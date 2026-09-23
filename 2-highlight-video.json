@@ -1,0 +1,153 @@
+{
+  "name": "Clip-Pipeline: Highlight-Video",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 2,
+              "triggerAtDay": [
+                5
+              ],
+              "triggerAtHour": 18
+            }
+          ]
+        }
+      },
+      "id": "a1f77f21-4187-443f-a238-1cd3fbda4e06",
+      "name": "Alle 2 Wochen",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Konfiguration: hier deine Werte eintragen ===\nconst CONFIG = {\n  pipelineBin: '/opt/clip-pipeline/bin/pipeline',\n  telegramChatId: 'DEINE_CHAT_ID',\n  tage: 14,\n};\nconst heute = new Date().toISOString().slice(0, 10);\nreturn [{ json: { ...CONFIG, id: `highlight-${heute}` } }];"
+      },
+      "id": "57d25f7e-af05-41ea-b143-a7bf11c02a14",
+      "name": "Konfiguration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "={{ $('Konfiguration').first().json.pipelineBin }} highlight --id {{ $('Konfiguration').first().json.id }} --tage {{ $('Konfiguration').first().json.tage }}",
+        "cwd": "/opt/clip-pipeline"
+      },
+      "id": "c20736cc-5414-40bd-a6ff-8be177ae7951",
+      "name": "Highlight bauen",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        480,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vertrag: Jedes Pipeline-Skript schreibt Logs nach stderr und gibt als\n// LETZTE Zeile auf stdout genau eine JSON-Zeile aus. Exit-Code 0 = ok.\nconst r = $input.first().json;\nif (r.code !== 0) {\n  throw new Error(`Exit-Code ${r.code}: ${(r.stderr || '').slice(-800)}`);\n}\nconst zeilen = (r.stdout || '').trim().split('\\n');\nconst letzte = zeilen[zeilen.length - 1];\ntry {\n  return [{ json: JSON.parse(letzte) }];\n} catch (e) {\n  throw new Error('Letzte Ausgabezeile ist kein JSON: ' + letzte);\n}"
+      },
+      "id": "79217462-9f73-4391-a540-3c08e8709572",
+      "name": "Ergebnis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Konfiguration').first().json.telegramChatId }}",
+        "text": "=🏆 Highlight-Video fertig: {{ $('Konfiguration').first().json.id }}\nClips: {{ $json.clips ?? '?' }} · Länge: {{ $json.dauer ?? '?' }}\nFreigabe im Bot.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "6443b735-a76c-427d-89b4-164671777eb5",
+      "name": "Telegram Info",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        940,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Highlight-Video alle 2 Wochen\nFreitags 18 Uhr (anpassbar im Trigger). Das Skript nimmt die bestbewerteten Clips der letzten 14 Tage, setzt Übergänge und Musik aus dem geprüften Ordner. Online geht erst etwas nach deiner Freigabe im Bot.",
+        "width": 620,
+        "height": 240,
+        "color": 4
+      },
+      "id": "b08494e5-a156-425b-8864-415ba6295feb",
+      "name": "Notiz 880731",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Alle 2 Wochen": {
+      "main": [
+        [
+          {
+            "node": "Konfiguration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Konfiguration": {
+      "main": [
+        [
+          {
+            "node": "Highlight bauen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Highlight bauen": {
+      "main": [
+        [
+          {
+            "node": "Ergebnis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ergebnis": {
+      "main": [
+        [
+          {
+            "node": "Telegram Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Einstieg laut Vertrag mit n8n: /opt/clip-pipeline/bin/pipeline <befehl> [...]
+# Startet die Pipeline aus dem venv des Projekts, egal aus welchem Ordner aufgerufen.
+PROJEKT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJEKT" || exit 2
+exec "$PROJEKT/.venv/bin/pipeline" "$@"

@@ -1,0 +1,23 @@
+{
+  "$comment": "Antwort von claude -p im Schritt decide. Alles andere wird verworfen.",
+  "type": "object",
+  "required": ["clips"],
+  "additionalProperties": false,
+  "properties": {
+    "clips": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["nr", "start_s", "ende_s"],
+        "additionalProperties": false,
+        "properties": {
+          "nr": {"type": "integer", "minimum": 1},
+          "start_s": {"type": "number", "minimum": 0},
+          "ende_s": {"type": "number", "minimum": 0},
+          "beschreibung": {"type": "string", "maxLength": 150},
+          "grund": {"type": "string", "maxLength": 300}
+        }
+      }
+    }
+  }
+}

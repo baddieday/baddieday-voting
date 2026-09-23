@@ -1,0 +1,264 @@
+"""Kommandozeile `pipeline ...` – Vertrag mit n8n (siehe CLAUDE.md, "Schnittstelle zu n8n"):
+
+  prepare|analyze|decide|render --session ID     highlight --id ID --tage 14
+
+Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
+Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+from pathlib import Path
+
+from . import aufraeumen, caption, db, erfassung, highlight, lernen, replay, shorts, verarbeitung
+from .konfig import KonfigFehler, SpeicherOffline, lade
+from .medien import MedienFehler
+from .sperre import Gesperrt, sperre
+from .vorbewertung import MERKMAL_NAMEN, MERKMALE, zahl
+from .zeit import iso, jetzt, utc_zu_lokal
+
+log = logging.getLogger("pipeline")
+
+# Befehle, die den Speicher brauchen: schläft der große Host, wird er per Wake-on-LAN geweckt
+WECKEN = {"prepare", "analyze", "decide", "render", "highlight", "scan", "process", "short"}
+
+
+def utc_heute_iso() -> str:
+    return iso(jetzt().replace(hour=0, minute=0, second=0, microsecond=0))
+
+
+def _json(daten: dict) -> None:
+    print(json.dumps(daten, ensure_ascii=False, default=str), flush=True)
+
+
+# --- Vertrag mit n8n ------------------------------------------------------------
+
+def _cmd_schritt(args, konfig, con) -> int:
+    schritt = {"prepare": verarbeitung.prepare, "analyze": verarbeitung.analyze,
+               "decide": verarbeitung.decide, "render": verarbeitung.render}[args.befehl]
+    log.info("%s --session %s", args.befehl, args.session)
+    _json(schritt(con, konfig, args.session))
+    return 0
+
+
+def _cmd_highlight(args, konfig, con) -> int:
+    log.info("highlight --id %s --tage %s", args.id, args.tage)
+    _json(highlight.erstelle(con, konfig, args.id, args.tage))
+    return 0
+
+
+# --- Komfort-Befehle ------------------------------------------------------------
+
+def _cmd_scan(args, konfig, con) -> int:
+    ergebnis = erfassung.scan(con, konfig)
+    if args.verarbeiten:
+        ergebnis["verarbeitet"] = []
+        for sid in ergebnis["offen"]:
+            try:
+                ergebnis["verarbeitet"].append(verarbeitung.process(con, konfig, sid))
+            except (verarbeitung.SessionFehler, MedienFehler, replay.ReplayFehler) as e:
+                log.error("Session %s: %s", sid, e)  # ein kaputtes Match blockiert die anderen nicht
+                ergebnis["verarbeitet"].append({"session": sid, "fehler": str(e)[:300]})
+    _json(ergebnis)
+    return 0
+
+
+def _cmd_process(args, konfig, con) -> int:
+    _json(verarbeitung.process(con, konfig, args.session))
+    return 0
+
+
+def _cmd_replay(args, konfig, con) -> int:
+    """Zeigt meine Ereignisse eines Replays in Ortszeit – zum Kalibrieren und Nachsehen."""
+    match, roh = replay.lies(Path(args.datei), konfig)
+    zone = konfig.wert("zeit.zeitzone", "Europe/Berlin")
+    ich = roh.get("ich") or {}
+    print(f"Match {match.id} · Build {match.build}")
+    print(f"Ich: {ich.get('name')} (Epic-ID {ich.get('epic_id')}, erkannt per {match.ich_quelle})")
+    print(f"Platz {match.platzierung} · Kills laut Replay {match.kills_stats}")
+    print(f"Start {utc_zu_lokal(match.start_utc, zone):%d.%m.%Y %H:%M:%S} · Ende {utc_zu_lokal(match.ende_utc, zone):%H:%M:%S}")
+    namen = {"kill": "Kill", "knock": "Knock", "tod": "gestorben", "knock_erlitten": "selbst am Boden"}
+    for e in match.ereignisse:
+        print(f"  {utc_zu_lokal(e.zeit_utc, zone):%H:%M:%S.%f}"[:-3] + f"  {namen.get(e.art, e.art)}")
+    for w in match.warnungen:
+        print(f"  ⚠️ {w}")
+    return 0
+
+
+def _cmd_status(args, konfig, con) -> int:
+    matches = {z["status"]: z["n"] for z in con.execute("SELECT status, COUNT(*) AS n FROM matches GROUP BY status")}
+    ergebnis = {
+        "clips": db.anzahl_je_status(con),
+        "matches": matches,
+        "aufnahmen": con.execute("SELECT COUNT(*) FROM aufnahmen").fetchone()[0],
+    }
+    try:
+        konfig.pruefe_speicher()
+        ergebnis["speicher"] = "ok"
+    except SpeicherOffline as e:
+        ergebnis["speicher"] = f"offline: {e}"
+    _json(ergebnis)
+    return 0
+
+
+def _cmd_gewichte(args, konfig, con) -> int:
+    version, e = lernen.aktualisiere(con, konfig) if args.neu else (None, lernen.berechne(con, konfig))
+    print(f"Datenbasis: {e.datenbasis} Bewertungen ({e.freigaben} Freigaben/Verwerfungen, {e.battles} Battles)")
+    print(f"Status: {e.grund} · Vertrauen {round(e.vertrauen * 100)} %")
+    print(f"{'Merkmal':<16}{'Start':>8}{'Aktuell':>9}")
+    for m in MERKMALE:
+        print(f"{MERKMAL_NAMEN[m]:<16}{zahl(e.start[m], 2):>8}{zahl(e.werte[m], 2):>9}")
+    if e.trefferquote is not None:
+        print(f"Trefferquote {round(e.trefferquote * 100)} % (Start: {round((e.trefferquote_start or 0) * 100)} %)")
+    if version is not None:
+        print(f"Gespeichert als Version {version}")
+    return 0
+
+
+def _cmd_caption(args, konfig, con) -> int:
+    zeile = db.clip(con, args.clip)
+    if zeile is None:
+        raise KeyError(f"Clip {args.clip} unbekannt")
+    print(caption.baue(zeile, db.match(con, zeile["match_id"]), konfig))
+    return 0
+
+
+def _cmd_short(args, konfig, con) -> int:
+    konfig.pruefe_speicher()
+    zeile = db.clip(con, args.clip)
+    if zeile is None:
+        raise KeyError(f"Clip {args.clip} unbekannt")
+    ziel = shorts.ziel_fuer(konfig, zeile)
+    groesse = shorts.rendere(konfig.absolut(zeile["clip_pfad"]), ziel, konfig, layout=args.layout)
+    con.execute("UPDATE clips SET short_pfad = ? WHERE id = ?", (konfig.relativ(ziel), args.clip))
+    _json({"clip": args.clip, "short": konfig.relativ(ziel), "mb": round(groesse / 1e6, 1)})
+    return 0
+
+
+def _cmd_aufraeumen(args, konfig, con) -> int:
+    if args.taeglich and con.execute(
+        "SELECT 1 FROM ereignisse WHERE art = 'aufraeumen' AND zeit >= ?", (utc_heute_iso(),)
+    ).fetchone():
+        _json({"uebersprungen": True, "hinweis": "heute schon aufgeräumt"})
+        return 0
+    konfig.pruefe_speicher()
+    aktionen = aufraeumen.plane(con, konfig)
+    ergebnis: dict = {"probelauf": not args.ausfuehren, "geplant": {}}
+    for a in aktionen:
+        ergebnis["geplant"][a.ziel] = ergebnis["geplant"].get(a.ziel, 0) + 1
+    if args.ausfuehren:
+        ergebnis["erledigt"] = aufraeumen.fuehre_aus(con, konfig, aktionen)
+        db.protokoll(con, "aufraeumen", json.dumps(ergebnis["erledigt"]))
+    elif args.liste:
+        ergebnis["dateien"] = [f"{a.ziel}: {konfig.relativ(a.pfad)}" for a in aktionen[:200]]
+    _json(ergebnis)
+    return 0
+
+
+def _cmd_bot(args, konfig, con) -> int:
+    from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
+
+    con.close()
+    return starte(konfig)
+
+
+def baue_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="pipeline", description="Clip-Pipeline für Fortnite-Highlights")
+    p.add_argument("--konfig", help="andere Konfigurationsdatei")
+    unter = p.add_subparsers(dest="befehl", required=True)
+
+    for name, hilfe in (("prepare", "Replay finden, Aufnahmen erfassen, Session anlegen"),
+                        ("analyze", "Kills und Kandidaten bestimmen (analyse.json)"),
+                        ("decide", "Schnittliste festlegen, claude -p + Schema-Prüfung (schnittliste.json)"),
+                        ("render", "Clips schneiden, bewerten, Vorschau, Datenbank")):
+        s = unter.add_parser(name, help=hilfe)
+        s.add_argument("--session", required=True)
+        s.set_defaults(fn=_cmd_schritt, sperren=True)
+
+    s = unter.add_parser("highlight", help="Highlight-Video der letzten Tage")
+    s.add_argument("--id", required=True)
+    s.add_argument("--tage", type=int, default=14)
+    s.set_defaults(fn=_cmd_highlight, sperren=True)
+
+    s = unter.add_parser("scan", help="neue Aufnahmen und fertige Matches erfassen")
+    s.add_argument("--verarbeiten", action="store_true", help="offene Matches gleich verarbeiten")
+    s.set_defaults(fn=_cmd_scan, sperren=True)
+
+    s = unter.add_parser("process", help="alle vier Schritte für eine Session")
+    s.add_argument("session")
+    s.set_defaults(fn=_cmd_process, sperren=True)
+
+    s = unter.add_parser("replay", help="Kills eines Replays anzeigen (Kalibrierung)")
+    s.add_argument("datei")
+    s.set_defaults(fn=_cmd_replay, sperren=False)
+
+    s = unter.add_parser("status", help="Überblick")
+    s.set_defaults(fn=_cmd_status, sperren=False)
+
+    s = unter.add_parser("gewichte", help="Gewichte der Vorbewertung anzeigen")
+    s.add_argument("--neu", action="store_true", help="neu berechnen und speichern")
+    s.set_defaults(fn=_cmd_gewichte, sperren=False)
+
+    s = unter.add_parser("caption", help="Caption für einen Clip erzeugen")
+    s.add_argument("clip", type=int)
+    s.set_defaults(fn=_cmd_caption, sperren=False)
+
+    s = unter.add_parser("short", help="Short im Hochformat für einen Clip rendern")
+    s.add_argument("clip", type=int)
+    s.add_argument("--layout", choices=["unschaerfe", "zuschnitt", "mit-cam"], help="statt [shorts].layout")
+    s.set_defaults(fn=_cmd_short, sperren=True)
+
+    s = unter.add_parser("aufraeumen", help="alte Dateien recyceln, Multikills archivieren")
+    s.add_argument("--ausfuehren", action="store_true", help="wirklich verschieben/löschen (sonst Probelauf)")
+    s.add_argument("--liste", action="store_true", help="im Probelauf die Dateien auflisten")
+    s.add_argument("--taeglich", action="store_true", help="nichts tun, wenn heute schon aufgeräumt wurde")
+    s.set_defaults(fn=_cmd_aufraeumen, sperren=True)
+
+    s = unter.add_parser("bot", help="Telegram-Bot starten (läuft dauerhaft)")
+    s.set_defaults(fn=_cmd_bot, sperren=False)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    args = baue_parser().parse_args(argv)
+    try:
+        konfig = lade(args.konfig)
+    except KonfigFehler as e:
+        _json({"fehler": str(e)})
+        return 2
+    con = db.verbinde(konfig.datenbank)
+    try:
+        if args.sperren:
+            warten = float(konfig.wert("sperre.warten_s", 7200))
+            with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=warten, melde=log.info):
+                if args.befehl in WECKEN:
+                    konfig.pruefe_speicher(wecken=True)
+                return args.fn(args, konfig, con)
+        return args.fn(args, konfig, con)
+    # Jeder Fehler steht auch auf stderr – der n8n-Fehler-Alarm zeigt stderr an
+    except SpeicherOffline as e:
+        log.error("Speicher offline: %s", e)
+        _json({"fehler": "speicher_offline", "hinweis": str(e)})
+        return 3
+    except Gesperrt as e:
+        log.error("%s", e)
+        _json({"fehler": "gesperrt", "hinweis": str(e)})
+        return 4
+    except (KeyError, verarbeitung.SessionFehler, replay.ReplayFehler, MedienFehler) as e:
+        log.error("%s", e)
+        _json({"fehler": str(e).strip("'\"")})
+        return 1
+    except Exception as e:  # Unerwartetes: trotzdem Vertrag einhalten (JSON als letzte Zeile)
+        log.exception("Unerwarteter Fehler")
+        _json({"fehler": f"{type(e).__name__}: {e}"})
+        return 1
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass

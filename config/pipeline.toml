@@ -1,0 +1,194 @@
+# Konfiguration der Clip-Pipeline.
+# Zeiten in Sekunden. Relative Speicherpfade beziehen sich auf [speicher].wurzel,
+# relative Programmpfade auf den Projektordner.
+
+[speicher]
+# Wurzel des Clip-Speichers. Auf dem Mini ist das der NFS-Mount vom großen Host.
+wurzel = "/srv/clips"
+# Diese Datei muss in der Wurzel liegen. Fehlt sie (großer Host aus, Mount fehlt),
+# fasst die Pipeline nichts an – so wird nie ein leerer Mount-Ordner befüllt.
+markierung = ".clip-speicher"
+# Optional: Host und Port des Speichers. Wird vor jedem Zugriff kurz angepingt,
+# damit ein schlafender NFS-Server die Pipeline nicht hängen lässt. Leer = keine Prüfung.
+host = ""
+port = 2049
+# MAC des großen Hosts: Schläft er, weckt ihn die Pipeline (z. B. für das Highlight-Video am Freitag).
+wol_mac = ""
+wecken_warten_s = 180
+eingang = "eingang"            # Aufnahmen vom Gaming-PC (nvidia/, steelseries/)
+replays = "replays"            # Fortnite-Replays
+sessions = "sessions"          # je Match ein Ordner: analyse.json, schnittliste.json, clips/, vorschau/, shorts/
+highlights = "highlights"      # Highlight-Videos alle 2 Wochen
+musik = "musik"                # nur lizenzierte Titel, je Titel eine <name>.lizenz.txt daneben
+archiv = "archiv"              # Multikills ab 3 Kills – wird nie aufgeräumt
+papierkorb = "papierkorb"
+
+[datenbank]
+# Liegt auf dem Mini (immer an), nicht auf dem Speicher.
+pfad = "/var/lib/clip-pipeline/pipeline.db"
+
+[zeit]
+zeitzone = "Europe/Berlin"
+# Gemessen am 21.09.2026 (Build 42.20): Fortnite schreibt die Replay-Startzeit in Ortszeit.
+replay_start_ist_ortszeit = true
+# Ein Spielabend endet um 06:00 – Runden nach Mitternacht zählen zum Vorabend.
+tageswechsel_stunde = 6
+
+[replay]
+# Das erste vorhandene Programm wird genommen: Linux-Build (Server) bzw. Windows-Build (.exe).
+# Bauen: siehe README, Abschnitt "Replay-Parser".
+programm = ["tools/replay2json/bin/linux-x64/replay2json", "tools/replay2json/bin/out/replay2json"]
+# Deine Epic-ID (zeigt `pipeline replay <datei>` an). Leer = automatische Erkennung.
+ich = "956D01EA3E7B43A0AD41096BAA0B6B9E"
+# Ein Replay gilt als fertig, wenn es so lange nicht mehr verändert wurde.
+ruhezeit_s = 120
+# Höchstdauer für das Auslesen eines Replays
+timeout_s = 120
+
+[quellen]
+# Dateien, die jünger sind, werden evtl. noch kopiert und deshalb erst später erfasst.
+ruhezeit_s = 60
+
+[quellen.nvidia]
+# Bei .DVR (Videobeweis) und Highlights ist die Uhrzeit im Namen das ENDE des Clips.
+# Gemessen am Kill-Zähler im Bild (23.09.2026, 2 Clips): Das echte Ende liegt 0,9–1,9 s
+# nach der Uhrzeit im Namen (Nvidia rundet auf ganze Sekunden) -> Mittelwert 1,4 s.
+versatz_s = 1.4
+# Ereignis liegt so viele Sekunden vor dem (korrigierten) Ende; nur für den Fall ohne Replay.
+nachlauf_s = 5.4
+
+[quellen.steelseries]
+# recording_timestamp aus den Metadaten = Ende des Clips.
+# Gemessen am Kill-Zähler im Bild: Abweichung unter 0,5 s -> kein Versatz nötig.
+# (Die Ereignis-Marker selbst liegen ca. 1,5 s nach dem Kill; das betrifft nur den Fall ohne Replay.)
+versatz_s = 0.0
+
+[auswahl]
+# Wenn mehrere Aufnahmen einen Moment enthalten: zuerst die mit der besten Abdeckung,
+# bei Gleichstand gilt diese Reihenfolge.
+prioritaet = ["nvidia_aufnahme", "nvidia_dvr", "steelseries", "nvidia_highlight"]
+
+[vorbewertung]
+multikill_fenster_s = 10.0
+puffer_vorne_s = 8.0
+puffer_hinten_s = 5.0
+# Bis zu dieser Länge gibt es keinen Längen-Abzug
+laenge_frei_s = 30.0
+# Punkte nach Anzahl Kills in einer Gruppe: Index = Kills, ab 4 gilt der letzte Wert
+kill_punkte = [0, 1, 3, 6, 10]
+# Lautstärke-Merkmal: so viele LU über dem Durchschnitt der Aufnahme ergeben 1,0
+lautstaerke_spanne_lu = 15.0
+
+[vorbewertung.startgewichte]
+kill_punkte = 1.0
+victory_royale = 5.0
+laenge = -0.5
+lautstaerke = 1.0
+kommentar = 1.0
+
+[lernen]
+# Erst ab so vielen Bewertungen (Freigaben/Verwerfungen + Battles) wird gelernt
+mindestens = 20
+# Ab so vielen Bewertungen voll vertrauen
+voll_vertrauen = 60
+schritt = 0.05
+durchlaeufe = 5
+# Leine: Gewicht bleibt innerhalb ±50 % seines Startwerts (mindestens ±0,5)
+leine_anteil = 0.5
+leine_minimum = 0.5
+max_paare_pro_abend = 20
+
+[elo]
+# Variante A aus clips_voter (src/community_clip_os.py)
+start = 1500.0
+unsicherheit_start = 350.0
+unsicherheit_min = 75.0
+unsicherheit_faktor = 0.94
+
+[saison]
+# Saisons à 14 Tage, beginnend an diesem Montag; Elo wird nie zurückgesetzt.
+start = "2026-09-21"
+tage = 14
+
+[decide]
+# claude -p justiert Schnittpunkte und schlägt eine Beschreibung vor (Max-Abo, nur Leserechte).
+# Jede Antwort wird gegen ein Schema und die Kill-Zeiten geprüft; sonst gilt der Regel-Vorschlag.
+claude = true
+programm = "claude"
+timeout_s = 180
+
+[sperre]
+# Nur ein rechenintensiver Schritt gleichzeitig; ein zweiter wartet so lange
+warten_s = 7200
+
+[highlight]
+max_clips = 12
+max_dauer_s = 180
+ueberblendung_s = 0.6
+breite = 1920
+hoehe = 1080
+fps = 60
+# Musik-Lautstärke (0..1); wird zusätzlich unter dem Spielton abgesenkt ("Ducking")
+musik_pegel = 0.35
+
+[schnitt]
+# Auf dem Server mit durchgereichter iGPU: "h264_vaapi"
+encoder = "libx264"
+crf = 18
+vaapi_geraet = "/dev/dri/renderD128"
+
+[vorschau]
+max_mb = 48
+kurze_seite = 720
+
+[shorts]
+# unschaerfe = ganzes Bild + unscharfer Hintergrund · zuschnitt = nur die Mitte · mit-cam = Cam oben
+layout = "unschaerfe"
+# 1.0 = ganzes Spielbild (klein), 1.3 = größer, schneidet aber Minimap/Killfeed am Rand an
+zoom = 1.0
+overlay = true
+overlay_text = "clip-battle.de"
+# Höhe des Overlays (Anteil der Bildhöhe). Oben ist frei; unten und rechts liegen die Knöpfe der Apps.
+overlay_y = 0.12
+endcard = true
+endcard_s = 2.5
+crf = 20
+max_kbit = 12000
+# Erste vorhandene Schrift wird benutzt (ohne Schriftdatei stürzt drawtext unter Windows ab)
+schriften = [
+  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+  "C:/Windows/Fonts/arialbd.ttf",
+  "C:/Windows/Fonts/arial.ttf",
+]
+# Nur für layout = "mit-cam": Cam-Ausschnitt im Originalvideo (Pixel)
+# [shorts.cam]
+# x = 1500
+# y = 700
+# b = 400
+# h = 300
+
+[veroeffentlichung]
+# Auf diese Plattformen MUSS jeder freigegebene Clip. Erst wenn alle erledigt sind: "veröffentlicht".
+pflicht = ["youtube", "tiktok"]
+# Zusätzlich nachverfolgt (optional): Einreichen des YouTube-Links auf clip-battle.de
+zusatz = ["clipbattle"]
+# Erinnerung an offene Uploads (Stunden)
+erinnerung_h = 24
+
+[telegram]
+outbox_intervall_s = 30
+
+[aufraeumen]
+# Nach so vielen Tagen wird recycelt (erst Papierkorb, dann endgültig) ...
+nach_tagen = 182
+papierkorb_tage = 14
+# ... außer Multikills ab dieser Größe: die werden für immer archiviert.
+archiv_ab_kills = 3
+
+[caption]
+vorlage = "templates/caption.txt"
+beschreibungen = "templates/beschreibungen.toml"
+# Optional: `claude -p` formuliert die Beschreibung um (nur mit Faktenprüfung)
+ki = false
+ki_timeout_s = 90
+max_laenge = 150

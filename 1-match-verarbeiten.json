@@ -1,0 +1,328 @@
+{
+  "name": "Clip-Pipeline: Match verarbeiten",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "match-vorbei",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "63a29e34-b825-4800-a9bf-34fd39863590",
+      "name": "Match vorbei",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        400
+      ],
+      "webhookId": "ebec3c09-73ea-4b6d-b2eb-73523d1e03b3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Konfiguration: hier deine Werte eintragen ===\nconst CONFIG = {\n  pipelineBin: '/opt/clip-pipeline/bin/pipeline',\n  telegramChatId: 'DEINE_CHAT_ID',\n};\n\n// Nur eine geprüfte Session-ID wird weitergegeben.\n// Grund: Der Wert landet später in einem Shell-Befehl auf dem Heimserver.\n// Ungeprüfte Eingaben könnten dort eigene Befehle einschleusen\n// (\"Command Injection\"). Erlaubt: Buchstaben, Ziffern, . _ - (kein Punkt am Anfang).\nconst body = $input.first().json.body ?? {};\nconst session = String(body.session ?? '').trim();\nif (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(session)) {\n  throw new Error(`Ungültige Session-ID: \"${session}\"`);\n}\n\nreturn [{ json: { ...CONFIG, session } }];"
+      },
+      "id": "7ec05517-ca93-4eb2-aeeb-d9d56cee6c31",
+      "name": "Eingabe prüfen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "={{ $('Eingabe prüfen').first().json.pipelineBin }} prepare --session {{ $('Eingabe prüfen').first().json.session }}",
+        "cwd": "/opt/clip-pipeline"
+      },
+      "id": "4e276ba0-4547-4ce2-bb06-85cd2f96bd53",
+      "name": "1 Vorbereiten",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        480,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vertrag: Jedes Pipeline-Skript schreibt Logs nach stderr und gibt als\n// LETZTE Zeile auf stdout genau eine JSON-Zeile aus. Exit-Code 0 = ok.\nconst r = $input.first().json;\nif (r.code !== 0) {\n  throw new Error(`Exit-Code ${r.code}: ${(r.stderr || '').slice(-800)}`);\n}\nconst zeilen = (r.stdout || '').trim().split('\\n');\nconst letzte = zeilen[zeilen.length - 1];\ntry {\n  return [{ json: JSON.parse(letzte) }];\n} catch (e) {\n  throw new Error('Letzte Ausgabezeile ist kein JSON: ' + letzte);\n}"
+      },
+      "id": "1dd99200-0c40-4ff8-8143-0266d486c1c0",
+      "name": "Ergebnis 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "={{ $('Eingabe prüfen').first().json.pipelineBin }} analyze --session {{ $('Eingabe prüfen').first().json.session }}",
+        "cwd": "/opt/clip-pipeline"
+      },
+      "id": "24117932-7e78-4e95-9ced-0b0949126524",
+      "name": "2 Analysieren",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        920,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vertrag: Jedes Pipeline-Skript schreibt Logs nach stderr und gibt als\n// LETZTE Zeile auf stdout genau eine JSON-Zeile aus. Exit-Code 0 = ok.\nconst r = $input.first().json;\nif (r.code !== 0) {\n  throw new Error(`Exit-Code ${r.code}: ${(r.stderr || '').slice(-800)}`);\n}\nconst zeilen = (r.stdout || '').trim().split('\\n');\nconst letzte = zeilen[zeilen.length - 1];\ntry {\n  return [{ json: JSON.parse(letzte) }];\n} catch (e) {\n  throw new Error('Letzte Ausgabezeile ist kein JSON: ' + letzte);\n}"
+      },
+      "id": "87e410e9-6701-4f60-a922-ad49aaf37d19",
+      "name": "Ergebnis 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "={{ $('Eingabe prüfen').first().json.pipelineBin }} decide --session {{ $('Eingabe prüfen').first().json.session }}",
+        "cwd": "/opt/clip-pipeline"
+      },
+      "id": "629c68ec-5552-4507-80e2-fe8dfd926a44",
+      "name": "3 Schnittliste",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vertrag: Jedes Pipeline-Skript schreibt Logs nach stderr und gibt als\n// LETZTE Zeile auf stdout genau eine JSON-Zeile aus. Exit-Code 0 = ok.\nconst r = $input.first().json;\nif (r.code !== 0) {\n  throw new Error(`Exit-Code ${r.code}: ${(r.stderr || '').slice(-800)}`);\n}\nconst zeilen = (r.stdout || '').trim().split('\\n');\nconst letzte = zeilen[zeilen.length - 1];\ntry {\n  return [{ json: JSON.parse(letzte) }];\n} catch (e) {\n  throw new Error('Letzte Ausgabezeile ist kein JSON: ' + letzte);\n}"
+      },
+      "id": "f2841283-4819-424f-b3bb-f21a36b6e68c",
+      "name": "Ergebnis 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1580,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "={{ $('Eingabe prüfen').first().json.pipelineBin }} render --session {{ $('Eingabe prüfen').first().json.session }}",
+        "cwd": "/opt/clip-pipeline"
+      },
+      "id": "d924c11b-f89c-41dd-8b76-78483495a092",
+      "name": "4 Rendern",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        1800,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vertrag: Jedes Pipeline-Skript schreibt Logs nach stderr und gibt als\n// LETZTE Zeile auf stdout genau eine JSON-Zeile aus. Exit-Code 0 = ok.\nconst r = $input.first().json;\nif (r.code !== 0) {\n  throw new Error(`Exit-Code ${r.code}: ${(r.stderr || '').slice(-800)}`);\n}\nconst zeilen = (r.stdout || '').trim().split('\\n');\nconst letzte = zeilen[zeilen.length - 1];\ntry {\n  return [{ json: JSON.parse(letzte) }];\n} catch (e) {\n  throw new Error('Letzte Ausgabezeile ist kein JSON: ' + letzte);\n}"
+      },
+      "id": "f2bd293f-9d57-4089-b521-8c3d8e2e95bc",
+      "name": "Ergebnis 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Eingabe prüfen').first().json.telegramChatId }}",
+        "text": "=🎬 Match verarbeitet: {{ $('Eingabe prüfen').first().json.session }}\nClips vorgeschlagen: {{ $json.clips ?? '?' }}\nBester Clip: {{ $json.top_label ?? '?' }} ({{ $json.top_score ?? '?' }} Punkte)\nJetzt im Bot bewerten.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "9c5797a3-7d11-4085-af76-f4b3db330713",
+      "name": "Telegram Info",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2240,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Clip-Pipeline: Match verarbeiten\nDer Gaming-PC meldet per POST, dass ein Match vorbei ist: Body `{\"session\": \"2026-09-23_20-15-33\"}`, Header `X-Pipeline-Token`.\n\nDanach ruft n8n per **SSH** vier Skripte auf dem Heimserver auf. Die Videos selbst kommen nie hierher, nur Session-ID und kleine JSON-Antworten.\n\n**Zum Testen, solange der Heimserver fehlt:** die Nodes 1–4 und Ergebnis 1–4 deaktivieren (Rechtsklick → Deaktivieren). Dann läuft Webhook → Prüfen → Telegram durch.",
+        "width": 700,
+        "height": 300,
+        "color": 4
+      },
+      "id": "c9a6388a-4dfe-473c-8b74-893f61336ccb",
+      "name": "Notiz abb1a2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Warum die Prüfung?\nDie Session-ID wird Teil eines Shell-Befehls. Ohne Prüfung könnte jemand, der den Webhook erreicht, eigene Befehle auf deinem Heimserver ausführen. Deshalb zusätzlich: Header-Token + nur über Tailscale erreichbar.",
+        "width": 480,
+        "height": 300,
+        "color": 3
+      },
+      "id": "4d64e9f0-b30f-4dca-83d7-039b2ab90b9a",
+      "name": "Notiz 109e68",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        700,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Schritt 3 = Claude\nDas Skript `decide` ruft intern `claude -p` auf, nur mit Leserecht (`--allowedTools \"Read\"`), und prüft die Schnittliste, bevor es weitergeht.",
+        "width": 420,
+        "height": 300,
+        "color": 6
+      },
+      "id": "3f558483-2533-446d-9103-33bf32d87b8b",
+      "name": "Notiz 637061",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        60
+      ]
+    }
+  ],
+  "connections": {
+    "Match vorbei": {
+      "main": [
+        [
+          {
+            "node": "Eingabe prüfen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eingabe prüfen": {
+      "main": [
+        [
+          {
+            "node": "1 Vorbereiten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1 Vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "Ergebnis 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ergebnis 1": {
+      "main": [
+        [
+          {
+            "node": "2 Analysieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2 Analysieren": {
+      "main": [
+        [
+          {
+            "node": "Ergebnis 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ergebnis 2": {
+      "main": [
+        [
+          {
+            "node": "3 Schnittliste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3 Schnittliste": {
+      "main": [
+        [
+          {
+            "node": "Ergebnis 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ergebnis 3": {
+      "main": [
+        [
+          {
+            "node": "4 Rendern",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4 Rendern": {
+      "main": [
+        [
+          {
+            "node": "Ergebnis 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ergebnis 4": {
+      "main": [
+        [
+          {
+            "node": "Telegram Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

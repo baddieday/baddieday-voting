@@ -1,0 +1,25 @@
+# Telegram-Bot der Clip-Pipeline (läuft dauerhaft auf dem Mini).
+# Installieren:  sudo cp deploy/systemd/clip-bot.service /etc/systemd/system/
+#                sudo systemctl daemon-reload && sudo systemctl enable --now clip-bot
+# Log ansehen:   journalctl -u clip-bot -f
+[Unit]
+Description=Clip-Pipeline Telegram-Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pipeline
+WorkingDirectory=/opt/clip-pipeline
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline bot
+Restart=always
+RestartSec=10
+# Härtung: der Bot darf nur in seine Datenbank und den Clip-Speicher schreiben
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/clip-pipeline /srv/clips
+
+[Install]
+WantedBy=multi-user.target

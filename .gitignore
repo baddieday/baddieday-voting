@@ -1,0 +1,28 @@
+# Geheimnisse – niemals committen
+.env
+*.env
+!.env.example
+windows/uebertragung.psd1
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# .NET
+tools/replay2json/bin/
+tools/replay2json/obj/
+
+# Laufzeitdaten und Medien
+*.db
+*.db-shm
+*.db-wal
+*.lock
+*.mp4
+*.mkv
+*.replay
+daten/
+logs/

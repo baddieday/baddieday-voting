@@ -1,0 +1,27 @@
+# Textbausteine für die Beschreibung. Erlaubte Platzhalter:
+#   {kills}        Kills im Clip
+#   {sekunden}     Sekunden vom ersten bis zum letzten Kill (mindestens 1)
+#   {platzierung}  Platzierung im Match
+#   {kills_match}  meine Kills im ganzen Match
+# Welche Variante genommen wird, hängt von der Clip-Nummer ab (reproduzierbar).
+
+einzel = [
+  "Sauberer Kill 🎯",
+  "Eine Eliminierung, kein Zögern 🎯",
+]
+double = [
+  "Double Kill in {sekunden} Sekunden 🔥",
+  "Zwei Eliminierungen in {sekunden} Sekunden – Double!",
+]
+triple = [
+  "Triple Kill in {sekunden} Sekunden 🔥",
+  "3 Eliminierungen in {sekunden} Sekunden – Triple!",
+]
+multi = [
+  "{kills}-fach Kill in {sekunden} Sekunden 🤯",
+  "{kills} Eliminierungen am Stück 🤯",
+]
+victory_royale = [
+  "Victory Royale mit {kills_match} Kills 👑",
+  "Platz 1 – Victory Royale 👑",
+]

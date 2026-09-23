@@ -1,0 +1,13 @@
+# Stündlich versuchen, höchstens einmal am Tag aufräumen (--taeglich). Der große Host wird dafür NICHT
+# geweckt: Läuft er gerade (z. B. nach dem Zocken), wird aufgeräumt, sonst in der nächsten Stunde.
+# Aktivieren: sudo systemctl enable --now clip-aufraeumen.timer
+[Unit]
+Description=Clip-Pipeline aufräumen (höchstens einmal täglich)
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

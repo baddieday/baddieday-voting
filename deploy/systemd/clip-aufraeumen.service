@@ -1,0 +1,17 @@
+# Recycelt Clips nach einem halben Jahr, archiviert Multikills ab 3 Kills (siehe config/pipeline.toml [aufraeumen]).
+# VOR dem Aktivieren einmal von Hand den Probelauf ansehen:
+#   sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline aufraeumen --liste
+[Unit]
+Description=Clip-Pipeline aufräumen
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/opt/clip-pipeline
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline aufraeumen --ausfuehren --taeglich
+# 3 = großer Host schläft, 4 = anderer Lauf aktiv -> kein Fehler, morgen wieder
+SuccessExitStatus=3 4
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/clip-pipeline /srv/clips

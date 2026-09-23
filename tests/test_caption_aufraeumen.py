@@ -1,0 +1,89 @@
+import os
+import time
+import unittest
+from datetime import datetime, timedelta
+
+from clip_pipeline import aufraeumen, caption, db
+from clip_pipeline.sperre import Gesperrt, sperre
+from clip_pipeline.zeit import UTC
+
+from tests.hilfen import MitSpeicher
+
+
+class Caption(MitSpeicher):
+    def test_komplette_caption_aus_fakten(self):
+        cid = self.clip_anlegen(max_gruppe=3)  # Kills im Abstand von 3 s -> 6 s Serie
+        self.con.execute("UPDATE clips SET typ = 'triple' WHERE id = ?", (cid,))
+        clip = db.clip(self.con, cid)
+        text = caption.baue(clip, db.match(self.con, clip["match_id"]), self.konfig)
+        self.assertTrue(text.startswith("Triple Kill in 6 Sekunden") or text.startswith("3 Eliminierungen in 6"), text)
+        self.assertIn("clip-battle.de", text)
+        self.assertIn("#triplekill", text)
+
+    def test_platzhalter_streng(self):
+        with self.assertRaises(caption.CaptionFehler):
+            caption.fuelle("{beschreibung} {gibtsnicht}", {"beschreibung": "x"})
+
+    def test_ki_darf_keine_zahlen_erfinden(self):
+        fakten = {"kills": 3, "sekunden": 6, "typ": "triple", "victory_royale": False, "platzierung": 3, "kills_match": 7}
+        self.assertTrue(caption.pruefe_ki_text("Triple in 6 Sekunden, Platz 3 🔥", fakten, 150))
+        self.assertFalse(caption.pruefe_ki_text("Triple in 4 Sekunden mit der Pumpgun", fakten, 150))
+        self.assertFalse(caption.pruefe_ki_text("x" * 151, fakten, 150))
+
+
+class Aufraeumen(MitSpeicher):
+    def _datei(self, relativ: str, alter_tage: float):
+        pfad = self.konfig.wurzel / relativ
+        pfad.parent.mkdir(parents=True, exist_ok=True)
+        pfad.write_bytes(b"x")
+        zeit = time.time() - alter_tage * 86400
+        os.utime(pfad, (zeit, zeit))
+        return pfad
+
+    def test_regel_halbes_jahr_ausser_triple(self):
+        alt = datetime.now(UTC) - timedelta(days=200)
+        cid = self.clip_anlegen(max_gruppe=3, start=alt)
+        self.con.execute("UPDATE clips SET clip_pfad = 'sessions/m1/clips/001_triple_3k.mp4' WHERE id = ?", (cid,))
+        triple = self._datei("sessions/m1/clips/001_triple_3k.mp4", 200)
+        einzel = self._datei("sessions/m1/clips/002_einzel_1k.mp4", 200)
+        neu = self._datei("sessions/m1/clips/003_einzel_1k.mp4", 10)
+        protokoll = self._datei("sessions/m1/schnittliste.json", 200)  # JSON bleibt immer
+        abgelaufen = self._datei("papierkorb/2026-01-01/sessions/alt.mp4", 1)
+
+        aktionen = {a.pfad.name: a.ziel for a in aufraeumen.plane(self.con, self.konfig)}
+        self.assertEqual(aktionen, {"001_triple_3k.mp4": "archiv", "002_einzel_1k.mp4": "papierkorb", "2026-01-01": "loeschen"})
+        self.assertTrue(triple.exists() and einzel.exists())  # Probelauf ändert nichts
+
+        aufraeumen.fuehre_aus(self.con, self.konfig, aufraeumen.plane(self.con, self.konfig))
+        self.assertTrue((self.konfig.ordner("archiv") / "sessions/m1/clips/001_triple_3k.mp4").exists())
+        self.assertFalse(einzel.exists())
+        self.assertTrue(neu.exists() and protokoll.exists())
+        self.assertFalse(abgelaufen.exists())
+        self.assertEqual(db.clip(self.con, cid)["clip_pfad"], "archiv/sessions/m1/clips/001_triple_3k.mp4")
+
+    def test_loescht_nie_ausserhalb_des_papierkorbs(self):
+        with self.assertRaises(RuntimeError):
+            aufraeumen.fuehre_aus(self.con, self.konfig, [aufraeumen.Aktion(self.konfig.ordner("sessions"), "loeschen", "")])
+
+
+class Sperre(MitSpeicher):
+    def test_zweiter_lauf_wartet_oder_gibt_auf(self):
+        pfad = self.tmp / "p.lock"
+        with sperre(pfad):
+            start = time.monotonic()
+            with self.assertRaises(Gesperrt):
+                with sperre(pfad, warten_s=1.5):
+                    pass
+            self.assertGreaterEqual(time.monotonic() - start, 1.4)  # hat gewartet
+        with sperre(pfad):  # danach wieder frei
+            pass
+
+    def test_caption_nutzt_gepruefte_beschreibung(self):
+        cid = self.clip_anlegen()
+        self.con.execute("UPDATE clips SET beschreibung = 'Sauber gelöst 🎯' WHERE id = ?", (cid,))
+        clip = db.clip(self.con, cid)
+        self.assertTrue(caption.baue(clip, db.match(self.con, "m1"), self.konfig).startswith("Sauber gelöst 🎯"))
+
+
+if __name__ == "__main__":
+    unittest.main()

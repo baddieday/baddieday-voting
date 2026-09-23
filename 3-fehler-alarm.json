@@ -1,0 +1,66 @@
+{
+  "name": "Clip-Pipeline: Fehler-Alarm",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "5251acd3-66f9-4375-8e2a-880506c1a4af",
+      "name": "Fehler aufgetreten",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "DEINE_CHAT_ID",
+        "text": "=⚠️ Fehler in „{{ $json.workflow.name }}“\nSchritt: {{ $json.execution.lastNodeExecuted }}\nMeldung: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "8be48b04-24a1-49e7-b37f-c6d75ab2bce2",
+      "name": "Telegram Alarm",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Fehler-Alarm\nIn den beiden anderen Workflows unter **Einstellungen → Error Workflow** diesen hier auswählen. Dann bekommst du bei jedem Fehler eine Telegram-Nachricht mit Schritt und Meldung.",
+        "width": 520,
+        "height": 220,
+        "color": 3
+      },
+      "id": "5307aa23-5b2f-4887-8cd5-3c17577e080c",
+      "name": "Notiz 7721e5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        40
+      ]
+    }
+  ],
+  "connections": {
+    "Fehler aufgetreten": {
+      "main": [
+        [
+          {
+            "node": "Telegram Alarm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
