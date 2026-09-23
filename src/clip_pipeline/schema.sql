@@ -117,6 +117,15 @@ CREATE TABLE IF NOT EXISTS highlights (
     entschieden     TEXT
 );
 
+-- Kurze Hinweise an dich (z. B. "Kills ohne Aufnahme"); der Bot verschickt sie einmal
+CREATE TABLE IF NOT EXISTS meldungen (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    schluessel TEXT    NOT NULL UNIQUE,     -- verhindert doppelte Meldungen, z. B. ohne_video:<session>
+    text       TEXT    NOT NULL,
+    erstellt   TEXT    NOT NULL,
+    gesendet   TEXT
+);
+
 -- Jede neu gelernte Gewichtung bekommt eine Versionsnummer (0 = Startgewichte)
 CREATE TABLE IF NOT EXISTS gewichte (
     version            INTEGER PRIMARY KEY,

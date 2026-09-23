@@ -78,10 +78,34 @@ class Vertragsablauf(MitSpeicher):
         vorschau = medien.probe(self.konfig.absolut(clip["vorschau_pfad"]))
         self.assertEqual(len(vorschau.tonspuren), 1)  # für Telegram gemischt
 
+        self.assertEqual((ergebnis["ohne_video"], ergebnis["warnung"]), (0, None))
+
         # idempotent: alles nochmal -> nichts doppelt
         self.assertTrue(verarbeitung.decide(self.con, self.konfig, SID)["uebersprungen"])
         self.assertEqual(verarbeitung.render(self.con, self.konfig, SID)["neu"], 0)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM clips").fetchone()[0], 1)
+
+
+class OhneVideo(MitSpeicher):
+    def test_warnung_bei_frischem_match_genau_einmal(self):
+        from clip_pipeline.zeit import iso, jetzt
+
+        ende = jetzt() - timedelta(minutes=20)
+        self.con.execute(
+            "INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, erstellt, geaendert) VALUES (?, 'r', ?, ?, 'x', 'x')",
+            (SID, iso(ende - timedelta(minutes=15)), iso(ende)),
+        )
+        verarbeitung.ordner(self.konfig, SID).mkdir(parents=True)
+        (verarbeitung.ordner(self.konfig, SID) / "schnittliste.json").write_text(json.dumps({
+            "clips": [], "ohne_video": [{"nr": 1, "titel": "Double Kill", "kill_zeiten_utc": ["a", "b"]}],
+        }), encoding="utf-8")
+        ergebnis = verarbeitung.render(self.con, self.konfig, SID)
+        self.assertEqual(ergebnis["ohne_video"], 2)
+        self.assertIn("Nvidia", ergebnis["warnung"])
+        verarbeitung.render(self.con, self.konfig, SID)  # nochmal -> keine zweite Meldung
+        meldungen = self.con.execute("SELECT text FROM meldungen").fetchall()
+        self.assertEqual(len(meldungen), 1)
+        self.assertIn("2 Kill(s) ohne Aufnahme", meldungen[0]["text"])
 
 
 class Entscheidung(MitSpeicher):

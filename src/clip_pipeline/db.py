@@ -63,6 +63,14 @@ def protokoll(con: sqlite3.Connection, art: str, text: str, *, clip_id: int | No
     )
 
 
+def meldung(con: sqlite3.Connection, schluessel: str, text: str) -> bool:
+    """Legt eine Nachricht für den Bot an – je Schlüssel nur einmal. True = neu angelegt."""
+    cursor = con.execute(
+        "INSERT OR IGNORE INTO meldungen (schluessel, text, erstellt) VALUES (?, ?, ?)", (schluessel, text, iso(jetzt()))
+    )
+    return cursor.rowcount == 1
+
+
 def status_wechsel(con: sqlite3.Connection, clip_id: int, von: tuple[str, ...], nach: str) -> bool:
     """Ändert den Status nur, wenn der alte Status passt. True = geändert."""
     if nach not in CLIP_STATUS:

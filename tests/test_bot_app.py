@@ -47,6 +47,22 @@ class BotApp(MitSpeicher):
         with mock.patch.object(self.konfig, "pruefe_speicher", side_effect=bot_app.SpeicherOffline("aus")):
             self.assertEqual(asyncio.run(bot_app.sende_outbox(fake)), 0)
 
+    def test_meldungen_einmal_senden(self):
+        from clip_pipeline import db
+
+        self.assertTrue(db.meldung(self.con, "ohne_video:s1", "⚠️ 2 Kills ohne Aufnahme"))
+        self.assertFalse(db.meldung(self.con, "ohne_video:s1", "⚠️ doppelt"))  # gleicher Schlüssel -> nicht nochmal
+        texte_gesendet = []
+
+        async def send_message(chat, text, **_):
+            texte_gesendet.append((chat, text))
+
+        fake = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                               bot=SimpleNamespace(send_message=send_message))
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(fake)), 1)
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(fake)), 0)
+        self.assertEqual(texte_gesendet, [(42, "⚠️ 2 Kills ohne Aufnahme")])
+
     def test_outbox_sendet_highlight_zur_freigabe(self):
         vorschau = self.konfig.ordner("highlights") / "h.vorschau.mp4"
         vorschau.write_bytes(b"video")

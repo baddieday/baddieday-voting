@@ -17,12 +17,15 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Konfig = (Join-Path $PSScriptRoot 'uebertragung.psd1'),
+    [string]$Konfig,
     [switch]$Verschieben,
     [switch]$Probelauf
 )
 
 $ErrorActionPreference = 'Stop'
+# Standardpfad erst hier auflösen: unter Windows PowerShell 5.1 ist $PSScriptRoot in param()-Standardwerten leer,
+# wenn das Skript mit [CmdletBinding()] per "powershell -File" (Aufgabenplanung) gestartet wird.
+if (-not $Konfig) { $Konfig = Join-Path $PSScriptRoot 'uebertragung.psd1' }
 $datenOrdner = Join-Path $env:LOCALAPPDATA 'ClipPipeline'
 $logDatei = Join-Path $datenOrdner 'uebertragung.log'
 $statusDatei = Join-Path $datenOrdner 'uebertragen.tsv'
@@ -59,6 +62,14 @@ function Sende-WakeOnLan([string]$mac) {
 }
 
 function Datei-Schluessel($datei) { '{0}|{1}|{2}' -f $datei.FullName, $datei.Length, $datei.LastWriteTimeUtc.Ticks }
+
+function Datei-Frei([string]$pfad) {
+    # Hält noch ein Programm die Datei zum Schreiben offen (Fortnite während des Matches, Rekorder beim Speichern)?
+    # Auf den Zeitstempel allein ist kein Verlass: Für offene Dateien zeigt Windows oft einen veralteten an.
+    # Öffnen mit FileShare 'Read' klappt nur, wenn gerade niemand schreibt.
+    try { $strom = [IO.File]::Open($pfad, 'Open', 'Read', 'Read'); $strom.Dispose(); return $true }
+    catch { return $false }
+}
 
 function Session-Id([string]$name) {
     # UnsavedReplay-2026.09.23-20.15.33.replay -> 2026-09-23_20-15-33 (wie in der Pipeline)
@@ -126,6 +137,7 @@ try {
             if ($datei.LastWriteTime -gt $grenzeJung -or $datei.LastWriteTime -lt $grenzeAlt) { continue }
             $schluessel = Datei-Schluessel $datei
             if ($erledigt.Contains($schluessel)) { continue }
+            if (-not (Datei-Frei $datei.FullName)) { continue }   # wird noch geschrieben -> nächster Lauf
 
             $unterpfad = $datei.FullName.Substring($quelle.TrimEnd('\').Length).TrimStart('\')
             $ziel = Join-Path (Join-Path $k.Ziel $q.Ziel) $unterpfad

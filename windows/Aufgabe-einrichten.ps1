@@ -11,8 +11,9 @@ $skript = Join-Path $PSScriptRoot 'Uebertragung.ps1'
 if (-not (Test-Path (Join-Path $PSScriptRoot 'uebertragung.psd1'))) {
     throw 'Erst uebertragung.beispiel.psd1 nach uebertragung.psd1 kopieren und anpassen.'
 }
-$aktion = New-ScheduledTaskAction -Execute 'powershell.exe' `
-    -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$skript`""
+# Über "conhost --headless" starten: powershell -WindowStyle Hidden blitzt trotzdem kurz als Fenster auf.
+$aktion = New-ScheduledTaskAction -Execute 'conhost.exe' `
+    -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$skript`""
 $ausloeser = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $Minuten)
 $einstellungen = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Hours 6) -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries

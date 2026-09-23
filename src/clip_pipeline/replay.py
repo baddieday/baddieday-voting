@@ -94,6 +94,46 @@ def lies_json(pfad: Path, konfig: Konfig) -> dict:
         raise ReplayFehler(f"{pfad.name}: ungültiges JSON von replay2json ({fehler})") from None
 
 
+KNOCK_GUELTIG_S = 90  # länger zurückliegendes Umhauen zählt nicht mehr (Gegner wurde vermutlich wiederbelebt)
+
+
+def _meine_ereignisse(eliminierungen: list[dict], start: datetime, meine_ids: set[str]) -> list[MeinEreignis]:
+    """Meine Kills nach Fortnite-Regel: Der Kill gehört dem, der den Gegner UMGEHAUEN hat.
+
+    Beispiele (Squad):
+      ich haue um, Teammate erledigt   -> mein Kill, Zeitpunkt = mein Umhauen (der Moment in meinem Video)
+      Teammate haut um, ich erledige   -> Kill des Teammates (so zählt es auch Fortnite)
+      ich haue um und erledige selbst  -> mein Kill, Zeitpunkt = das Erledigen
+      direkter Kill ohne Umhauen (Solo) -> Kill dessen, der erledigt
+    """
+    ereignisse: list[MeinEreignis] = []
+    letzter_knock: dict[str, tuple[datetime, str]] = {}  # Opfer -> (Zeitpunkt, wer umgehauen hat)
+    for e in sorted((e for e in eliminierungen if e.get("t_ms") is not None), key=lambda e: int(e["t_ms"])):
+        zeitpunkt = start + timedelta(milliseconds=int(e["t_ms"]))
+        taeter = str(e.get("eliminator") or "").upper()
+        opfer = str(e.get("eliminiert") or "").upper()
+        if e.get("knock"):
+            letzter_knock[opfer] = (zeitpunkt, taeter)
+            if opfer in meine_ids:
+                ereignisse.append(MeinEreignis(zeitpunkt, "knock_erlitten"))
+            elif taeter in meine_ids:
+                ereignisse.append(MeinEreignis(zeitpunkt, "knock"))
+            continue
+        if opfer in meine_ids:
+            ereignisse.append(MeinEreignis(zeitpunkt, "tod"))
+            continue
+        knock = letzter_knock.pop(opfer, None)
+        if knock and (zeitpunkt - knock[0]).total_seconds() > KNOCK_GUELTIG_S:
+            knock = None
+        gutgeschrieben = knock[1] if knock else taeter
+        # Selbst-Eliminierung (Sturm, Sturz) zählt nur, wenn vorher jemand umgehauen hat – dann für den
+        if gutgeschrieben in meine_ids and opfer and (knock or not e.get("selbst")):
+            eigener_finish = taeter in meine_ids
+            ereignisse.append(MeinEreignis(zeitpunkt if eigener_finish or not knock else knock[0], "kill"))
+    ereignisse.sort(key=lambda e: e.zeit_utc)
+    return ereignisse
+
+
 def match_aus_json(daten: dict, mid: str, *, zonen_name: str, start_ist_ortszeit: bool = True) -> Match:
     """Wandelt das JSON von replay2json in ein Match (ohne Dateizugriff, gut testbar)."""
     roh_start = daten.get("replay_start")
@@ -113,18 +153,7 @@ def match_aus_json(daten: dict, mid: str, *, zonen_name: str, start_ist_ortszeit
     if not meine_ids:
         warnungen.append("Eigener Spieler im Replay nicht gefunden – Epic-ID in config/pipeline.toml [replay] ich eintragen")
 
-    ereignisse: list[MeinEreignis] = []
-    for e in daten.get("eliminierungen") or []:
-        if e.get("t_ms") is None:
-            continue
-        zeitpunkt = start + timedelta(milliseconds=int(e["t_ms"]))
-        taeter = str(e.get("eliminator") or "").upper()
-        opfer = str(e.get("eliminiert") or "").upper()
-        if taeter in meine_ids and opfer not in meine_ids and not e.get("selbst"):
-            ereignisse.append(MeinEreignis(zeitpunkt, "knock" if e.get("knock") else "kill"))
-        elif opfer in meine_ids:
-            ereignisse.append(MeinEreignis(zeitpunkt, "knock_erlitten" if e.get("knock") else "tod"))
-    ereignisse.sort(key=lambda e: e.zeit_utc)
+    ereignisse = _meine_ereignisse(daten.get("eliminierungen") or [], start, meine_ids)
 
     kills_stats = daten.get("stats_eliminierungen")
     anzahl_kills = sum(1 for e in ereignisse if e.art == "kill")

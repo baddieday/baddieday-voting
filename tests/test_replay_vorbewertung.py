@@ -57,6 +57,24 @@ class Replay(unittest.TestCase):
         self.assertEqual(ohne_ich.kills, [])
         self.assertIn("Epic-ID", ohne_ich.warnungen[0])
 
+    def test_kill_gehoert_dem_der_umhaut(self):
+        def elim(t, taeter, opfer, knock=False, selbst=False):
+            return {"t_ms": t * 1000, "eliminator": taeter, "eliminiert": opfer, "knock": knock, "selbst": selbst}
+
+        daten = dict(self.DATEN, stats_eliminierungen=4, eliminierungen=[
+            elim(100, ICH, "A", knock=True), elim(104, "TEAM", "A"),       # ich haue um, Teammate erledigt -> meiner (t=100)
+            elim(200, "TEAM", "B", knock=True), elim(203, ICH, "B"),       # Teammate haut um, ich erledige -> nicht meiner
+            elim(300, ICH, "C", knock=True), elim(302, ICH, "C"),          # alles selbst -> meiner (t=302, das Erledigen)
+            elim(400, ICH, "D"),                                           # direkter Kill -> meiner
+            elim(500, ICH, "E", knock=True), elim(510, "E", "E", selbst=True),  # umgehauen, dann Sturm -> meiner (t=500)
+            elim(600, "X", "F", selbst=True),                              # fremde Selbst-Eliminierung -> nicht meiner
+            elim(700, ICH, "G", knock=True), elim(900, "Y", "G"),          # Umhauen zu lange her (wiederbelebt) -> nicht meiner
+        ])
+        m = match_aus_json(daten, "m", zonen_name="Europe/Berlin")
+        sekunden = [round((k - m.start_utc).total_seconds()) for k in m.kills]
+        self.assertEqual(sekunden, [100, 302, 400, 500])
+        self.assertFalse(any("Kills" in w for w in m.warnungen))  # passt zur Replay-Statistik (4)
+
     def test_match_id(self):
         from pathlib import Path
         self.assertEqual(match_id(Path("UnsavedReplay-2026.09.21-21.42.22.replay")), "2026-09-21_21-42-22")

@@ -22,7 +22,7 @@ from pathlib import Path
 
 from . import caption, db, erfassung, lernen, medien, replay, schema, schnittliste, vorbewertung, zeitleiste
 from .konfig import Konfig
-from .zeit import aus_iso, iso, jetzt
+from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
 
 log = logging.getLogger("pipeline")
 SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
@@ -362,14 +362,25 @@ def render(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
             db.protokoll(con, "clip", f"{c['titel']}: {punkte} Punkte", clip_id=cursor.lastrowid, match_id=sid)
         neu += 1
 
+    kills_ohne_video = sum(len(k["kill_zeiten_utc"]) for k in liste.get("ohne_video", []))
+    warnung = (
+        f"{kills_ohne_video} Kill(s) ohne Aufnahme – liefen Nvidia Highlights und SteelSeries Moments?"
+        if kills_ohne_video else None
+    )
     with db.transaktion(con):
         con.execute("UPDATE matches SET status = 'verarbeitet', geaendert = ? WHERE id = ?", (iso(jetzt()), sid))
         db.protokoll(con, "match", f"render: {neu} neue Clips", match_id=sid)
+        match_ende = aus_iso(db.match(con, sid)["ende_utc"])
+        # Nur für frische Matches melden – beim Nachholen alter Matches wäre das nur Rauschen
+        if warnung and jetzt() - match_ende < timedelta(hours=12):
+            zeit = utc_zu_lokal(match_ende, konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+            db.meldung(con, f"ohne_video:{sid}", f"⚠️ Match bis {zeit:%H:%M} Uhr: {warnung}")
     zeilen = con.execute("SELECT titel, punkte FROM clips WHERE match_id = ? ORDER BY punkte DESC, nr", (sid,)).fetchall()
     return {
         "session": sid, "clips": len(zeilen), "neu": neu,
         "top_label": zeilen[0]["titel"] if zeilen else None,
         "top_score": zeilen[0]["punkte"] if zeilen else 0,
+        "ohne_video": kills_ohne_video, "warnung": warnung,
         "hinweise": hinweise,
     }
 

@@ -44,6 +44,17 @@ def _clip_text(con, konfig: Konfig, clip_id: int) -> str:
 
 # --- Outbox: neue Clips verschicken -------------------------------------------
 
+async def sende_meldungen(app: Application) -> int:
+    """Kurze Hinweise (z. B. Kills ohne Aufnahme) – brauchen keinen Speicher, gehen also immer."""
+    con, chat = app.bot_data["con"], app.bot_data["erlaubt"]
+    gesendet = 0
+    for m in con.execute("SELECT id, text FROM meldungen WHERE gesendet IS NULL ORDER BY id").fetchall():
+        await app.bot.send_message(chat, m["text"])
+        con.execute("UPDATE meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
+        gesendet += 1
+    return gesendet
+
+
 async def sende_outbox(app: Application) -> int:
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     zeilen = aktionen.outbox(con)
@@ -104,7 +115,7 @@ async def erinnere(app: Application) -> bool:
 async def _outbox_schleife(app: Application) -> None:
     intervall = float(app.bot_data["konfig"].wert("telegram.outbox_intervall_s", 30))
     while True:
-        for aufgabe in (sende_outbox, erinnere):
+        for aufgabe in (sende_meldungen, sende_outbox, erinnere):
             try:
                 await aufgabe(app)
             except Exception:  # der Bot soll wegen eines Versandfehlers nicht sterben
