@@ -139,6 +139,17 @@ sudo -u pipeline .venv/bin/pipeline aufraeumen --liste
 systemctl enable --now clip-aufraeumen.timer
 ```
 
+### B4b. Alte Matches nachholen (Rückstand)
+`deploy/rueckstand.sh` schickt alle Replays, die noch nicht verarbeitet sind, nacheinander durch
+`prepare → analyze → decide → render` (älteste zuerst). Es ist beliebig oft neu startbar, wartet bei
+„Speicher offline“ oder „Sperre“ und lässt zwischen den Schritten n8n-Aufträge vor.
+```bash
+sudo -u pipeline /opt/clip-pipeline/deploy/rueckstand.sh --liste        # nur anzeigen, was offen ist
+systemd-run --unit=clip-rueckstand --uid=pipeline --gid=pipeline \
+  -p WorkingDirectory=/opt/clip-pipeline --collect /opt/clip-pipeline/deploy/rueckstand.sh
+tail -f /var/lib/clip-pipeline/rueckstand.log                           # Fortschritt ansehen
+```
+
 ### B5. Tailscale und SSH für n8n
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh && tailscale up    # Link im Browser bestätigen
