@@ -1,0 +1,8 @@
+# Rechner-eigene Einstellungen. Auf dem Server kopieren:
+#   cp config/lokal.beispiel.toml config/lokal.toml
+# lokal.toml steht in .gitignore und überschreibt nur die Werte, die hier drinstehen.
+
+[speicher]
+# großer Proxmox-Host (pve-big): Erreichbarkeit prüfen und bei Bedarf per Wake-on-LAN wecken
+host = "192.168.178.51"
+wol_mac = "40:61:86:2e:9a:ff"

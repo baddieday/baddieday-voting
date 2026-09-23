@@ -148,17 +148,36 @@ def sende_wake_on_lan(mac: str, broadcast: str = "255.255.255.255", port: int = 
     return paket
 
 
+def _mische(basis: dict, zusatz: dict) -> dict:
+    """Überschreibt einzelne Werte, Abschnitte werden zusammengeführt statt ersetzt."""
+    for schluessel, wert in zusatz.items():
+        if isinstance(wert, dict) and isinstance(basis.get(schluessel), dict):
+            _mische(basis[schluessel], wert)
+        else:
+            basis[schluessel] = wert
+    return basis
+
+
+def _lies_toml(pfad: Path) -> dict:
+    try:
+        return tomllib.loads(pfad.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise KonfigFehler(f"Konfiguration {pfad} nicht gefunden") from None
+    except tomllib.TOMLDecodeError as fehler:
+        raise KonfigFehler(f"Konfiguration {pfad} fehlerhaft: {fehler}") from None
+
+
 def lade(pfad: Path | str | None = None) -> Konfig:
     lade_env(PROJEKT / ".env")
     pfad = Path(pfad or os.environ.get("CLIP_KONFIG") or STANDARD_KONFIG)
     if not pfad.is_absolute():
         pfad = PROJEKT / pfad
-    try:
-        daten = tomllib.loads(pfad.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise KonfigFehler(f"Konfiguration {pfad} nicht gefunden") from None
-    except tomllib.TOMLDecodeError as fehler:
-        raise KonfigFehler(f"Konfiguration {pfad} fehlerhaft: {fehler}") from None
+    daten = _lies_toml(pfad)
+    # Rechner-eigene Werte (z. B. IP und MAC des großen Hosts) stehen in lokal.toml neben der
+    # Konfiguration. Die Datei ist in .gitignore – so gibt es bei "git pull" nie Konflikte.
+    lokal = pfad.with_name("lokal.toml")
+    if lokal.is_file():
+        _mische(daten, _lies_toml(lokal))
 
     # Überschreibungen aus der Umgebung (praktisch zum Testen und für die .env)
     if wurzel := os.environ.get("CLIP_SPEICHER"):

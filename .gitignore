@@ -3,6 +3,7 @@
 *.env
 !.env.example
 windows/uebertragung.psd1
+config/lokal.toml
 
 # Python
 .venv/

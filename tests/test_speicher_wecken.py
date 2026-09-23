@@ -43,6 +43,24 @@ class Wecken(MitSpeicher):
         wol.assert_not_called()
 
 
+class LokaleKonfig(unittest.TestCase):
+    def test_lokal_toml_ueberschreibt_nur_einzelne_werte(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            haupt = Path(tmp) / "pipeline.toml"
+            haupt.write_text('[speicher]\nwurzel = "/srv/clips"\nhost = ""\n[elo]\nstart = 1500.0\n', encoding="utf-8")
+            (Path(tmp) / "lokal.toml").write_text('[speicher]\nhost = "192.168.178.51"\n', encoding="utf-8")
+            with mock.patch.dict(os.environ, {}, clear=False):
+                for name in ("CLIP_SPEICHER", "CLIP_DATENBANK", "CLIP_EPIC_ID"):
+                    os.environ.pop(name, None)
+                k = konfig.lade(haupt)
+        self.assertEqual(k.wert("speicher.host"), "192.168.178.51")
+        self.assertEqual(k.wert("speicher.wurzel"), "/srv/clips")  # bleibt erhalten
+        self.assertEqual(k.wert("elo.start"), 1500.0)
+
+
 class AufraeumenTaeglich(MitSpeicher):
     def _cli(self, *argv) -> dict:
         umgebung = {"CLIP_SPEICHER": str(self.konfig.wurzel), "CLIP_DATENBANK": str(self.konfig.datenbank)}
