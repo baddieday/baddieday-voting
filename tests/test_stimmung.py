@@ -132,3 +132,15 @@ class Durchlauf(MitSpeicher):
         self.assertIn("tot", z["text"].lower())
         self.assertGreaterEqual(json.loads(z["merkmale"])["frust"], 2)
         self.assertEqual(z["stimmung"], "frustriert")
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class Reihenfolge(Durchlauf):
+    def test_max_nimmt_die_besten_und_nie_verworfene(self):
+        self.con.execute("UPDATE clips SET punkte = 1, status = 'gesendet' WHERE id = ?", (self.episch,))
+        self.con.execute("UPDATE clips SET punkte = 9, status = 'freigegeben' WHERE id = ?", (self.tod,))
+        e = stimmung.analysiere(self.con, self.konfig, claude=False, whisper=False, maximal=1)
+        self.assertEqual(e["analysiert"], 1)
+        self.assertEqual([z["clip_id"] for z in self.con.execute("SELECT clip_id FROM momente")], [self.tod])
+        self.con.execute("UPDATE clips SET status = 'verworfen' WHERE id = ?", (self.episch,))
+        self.assertEqual(stimmung.analysiere(self.con, self.konfig, claude=False, whisper=False)["analysiert"], 0)

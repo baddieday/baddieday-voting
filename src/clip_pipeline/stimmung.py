@@ -80,7 +80,11 @@ def _eigene_ereignisse(konfig: Konfig, match_id: str, cache: dict) -> list[repla
 
 def momente_aus_clips(con: sqlite3.Connection, konfig: Konfig) -> list[Moment]:
     ergebnis, cache = [], {}
-    for c in con.execute("SELECT * FROM clips WHERE clip_pfad IS NOT NULL ORDER BY id").fetchall():
+    # Beste zuerst (freigegebene, dann nach Punkten) – verworfene braucht der Regisseur nie
+    for c in con.execute(
+        """SELECT * FROM clips WHERE clip_pfad IS NOT NULL AND status != 'verworfen'
+            ORDER BY CASE WHEN status IN ('freigegeben', 'veroeffentlicht', 'im_highlight') THEN 0 ELSE 1 END,
+                     punkte DESC, id""").fetchall():
         datei = material.lokal(konfig, c["clip_pfad"])
         start = aus_iso(c["start_utc"])
         dauer = float(c["quelle_ende_s"]) - float(c["quelle_start_s"])
@@ -330,12 +334,14 @@ def _speichere(con, m: Moment, stimmung: str, sicherheit: float, quelle: str, mk
 
 
 def analysiere(con: sqlite3.Connection, konfig: Konfig, *, dateien: bool = False, neu: bool = False,
-               claude: bool = True, whisper: bool = True) -> dict:
+               claude: bool = True, whisper: bool = True, maximal: int | None = None) -> dict:
     momente = momente_aus_clips(con, konfig) + (momente_aus_dateien(con, konfig) if dateien else [])
     fertig = {z["schluessel"] for z in con.execute("SELECT schluessel FROM momente")}
     offen = [m for m in momente if neu or m.schluessel not in fertig]
     fehlend = [m for m in offen if not m.datei.is_file()]
     offen = [m for m in offen if m.datei.is_file()]
+    if maximal is not None:
+        offen = offen[:maximal]  # die besten zuerst; der Rest beim nächsten Lauf
     sprache = Transkription(konfig) if whisper else None
     hinweise = []
     if sprache is not None and not sprache.verfuegbar():

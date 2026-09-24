@@ -226,7 +226,7 @@ def _cmd_material(args, konfig, con) -> int:
 
 def _cmd_stimmung(args, konfig, con) -> int:
     _json(stimmung.analysiere(con, konfig, dateien=args.dateien, neu=args.neu, claude=not args.ohne_claude,
-                              whisper=not args.ohne_whisper))
+                              whisper=not args.ohne_whisper, maximal=args.max))
     return 0
 
 
@@ -433,6 +433,7 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--neu", action="store_true", help="schon analysierte Momente neu bewerten")
     s.add_argument("--ohne-claude", action="store_true")
     s.add_argument("--ohne-whisper", action="store_true")
+    s.add_argument("--max", type=int, help="höchstens so viele (die besten zuerst), Rest beim nächsten Lauf")
     s.set_defaults(fn=_cmd_stimmung, sperren=True)
 
     s = unter.add_parser("musik", help="Musik: analysieren, hinzufügen (mit Quelle), NCS laden, Liste")
