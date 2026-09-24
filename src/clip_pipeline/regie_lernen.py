@@ -53,10 +53,54 @@ def _hauptstimmung(zeile: sqlite3.Row) -> str | None:
         return None
 
 
+# Deine Vorgaben ([regie.vorgaben] in config/lokal.toml): erlaubte Schlüssel und ihre Grenzen
+VORGABE_GRENZEN = {
+    "puffer_vor_s": (1.0, 6.0), "puffer_nach_s": (0.5, 4.0), "seg_min_faktor": (0.5, 2.0),
+    "dauer_faktor": (0.6, 1.0), "uebergang_faktor": (0.5, 2.0), "musik_pegel": (0.0, 1.0),
+    "max_je_match": (1, 10), "beats_pro_schnitt": (1, 4),
+}
+
+
+def vorgaben(konfig: Konfig) -> tuple[dict, dict, list[str]]:
+    """Startwerte aus der Konfiguration: (Parameter, Musik-Ziele, Hinweise zu ignorierten Einträgen).
+
+    Beispiel in config/lokal.toml:
+        [regie.vorgaben]
+        seg_min_faktor = 1.3          # grundsätzlich ruhiger schneiden
+        dauer_faktor = 0.8            # kürzer (Short: 45 s × 0,8 ≈ 36 s)
+        [regie.vorgaben.stimmung_bonus]
+        lustig = 1.0                  # lustige Momente bevorzugen
+        [regie.musik_ziele.episch]
+        bpm = 150                     # für episch schnellere Musik
+    Von hier aus lernt der Regisseur mit deinen Bewertungen weiter."""
+    p, ziel, hinweise = copy.deepcopy(PARAMETER), copy.deepcopy(ZIEL), []
+    for name, wert in (konfig.wert("regie.vorgaben", {}) or {}).items():
+        if name == "stimmung_bonus" and isinstance(wert, dict):
+            for stimmung, bonus in wert.items():
+                if stimmung in ZIEL and isinstance(bonus, (int, float)):
+                    p["stimmung_bonus"][stimmung] = _grenze(float(bonus), -2.0, 2.0)
+                else:
+                    hinweise.append(f"regie.vorgaben.stimmung_bonus.{stimmung} ignoriert")
+        elif name in VORGABE_GRENZEN and isinstance(wert, (int, float)) and not isinstance(wert, bool):
+            unten, oben = VORGABE_GRENZEN[name]
+            p[name] = int(_grenze(wert, unten, oben)) if isinstance(PARAMETER[name], int) else _grenze(float(wert), unten, oben)
+        else:
+            hinweise.append(f"regie.vorgaben.{name} ignoriert (unbekannt oder keine Zahl)")
+    for stimmung, werte in (konfig.wert("regie.musik_ziele", {}) or {}).items():
+        if stimmung not in ZIEL or not isinstance(werte, dict):
+            hinweise.append(f"regie.musik_ziele.{stimmung} ignoriert")
+            continue
+        if isinstance(werte.get("energie"), (int, float)):
+            ziel[stimmung]["energie"] = _grenze(float(werte["energie"]), 0.0, 1.0)
+        if isinstance(werte.get("bpm"), (int, float)):
+            ziel[stimmung]["bpm"] = _grenze(float(werte["bpm"]), 60.0, 200.0)
+    return p, ziel, hinweise
+
+
 def aktuelle(con: sqlite3.Connection, konfig: Konfig) -> tuple[dict, dict]:
-    """(Regie-Parameter, Musik-Ziele je Stimmung) nach allen bisherigen Bewertungen."""
-    p = copy.deepcopy(PARAMETER)
-    ziel = copy.deepcopy(ZIEL)
+    """(Regie-Parameter, Musik-Ziele je Stimmung): deine Vorgaben, dann alle bisherigen Bewertungen."""
+    p, ziel, _ = vorgaben(konfig)
+    beats_vorgabe = int(p["beats_pro_schnitt"])
     zeilen = bewertungen(con)
     mindestens = int(konfig.wert("regie.lernen_ab", 3))
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
@@ -85,7 +129,8 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig) -> tuple[dict, dict]:
             elif n >= mindestens:
                 bonus += 0.25 * int(b["daumen"])
             p["stimmung_bonus"][haupt] = _grenze(bonus, -2.0, 2.0)
-    p["beats_pro_schnitt"] = 4 if p["seg_min_faktor"] >= 1.7 else 2 if p["seg_min_faktor"] >= 1.3 else 1
+    gelernt = 4 if p["seg_min_faktor"] >= 1.7 else 2 if p["seg_min_faktor"] >= 1.3 else 1
+    p["beats_pro_schnitt"] = max(gelernt, beats_vorgabe)  # deine Vorgabe ist die Untergrenze
     return p, ziel
 
 
@@ -116,17 +161,22 @@ def bewerte(con: sqlite3.Connection, entwurf_id: int, *, daumen: int | None = No
 
 def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     p, ziel = aktuelle(con, konfig)
+    start, start_ziel, hinweise = vorgaben(konfig)
     zeilen = bewertungen(con)
     daumen = sum(1 for z in zeilen if z["daumen"] > 0)
     teile = [f"🧠 Regie – {len(zeilen)} Bewertungen ({daumen} 👍 / {len(zeilen) - daumen} 👎)"]
     for name in ("puffer_vor_s", "puffer_nach_s", "seg_min_faktor", "beats_pro_schnitt", "dauer_faktor", "uebergang_faktor"):
-        start, jetzt_ = PARAMETER[name], p[name]
-        teile.append(f"{name}: {jetzt_}" + ("" if jetzt_ == start else f" (Start {start})"))
+        s0, jetzt_ = start[name], p[name]
+        herkunft = "" if s0 == PARAMETER[name] else ", deine Vorgabe"
+        teile.append(f"{name}: {jetzt_}" + ("" if jetzt_ == s0 else f" (Start {s0}{herkunft})")
+                     + (" (deine Vorgabe)" if jetzt_ == s0 and herkunft else ""))
+    for h in hinweise:
+        teile.append(f"⚠️ {h}")
     if p["stimmung_bonus"]:
         teile.append("Stimmungs-Bonus: " + ", ".join(f"{k} {v:+}" for k, v in sorted(p["stimmung_bonus"].items())))
     if p["track_malus"]:
         teile.append("Musik-Abzug: " + ", ".join(f"#{k} −{v}" for k, v in sorted(p["track_malus"].items())))
-    geaendert = [s for s in ziel if ziel[s] != ZIEL[s]]
+    geaendert = [s for s in ziel if ziel[s] != ZIEL[s]]  # durch Vorgabe oder "Stimmung getroffen"
     for s in geaendert:
         teile.append(f"Musik für {s}: Energie-Rang {ziel[s]['energie']}, {ziel[s]['bpm']} BPM")
     return "\n".join(teile)

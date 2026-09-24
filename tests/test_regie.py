@@ -125,3 +125,58 @@ class ActionAmEnde(MitRegieMaterial):
                          "WHERE schluessel = 'datei:1'")
         liste = lies(regie.erstelle(self.con, self.konfig, "short"))
         self.assertEqual(regie.pruefe_liste(liste), [])
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class Vorgaben(MitRegieMaterial):
+    """Deine Startwerte aus config/lokal.toml – von dort lernt der Regisseur weiter."""
+
+    def test_vorgaben_grenzen_und_hinweise(self):
+        self.konfig.daten["regie"]["vorgaben"] = {
+            "seg_min_faktor": 1.4, "dauer_faktor": 5.0, "puffer_vor_s": "viel", "gibtsnicht": 1,
+            "stimmung_bonus": {"lustig": 1.0, "wütend": 3}, "beats_pro_schnitt": 4,
+        }
+        self.konfig.daten["regie"]["musik_ziele"] = {"episch": {"bpm": 150, "energie": 2.0}}
+        p, ziel, hinweise = regie_lernen.vorgaben(self.konfig)
+        self.assertEqual(p["seg_min_faktor"], 1.4)
+        self.assertEqual(p["dauer_faktor"], 1.0)            # auf die Grenze gestutzt
+        self.assertEqual(p["puffer_vor_s"], regie.PARAMETER["puffer_vor_s"])  # keine Zahl -> ignoriert
+        self.assertEqual(p["stimmung_bonus"], {"lustig": 1.0})
+        self.assertEqual((ziel["episch"]["bpm"], ziel["episch"]["energie"]), (150.0, 1.0))
+        self.assertEqual(len(hinweise), 3)                  # puffer_vor_s, gibtsnicht, wütend
+        p2, _ = regie_lernen.aktuelle(self.con, self.konfig)
+        self.assertEqual(p2["beats_pro_schnitt"], 4)        # Vorgabe ist die Untergrenze
+        self.assertIn("deine Vorgabe", regie_lernen.lernstand_text(self.con, self.konfig))
+
+    def test_vorgabe_wirkt_und_bewertung_lernt_weiter(self):
+        self.momente_anlegen(MOMENTE[:10])
+        self.musik_anlegen(150, "episch")
+        vorher = lies(regie.erstelle(self.con, self.konfig, "short", parameter=regie_lernen.aktuelle(self.con, self.konfig)[0]))
+        self.konfig.daten["regie"]["vorgaben"] = {"dauer_faktor": 0.7}
+        p, ziel = regie_lernen.aktuelle(self.con, self.konfig)
+        e = regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel)
+        self.assertLess(lies(e)["dauer_s"], vorher["dauer_s"])
+        regie_lernen.bewerte(self.con, e["entwurf"], grund="lang")  # und noch kürzer gewünscht
+        p2, _ = regie_lernen.aktuelle(self.con, self.konfig)
+        self.assertEqual(p2["dauer_faktor"], 0.63)          # 0,7 × 0,9 – von der Vorgabe aus gelernt
+
+    def test_cli_bewerte_und_lernstand(self):
+        import contextlib
+        import io
+        from unittest import mock
+
+        from clip_pipeline import cli
+
+        self.momente_anlegen(MOMENTE[:6])
+        e = regie.erstelle(self.con, self.konfig, "short")
+        ausgabe = io.StringIO()
+        with mock.patch("clip_pipeline.cli.lade", return_value=self.konfig), contextlib.redirect_stdout(ausgabe), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["bewerte", str(e["entwurf"]), "--schlecht", "--grund", "hektisch",
+                                       "--grund", "lang"]), 0)
+            self.assertEqual(cli.main(["lernstand"]), 0)
+            self.assertEqual(cli.main(["bewerte", "999", "--gut"]), 1)
+        zeilen = [json.loads(z) for z in ausgabe.getvalue().splitlines() if z.startswith("{")]
+        self.assertEqual((zeilen[0]["daumen"], zeilen[0]["gruende"]), (-1, ["hektisch", "lang"]))
+        self.assertGreater(zeilen[1]["parameter"]["seg_min_faktor"], 1.0)
+        self.assertIn("unbekannt", zeilen[2]["fehler"])

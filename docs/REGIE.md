@@ -51,6 +51,15 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 - `/lernstand` zeigt, was der Regisseur gelernt hat, `/musik` die Titel, `/stand` einen Satz zum Stand.
 - Abends um 21:00 kommt ein Satz zum Stand (`[lernbot].abend_uhrzeit`).
 
+## Selbst steuern – auch ohne Bot
+- **Vorgaben** in `config/lokal.toml` (Beispiel mit allen Schlüsseln: `config/lokal.beispiel.toml`):
+  `[regie.vorgaben]` für Schnitt-Tempo, Länge, Puffer, Übergänge, Musik-Pegel und bevorzugte Stimmungen,
+  `[regie.musik_ziele.<stimmung>]` für Tempo und Energie der Musik. Das sind **Startwerte**: Deine Bewertungen
+  verschieben von dort aus weiter. Unbekannte oder unsinnige Werte werden gemeldet und auf Grenzen gestutzt.
+- **Bewerten ohne Telegram:** `pipeline bewerte <entwurf> --gut|--schlecht [--grund hektisch --grund lang]`
+  (Gründe: `musik`, `hektisch`, `getroffen`, `lang`, `abgeschnitten`) – dieselbe Wirkung wie die Knöpfe.
+- **Nachsehen:** `pipeline lernstand` (bzw. `/lernstand` im Bot) zeigt Vorgaben und Gelerntes.
+
 ## Was die Gründe bewirken
 | Grund | Wirkung beim nächsten compose |
 |---|---|

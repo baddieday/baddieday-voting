@@ -6,3 +6,19 @@
 # großer Proxmox-Host (pve-big): Erreichbarkeit prüfen und bei Bedarf per Wake-on-LAN wecken
 host = "192.168.178.51"
 wol_mac = "40:61:86:2e:9a:ff"
+
+# --- Regisseur steuern (optional) ---------------------------------------------------------
+# Startwerte, von denen aus der Regisseur mit deinen Bewertungen weiterlernt. Nur eintragen, was du ändern willst.
+# Ansehen, was gerade gilt:  pipeline lernstand
+# [regie.vorgaben]
+# seg_min_faktor = 1.3      # ruhiger schneiden: Segmente länger (1.0 = Standard, 0.5 … 2.0); ab 1.3 nur jeder 2. Beat
+# dauer_faktor = 0.8        # kürzer: Short 45 s × 0.8 ≈ 36 s, Zusammenschnitt entsprechend (0.6 … 1.0)
+# puffer_vor_s = 3.5        # mehr Anlauf vor dem ersten Kill (1 … 6 s)
+# puffer_nach_s = 2.0       # länger nach dem letzten Kill (0.5 … 4 s)
+# uebergang_faktor = 1.2    # weichere, längere Übergänge
+# musik_pegel = 0.3         # Musik leiser (0 … 1)
+# [regie.vorgaben.stimmung_bonus]
+# lustig = 1.0              # lustige Momente bevorzugen (−2 … +2)
+# [regie.musik_ziele.episch]
+# bpm = 150                 # für epische Momente schnellere Musik
+# energie = 0.9             # und energiereichere (Rang in deiner Bibliothek, 0 … 1)

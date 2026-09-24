@@ -333,6 +333,31 @@ def _cmd_sitzungen(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_bewerte(args, konfig, con) -> int:
+    """Einen Entwurf ohne Telegram bewerten (gleiche Wirkung wie die Knöpfe im Lern-Bot)."""
+    from . import regie_lernen
+
+    if con.execute("SELECT 1 FROM entwuerfe WHERE id = ?", (args.entwurf,)).fetchone() is None:
+        _json({"fehler": f"Entwurf {args.entwurf} unbekannt"})
+        return 1
+    b = regie_lernen.bewerte(con, args.entwurf, daumen=1 if args.gut else -1)
+    for grund in args.grund:
+        if grund not in json.loads(b["gruende"]):
+            b = regie_lernen.bewerte(con, args.entwurf, grund=grund)
+    print(regie_lernen.lernstand_text(con, konfig), file=sys.stderr)
+    _json({"entwurf": args.entwurf, "daumen": b["daumen"], "gruende": json.loads(b["gruende"])})
+    return 0
+
+
+def _cmd_lernstand(args, konfig, con) -> int:
+    from . import regie_lernen
+
+    print(regie_lernen.lernstand_text(con, konfig), file=sys.stderr)
+    parameter, ziel = regie_lernen.aktuelle(con, konfig)
+    _json({"parameter": parameter, "musik_ziele": ziel})
+    return 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -450,6 +475,18 @@ def baue_parser() -> argparse.ArgumentParser:
     s = unter.add_parser("sitzungen", help="'Session vorbei' vom Gaming-PC: Stimmung + Short des Abends (weckt nicht)")
     s.add_argument("--ohne-claude", action="store_true")
     s.set_defaults(fn=_cmd_sitzungen, sperren=True)
+
+    s = unter.add_parser("bewerte", help="Entwurf bewerten ohne Telegram (👍/👎 + Gründe)")
+    s.add_argument("entwurf", type=int)
+    daumen = s.add_mutually_exclusive_group(required=True)
+    daumen.add_argument("--gut", action="store_true", help="👍")
+    daumen.add_argument("--schlecht", action="store_true", help="👎")
+    s.add_argument("--grund", action="append", default=[],
+                   choices=["musik", "hektisch", "getroffen", "lang", "abgeschnitten"])
+    s.set_defaults(fn=_cmd_bewerte, sperren=False)
+
+    s = unter.add_parser("lernstand", help="Was hat der Regisseur gelernt? (inkl. deiner Vorgaben)")
+    s.set_defaults(fn=_cmd_lernstand, sperren=False)
 
     s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
     s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])
