@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Auf pve-mini als root:  bash regie-starten.sh
-# Weckt pve-big, spielt den Sprint-Stand NEBEN der Produktion ein (/opt/clip-regie im CT), lädt Musik,
-# bestimmt die Stimmung der besten Clips, startet den Lern-Bot und baut den ersten Entwurf.
-# Die Produktion (/opt/clip-pipeline, clip-bot, n8n-Aufrufe) bleibt unverändert. Beliebig oft wiederholbar.
+# Weckt pve-big, spielt den Sprint-Stand NEBEN der Produktion ein (/opt/clip-regie im CT), legt clip-leerlauf
+# für pve-big bereit, lädt Musik, bestimmt die Stimmung der besten Clips, startet den Lern-Bot und baut einen
+# Entwurf. Die Produktion (/opt/clip-pipeline, clip-bot, n8n-Aufrufe) bleibt unverändert. Beliebig oft
+# wiederholbar; gibt es eine neuere Version dieses Skripts im Repo, übernimmt es sie selbst.
 set -euo pipefail
 CT="${CT:-102}"
 BRANCH="${BRANCH:-sprint-regisseur}"
@@ -17,7 +18,7 @@ als_pipeline() { pct exec "$CT" -- runuser -l pipeline -c "export GIT_TERMINAL_P
 
 [ "$(pct status "$CT" | awk '{print $2}')" = running ] || { echo "CT $CT läuft nicht – erst: pct start $CT"; exit 1; }
 
-sag "1/6 pve-big wecken (falls er schläft) und warten, bis der Clips-Speicher da ist"
+sag "1/7 pve-big wecken (falls er schläft) und warten, bis der Clips-Speicher da ist"
 if ! findmnt -rn "$Z" >/dev/null 2>&1; then
   MAC="${WOL_MAC:-$(im_ct awk -F'"' '/^[[:space:]]*wol_mac/ {print $2; exit}' "$PROD/config/lokal.toml" 2>/dev/null || true)}"
   [ -n "$MAC" ] || { echo "Keine MAC gefunden (wol_mac in config/lokal.toml). pve-big von Hand einschalten, dann nochmal."; exit 1; }
@@ -36,7 +37,7 @@ fi
 if im_ct ls /srv/clips/.clip-speicher >/dev/null 2>&1; then echo "Clips-Speicher im CT sichtbar"
 else echo "Auf pve-mini eingehängt, aber im CT fehlt /srv/clips/.clip-speicher – bitte melden."; exit 1; fi
 
-sag "2/6 Sprint-Stand nach $REGIE (neben der Produktion, als eigener git-worktree)"
+sag "2/7 Sprint-Stand nach $REGIE (neben der Produktion, als eigener git-worktree)"
 if ! als_pipeline "git -C $PROD fetch -q origin +refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"; then
   echo "git fetch geht nicht (Zugang zu GitHub im CT?) – bitte melden. Die Produktion ist unverändert."; exit 1
 fi
@@ -48,25 +49,47 @@ else
 fi
 als_pipeline "git -C $REGIE log --oneline -1"
 
-sag "3/6 Python-Umgebung (numpy, faster-whisper) – beim ersten Mal ein paar Minuten"
+# Neuere Version dieses Skripts im Repo? Dann übernehmen und neu starten (einmal)
+if [ -z "${REGIE_NEU:-}" ] && [ -f "$0" ]; then
+  tmp="$(mktemp -d)"; neu="$tmp/regie.sh"
+  if pct pull "$CT" "$REGIE/deploy/pve-mini/regie-starten.sh" "$neu" 2>/dev/null && [ -s "$neu" ] \
+     && head -n 1 "$neu" | grep -q '^#!' && bash -n "$neu" && ! cmp -s "$neu" "$0"; then
+    echo "Neue Version von $0 – übernehme sie und starte neu"
+    cp "$neu" "$0.neu" && mv "$0.neu" "$0" && rm -rf "$tmp"
+    REGIE_NEU=1 exec bash "$0" "$@"
+  fi
+  rm -rf "$tmp"
+fi
+
+sag "3/7 clip-leerlauf für pve-big bereitlegen (Einrichten: Block aus dem Chat in der Shell von pve-big)"
+als_pipeline "install -d -m 755 /srv/clips/.einrichtung && cd $REGIE/deploy/big && cp clip-leerlauf clip-leerlauf.service clip-leerlauf.timer einrichten.sh /srv/clips/.einrichtung/"
+echo "liegt auf pve-big unter <clips>/.einrichtung"
+
+sag "4/7 Python-Umgebung (numpy, faster-whisper) – beim ersten Mal ein paar Minuten"
 als_pipeline "cd $REGIE && { [ -x .venv/bin/python ] || python3 -m venv .venv; } && .venv/bin/pip install -q -e '.[whisper]'"
 als_pipeline "ln -sfn $PROD/.env $REGIE/.env && { [ -f $REGIE/config/lokal.toml ] || cp $PROD/config/lokal.toml $REGIE/config/ 2>/dev/null || true; }"
 
-sag "4/6 Musik von NCS (je Stimmung 2 Titel, mit Quellenangabe)"
+sag "5/7 Musik von NCS (je Stimmung 2 Titel, mit Quellenangabe)"
 als_pipeline "cd $REGIE && for s in episch spannend lustig frustriert chill; do .venv/bin/pipeline musik ncs --stimmung \$s --anzahl 2 2>/dev/null | tail -n 1; done"
 
-sag "5/6 Stimmung für die besten $ANZAHL Clips (Whisper lädt beim ersten Mal ~480 MB)"
+sag "6/7 Stimmung für die nächsten $ANZAHL Clips (Whisper lädt beim ersten Mal ~480 MB)"
 als_pipeline "cd $REGIE && .venv/bin/pipeline stimmung --max $ANZAHL 2>/dev/null | tail -n 1"
 
-sag "6/6 Lern-Bot als Dienst starten und ersten Entwurf bauen"
+sag "7/7 Lern-Bot als Dienst starten und einen Entwurf bauen"
 im_ct sh -c "sed 's#/opt/clip-pipeline#$REGIE#g' $REGIE/deploy/systemd/clip-lernbot.service > /etc/systemd/system/clip-lernbot.service
   getent group render >/dev/null || sed -i '/^SupplementaryGroups=/d' /etc/systemd/system/clip-lernbot.service
   systemctl daemon-reload && systemctl enable -q clip-lernbot && systemctl restart clip-lernbot
   sleep 5; systemctl is-active clip-lernbot"
 als_pipeline "cd $REGIE && .venv/bin/pipeline entwurf-neu --format short 2>/dev/null | tail -n 1"
 
-sag "Fertig. In Telegram deinem Lern-Bot /start schreiben – der erste Entwurf kommt in ~30 s."
-echo "Weitere Entwürfe: /entwurf short  oder  /entwurf zusammenschnitt"
-echo "Mehr Clips mit Stimmung:  ANZAHL=100 bash $0"
-echo "Log des Lern-Bots:        pct exec $CT -- journalctl -u clip-lernbot -n 30"
-echo "pve-big läuft jetzt – wenn du fertig bist, auf pve-big herunterfahren (Weboberfläche → Shutdown)."
+sag "Fertig. Der Entwurf kommt in ~30 s im Lern-Bot (sonst dort /start)."
+echo "Nach jeder Bewertung (✅ fertig) baut der Bot den nächsten und analysiert dabei 10 weitere Clips."
+echo "Mehr Clips auf einmal:  ANZAHL=100 bash $0"
+echo "Log des Lern-Bots:      pct exec $CT -- journalctl -u clip-lernbot -n 30"
+# Schaltet sich pve-big selbst ab? (clip-leerlauf schreibt jede Minute <clips>/.leerlauf.json)
+if im_ct python3 -c 'import json, sys, time; d = json.load(open("/srv/clips/.leerlauf.json")); sys.exit(not (d.get("trocken") is False and time.time() - d.get("stand", 0) < 600))' 2>/dev/null; then
+  echo "✅ pve-big schaltet sich über clip-leerlauf selbst ab, wenn ihn keiner mehr braucht."
+else
+  echo "⚠️  clip-leerlauf ist auf pve-big noch nicht scharf: Block aus dem Chat in der Shell von pve-big einfügen."
+  echo "    Bis dahin pve-big von Hand herunterfahren, wenn du fertig bist (Weboberfläche → Shutdown)."
+fi

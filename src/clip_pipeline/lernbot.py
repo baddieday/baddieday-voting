@@ -4,8 +4,9 @@ Was er tut:
   - nimmt Audiodateien als Musik an: Bildunterschrift = Quellenangabe (Pflicht), "#episch" o. ä. = Stimmung;
     misst Tempo und Energie und antwortet mit dem Ergebnis
   - schickt Entwürfe (Short/Zusammenschnitt) mit 👍/👎; danach Gründe zum An-/Abwählen:
-    Musik passt nicht · zu hektisch · Stimmung getroffen · zu lang · abgeschnitten
+    Musik passt nicht · zu hektisch · Stimmung getroffen · zu lang · abgeschnitten · Clips langweilig
   - speichert die Bewertungen (entwurf_bewertungen) – der nächste `compose` lernt daraus (regie_lernen.py)
+  - analysiert vor jedem Entwurf ein paar weitere Clips (Stimmung), damit die Auswahl wächst
   - schickt Meldungen aus lern_meldungen (Alarme, abends ein Satz zum Stand, Abschlussbericht)
 Befehle: /entwurf [short|zusammenschnitt] · /musik · /lernstand · /stand · /hilfe
 """
@@ -23,8 +24,8 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from . import db, entwurf, musik, regie, regie_lernen
-from .konfig import Konfig
+from . import big, db, entwurf, musik, regie, regie_lernen, stimmung
+from .konfig import Konfig, SpeicherOffline
 from .zeit import iso, jetzt, utc_zu_lokal
 
 log = logging.getLogger("lern-bot")
@@ -77,6 +78,8 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
     teile = [f"🎬 <b>Entwurf #{zeile['id']}</b> · {FORMAT_NAMEN[liste['format']]} {liste['dauer_s']:.0f} s · "
              f"Stimmung <b>{liste['stimmung']}</b> · {len(liste['segmente'])} Momente",
              f"Bogen {_balken(liste['bogen'])}"]
+    if a := liste.get("auswahl"):
+        teile.append(f"🆕 {a['neu']} neue · {a['schon_gezeigt']} schon gezeigt · Auswahl aus {a['kandidaten']} Momenten")
     if m:
         teile.append(f"🎵 {escape(m['titel'])} – {escape(m.get('kuenstler') or '?')} ({m.get('bpm') or 0:.0f} BPM)")
     for h in liste.get("hinweise", [])[:3]:
@@ -117,14 +120,42 @@ def stuecke(text: str, groesse: int = TEXT_MAX) -> list[str]:
 
 # --- Arbeit im Hintergrund (eigene DB-Verbindung je Thread) ------------------------------
 
+def speicher_da(konfig: Konfig) -> bool:
+    try:
+        konfig.pruefe_speicher()  # prüft zuerst per TCP, ob pve-big antwortet – hängt nicht am toten Mount
+        return True
+    except SpeicherOffline:
+        return False
+
+
+def stimmung_nachziehen(con: sqlite3.Connection, konfig: Konfig) -> int:
+    """Vor jedem Entwurf die nächsten n Clips ohne Stimmung analysieren (die besten zuerst) – so wächst die
+    Auswahl mit jeder Runde, ohne pve-big dafür extra wach zu halten. Ohne Claude (der zählt gegen dein Abo)."""
+    n = int(konfig.wert("lernbot.stimmung_je_entwurf", 10))
+    if n <= 0:
+        return 0
+    try:
+        e = stimmung.analysiere(con, konfig, claude=False, maximal=n)
+    except Exception:  # der Entwurf ist wichtiger – mit den vorhandenen Momenten weitermachen
+        log.exception("Stimmung nachziehen fehlgeschlagen")
+        return 0
+    if e["analysiert"]:
+        log.info("Stimmung für %s weitere Clips: %s", e["analysiert"], e["stimmungen"])
+    return int(e["analysiert"])
+
+
 def baue_entwurf(konfig: Konfig, fmt: str) -> int:
-    """compose + rendern. Läuft in einem Thread; SQLite-Verbindungen dürfen nicht zwischen Threads wandern."""
+    """compose + rendern. Läuft in einem Thread; SQLite-Verbindungen dürfen nicht zwischen Threads wandern.
+    Schläft pve-big, wird er geweckt – aber nur, wenn er danach sicher wieder ausgeht (big.darf_wecken)."""
     from .sperre import sperre
 
+    konfig.pruefe_speicher(wecken=True)  # wirft SpeicherOffline mit Grund, wenn Wecken nicht erlaubt ist
     con = db.verbinde(konfig.datenbank)
     try:
         # Rendern ist ein rechenintensiver Schritt: gleiche Sperre wie die Pipeline (nur einer gleichzeitig)
-        with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))):
+        with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
+                big.herzschlag(konfig, "lernbot"):
+            stimmung_nachziehen(con, konfig)
             parameter, ziel = regie_lernen.aktuelle(con, konfig)
             e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel)
             entwurf.entwurf(con, konfig, e["entwurf"])
@@ -203,9 +234,22 @@ def abendstand(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = 
     return db.lern_meldung(con, f"abend:{lokal:%Y-%m-%d}", stand_satz(con))
 
 
+def blick_auf_leerlauf(app) -> None:
+    """Scharfes clip-leerlauf auf pve-big gesehen? (erlaubt Wecken) – im Hintergrund und höchstens einmal
+    gleichzeitig: Hängt der NFS-Mount, weil pve-big gerade ausgeht, bleibt nur dieser eine Faden stehen und
+    die Schleife läuft weiter."""
+    alt = app.bot_data.get("leerlauf_blick")
+    if alt is not None and not alt.done():
+        return
+    neu = asyncio.ensure_future(asyncio.to_thread(big.merke_leerlauf, app.bot_data["konfig"]))
+    neu.add_done_callback(lambda f: f.cancelled() or f.exception())  # Fehler hier sind egal
+    app.bot_data["leerlauf_blick"] = neu
+
+
 async def _schleife(app) -> None:
     konfig = app.bot_data["konfig"]
     while True:
+        blick_auf_leerlauf(app)
         for aufgabe in (sende_meldungen, sende_entwuerfe):
             try:
                 await aufgabe(app)
@@ -245,25 +289,36 @@ async def cmd_musik(update, context) -> None:
     await update.effective_message.reply_text(text[:TEXT_MAX])
 
 
+async def neuer_entwurf(app, fmt: str) -> int | None:
+    """Baut einen Entwurf und schickt ihn – für /entwurf und automatisch nach jeder fertigen Bewertung."""
+    chat = app.bot_data["erlaubt"]
+    if app.bot_data.get("arbeitet"):
+        await app.bot.send_message(chat, "⏳ Ich baue gerade schon einen Entwurf.")
+        return None
+    app.bot_data["arbeitet"] = True
+    try:
+        konfig = app.bot_data["konfig"]
+        wach = await asyncio.to_thread(speicher_da, konfig)
+        await app.bot.send_message(chat, f"🎬 Baue einen {FORMAT_NAMEN[fmt]} …"
+                                   + ("" if wach else " 💤 pve-big schläft – ich wecke ihn (bis zu 3 min)."))
+        eid = await asyncio.to_thread(baue_entwurf, konfig, fmt)
+        await sende_entwuerfe(app)
+        log.info("Entwurf #%s gebaut", eid)
+        return eid
+    except Exception as e:  # dir kurz sagen, was los ist – Details ins Log
+        log.exception("Entwurf fehlgeschlagen")
+        await app.bot.send_message(chat, f"⚠️ Entwurf fehlgeschlagen: {escape(str(e)[:300])}")
+        return None
+    finally:
+        app.bot_data["arbeitet"] = False
+
+
 async def cmd_entwurf(update, context) -> None:
     fmt = (context.args or ["short"])[0].lower()
     if fmt not in regie.FORMATE:
         await update.effective_message.reply_text("Aufruf: /entwurf short oder /entwurf zusammenschnitt")
         return
-    if context.bot_data.get("arbeitet"):
-        await update.effective_message.reply_text("⏳ Ich baue gerade schon einen Entwurf.")
-        return
-    context.bot_data["arbeitet"] = True
-    await update.effective_message.reply_text(f"🎬 Baue einen {FORMAT_NAMEN[fmt]} …")
-    try:
-        eid = await asyncio.to_thread(baue_entwurf, context.bot_data["konfig"], fmt)
-        await sende_entwuerfe(context.application)
-        log.info("Entwurf #%s gebaut", eid)
-    except Exception as e:  # dem Nutzer kurz sagen, was los ist – Details ins Log
-        log.exception("Entwurf fehlgeschlagen")
-        await update.effective_message.reply_text(f"⚠️ Entwurf fehlgeschlagen: {escape(str(e)[:300])}")
-    finally:
-        context.bot_data["arbeitet"] = False
+    await neuer_entwurf(context.application, fmt)
 
 
 async def bei_audio(update, context) -> None:
@@ -318,8 +373,12 @@ async def bei_klick(update, context) -> None:
         knoepfe = knoepfe_gruende(eid, json.loads(bewertung["gruende"]))
     else:
         bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
-        await query.answer("Gespeichert – fließt in den nächsten Entwurf ein.")
+        weiter = bool(context.bot_data["konfig"].wert("lernbot.naechster_nach_bewertung", True))
+        await query.answer("Gespeichert – der nächste Entwurf kommt gleich." if weiter
+                           else "Gespeichert – fließt in den nächsten Entwurf ein.")
         knoepfe = None
+        if weiter:  # Lernschleife: sofort der nächste Entwurf, schon mit dieser Bewertung eingerechnet
+            context.application.create_task(neuer_entwurf(context.application, zeile["format"]))
     with contextlib.suppress(Exception):  # "message is not modified" bei Doppelklick
         await query.edit_message_caption(caption=entwurf_text(zeile, _liste(zeile), bewertung), parse_mode="HTML",
                                          reply_markup=_markup(knoepfe) if knoepfe else None)

@@ -322,6 +322,19 @@ def schreibe(name: str, daten: dict) -> None:
     tmp.replace(ordner / name)
 
 
+def melde_speicher(k: dict, status: dict) -> None:
+    """Status auch als <speicher>/.leerlauf.json: Daran sieht der Mini (über NFS), dass pve-big sich selbst
+    abschaltet – dann darf er ihn wecken, auch ohne SSH-Steuerung. Fehler hier sind egal."""
+    ziel = Path(k["SPEICHER"]) / ".leerlauf.json"
+    try:
+        tmp = ziel.with_name(".leerlauf.json.tmp")
+        tmp.write_text(json.dumps({**status, "stand": int(time.time())}, ensure_ascii=False))
+        os.chmod(tmp, 0o644)
+        tmp.replace(ziel)
+    except OSError:
+        pass
+
+
 def log(text: str) -> None:
     print(text, flush=True)  # systemd schreibt es ins Journal (SyslogIdentifier=clip-leerlauf)
 
@@ -379,6 +392,7 @@ def lauf() -> int:
         z["trocken_gemeldet"] = False
     schreibe("zustand.json", z)
     schreibe("status.json", status)
+    melde_speicher(k, status)
     return 0
 
 

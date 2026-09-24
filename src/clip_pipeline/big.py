@@ -246,6 +246,7 @@ def herzschlag(konfig: Konfig, name: str, intervall_s: float = 60.0) -> Iterator
                     datei.parent.mkdir(exist_ok=True)
                     datei.touch()
                     geschrieben = True
+                    merke_leerlauf(konfig)
             except OSError:
                 pass
             if stopp.wait(intervall_s):
@@ -267,23 +268,47 @@ def herzschlag(konfig: Konfig, name: str, intervall_s: float = 60.0) -> Iterator
 
 # --- Wecken -----------------------------------------------------------------------
 
+def merke_leerlauf(konfig: Konfig) -> bool | None:
+    """Liest <speicher>/.leerlauf.json (schreibt clip-leerlauf auf pve-big jede Minute) und merkt sich lokal,
+    wann zuletzt ein SCHARFES clip-leerlauf gesehen wurde. None = nichts zu sehen (pve-big schläft o. Ä.)."""
+    if not konfig._host_erreichbar():  # schläft pve-big: nicht am (vielleicht hängenden) NFS-Mount lesen
+        return None
+    try:
+        daten = json.loads((konfig.wurzel / ".leerlauf.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    frisch = time.time() - float(daten.get("stand", 0)) < 600
+    scharf = frisch and daten.get("trocken") is False
+    if scharf:
+        _schreibe_zustand(konfig, leerlauf_scharf=iso(jetzt()))
+    return scharf
+
+
+def _frisch(zeitpunkt: str | None, konfig: Konfig, zeit: datetime | None) -> bool:
+    tage = float(_b(konfig, "status_gueltig_tage", 14))
+    return bool(zeitpunkt) and (zeit or jetzt()) - aus_iso(zeitpunkt) <= timedelta(days=tage)
+
+
 def darf_wecken(konfig: Konfig, zeit: datetime | None = None) -> str | None:
-    """None = Wecken erlaubt, sonst der Grund dagegen."""
+    """None = Wecken erlaubt, sonst der Grund dagegen.
+
+    Erlaubt nur, wenn pve-big danach sicher wieder ausgeht: entweder über die SSH-Steuerung (schon einmal
+    erfolgreich geprüft) oder weil ein scharfes clip-leerlauf auf pve-big gesehen wurde (schaltet selbst ab)."""
     if frist_vorbei(konfig, zeit):
         return f"Frist {_b(konfig, 'frist')} ist vorbei – pve-big wird nicht mehr geweckt"
     if not str(konfig.wert("speicher.wol_mac", "") or "").strip():
         return "keine MAC für Wake-on-LAN ([speicher].wol_mac)"
     if not host(konfig):
         return "kein Host für pve-big ([big].host / [speicher].host)"
-    if not ssh_befehl(konfig):
-        return "Herunterfahren nicht eingerichtet ([big].ssh_ziel / ssh_schluessel) – wecke nicht"
-    status_ok = lies_zustand(konfig).get("status_ok")
-    if not status_ok:
-        return "Herunterfahren noch nie erfolgreich geprüft – erst `pipeline big pruefen`, wenn pve-big läuft"
-    tage = float(_b(konfig, "status_gueltig_tage", 14))
-    if (zeit or jetzt()) - aus_iso(status_ok) > timedelta(days=tage):
-        return f"Steuerung zuletzt vor über {tage:.0f} Tagen geprüft – erst `pipeline big pruefen`, wenn pve-big läuft"
-    return None
+    zustand = lies_zustand(konfig)
+    if ssh_befehl(konfig) and _frisch(zustand.get("status_ok"), konfig, zeit):
+        return None
+    if _frisch(zustand.get("leerlauf_scharf"), konfig, zeit):
+        return None
+    if ssh_befehl(konfig) and zustand.get("status_ok"):
+        return "Steuerung zu lange nicht geprüft – erst `pipeline big pruefen`, wenn pve-big läuft"
+    return ("Herunterfahren nicht gesichert: weder SSH-Steuerung geprüft ([big].ssh_ziel, `pipeline big pruefen`) "
+            "noch ein scharfes clip-leerlauf auf pve-big gesehen – wecke nicht")
 
 
 @contextmanager
@@ -310,7 +335,8 @@ def wach_halten(konfig: Konfig, name: str, grund: str, minuten: float = 120) -> 
                     raise BigFehler("pve-big ist nach Wake-on-LAN nicht aufgewacht")
                 time.sleep(5)
             try:
-                fern_status(konfig)  # geht das Herunterfahren? Sonst sofort abbrechen
+                if ssh_befehl(konfig):
+                    fern_status(konfig)  # geht das Herunterfahren? Sonst sofort abbrechen
             except BigFehler as e:
                 loese_marke(konfig, name)
                 herunterfahren(konfig, "Steuerung antwortete nach dem Wecken nicht", warten_s=60)  # Versuch
@@ -319,7 +345,9 @@ def wach_halten(konfig: Konfig, name: str, grund: str, minuten: float = 120) -> 
             yield True
     finally:
         loese_marke(konfig, name)
-        if not schon_wach:
+        if not schon_wach and not ssh_befehl(konfig):
+            log.info("pve-big schaltet sich über clip-leerlauf selbst ab")
+        elif not schon_wach:
             entscheidung = pruefe(konfig)
             if entscheidung.aus:
                 herunterfahren(konfig, f"{grund} erledigt")

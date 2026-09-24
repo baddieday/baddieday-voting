@@ -36,3 +36,8 @@ Legende: ✅ fertig und hier getestet · 🧪 gebaut, nur mit künstlichem Mater
   konnte sie nur Teil A (Umgebung) erledigen. Sie hat mir geschrieben; umgekehrt geht es nicht (E11).
 - Unabhängige Prüfung des Sprint-Codes: 8 Befunde, alle behoben (E12).
 - Beispiel-Short mit echter NCS-Musik gerendert und dir im Chat geschickt (Testbilder statt echter Clips).
+- CT 102 startete nicht (toter NFS-Pfad als `mp0`) → Rettungsskript, von dir ausgeführt; CT startet jetzt
+  immer (E13). Echte Clips über `regie-starten.sh`: Musik, Stimmung der besten 40, Lern-Bot, erste Entwürfe.
+- `clip-leerlauf` für pve-big (E14): Probelauf-Tests, jetzt `einrichten.sh` für den scharfen Betrieb.
+- Lernschleife (E15): nach ✅ sofort der nächste Entwurf; weckt pve-big nur mit gesichertem Aus.
+- Du: „Warum immer die gleichen Clips mit anderer Musik?“ → Ursache gefunden und behoben (E16).

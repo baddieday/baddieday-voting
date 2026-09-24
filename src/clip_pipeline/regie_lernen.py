@@ -11,6 +11,9 @@ begrenzten Schritt:
   Stimmung getroffen  die Hauptstimmung bekommt Bonus (+0,5), und die Musik-Ziele dieser Stimmung rücken
                       20 % in Richtung des benutzten Titels (so lernt der Regisseur, welche Musik passt)
   👍 / 👎 allein      Hauptstimmung ±0,25 – erst ab `mindestens` Bewertungen
+  Clips langweilig    jeder Moment dieses Entwurfs −1
+  je Moment           👍: +0,5 für jeden Moment im Entwurf; 👎 ohne Grund: −0,5 (bei 👎 mit Grund lag es an
+                      Musik/Tempo/Länge/Schnitt, nicht an den Clips); begrenzt auf ±3
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ GRUENDE = {
     "getroffen": "🎯 Stimmung getroffen",
     "lang": "⏳ zu lang",
     "abgeschnitten": "✂️ abgeschnitten",
+    "langweilig": "🥱 Clips langweilig",
 }
 
 
@@ -45,19 +49,20 @@ def bewertungen(con: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def _hauptstimmung(zeile: sqlite3.Row) -> str | None:
+def _liste(zeile: sqlite3.Row) -> dict:
     try:
         with open(zeile["schnittliste"], encoding="utf-8") as f:
-            return json.load(f).get("stimmung")
+            return json.load(f)
     except (OSError, json.JSONDecodeError):
-        return None
+        return {}
+
 
 
 # Deine Vorgaben ([regie.vorgaben] in config/lokal.toml): erlaubte Schlüssel und ihre Grenzen
 VORGABE_GRENZEN = {
     "puffer_vor_s": (1.0, 6.0), "puffer_nach_s": (0.5, 4.0), "seg_min_faktor": (0.5, 2.0),
     "dauer_faktor": (0.6, 1.0), "uebergang_faktor": (0.5, 2.0), "musik_pegel": (0.0, 1.0),
-    "max_je_match": (1, 10), "beats_pro_schnitt": (1, 4),
+    "max_je_match": (1, 10), "beats_pro_schnitt": (1, 4), "abwechslung": (0.0, 1.0),
 }
 
 
@@ -106,7 +111,13 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig) -> tuple[dict, dict]:
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
     for n, b in enumerate(zeilen, 1):
         gruende = set(json.loads(b["gruende"] or "[]"))
-        haupt = _hauptstimmung(b)
+        liste = _liste(b)
+        haupt = liste.get("stimmung")
+        # je Moment: was du magst, kommt öfter; was dich langweilt, seltener
+        schritt = -1.0 if "langweilig" in gruende else 0.5 if b["daumen"] > 0 else -0.5 if not gruende else 0.0
+        for m in {s.get("moment") for s in liste.get("segmente", []) if isinstance(s, dict)} - {None}:
+            if schritt:
+                p["moment_bonus"][m] = _grenze(p["moment_bonus"].get(m, 0.0) + schritt, -3.0, 3.0)
         if "hektisch" in gruende:
             p["seg_min_faktor"] = _grenze(p["seg_min_faktor"] * 1.15, 0.5, 2.0)
             p["uebergang_faktor"] = _grenze(p["uebergang_faktor"] * 1.10, 0.5, 2.0)
@@ -176,6 +187,13 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
         teile.append("Stimmungs-Bonus: " + ", ".join(f"{k} {v:+}" for k, v in sorted(p["stimmung_bonus"].items())))
     if p["track_malus"]:
         teile.append("Musik-Abzug: " + ", ".join(f"#{k} −{v}" for k, v in sorted(p["track_malus"].items())))
+    gemocht = sum(1 for v in p["moment_bonus"].values() if v > 0)
+    abgelehnt = sum(1 for v in p["moment_bonus"].values() if v < 0)
+    if gemocht or abgelehnt:
+        teile.append(f"Momente: {gemocht} gemocht, {abgelehnt} weniger gern gesehen")
+    teile.append(f"Abwechslung: Momente aus dem letzten Entwurf verlieren {p['abwechslung']:.0%} ihrer Punkte, "
+                 "je älterem Entwurf die Hälfte" + ("" if start["abwechslung"] == PARAMETER["abwechslung"]
+                                                     else " (deine Vorgabe)"))
     geaendert = [s for s in ziel if ziel[s] != ZIEL[s]]  # durch Vorgabe oder "Stimmung getroffen"
     for s in geaendert:
         teile.append(f"Musik für {s}: Energie-Rang {ziel[s]['energie']}, {ziel[s]['bpm']} BPM")

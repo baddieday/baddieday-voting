@@ -5,7 +5,11 @@ Formate:
   short            9:16, 30–45 s, unscharfer Rand, Schriftzug "clip-battle.de"
 
 Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der Konfig):
-  1. Auswahl     Punkte je Moment: Kill-Serie (1/3/6/10), Victory, Stimmung, Elo, gelernte Vorlieben.
+  1. Auswahl     Punkte je Moment: Kill-Serie (1/3/6/10), Victory, Stimmung, Elo, gelernte Vorlieben
+                 (Stimmung und je Moment aus deinen 👍/👎). Abwechslung: Wer im letzten Entwurf war, verliert
+                 70 % seiner Punkte, im vorletzten 35 % usw. (zusammen höchstens 100 %) – so kommen nicht immer
+                 dieselben Momente, die stärksten aber regelmäßig wieder. Als Anteil, weil die Punkte weit
+                 streuen (Einzelkill 3, Vierfach-Kill 13): ein fester Abzug ließe die stärksten immer vorn.
                  Verworfene Clips nie; höchstens n Momente aus demselben Match.
   2. Bogen       Einstieg = zweitstärkster Moment (Hook), dann steigend, bei ~60 % eine Atempause
                  (lustig/chill), der stärkste zum Schluss. Keine gleiche Stimmung / kein gleiches Match
@@ -54,8 +58,11 @@ PARAMETER = {
     "musik_pegel": 0.35,
     "stimmung_bonus": {},         # Stimmung -> Zusatzpunkte ("Stimmung getroffen" + 👍)
     "track_malus": {},            # Track-ID -> Abzug ("Musik passt nicht")
+    "moment_bonus": {},           # Moment -> Zusatzpunkte (👍 +, 👎 ohne Grund −, "Clips langweilig" −−)
+    "abwechslung": 0.7,           # Anteil der Punkte, den ein Moment aus dem letzten Entwurf verliert (je älter: halb)
     "max_je_match": 3,
 }
+ABWECHSLUNG_FENSTER = 12          # so viele letzte Entwürfe zählen für die Abwechslung
 
 
 class RegieFehler(RuntimeError):
@@ -76,6 +83,8 @@ class Kandidat:
     muss: tuple[float, float]      # darf nicht angeschnitten werden (erster Kill − 1 s … letzter Kill + 0,5 s)
     grund: str
     merkmale: dict = field(default_factory=dict)
+    abzug: float = 0.0             # schon gezeigt (Abwechslung): Punkte, die in `punkte` schon abgezogen sind
+    gezeigt: int = 0               # in wie vielen der letzten Entwürfe
 
 
 # --- 1. Auswahl ----------------------------------------------------------------------
@@ -99,7 +108,31 @@ def _kern(mk: dict, dauer: float, p: dict) -> tuple[tuple[float, float], tuple[f
     return klemme(*kern), klemme(*muss), grund
 
 
-def kandidaten(con: sqlite3.Connection, p: dict) -> list[Kandidat]:
+def gezeigte_momente(con: sqlite3.Connection, fenster: int = ABWECHSLUNG_FENSTER) -> list[list[str]]:
+    """Momente der letzten Entwürfe, neuester zuerst (aus den gespeicherten Schnittlisten)."""
+    ergebnis = []
+    for z in con.execute("SELECT schnittliste FROM entwuerfe ORDER BY id DESC LIMIT ?", (fenster,)):
+        try:
+            with open(z["schnittliste"], encoding="utf-8") as f:
+                ergebnis.append([s["moment"] for s in json.load(f).get("segmente", [])])
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            ergebnis.append([])  # Datei fehlt: zählt als Entwurf, aber ohne Momente
+    return ergebnis
+
+
+def abwechslung(frueher: list[list[str]], anteil: float) -> dict[str, tuple[float, int]]:
+    """Moment -> (Anteil der Punkte, der abgezogen wird; wie oft gezeigt).
+    Letzter Entwurf: der volle Anteil, davor je Entwurf die Hälfte; zusammen höchstens 1 (= alle Punkte)."""
+    schon: dict[str, tuple[float, int]] = {}
+    for alter, momente in enumerate(frueher):
+        for m in set(momente):
+            wert, n = schon.get(m, (0.0, 0))
+            schon[m] = (wert + anteil * 0.5 ** alter, n + 1)
+    return {m: (round(min(1.0, w), 3), n) for m, (w, n) in schon.items()}
+
+
+def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None = None) -> list[Kandidat]:
+    schon = abwechslung(frueher or [], float(p.get("abwechslung", 0.0)))
     zeilen = con.execute(
         """SELECT m.*, c.status AS clip_status, c.elo AS elo, c.punkte AS clip_punkte, c.max_gruppe AS max_gruppe,
                   c.victory_royale AS victory_royale
@@ -121,9 +154,13 @@ def kandidaten(con: sqlite3.Connection, p: dict) -> list[Kandidat]:
             punkte += 1.0
         if z["elo"] is not None:
             punkte += (float(z["elo"]) - 1500.0) / 100.0
+        punkte += float(p.get("moment_bonus", {}).get(z["schluessel"], 0.0))
+        anteil, gezeigt = schon.get(z["schluessel"], (0.0, 0))
+        abzug = round(anteil * max(punkte, 1.0), 2)  # auch schwache Momente (< 1 Punkt) verlieren etwas
         kern, muss, grund = _kern(mk, dauer, p)
         ergebnis.append(Kandidat(z["schluessel"], z["datei"], dauer, z["stimmung"], round(intensitaet, 2),
-                                 round(punkte, 2), z["clip_id"], z["match_id"], kern, muss, grund, mk))
+                                 round(punkte - abzug, 2), z["clip_id"], z["match_id"], kern, muss, grund, mk,
+                                 abzug, gezeigt))
     return ergebnis
 
 
@@ -250,6 +287,7 @@ def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: d
         segmente.append({
             "nr": nr, "moment": k.schluessel, "clip_id": k.clip_id, "match_id": k.match_id, "datei": k.datei,
             "stimmung": k.stimmung, "intensitaet": k.intensitaet, "grund": k.grund,
+            "punkte": k.punkte, "abzug": k.abzug, "gezeigt": k.gezeigt,
             "quelle_start_s": round(start, 3), "quelle_ende_s": round(start + laenge, 3),
             "quelle_dauer_s": round(k.dauer_s, 3), "muss": [round(k.muss[0], 3), round(k.muss[1], 3)],
             "zeit_start": round(t, 3), "zeit_ende": round(ende, 3),
@@ -305,7 +343,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     fmt = FORMATE[fmt_name]
     p = {**PARAMETER, **(parameter or {})}
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
-    alle = [k for k in kandidaten(con, p) if nur_matches is None or k.match_id in nur_matches]
+    frueher = gezeigte_momente(con)
+    alle = [k for k in kandidaten(con, p, frueher) if nur_matches is None or k.match_id in nur_matches]
     if not alle:
         raise RegieFehler("Keine Momente mit Stimmung" + (" in diesen Matches" if nur_matches else "")
                           + " – erst `pipeline stimmung`")
@@ -355,14 +394,18 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             reihe, segmente = neue_reihe, neue_segmente
             if not mit_grenze and (h := f"mehr als {p['max_je_match']} Momente aus einem Match") not in hinweise:
                 hinweise.append(h)
-    # Zu lang (Short!)? Schwächstes Segment aus der Mitte streichen und neu planen
+    # Zu lang (Short!)? Den Moment mit den wenigsten Punkten (inkl. Gelerntem und Abwechslung) aus der Mitte
+    # streichen und neu planen – der Höhepunkt am Schluss bleibt
     while segmente and segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6 and len(reihe) > 1:
         mitte = reihe[:-1]
-        reihe.remove(min(mitte, key=lambda k: (k.intensitaet, k.schluessel)))
+        reihe.remove(min(mitte, key=lambda k: (k.punkte, k.intensitaet, k.schluessel)))
         segmente = plane_zeitleiste(reihe, raster, fmt, p, fps)
     gesamt = segmente[-1]["zeit_ende"] if segmente else 0.0
     if gesamt < fmt["min_s"] - 1e-6:
         hinweise.append(f"Dauer {gesamt:.1f} s unter {fmt['min_s']:.0f} s – zu wenig Material")
+    neu = sum(1 for s in segmente if s["gezeigt"] == 0)
+    if frueher and len(alle) < 3 * len(segmente):
+        hinweise.append(f"nur {len(alle)} Momente zur Auswahl – für mehr Abwechslung mehr Clips analysieren")
 
     if name is None:
         name = basis = f"{fmt_name}-{jetzt():%Y%m%d-%H%M%S}"
@@ -381,6 +424,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         },
         "overlay": str(konfig.wert("shorts.overlay_text", "clip-battle.de")) if fmt_name == "short" else None,
         "bogen": [s["intensitaet"] for s in segmente],
+        "auswahl": {"kandidaten": len(alle), "neu": neu, "schon_gezeigt": len(segmente) - neu,
+                    "abwechslung": float(p.get("abwechslung", 0.0))},
         "segmente": segmente,
         "hinweise": hinweise,
         "erstellt": iso(jetzt()),
@@ -400,4 +445,4 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     )
     return {"entwurf": cur.lastrowid, "name": name, "format": fmt_name, "datei": str(ziel_datei),
             "dauer_s": round(gesamt, 1), "segmente": len(segmente), "stimmung": haupt,
-            "musik": liste["musik"]["titel"] if track else None, "hinweise": hinweise}
+            "musik": liste["musik"]["titel"] if track else None, "neu": neu, "hinweise": hinweise}

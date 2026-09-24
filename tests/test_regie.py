@@ -66,6 +66,7 @@ class Regisseur(MitRegieMaterial):
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 2)
 
     def test_lernen_wirkt_im_naechsten_lauf(self):
+        self.konfig.daten["regie"]["vorgaben"] = {"abwechslung": 0}  # gleiche Momente: nur das Gelernte wirkt
         self.momente_anlegen(MOMENTE)
         erster_track = self.musik_anlegen(150, "episch", name="A")
         self.musik_anlegen(146, "episch", name="B")
@@ -180,3 +181,55 @@ class Vorgaben(MitRegieMaterial):
         self.assertEqual((zeilen[0]["daumen"], zeilen[0]["gruende"]), (-1, ["hektisch", "lang"]))
         self.assertGreater(zeilen[1]["parameter"]["seg_min_faktor"], 1.0)
         self.assertIn("unbekannt", zeilen[2]["fehler"])
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class Abwechslung(MitRegieMaterial):
+    """Nicht immer dieselben Momente: Abzug für kürzlich Gezeigtes, Lernen je Moment aus 👍/👎."""
+
+    def compose(self):
+        p, ziel = regie_lernen.aktuelle(self.con, self.konfig)
+        return lies(regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel))
+
+    @staticmethod
+    def momente(liste):
+        return {s["moment"] for s in liste["segmente"]}
+
+    def test_neue_momente_und_die_besten_kommen_wieder(self):
+        self.momente_anlegen(MOMENTE * 2)  # 32 Momente, ein Short braucht ~5
+        self.musik_anlegen(150, "episch")
+        listen = [self.compose() for _ in range(4)]
+        for liste in listen:
+            self.assertEqual(regie.pruefe_liste(liste), [])
+        eins, zwei, drei = (self.momente(listen[i]) for i in range(3))
+        self.assertEqual(eins & zwei, set())                   # direkt danach: alles neu
+        self.assertEqual(listen[0]["auswahl"]["neu"], len(eins))
+        self.assertEqual(listen[1]["auswahl"]["schon_gezeigt"], len(eins & zwei))
+        self.assertTrue(eins & drei)                           # die stärksten kommen wieder, nur nicht jedes Mal
+        gezeigt = {s["moment"]: s["gezeigt"] for s in listen[2]["segmente"]}
+        self.assertTrue(all(gezeigt[m] >= 1 for m in eins & drei))
+        # Ohne Abwechslung (Vorgabe 0): immer dieselben – so war es vorher
+        self.konfig.daten["regie"]["vorgaben"] = {"abwechslung": 0}
+        self.assertEqual(self.momente(self.compose()), self.momente(self.compose()))
+        self.assertIn("deine Vorgabe", regie_lernen.lernstand_text(self.con, self.konfig))
+
+    def test_lernen_je_moment(self):
+        self.momente_anlegen(MOMENTE)
+        self.konfig.daten["regie"]["vorgaben"] = {"abwechslung": 0}
+        p, _ = regie_lernen.aktuelle(self.con, self.konfig)
+        gut, schlecht, musik, langweilig = (regie.erstelle(self.con, self.konfig, "short", parameter=p)
+                                            for _ in range(4))       # ohne Abwechslung: viermal dieselben
+        regie_lernen.bewerte(self.con, gut["entwurf"], daumen=1)
+        p, _ = regie_lernen.aktuelle(self.con, self.konfig)
+        m = self.momente(lies(gut))
+        self.assertEqual({p["moment_bonus"][k] for k in m}, {0.5})
+        regie_lernen.bewerte(self.con, schlecht["entwurf"], daumen=-1)        # 👎 ohne Grund: die Clips
+        regie_lernen.bewerte(self.con, musik["entwurf"], grund="musik")       # 👎 wegen Musik: nicht die Clips
+        p, _ = regie_lernen.aktuelle(self.con, self.konfig)
+        self.assertEqual({p["moment_bonus"][k] for k in m}, {0.0})
+        regie_lernen.bewerte(self.con, langweilig["entwurf"], grund="langweilig")
+        p, ziel = regie_lernen.aktuelle(self.con, self.konfig)
+        self.assertEqual({p["moment_bonus"][k] for k in m}, {-1.0})
+        self.assertIn("weniger gern gesehen", regie_lernen.lernstand_text(self.con, self.konfig))
+        danach = self.momente(lies(regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel)))
+        self.assertNotEqual(danach, m)                                        # andere Clips, obwohl ohne Abwechslung

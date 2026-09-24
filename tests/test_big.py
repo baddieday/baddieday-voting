@@ -163,13 +163,35 @@ class Wecken(MitSpeicher):
             self.addCleanup(ziel.stop)
 
     def test_gruende_gegen_wecken(self):
-        self.assertIn("nie erfolgreich", big.darf_wecken(self.konfig))
+        self.assertIn("nicht gesichert", big.darf_wecken(self.konfig))
         big._schreibe_zustand(self.konfig, status_ok=iso(jetzt()))
         self.assertIsNone(big.darf_wecken(self.konfig))
         self.konfig.daten["big"]["frist"] = iso(jetzt() - timedelta(seconds=1))
         self.assertIn("Frist", big.darf_wecken(self.konfig))
         self.konfig.daten["big"].update(frist="", ssh=None, ssh_ziel="")
-        self.assertIn("nicht eingerichtet", big.darf_wecken(self.konfig))
+        self.assertIn("nicht gesichert", big.darf_wecken(self.konfig))  # status_ok allein reicht ohne SSH nicht
+
+    def test_scharfes_clip_leerlauf_erlaubt_wecken(self):
+        import time as zeitmodul
+
+        self.konfig.daten["big"].update(ssh=None, ssh_ziel="")
+        status = self.konfig.wurzel / ".leerlauf.json"
+        status.write_text(json.dumps({"trocken": True, "stand": int(zeitmodul.time())}))
+        self.assertFalse(big.merke_leerlauf(self.konfig))           # Probelauf zählt nicht
+        self.assertIn("nicht gesichert", big.darf_wecken(self.konfig))
+        status.write_text(json.dumps({"trocken": False, "stand": int(zeitmodul.time()) - 3600}))
+        self.assertFalse(big.merke_leerlauf(self.konfig))           # veraltet zählt nicht
+        status.write_text(json.dumps({"trocken": False, "stand": int(zeitmodul.time())}))
+        with mock.patch.object(konfig.Konfig, "_host_erreichbar", return_value=False), \
+                mock.patch("pathlib.Path.read_text", side_effect=AssertionError("NFS-Mount angefasst")):
+            self.assertIsNone(big.merke_leerlauf(self.konfig))      # pve-big antwortet nicht: Mount nicht anfassen
+        self.assertTrue(big.merke_leerlauf(self.konfig))
+        self.assertIsNone(big.darf_wecken(self.konfig))
+        status.unlink()                                             # pve-big schläft: gemerkt bleibt gemerkt
+        self.assertIsNone(big.merke_leerlauf(self.konfig))
+        self.assertIsNone(big.darf_wecken(self.konfig))
+        self.konfig.daten["big"]["frist"] = iso(jetzt() - timedelta(seconds=1))
+        self.assertIn("Frist", big.darf_wecken(self.konfig))        # Frist gilt immer
 
     def test_wecken_verboten_sendet_nichts(self):
         with mock.patch.object(big, "wach", return_value=False), \

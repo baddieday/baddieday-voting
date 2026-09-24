@@ -47,7 +47,10 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 - **Musik schicken:** Audiodatei, Bildunterschrift = Quellenangabe (Pflicht), optional `#episch`,
   `#spannend`, `#lustig`, `#frustriert`, `#chill`.
 - **Entwürfe:** kommen automatisch (z. B. nach „Session vorbei“) oder per `/entwurf short`.
-  👍/👎 → Gründe an-/abwählen → ✅ fertig.
+  👍/👎 → Gründe an-/abwählen → ✅ fertig. Danach baut der Bot sofort den nächsten (Lernschleife,
+  `[lernbot].naechster_nach_bewertung`) und analysiert dabei 10 weitere Clips (`stimmung_je_entwurf`).
+  Schläft pve-big, weckt der Bot ihn – aber nur, wenn er danach sicher wieder ausgeht (clip-leerlauf scharf).
+- Unter jedem Entwurf steht „🆕 3 neue · 2 schon gezeigt · Auswahl aus 40 Momenten“.
 - `/lernstand` zeigt, was der Regisseur gelernt hat, `/musik` die Titel, `/stand` einen Satz zum Stand.
 - Abends um 21:00 kommt ein Satz zum Stand (`[lernbot].abend_uhrzeit`).
 
@@ -68,10 +71,23 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 | 🎯 Stimmung getroffen | Hauptstimmung +0,5; Musikziel dieser Stimmung rückt 20 % zum benutzten Titel |
 | ⏳ zu lang | Ziel-Dauer −10 % (bis 60 %) |
 | ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills |
+| 🥱 Clips langweilig | jeder Moment dieses Entwurfs −1 Punkt (kommt seltener) |
+| 👍 | jeder Moment dieses Entwurfs +0,5 (kommt öfter wieder) |
+| 👎 ohne Grund | jeder Moment dieses Entwurfs −0,5 (bei 👎 *mit* Grund lag es nicht an den Clips) |
 | 👍/👎 ohne Grund | Hauptstimmung ±0,25 (ab 3 Bewertungen) |
 
 Alles wird bei jedem Lauf aus den gespeicherten Bewertungen neu berechnet und ist begrenzt – ein Ausreißer
-kann nichts kaputt machen.
+kann nichts kaputt machen (je Moment höchstens ±3).
+
+## Abwechslung – warum nicht immer dieselben Clips kommen
+Jeder Moment hat Punkte (Kill-Serie 1/3/6/10, Victory +5, Stimmung, Elo, Freigabe, Gelerntes). Früher gewannen
+bei jedem Entwurf dieselben Top-Momente; nur die Musik wechselte. Jetzt verliert ein Moment, der im **letzten**
+Entwurf war, **70 %** seiner Punkte, einer aus dem vorletzten 35 %, davor 17,5 % … (zusammen höchstens 100 %,
+die letzten 12 Entwürfe zählen). Ein Vierfach-Kill (13,5 Punkte) fällt damit nach einem Auftritt auf 4 und
+kommt ein, zwei Entwürfe später wieder; dazwischen kommen die anderen dran.
+Einstellbar: `[regie.vorgaben] abwechslung = 0.7` (0 = immer die besten, 1 = maximal wechseln).
+Je mehr Clips eine Stimmung haben, desto mehr Auswahl: `regie-starten.sh` analysiert die nächsten 40, der
+Bot vor jedem Entwurf 10 weitere.
 
 ## Stimmungen und Übergänge
 | Stimmung | erkannt an (Punkte-Regeln in `stimmung.punkte`) | Übergang in den Moment |
@@ -84,3 +100,18 @@ kann nichts kaputt machen.
 
 Die Mitte jedes Übergangs liegt genau auf dem Beat; kein Kill wird angeschnitten (fachliche Prüfung der
 Schnittliste vor dem Speichern).
+
+## pve-big schaltet sich selbst ab (clip-leerlauf)
+`deploy/big/clip-leerlauf` läuft auf pve-big jede Minute und fährt ihn nach 20 min ohne echten Zugriff auf den
+Clips-Ordner herunter (Details im Kopf des Skripts). Er schreibt jede Minute `<clips>/.leerlauf.json`; daran
+erkennt der Mini, dass pve-big sich selbst abschaltet – erst dann darf der Lern-Bot ihn wecken (Regel 3).
+
+Einrichten (einmal):
+1. pve-mini: `bash /root/regie.sh` legt die Dateien nach `<clips>/.einrichtung`.
+2. pve-big-Shell (Weboberfläche → pve-big → Shell): den Block aus dem Chat einfügen. Er kopiert die Dateien
+   in einen Ordner nur für root, **prüft die SHA-256-Summen** (im Block fest eingetragen – eine veränderte Datei
+   auf der Freigabe wird nicht ausgeführt) und startet `einrichten.sh`: Konfiguration aus ZFS, Gäste mit
+   Autostart zählen nicht, `TROCKEN=0`.
+
+Pause bis zum nächsten Neustart: `touch /run/clip-halten` · Ganz aus: `systemctl disable --now clip-leerlauf.timer`
+· Mitlesen: `journalctl -t clip-leerlauf -f`. Eine offene Web-Konsole hält pve-big wach.

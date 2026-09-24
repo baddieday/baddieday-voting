@@ -483,7 +483,7 @@ def baue_parser() -> argparse.ArgumentParser:
     daumen.add_argument("--gut", action="store_true", help="👍")
     daumen.add_argument("--schlecht", action="store_true", help="👎")
     s.add_argument("--grund", action="append", default=[],
-                   choices=["musik", "hektisch", "getroffen", "lang", "abgeschnitten"])
+                   choices=["musik", "hektisch", "getroffen", "lang", "abgeschnitten", "langweilig"])
     s.set_defaults(fn=_cmd_bewerte, sperren=False)
 
     s = unter.add_parser("lernstand", help="Was hat der Regisseur gelernt? (inkl. deiner Vorgaben)")

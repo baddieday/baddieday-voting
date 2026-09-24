@@ -50,8 +50,15 @@ class LernBot(MitRegieMaterial):
     def setUp(self):
         super().setUp()
         self.bot = FakeBot()
-        self.app = SimpleNamespace(bot=self.bot, bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42})
+        self.aufgaben = []
+        self.app = SimpleNamespace(bot=self.bot, bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                                   create_task=lambda koro: self.aufgaben.append(koro))
         self.context = SimpleNamespace(bot_data=self.app.bot_data, application=self.app, args=[])
+
+    def tearDown(self):
+        for koro in self.aufgaben:  # nicht ausgeführte Lernschleifen-Aufgaben schließen (sonst RuntimeWarning)
+            koro.close()
+        super().tearDown()
 
     def klick(self, daten, von=42):
         q = FakeQuery(daten, von)
@@ -73,6 +80,7 @@ class LernBot(MitRegieMaterial):
         video = self.bot.videos[0]
         self.assertEqual(video["chat_id"], 42)
         self.assertIn(f"Entwurf #{eid}", video["caption"])
+        self.assertIn("🆕 ", video["caption"])  # wie viele Momente neu sind
         daten = [b.callback_data for reihe in video["reply_markup"].inline_keyboard for b in reihe]
         self.assertEqual(daten, [f"d:{eid}:1", f"d:{eid}:-1"])
 
@@ -102,6 +110,74 @@ class LernBot(MitRegieMaterial):
 
         self.assertEqual(sorted(asyncio.run(beide())), [0, 1])
         self.assertEqual(len(self.bot.videos), 1)
+
+    def test_nach_bewertung_kommt_der_naechste(self):
+        self.momente_anlegen(MOMENTE[:8])
+        self.musik_anlegen(150, "episch")
+        eid = lernbot.baue_entwurf(self.konfig, "short")
+        asyncio.run(lernbot.sende_entwuerfe(self.app))
+        self.klick(f"d:{eid}:1")
+        q = self.klick(f"x:{eid}:")
+        self.assertIn("nächste Entwurf kommt gleich", q.antworten[0])
+        self.assertEqual(len(self.aufgaben), 1)
+        asyncio.run(self.aufgaben[0])                              # Lernschleife läuft
+        self.assertEqual(len(self.bot.videos), 2)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 2)
+        self.assertEqual(list((self.konfig.wurzel / ".aktiv").glob("*")) if (self.konfig.wurzel / ".aktiv").exists() else [], [])
+
+    def test_vor_dem_entwurf_weitere_clips_analysieren(self):
+        from unittest import mock
+        self.momente_anlegen(MOMENTE[:8])
+        with mock.patch.object(lernbot.stimmung, "analysiere",
+                               return_value={"analysiert": 3, "stimmungen": {"episch": 3}}) as analyse:
+            lernbot.baue_entwurf(self.konfig, "short")
+        self.assertEqual((analyse.call_args.kwargs["claude"], analyse.call_args.kwargs["maximal"]), (False, 10))
+        self.konfig.daten["lernbot"] = {"stimmung_je_entwurf": 0}
+        with mock.patch.object(lernbot.stimmung, "analysiere") as analyse:
+            lernbot.baue_entwurf(self.konfig, "short")
+        analyse.assert_not_called()
+        self.konfig.daten["lernbot"] = {"stimmung_je_entwurf": 5}
+        with mock.patch.object(lernbot.stimmung, "analysiere", side_effect=RuntimeError("Whisper kaputt")), \
+                self.assertLogs("lern-bot", "ERROR"):
+            self.assertTrue(lernbot.baue_entwurf(self.konfig, "short"))  # Entwurf kommt trotzdem
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 3)
+
+    def test_blick_auf_leerlauf_haelt_die_schleife_nicht_auf(self):
+        import threading
+        from unittest import mock
+        frei, aufrufe = threading.Event(), []
+
+        def haengt(konfig):  # wie ein NFS-Lesezugriff, während pve-big ausgeht
+            aufrufe.append(1)
+            frei.wait(5)
+
+        async def ablauf():
+            with mock.patch.object(lernbot.big, "merke_leerlauf", side_effect=haengt):
+                lernbot.blick_auf_leerlauf(self.app)       # kehrt sofort zurück
+                await asyncio.sleep(0.05)
+                lernbot.blick_auf_leerlauf(self.app)       # der erste hängt noch -> kein zweiter Faden
+                await asyncio.sleep(0.05)
+                self.assertEqual(len(aufrufe), 1)
+                frei.set()
+                await self.app.bot_data["leerlauf_blick"]
+                lernbot.blick_auf_leerlauf(self.app)
+                await self.app.bot_data["leerlauf_blick"]
+                self.assertEqual(len(aufrufe), 2)
+
+        asyncio.run(ablauf())
+
+    def test_schlafender_speicher_ohne_erlaubnis_klare_meldung(self):
+        (self.konfig.wurzel / ".clip-speicher").unlink()
+        self.konfig.daten["speicher"].update(host="192.0.2.1", wol_mac="aa:bb:cc:dd:ee:ff")
+        from unittest import mock
+        with mock.patch("clip_pipeline.konfig.Konfig._host_erreichbar", return_value=False), \
+                mock.patch("clip_pipeline.konfig.sende_wake_on_lan") as wol:
+            self.assertIsNone(asyncio.run(lernbot.neuer_entwurf(self.app, "short")))
+        wol.assert_not_called()                                    # ohne gesichertes Aus kein Wecken
+        texte = [t for _, t in self.bot.texte]
+        self.assertIn("pve-big schläft", texte[0])
+        self.assertIn("nicht geweckt", texte[1])
+        self.assertFalse(self.app.bot_data["arbeitet"])
 
     def test_musik_annehmen(self):
         self.konfig.daten["musik"]["ordner"] = str(self.tmp / "musik")

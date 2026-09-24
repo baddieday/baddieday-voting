@@ -31,6 +31,15 @@
     },
     "overlay": {"type": ["string", "null"]},
     "bogen": {"type": "array", "items": {"type": "number"}},
+    "auswahl": {
+      "type": "object",
+      "properties": {
+        "kandidaten": {"type": "integer", "minimum": 0},
+        "neu": {"type": "integer", "minimum": 0},
+        "schon_gezeigt": {"type": "integer", "minimum": 0},
+        "abwechslung": {"type": "number", "minimum": 0}
+      }
+    },
     "hinweise": {"type": "array", "items": {"type": "string"}},
     "erstellt": {"type": "string"},
     "segmente": {
@@ -50,6 +59,9 @@
           "stimmung": {"type": "string", "enum": ["episch", "lustig", "spannend", "frustriert", "chill"]},
           "intensitaet": {"type": "number"},
           "grund": {"type": "string"},
+          "punkte": {"type": "number"},
+          "abzug": {"type": "number", "minimum": 0},
+          "gezeigt": {"type": "integer", "minimum": 0},
           "quelle_start_s": {"type": "number", "minimum": 0},
           "quelle_ende_s": {"type": "number", "minimum": 0},
           "quelle_dauer_s": {"type": "number", "minimum": 0},

@@ -104,6 +104,10 @@ format = "short"
 # Abends einmal ein Satz zum Stand (Ortszeit)
 abendstand = true
 abend_uhrzeit = "21:00"
+# Nach jeder fertigen Bewertung (✅) sofort den nächsten Entwurf bauen – die Lernschleife
+naechster_nach_bewertung = true
+# Vor jedem Entwurf so viele weitere Clips analysieren (Stimmung, Whisper) – die Auswahl wächst mit; 0 = aus
+stimmung_je_entwurf = 10
 intervall_s = 30
 
 [datenbank]

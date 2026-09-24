@@ -217,6 +217,14 @@ class Leerlauf(unittest.TestCase):
         self.assertIn("Gegenprobe: doch aktiv", ausgabe)
         self.assertFalse(self.aus)
 
+    def test_status_fuer_den_mini_im_speicher(self):
+        self.konf(TROCKEN="0", LEERLAUF_MIN="20", MINDEST_WACH_MIN="10")
+        self.uptime(600)
+        self.lauf()
+        daten = json.loads((self.t / "clips/.leerlauf.json").read_text())
+        self.assertIs(daten["trocken"], False)
+        self.assertAlmostEqual(daten["stand"], time.time(), delta=30)
+
     def test_automatik_aus_datei(self):
         (self.t / "automatik-aus").touch()
         self.konf(TROCKEN="0", LEERLAUF_MIN="1", MINDEST_WACH_MIN="1")
@@ -227,3 +235,79 @@ class Leerlauf(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+EINRICHTEN = SKRIPT.parent / "einrichten.sh"
+
+
+@unittest.skipUnless(os.geteuid() == 0, "einrichten.sh verlangt root")
+class Einrichten(unittest.TestCase):
+    """deploy/big/einrichten.sh: Konfiguration aus ZFS und Autostart-Gästen, scharf (TROCKEN=0)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        t = self.t = Path(self._tmp.name)
+        for d in ("stub", "sbin", "units", "pve/qemu-server", "pve/lxc", "ZFS-Pool/clips"):
+            (t / d).mkdir(parents=True)
+        (t / "ZFS-Pool/clips/.clip-speicher").touch()
+        (t / "pve/qemu-server/100.conf").write_text("name: nas\nonboot: 1\n")
+        (t / "pve/qemu-server/101.conf").write_text("name: spiel\n")
+        (t / "pve/lxc/200.conf").write_text("onboot: 1\nhostname: dns\n")
+        self.env = {**os.environ, "PATH": f"{t}/stub:{os.environ['PATH']}", "SBIN": str(t / "sbin"),
+                    "UNITS": str(t / "units"), "KONF": str(t / "clip-leerlauf.conf"), "PVE": str(t / "pve"),
+                    "KEIN_SYSTEMD": "1"}
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def zfs(self, eigenes_dataset: bool):
+        eintrag = f'printf "ZFS-Pool/clips\\t{self.t}/ZFS-Pool/clips\\n"' if eigenes_dataset else "true"
+        (self.t / "stub/zfs").write_text(f'''#!/bin/bash
+if [ "$4" = name,mountpoint ]; then printf "ZFS-Pool\\t{self.t}/ZFS-Pool\\n"; {eintrag}; else echo ZFS-Pool; fi
+''')
+        (self.t / "stub/zfs").chmod(0o755)
+
+    def einrichten(self):
+        return subprocess.run(["bash", str(EINRICHTEN), str(self.t / "ZFS-Pool/clips")], capture_output=True,
+                              text=True, env=self.env, timeout=30)
+
+    def konf(self) -> dict:
+        return dict(z.split("=", 1) for z in (self.t / "clip-leerlauf.conf").read_text().splitlines()
+                    if "=" in z and not z.startswith("#"))
+
+    def test_eigenes_dataset_scharf_und_autostart_gaeste(self):
+        self.zfs(eigenes_dataset=True)
+        r = self.einrichten()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        k = self.konf()
+        self.assertEqual((k["SPEICHER"], k["DATASET"], k["ZFS_ZAEHLER"], k["TROCKEN"], k["LEERLAUF_MIN"]),
+                         (str(self.t / "ZFS-Pool/clips"), "ZFS-Pool/clips", "1", "0", "20"))
+        self.assertEqual(k["GAESTE_ERLAUBT"], "100 200")  # 101 (ohne Autostart) hält wach
+        self.assertTrue(os.access(self.t / "sbin/clip-leerlauf", os.X_OK))
+        self.assertTrue((self.t / "units/clip-leerlauf.timer").is_file())
+        self.assertIn("scharf", r.stdout)
+        # clip-leerlauf liest die Datei so, wie sie geschrieben wurde
+        lesen = subprocess.run(["python3", "-c", "import importlib.machinery as m, json; l = m.SourceFileLoader("
+                                "'ll', __import__('sys').argv[1]).load_module(); print(json.dumps(l.konfig()))",
+                                str(SKRIPT)], capture_output=True, text=True, timeout=30,
+                               env={**os.environ, "CLIP_LL_KONF": str(self.t / "clip-leerlauf.conf")})
+        gelesen = json.loads(lesen.stdout)
+        self.assertEqual((gelesen["TROCKEN"], gelesen["GAESTE_ERLAUBT"]), ("0", "100 200"))
+        # wiederholbar: alte Konfiguration wird gesichert
+        self.assertEqual(self.einrichten().returncode, 0)
+        self.assertTrue((self.t / "clip-leerlauf.conf.vorher").is_file())
+
+    def test_clips_nur_ein_ordner_ohne_zfs_zaehler(self):
+        self.zfs(eigenes_dataset=False)
+        r = self.einrichten()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((self.konf()["ZFS_ZAEHLER"], self.konf()["DATASET"]), ("0", "ZFS-Pool"))
+        self.assertIn("kein eigenes Dataset", r.stdout)
+
+    def test_falscher_ordner(self):
+        self.zfs(eigenes_dataset=True)
+        (self.t / "ZFS-Pool/clips/.clip-speicher").unlink()
+        r = self.einrichten()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(".clip-speicher fehlt", r.stdout)
+        self.assertFalse((self.t / "clip-leerlauf.conf").exists())
