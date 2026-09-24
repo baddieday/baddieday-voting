@@ -326,6 +326,13 @@ def _cmd_lernbot_sende(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_sitzungen(args, konfig, con) -> int:
+    from . import sitzung
+
+    _json(sitzung.verarbeite(con, konfig, claude=not args.ohne_claude))
+    return 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -439,6 +446,10 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--datei", help="Textdatei, z. B. docs/ABSCHLUSSBERICHT.md")
     s.add_argument("--schluessel", help="gleicher Schlüssel = nur einmal senden")
     s.set_defaults(fn=_cmd_lernbot_sende, sperren=False)
+
+    s = unter.add_parser("sitzungen", help="'Session vorbei' vom Gaming-PC: Stimmung + Short des Abends (weckt nicht)")
+    s.add_argument("--ohne-claude", action="store_true")
+    s.set_defaults(fn=_cmd_sitzungen, sperren=True)
 
     s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
     s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])

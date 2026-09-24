@@ -15,6 +15,10 @@
 
     # Datei gilt als fertig, wenn sie so lange nicht mehr verändert wurde
     RuhezeitSekunden    = 60
+    # "Session vorbei" an den Mini melden (Datei sitzungen\session_<zeit>.json auf dem Speicher):
+    # 0 = aus. Z. B. 20 = Fortnite zu und seit 20 Minuten kein neues Match. n8n bleibt davon unberührt.
+    SessionVorbeiMinuten = 0
+
     # Ältere Dateien ignorieren (begrenzt die allererste Übertragung; das Archiv ist ~430 GB groß)
     MaxAlterTage        = 30
 

@@ -295,15 +295,17 @@ def ordner(konfig: Konfig) -> Path:
 
 
 def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, parameter: dict | None = None,
-             name: str | None = None, ziel: dict | None = None) -> dict:
+             name: str | None = None, ziel: dict | None = None, nur_matches: set[str] | None = None) -> dict:
+    """nur_matches: nur Momente aus diesen Matches (z. B. ein Spielabend)."""
     if fmt_name not in FORMATE:
         raise RegieFehler(f"Unbekanntes Format {fmt_name!r}")
     fmt = FORMATE[fmt_name]
     p = {**PARAMETER, **(parameter or {})}
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
-    alle = kandidaten(con, p)
+    alle = [k for k in kandidaten(con, p) if nur_matches is None or k.match_id in nur_matches]
     if not alle:
-        raise RegieFehler("Keine Momente mit Stimmung – erst `pipeline stimmung`")
+        raise RegieFehler("Keine Momente mit Stimmung" + (" in diesen Matches" if nur_matches else "")
+                          + " – erst `pipeline stimmung`")
     gewaehlt, ziel_s, hinweise = waehle(alle, fmt, p)
     reihe = bogen(gewaehlt, fmt_name)
 

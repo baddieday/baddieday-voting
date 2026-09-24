@@ -85,3 +85,13 @@ CREATE TABLE IF NOT EXISTS entwurf_bewertungen (
     erstellt   TEXT NOT NULL,
     geaendert  TEXT NOT NULL
 );
+
+-- "Session vorbei"-Meldungen des Gaming-PCs (Datei sitzungen/<name>.json auf dem Speicher)
+CREATE TABLE IF NOT EXISTS sitzungen (
+    name        TEXT PRIMARY KEY,
+    matches     TEXT NOT NULL,              -- JSON-Liste der Session-IDs (Replays) des Abends
+    ende_utc    TEXT,
+    entwurf_id  INTEGER,
+    hinweis     TEXT,
+    verarbeitet TEXT NOT NULL
+);

@@ -10,6 +10,9 @@
   - Merkt sich übertragene Dateien lokal – schnell auch bei tausenden Clips.
   - Löscht auf dem Gaming-PC nur mit -Verschieben und nur nach SHA-256-Vergleich.
     Replays werden nie gelöscht (NurKopieren).
+  - Optional (SessionVorbeiMinuten > 0): Läuft Fortnite nicht mehr und kam seit N Minuten kein Match dazu,
+    schreibt es EINMAL "sitzungen\session_<zeit>.json" mit den Match-IDs des Abends auf den Speicher.
+    Der Mini holt die Datei ab (pipeline sitzungen) und baut daraus Stimmung + Entwurf. n8n bleibt unverändert.
 
 .EXAMPLE
   .\Uebertragung.ps1 -Probelauf      # zeigt nur, was kopiert würde
@@ -30,6 +33,7 @@ $datenOrdner = Join-Path $env:LOCALAPPDATA 'ClipPipeline'
 $logDatei = Join-Path $datenOrdner 'uebertragung.log'
 $statusDatei = Join-Path $datenOrdner 'uebertragen.tsv'
 $meldeDatei = Join-Path $datenOrdner 'zu-melden.txt'
+$sessionDatei = Join-Path $datenOrdner 'session.txt'   # Match-IDs seit dem letzten "Session vorbei"
 New-Item -ItemType Directory -Force -Path $datenOrdner | Out-Null
 
 function Log([string]$text) {
@@ -93,6 +97,26 @@ function Melde-Session([string]$sid, $k) {
         Log "Meldung an n8n fehlgeschlagen ($sid): $($_.Exception.Message) – neuer Versuch beim nächsten Lauf"
         return $false
     }
+}
+
+function Pruefe-SessionVorbei($k) {
+    # Session vorbei = Fortnite läuft nicht UND seit SessionVorbeiMinuten ist kein Match dazugekommen.
+    if (-not (Test-Path $sessionDatei)) { return }
+    $ids = @(Get-Content $sessionDatei -Encoding UTF8 | Where-Object { $_ } | Select-Object -Unique)
+    if (-not $ids.Count) { return }
+    if (Get-Process -Name 'FortniteClient-Win64-Shipping' -ErrorAction SilentlyContinue) { return }
+    $ruhe = (Get-Date) - (Get-Item $sessionDatei).LastWriteTime
+    if ($ruhe.TotalMinutes -lt [int]$k.SessionVorbeiMinuten) { return }
+    $name = 'session_{0:yyyy-MM-dd_HH-mm-ss}' -f (Get-Date)
+    $ordner = Join-Path $k.Ziel 'sitzungen'
+    New-Item -ItemType Directory -Force -Path $ordner | Out-Null
+    $inhalt = [ordered]@{ session = $name; matches = $ids; ende_utc = (Get-Date).ToUniversalTime().ToString('o') } |
+        ConvertTo-Json -Compress
+    $ziel = Join-Path $ordner "$name.json"
+    Set-Content -LiteralPath "$ziel.teil" -Value $inhalt -Encoding UTF8   # erst fertig schreiben, dann umbenennen
+    Move-Item -LiteralPath "$ziel.teil" -Destination $ziel -Force
+    Remove-Item -LiteralPath $sessionDatei
+    Log "Session vorbei: $name ($($ids.Count) Matches)"
 }
 
 # --- Nur ein Lauf gleichzeitig ---------------------------------------------------
@@ -160,7 +184,10 @@ try {
                 }
                 Add-Content -Path $statusDatei -Value $schluessel -Encoding UTF8
                 [void]$erledigt.Add($schluessel)
-                if ($q.Melden) { $zuMelden.Add((Session-Id $datei.Name)) }
+                if ($q.Melden) {
+                    $zuMelden.Add((Session-Id $datei.Name))
+                    if ([int]$k.SessionVorbeiMinuten -gt 0) { Add-Content -Path $sessionDatei -Value (Session-Id $datei.Name) -Encoding UTF8 }
+                }
             } catch {
                 $zaehler.fehler++
                 Log "FEHLER bei $($datei.Name): $($_.Exception.Message)"
@@ -173,6 +200,7 @@ try {
         $offen = @($zuMelden | Select-Object -Unique | Where-Object { -not (Melde-Session $_ $k) })
         [IO.File]::WriteAllLines($meldeDatei, [string[]]$offen)
     }
+    if ([int]$k.SessionVorbeiMinuten -gt 0 -and -not $Probelauf) { Pruefe-SessionVorbei $k }
     if ($zaehler.kopiert -or $zaehler.fehler -or $zaehler.geloescht) {
         Log ('kopiert {0} ({1:N0} MB), gelöscht {2}, Fehler {3}' -f $zaehler.kopiert, ($zaehler.bytes / 1MB), $zaehler.geloescht, $zaehler.fehler)
     }

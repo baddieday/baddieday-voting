@@ -88,6 +88,13 @@ lernen_ab = 3
 # pve-big höchstens so lange für den Final-Render wach halten
 final_halten_min = 60
 
+[sitzungen]
+# "Session vorbei"-Dateien des Gaming-PCs (windows/Uebertragung.ps1, SessionVorbeiMinuten)
+ordner = "sitzungen"
+# So lange auf n8n warten, bis alle Matches des Abends verarbeitet sind
+warten_h = 2
+format = "short"
+
 [lernbot]
 # Abends einmal ein Satz zum Stand (Ortszeit)
 abendstand = true
