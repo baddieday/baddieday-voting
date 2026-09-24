@@ -17,3 +17,10 @@ Legende: ✅ fertig und hier getestet · 🧪 gebaut, nur mit künstlichem Mater
 - Branch `sprint-regisseur` angelegt; Ausgangslage 59 Tests grün.
 - Werkzeuge im Container: ffmpeg 6.1 (libx264, h264_vaapi, h264_nvenc eingebaut), espeak-ng (künstliche
   deutsche Sprache zum Testen von Whisper), faster-whisper.
+- ✅ Ziel 1 Sicherheitsnetz: `pipeline big …`, Timer `clip-big-waechter` (10 min), Halten-Marken, Frist,
+  Weckt nur mit nachweislich funktionierendem Herunterfahren. 🏠 SSH-Zugang zu pve-big fehlt noch (Host-Änderung).
+- 🧪 Ziel 2 Bestandsaufnahme: `pipeline bestand [--bericht docs/BESTAND.md]` – Replays, Videos, Mikro-Spur per
+  Pegel, VA-API per Test-Encode, Platz. Hier: kein /dev/dri → VA-API ❌ (erwartet). 🏠 echter Lauf auf dem Mini.
+- 🧪 Ziel 3 Material: `pipeline material [--probelauf]` – 1× wecken, SHA-256, Platzmangel → letzte 90 s.
+- ✅ Ziel 4 Stimmung: `pipeline stimmung` – Regeln + 1× Claude; Whisper small (de) hier echt getestet
+  (espeak-Stimme). 🏠 Mit echter Mikro-Spur prüfen, ob die Wortlisten passen.

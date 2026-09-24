@@ -50,6 +50,22 @@ ende_s = 90
 halten_min = 240
 stichprobe = 5
 
+[stimmung]
+# faster-whisper auf der Mikro-Spur (CPU). "small" braucht ca. 1 GB RAM, int8 ist auf dem Ryzen am schnellsten.
+modell = "small"
+sprache = "de"
+geraet = "cpu"
+rechenart = "int8"
+threads = 6
+# Spitzen: Spielton so viele LU über seinem Median; Jubel: Mikro so viele LU über seinem Median
+spitze_lu = 8
+jubel_lu = 12
+# Momente mit Sicherheit darunter fragt `claude -p` – gesammelt in EINEM Aufruf pro Durchlauf
+claude = true
+unsicher_unter = 0.35
+claude_max = 40
+claude_timeout_s = 180
+
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.
 pfad = "/var/lib/clip-pipeline/pipeline.db"

@@ -14,7 +14,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import aufraeumen, bestand, big, caption, db, erfassung, highlight, lernen, material, replay, shorts, verarbeitung
+from . import aufraeumen, bestand, big, caption, db, erfassung, highlight, lernen, material, replay, shorts, stimmung, verarbeitung
 from .konfig import KonfigFehler, SpeicherOffline, lade
 from .medien import MedienFehler
 from .sperre import Gesperrt, sperre
@@ -224,6 +224,12 @@ def _cmd_material(args, konfig, con) -> int:
     return 1 if ergebnis.get("fehler") else 0
 
 
+def _cmd_stimmung(args, konfig, con) -> int:
+    _json(stimmung.analysiere(con, konfig, dateien=args.dateien, neu=args.neu, claude=not args.ohne_claude,
+                              whisper=not args.ohne_whisper))
+    return 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -293,6 +299,13 @@ def baue_parser() -> argparse.ArgumentParser:
     s = unter.add_parser("material", help="Replays, Sessions und Videos von pve-big auf den Mini kopieren (1× wecken)")
     s.add_argument("--probelauf", action="store_true", help="nur zeigen, was kopiert würde (weckt nicht)")
     s.set_defaults(fn=_cmd_material, sperren=False)
+
+    s = unter.add_parser("stimmung", help="Stimmung je Moment (Whisper, Lautstärke, Kills, Tod; 1× claude -p)")
+    s.add_argument("--dateien", action="store_true", help="auch kurze Rohvideos ohne Clip als Momente")
+    s.add_argument("--neu", action="store_true", help="schon analysierte Momente neu bewerten")
+    s.add_argument("--ohne-claude", action="store_true")
+    s.add_argument("--ohne-whisper", action="store_true")
+    s.set_defaults(fn=_cmd_stimmung, sperren=True)
 
     s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
     s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])
