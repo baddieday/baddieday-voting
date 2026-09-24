@@ -62,8 +62,11 @@ if [ -z "${REGIE_NEU:-}" ] && [ -f "$0" ]; then
 fi
 
 sag "3/7 clip-leerlauf für pve-big bereitlegen (Einrichten: Block aus dem Chat in der Shell von pve-big)"
-als_pipeline "install -d -m 755 /srv/clips/.einrichtung && cd $REGIE/deploy/big && cp clip-leerlauf clip-leerlauf.service clip-leerlauf.timer einrichten.sh /srv/clips/.einrichtung/"
-echo "liegt auf pve-big unter <clips>/.einrichtung"
+if als_pipeline "install -d -m 755 /srv/clips/.einrichtung && cd $REGIE/deploy/big && cp clip-leerlauf clip-leerlauf.service clip-leerlauf.timer einrichten.sh /srv/clips/.einrichtung/"; then
+  echo "liegt auf pve-big unter <clips>/.einrichtung"
+else
+  echo "⚠️  konnte nicht bereitlegen (Schreibrecht auf /srv/clips?) – bitte melden; der Rest läuft weiter."
+fi
 
 sag "4/7 Python-Umgebung (numpy, faster-whisper) – beim ersten Mal ein paar Minuten"
 als_pipeline "cd $REGIE && { [ -x .venv/bin/python ] || python3 -m venv .venv; } && .venv/bin/pip install -q -e '.[whisper]'"
