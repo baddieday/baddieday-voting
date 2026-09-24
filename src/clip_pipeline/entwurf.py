@@ -109,10 +109,12 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
             f"[{musik_eingang}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
             f"volume={m['pegel']},atrim=0:{gesamt:.3f},afade=t=in:d=0.5,afade=t=out:st={max(0.0, gesamt - 2):.3f}:d=2[mus]",
             "[mus][schluessel]sidechaincompress=threshold=0.05:ratio=6:attack=20:release=400[leiser]",
-            "[spiel][leiser]amix=inputs=2:normalize=0,alimiter=limit=0.95[aout]",
+            "[spiel][leiser]amix=inputs=2:normalize=0,alimiter=limit=0.95,apad[aout]",
         ]
     else:
-        teile.append(f"{a}anull[aout]")
+        teile.append(f"{a}apad[aout]")
+    # apad + "-t gesamt" am Ausgang: Der Ton ist immer genau so lang wie das Bild. Die Mischkette (amix,
+    # sidechaincompress, alimiter) verlor im Test gelegentlich bis zu 0,1 s am Ende, nicht reproduzierbar.
     return ";".join(teile), gesamt
 
 
