@@ -257,6 +257,19 @@ def _cmd_musik(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_compose(args, konfig, con) -> int:
+    from . import regie, regie_lernen
+
+    parameter, ziel = regie_lernen.aktuelle(con, konfig)
+    try:
+        ergebnis = regie.erstelle(con, konfig, args.format, parameter=parameter, ziel=ziel, name=args.name)
+    except regie.RegieFehler as e:
+        _json({"fehler": str(e)})
+        return 1
+    _json(ergebnis)
+    return 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -343,6 +356,11 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--stimmung", choices=["episch", "spannend", "lustig", "frustriert", "chill"], default="episch")
     s.add_argument("--anzahl", type=int, default=3)
     s.set_defaults(fn=_cmd_musik, sperren=False)
+
+    s = unter.add_parser("compose", help="Regisseur: Schnittliste mit Bogen, Musik, Schnitten auf dem Beat")
+    s.add_argument("--format", choices=["zusammenschnitt", "short"], default="zusammenschnitt")
+    s.add_argument("--name", help="Name des Entwurfs (sonst Format + Zeit)")
+    s.set_defaults(fn=_cmd_compose, sperren=False)
 
     s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
     s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])

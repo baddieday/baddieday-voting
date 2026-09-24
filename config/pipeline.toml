@@ -78,6 +78,10 @@ lustig = [8, 16, 11]        # Funny, Quirky, Happy
 frustriert = [1, 30, 18]    # Angry, Heavy, Restless
 chill = [13, 17, 15]        # Laid Back, relaxed, Peaceful
 
+[regie]
+# Schnittlisten und Entwürfe des Regisseurs (auf dem Mini)
+ordner = "/var/lib/clip-pipeline/regie"
+
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.
 pfad = "/var/lib/clip-pipeline/pipeline.db"
