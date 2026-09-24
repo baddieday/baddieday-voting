@@ -93,6 +93,16 @@ class LernBot(MitRegieMaterial):
         p, _ = regie_lernen.aktuelle(self.con, self.konfig)
         self.assertEqual(p["track_malus"], {str(track["id"]): 1.0})
 
+    def test_gleichzeitig_senden_nur_einmal(self):
+        self.momente_anlegen(MOMENTE[:6])
+        lernbot.baue_entwurf(self.konfig, "short")
+
+        async def beide():
+            return await asyncio.gather(lernbot.sende_entwuerfe(self.app), lernbot.sende_entwuerfe(self.app))
+
+        self.assertEqual(sorted(asyncio.run(beide())), [0, 1])
+        self.assertEqual(len(self.bot.videos), 1)
+
     def test_musik_annehmen(self):
         self.konfig.daten["musik"]["ordner"] = str(self.tmp / "musik")
         quelle = klick_musik(self.tmp / "q.mp3", 128, 20)

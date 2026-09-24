@@ -92,7 +92,10 @@ def _kern(mk: dict, dauer: float, p: dict) -> tuple[tuple[float, float], tuple[f
         mitte = ereignisse[0] if ereignisse else dauer / 2
         kern, muss = (mitte - 4.0, mitte + 3.0), (mitte - 1.0, mitte + 1.0)
         grund = "Tod" if mk.get("tod_sekunde") is not None else ("Jubel/Spitze" if ereignisse else "Mitte")
-    klemme = lambda a, b: (max(0.0, min(a, dauer)), max(0.0, min(b, dauer)))  # noqa: E731
+    # Nur den nutzbaren Teil der Datei (am Ende braucht der Schnitt noch Bilder, siehe plane_zeitleiste) –
+    # sonst lässt ein Moment mit Action in den letzten Zehnteln jeden compose scheitern.
+    nutzbar = max(0.5, dauer - 0.25)
+    klemme = lambda a, b: (max(0.0, min(a, nutzbar)), max(0.0, min(b, nutzbar)))  # noqa: E731
     return klemme(*kern), klemme(*muss), grund
 
 

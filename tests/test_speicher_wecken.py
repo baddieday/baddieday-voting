@@ -29,7 +29,17 @@ class Wecken(MitSpeicher):
         super().setUp()
         self.konfig.daten["speicher"].update(host="pve-gross", wol_mac="aa:bb:cc:dd:ee:ff", wecken_warten_s=60)
 
+    def test_ohne_gesichertes_herunterfahren_kein_wecken(self):
+        # Sprint-Regel 3: auch der alte Weckweg weckt nur, wenn pve-big danach sicher wieder ausgeht
+        with mock.patch.object(konfig.Konfig, "_host_erreichbar", return_value=False), \
+                mock.patch("clip_pipeline.konfig.sende_wake_on_lan") as wol:
+            with self.assertRaises(SpeicherOffline) as fehler:
+                self.konfig.pruefe_speicher(wecken=True)
+        self.assertIn("nicht geweckt", str(fehler.exception))
+        wol.assert_not_called()
+
     def test_schlafender_host_wird_geweckt(self):
+        self.konfig.daten["big"]["alter_weckweg_nur_mit_aus"] = False  # bisheriges Verhalten
         with mock.patch.object(konfig.Konfig, "_host_erreichbar", side_effect=[False, False, True]), \
                 mock.patch("clip_pipeline.konfig.sende_wake_on_lan") as wol, mock.patch("time.sleep"):
             self.konfig.pruefe_speicher(wecken=True)

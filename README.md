@@ -28,6 +28,13 @@ YouTube Shorts **und** TikTok → alle 2 Wochen ein Highlight-Video. Die Vorbewe
    und schickt eine Vorschau zur **Freigabe in den Bot**. Schläft der große Host, weckt ihn die Pipeline.
 8. Nach einem halben Jahr wird recycelt – Multikills ab 3 Kills bleiben für immer im Archiv.
 
+## Regisseur (Sprint 09/2026)
+
+Automatische Zusammenschnitte (16:9) und Shorts (9:16) mit Musik, Schnitten auf dem Beat und Übergängen je
+Stimmung; Bewertung im eigenen **Lern-Bot**, der Regisseur lernt daraus. Dazu ein Sicherheitsnetz, das pve-big
+herunterfährt, wenn nichts zu tun ist. Bedienung: `docs/REGIE.md` · Entscheidungen: `docs/ENTSCHEIDUNGEN.md` ·
+Stand und Host-Änderungen: `docs/ABSCHLUSSBERICHT.md`.
+
 ## Befehle
 
 | Befehl | Was |

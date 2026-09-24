@@ -119,11 +119,15 @@ def stuecke(text: str, groesse: int = TEXT_MAX) -> list[str]:
 
 def baue_entwurf(konfig: Konfig, fmt: str) -> int:
     """compose + rendern. Läuft in einem Thread; SQLite-Verbindungen dürfen nicht zwischen Threads wandern."""
+    from .sperre import sperre
+
     con = db.verbinde(konfig.datenbank)
     try:
-        parameter, ziel = regie_lernen.aktuelle(con, konfig)
-        e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel)
-        entwurf.entwurf(con, konfig, e["entwurf"])
+        # Rendern ist ein rechenintensiver Schritt: gleiche Sperre wie die Pipeline (nur einer gleichzeitig)
+        with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))):
+            parameter, ziel = regie_lernen.aktuelle(con, konfig)
+            e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel)
+            entwurf.entwurf(con, konfig, e["entwurf"])
         return int(e["entwurf"])
     finally:
         con.close()
@@ -153,6 +157,13 @@ def _liste(zeile: sqlite3.Row) -> dict:
 
 
 async def sende_entwuerfe(app) -> int:
+    # Handler (/entwurf) und Schleife können gleichzeitig senden wollen -> nacheinander, sonst doppelt
+    schloss = app.bot_data.setdefault("sende_schloss", asyncio.Lock())
+    async with schloss:
+        return await _sende_entwuerfe(app)
+
+
+async def _sende_entwuerfe(app) -> int:
     con, chat = app.bot_data["con"], app.bot_data["erlaubt"]
     gesendet = 0
     for z in con.execute("SELECT * FROM entwuerfe WHERE status = 'gerendert' ORDER BY id").fetchall():

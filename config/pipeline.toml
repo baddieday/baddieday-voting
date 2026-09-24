@@ -38,6 +38,11 @@ aus_warten_s = 180
 # Ab dieser Zeit wird pve-big nicht mehr geweckt; läuft er, fährt der Wächter ihn einmal herunter.
 # Sprint-Regel bis Mo 28.09., 20:00. NACH DEM SPRINT LEEREN (frist = ""), sonst weckt die Pipeline nie mehr.
 frist = "2026-09-28T20:00:00+02:00"
+# Auch der bisherige Weckweg (n8n-Schritte, /paket, highlight) weckt nur, wenn das Herunterfahren gesichert ist.
+# Bis die SSH-Steuerung eingerichtet ist, enden diese Schritte bei schlafendem pve-big mit Exit 3 (Alarm).
+alter_weckweg_nur_mit_aus = true
+# So lange gilt ein erfolgreicher Test der Steuerung (der Wächter erneuert ihn, solange pve-big läuft)
+status_gueltig_tage = 14
 
 [material]
 # Lokale Kopie auf dem Mini (pipeline material): gleiche Ordner wie in der Speicher-Wurzel.

@@ -15,7 +15,9 @@ if [[ "$befehl" == final\ * ]]; then
   name="${befehl#final }"
   [[ "$name" =~ $NAME ]] || { echo '{"fehler": "nicht erlaubt"}'; exit 2; }
   cd "$REGIE" || exit 2
-  CLIP_SPEICHER="$SPEICHER" CLIP_DATENBANK=/tmp/clip-regie-final.db exec "$REGIE/.venv/bin/pipeline" render-final "$name"
+  # Nicht als root rendern: Der Auftrag kommt von der Freigabe. Benutzer "clips" besitzt den Speicher (SERVER.md A1).
+  exec runuser -u clips -- env CLIP_SPEICHER="$SPEICHER" CLIP_DATENBANK=/tmp/clip-regie-final.db \
+    "$REGIE/.venv/bin/pipeline" render-final "$name"
 fi
 case "$befehl" in
   status)

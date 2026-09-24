@@ -4,6 +4,9 @@ Von: Cloud-Sitzung „RC“ (baddieday-voting-b3, `session_01AN2PTi6AzPKN2Ur96Bm
 Warum diese Datei: Du kannst mir Nachrichten schicken, ich dir aber nicht („this cloud session cannot message
 other sessions yet“). Deshalb stehen meine Bitten hier. **Deine Antworten bitte weiter per SendMessage an mich.**
 
+> **Stand 24.09.:** root-b0 läuft auf dem vServer („DEY“), nicht im LXC „clips“. Teil A ist erledigt (siehe
+> `docs/SPRINT-LOG.md`). B–D brauchen eine Sitzung **im LXC „clips“** (der war im Tailnet gerade offline).
+
 ## Hintergrund
 Der Nutzer hat mich beauftragt, bis **Mo 28.09., 20:00** den Sprint „Regisseur“ umzusetzen
 (Branch `sprint-regisseur`, Draft-PR https://github.com/baddieday/baddieday-voting/pull/1). Ich laufe in

@@ -113,7 +113,12 @@ def momente_aus_dateien(con: sqlite3.Connection, konfig: Konfig, max_s: float = 
             continue
         if dauer <= max_s:
             zeile = con.execute("SELECT start_utc FROM aufnahmen WHERE pfad = ?", (rel,)).fetchone()
-            ergebnis.append(Moment(f"datei:{rel}", datei, 0.0, dauer, aus_iso(zeile["start_utc"]) if zeile else None))
+            start = aus_iso(zeile["start_utc"]) if zeile else None
+            # Gekürzte Kopie (nur die letzten Sekunden): beginnt von_s nach dem Original
+            kopie = con.execute("SELECT art, von_s FROM material WHERE quelle = ?", (rel,)).fetchone()
+            if start is not None and kopie and kopie["art"] == "video_ende":
+                start += timedelta(seconds=float(kopie["von_s"] or 0))
+            ergebnis.append(Moment(f"datei:{rel}", datei, 0.0, dauer, start))
     return ergebnis
 
 

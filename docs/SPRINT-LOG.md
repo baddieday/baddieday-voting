@@ -24,3 +24,15 @@ Legende: ✅ fertig und hier getestet · 🧪 gebaut, nur mit künstlichem Mater
 - 🧪 Ziel 3 Material: `pipeline material [--probelauf]` – 1× wecken, SHA-256, Platzmangel → letzte 90 s.
 - ✅ Ziel 4 Stimmung: `pipeline stimmung` – Regeln + 1× Claude; Whisper small (de) hier echt getestet
   (espeak-Stimme). 🏠 Mit echter Mikro-Spur prüfen, ob die Wortlisten passen.
+- ✅ Musik: `pipeline musik` – eigene Beat-Analyse (±1 % Tempo, ±15 ms Beats), 10 NCS-Titel probeweise geladen.
+- ✅ Ziel 6 Regisseur: `pipeline compose` – Bogen, Abwechslung, Musik nach Stimmung/Tempo, Schnitte auf dem Beat.
+- ✅ Ziel 7 Rendern: `pipeline render-entwurf [--final]` – CPU hier echt (Farb-Test je Segment), VA-API/NVENC
+  nur Befehlsaufbau. Zwei stille xfade-Fallen gefunden und behoben (E8).
+- ✅ Ziel 8 Lernen: `regie_lernen.py` – Gründe wirken im nächsten compose (getestet).
+- ✅ Ziel 5 Lern-Bot: `pipeline lernbot` – ohne Netzwerk getestet. ⛔ Token fehlt → nichts gesendet.
+- ✅ Ziel 9 Session vorbei: vorbereitet (Standard aus), unter PowerShell 7 getestet.
+- Du hast gebeten, die Arbeit mit der anderen Online-Sitzung zu teilen. Diese Sitzung („root-b0“) läuft aber auf
+  dem **vServer**, nicht im LXC. Der LXC „clips“ ist im Tailnet offline, pve-big ist nicht im Tailnet. Deshalb
+  konnte sie nur Teil A (Umgebung) erledigen. Sie hat mir geschrieben; umgekehrt geht es nicht (E11).
+- Unabhängige Prüfung des Sprint-Codes: 8 Befunde, alle behoben (E12).
+- Beispiel-Short mit echter NCS-Musik gerendert und dir im Chat geschickt (Testbilder statt echter Clips).

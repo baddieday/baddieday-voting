@@ -60,6 +60,12 @@ class Entwurf(MitRegieMaterial):
         auftrag = entwurf.final_auftrag(self.con, self.konfig, e["entwurf"])
         daten = json.loads(auftrag.read_text())
         self.assertTrue(all(not s["datei"].startswith("/") for s in daten["segmente"]))
+        # Gekürzte Material-Kopie: Zeiten werden auf das Original (auf pve-big) umgerechnet
+        erstes = daten["segmente"][0]
+        self.con.execute("INSERT INTO material (quelle, ziel, art, groesse, sha256_quelle, sha256_ziel, von_s, kopiert) "
+                         "VALUES (?, 'x', 'video_ende', 1, 'a', 'b', 100.0, 'x')", (erstes["datei"],))
+        daten2 = json.loads(entwurf.final_auftrag(self.con, self.konfig, e["entwurf"]).read_text())
+        self.assertAlmostEqual(daten2["segmente"][0]["quelle_start_s"], erstes["quelle_start_s"] + 100.0, places=3)
         self.assertTrue((self.konfig.wurzel / "regie" / "musik" / daten["musik"]["datei"]).is_file())
         self.assertEqual(entwurf.encoder(self.konfig, final=True)[2], "h264_nvenc")
 
@@ -82,8 +88,11 @@ class FinalAufBig(MitRegieMaterial):
         def wol(_mac):
             an["wert"] = True
 
+        from clip_pipeline.sperre import sperre
+
         with mock.patch.object(big, "wach", side_effect=lambda _k=None: an["wert"] and not (self.tmp / "aus").exists()), \
-                mock.patch.object(big, "sende_wake_on_lan", side_effect=wol), mock.patch("time.sleep"):
+                mock.patch.object(big, "sende_wake_on_lan", side_effect=wol), mock.patch("time.sleep"), \
+                sperre(self.konfig.datenbank.with_suffix(".lock")):  # wie im echten Aufruf (sperren=True)
             ergebnis = entwurf.final_auf_big(self.con, self.konfig, e["entwurf"])
         self.assertEqual(falsch.aufrufe[0], "status")
         self.assertIn("final", falsch.aufrufe)
@@ -120,3 +129,26 @@ class VaApi(MitRegieMaterial):
         self.assertIn("hwupload[vout]", vaapi[vaapi.index("-filter_complex") + 1])
         self.assertEqual((r["encoder"], "-vaapi_device" in cpu), ("libx264", False))
         self.assertTrue(Path(r["datei"]).is_file())
+
+
+class FinalPruefung(MitRegieMaterial):
+    """Auf pve-big ist der Auftrag fremde Eingabe: nichts außerhalb des Speichers, nur gültige Listen."""
+
+    def test_boese_auftraege_abgewiesen(self):
+        self.konfig.daten["material"] = {"ordner": str(self.tmp / "momente")}
+        self.momente_anlegen(MOMENTE[:6])
+        e = regie.erstelle(self.con, self.konfig, "short", name="gut")
+        auftrag = entwurf.final_auftrag(self.con, self.konfig, e["entwurf"])
+        gut = json.loads(auftrag.read_text())
+        faelle = {
+            "pfad": lambda l: l["segmente"][0].update(datei="../../etc/passwd"),
+            "absolut": lambda l: l["segmente"][0].update(datei="/etc/passwd"),
+            "filter": lambda l: l["segmente"][1]["uebergang"].update(art="fade:ametadata=file=/tmp/x"),
+            "name": lambda l: l.update(name="anders"),
+        }
+        for was, aendern in faelle.items():
+            liste = json.loads(json.dumps(gut))
+            aendern(liste)
+            auftrag.write_text(json.dumps(liste))
+            with self.assertRaises(entwurf.MedienFehler, msg=was):
+                entwurf.fuehre_final_aus(self.konfig, auftrag)

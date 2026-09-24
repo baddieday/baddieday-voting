@@ -16,6 +16,7 @@ from datetime import timedelta
 
 from . import entwurf, regie, regie_lernen, stimmung
 from .konfig import Konfig
+from .medien import MedienFehler
 from .verarbeitung import SESSION_ID
 from .zeit import aus_iso, iso, jetzt
 
@@ -55,7 +56,7 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
                                ziel=ziel, nur_matches=set(matches))
             entwurf.entwurf(con, konfig, e["entwurf"])
             entwurf_id = e["entwurf"]
-        except regie.RegieFehler as fehler:
+        except (regie.RegieFehler, MedienFehler) as fehler:  # vermerken statt alle 10 min neu versuchen
             hinweis = "; ".join(filter(None, [hinweis, str(fehler)]))
         con.execute(
             """INSERT INTO sitzungen (name, matches, ende_utc, entwurf_id, hinweis, verarbeitet) VALUES (?, ?, ?, ?, ?, ?)

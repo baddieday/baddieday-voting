@@ -1,5 +1,33 @@
 # PLAN – Clip-Pipeline
 
+## Sprint „Regisseur“ (24.–28.09.2026) – Änderungen am Plan
+
+**Neues Zielbild (gilt vor allem, was unten steht):** Zentrale mit Warteschlange und Postgres **auf dem Mini**;
+der VPS (n8n) ist nur noch Zusatz. Bis dahin bleibt der n8n-Vertrag unverändert in Betrieb.
+Alle neuen Tabellen sind in portablem SQL geschrieben (`src/clip_pipeline/regie.sql`, Entscheidung E3).
+
+Neu dazugekommen (Bedienung: `docs/REGIE.md`, Begründungen: `docs/ENTSCHEIDUNGEN.md`, Verlauf: `docs/SPRINT-LOG.md`):
+
+| Ziel | Stand | Befehl |
+|---|---|---|
+| 1 Sicherheitsnetz pve-big | ✅ gebaut + getestet · 🏠 SSH-Zugang auf pve-big fehlt | `pipeline big …`, Timer `clip-big-waechter` |
+| 2 Bestandsaufnahme | ✅ gebaut · 🏠 echter Lauf durch die Vor-Ort-Sitzung | `pipeline bestand` |
+| 3 Material auf den Mini | ✅ gebaut · 🏠 braucht Ziel 1 auf dem echten System | `pipeline material` |
+| 4 Stimmung | ✅ gebaut, Whisper echt getestet (künstliche Stimme) | `pipeline stimmung` |
+| 5 Lern-Bot | ✅ gebaut, ohne Netzwerk getestet · 🏠 Token fehlt | `pipeline lernbot`, Dienst `clip-lernbot` |
+| 6 Regisseur | ✅ gebaut + getestet | `pipeline compose` |
+| 7 Rendern | ✅ Entwurf (CPU) echt getestet · VA-API/NVENC nur Befehlsaufbau | `pipeline render-entwurf [--final]` |
+| 8 Lernen | ✅ gebaut + getestet | `regie_lernen.py`, `/lernstand` |
+| 9 Session vorbei | ✅ vorbereitet (Standard aus), unter PowerShell 7 getestet | `SessionVorbeiMinuten`, `pipeline sitzungen` |
+
+Offene Stufen aus dem alten Plan, die der Sprint berührt:
+- Stufe 5c Whisper: jetzt vorhanden (`pip install -e .[whisper]`), bisher nur für die Stimmung genutzt –
+  Untertitel in Shorts fehlen weiterhin.
+- Stufe 7 Highlight-Video: bleibt; der Regisseur ist die bessere Grundlage (Bogen, Beat-Schnitt). Vorschlag:
+  `highlight` später auf `compose --format zusammenschnitt` umstellen.
+
+---
+
 ## Umsetzungsstand (23.09.2026, nachmittags)
 
 Gebaut und getestet (55 Tests + echter Lauf mit dem Match vom 21.09.; deine n8n-Workflows 1–3 geprüft):

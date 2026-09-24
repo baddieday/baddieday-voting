@@ -123,6 +123,11 @@ class Konfig:
                 raise SpeicherOffline(f"Speicher-Host {self.wert('speicher.host')} schläft oder ist nicht erreichbar")
             if (frist := str(self.wert("big.frist", "") or "").strip()) and _vorbei(frist):
                 raise SpeicherOffline(f"Speicher-Host schläft; Wecken ist seit {frist} gesperrt ([big].frist)")
+            if self.wert("big.alter_weckweg_nur_mit_aus", True):
+                from . import big  # erst hier: big importiert konfig
+
+                if grund := big.darf_wecken(self):
+                    raise SpeicherOffline(f"Speicher-Host schläft und wird nicht geweckt: {grund}")
             sende_wake_on_lan(mac)
             ende = time.monotonic() + float(self.wert("speicher.wecken_warten_s", 180))
             while not self._host_erreichbar():

@@ -221,6 +221,12 @@ def final_auftrag(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> P
         datei = Path(s["datei"])
         if datei.is_relative_to(material_wurzel):
             s["datei"] = datei.relative_to(material_wurzel).as_posix()
+            kopie = con.execute("SELECT art, von_s FROM material WHERE quelle = ?", (s["datei"],)).fetchone()
+            if kopie and kopie["art"] == "video_ende":  # gekürzte Kopie -> Zeiten auf das Original umrechnen
+                von = float(kopie["von_s"] or 0)
+                for feld in ("quelle_start_s", "quelle_ende_s", "quelle_dauer_s"):
+                    s[feld] = round(s[feld] + von, 3)
+                s["muss"] = [round(s["muss"][0] + von, 3), round(s["muss"][1] + von, 3)]
         elif datei.is_relative_to(konfig.wurzel):
             s["datei"] = konfig.relativ(datei)
         else:
@@ -237,11 +243,33 @@ def final_auftrag(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> P
     return datei
 
 
+def _im_speicher(konfig: Konfig, relativ: str) -> Path:
+    """Relativer Pfad, der nach dem Auflösen sicher in der Speicher-Wurzel bleibt."""
+    wurzel = konfig.wurzel.resolve()
+    if not relativ or relativ.startswith(("/", "\\")) or ".." in Path(relativ).parts:
+        raise MedienFehler(f"Pfad im Auftrag nicht erlaubt: {relativ!r}")
+    pfad = (wurzel / relativ).resolve()
+    if not pfad.is_relative_to(wurzel):
+        raise MedienFehler(f"Pfad im Auftrag zeigt aus dem Speicher: {relativ!r}")
+    return pfad
+
+
 def fuehre_final_aus(konfig: Konfig, auftrag: Path) -> dict:
-    """Läuft AUF pve-big (clip-big-steuer final <name>): Pfade sind relativ zur Speicher-Wurzel."""
+    """Läuft AUF pve-big (clip-big-steuer final <name>). Der Auftrag liegt auf der Freigabe – also wie fremde
+    Eingabe behandeln: Schema + fachliche Prüfung, Name passend zur Datei, alle Pfade innerhalb des Speichers."""
+    from . import regie
+    from .verarbeitung import SESSION_ID
+
     liste = json.loads(auftrag.read_text(encoding="utf-8"))
+    if fehler := regie.pruefe_liste(liste):  # prüft u. a. Übergangs-Arten (feste Liste) und Musik-Pegel 0..1
+        raise MedienFehler("Auftrag ungültig: " + "; ".join(fehler[:3]))
+    if liste["name"] != auftrag.stem or not SESSION_ID.fullmatch(liste["name"]):
+        raise MedienFehler("Auftrag: Name passt nicht zur Datei")
     for s in liste["segmente"]:
-        s["datei"] = str(konfig.absolut(s["datei"]))
+        s["datei"] = str(_im_speicher(konfig, s["datei"]))
+    if m := liste.get("musik"):
+        if Path(m["datei"]).name != m["datei"]:
+            raise MedienFehler(f"Musik-Dateiname nicht erlaubt: {m['datei']!r}")
     konfig.daten.setdefault("musik", {})["ordner"] = str(konfig.wurzel / "regie" / "musik")
     ziel = konfig.wurzel / "regie" / "final" / f"{liste['name']}.mp4"
     return rendere(liste, ziel, konfig, final=True)

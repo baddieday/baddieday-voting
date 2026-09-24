@@ -112,3 +112,16 @@ class Regisseur(MitRegieMaterial):
         self.assertIsNone(liste["musik"])
         self.assertIn("keine Musik", " ".join(liste["hinweise"]))
         self.assertEqual(regie.pruefe_liste(liste), [])
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class ActionAmEnde(MitRegieMaterial):
+    DAUER = 10.0
+
+    def test_jubel_kurz_vor_dateiende_bricht_compose_nicht(self):
+        # Instant-Replays enden direkt nach der Action: Jubel bei 9,6 s von 10 s
+        self.momente_anlegen([("lustig", 0, [], "m1"), ("spannend", 1, [9.8], "m2"), ("chill", 0, [], "m3")])
+        self.con.execute("UPDATE momente SET merkmale = json_set(merkmale, '$.jubel_laut_s', json('[9.6]')) "
+                         "WHERE schluessel = 'datei:1'")
+        liste = lies(regie.erstelle(self.con, self.konfig, "short"))
+        self.assertEqual(regie.pruefe_liste(liste), [])

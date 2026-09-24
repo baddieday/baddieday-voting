@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .konfig import Konfig, sende_wake_on_lan
-from .sperre import _freigeben, _versuche
+from .sperre import GEHALTEN, _freigeben, _versuche
 from .zeit import aus_iso, iso, jetzt
 
 log = logging.getLogger("pipeline")
@@ -204,13 +204,16 @@ def setze_marke(konfig: Konfig, name: str, minuten: float, grund: str) -> Marke:
 
 
 def loese_marke(konfig: Konfig, name: str) -> None:
+    if not NAME.fullmatch(name):
+        raise BigFehler(f"Ungültiger Markenname {name!r}")
     (halten_ordner(konfig) / f"{name}.json").unlink(missing_ok=True)
 
 
 def pipeline_beschaeftigt(konfig: Konfig) -> bool:
-    """Hält gerade ein Pipeline-Schritt die flock-Sperre? (Wir nehmen sie nur probeweise.)"""
+    """Hält gerade ein ANDERER Pipeline-Schritt die flock-Sperre? (Wir nehmen sie nur probeweise.)
+    Hält dieser Prozess sie selbst (z. B. render-entwurf --final), zählt das nicht."""
     pfad = konfig.datenbank.with_suffix(".lock")
-    if not pfad.exists():
+    if not pfad.exists() or str(pfad.resolve()) in GEHALTEN:
         return False
     fd = os.open(pfad, os.O_RDWR)
     try:
@@ -234,8 +237,12 @@ def darf_wecken(konfig: Konfig, zeit: datetime | None = None) -> str | None:
         return "kein Host für pve-big ([big].host / [speicher].host)"
     if not ssh_befehl(konfig):
         return "Herunterfahren nicht eingerichtet ([big].ssh_ziel / ssh_schluessel) – wecke nicht"
-    if not lies_zustand(konfig).get("status_ok"):
+    status_ok = lies_zustand(konfig).get("status_ok")
+    if not status_ok:
         return "Herunterfahren noch nie erfolgreich geprüft – erst `pipeline big pruefen`, wenn pve-big läuft"
+    tage = float(_b(konfig, "status_gueltig_tage", 14))
+    if (zeit or jetzt()) - aus_iso(status_ok) > timedelta(days=tage):
+        return f"Steuerung zuletzt vor über {tage:.0f} Tagen geprüft – erst `pipeline big pruefen`, wenn pve-big läuft"
     return None
 
 
@@ -264,6 +271,8 @@ def wach_halten(konfig: Konfig, name: str, grund: str, minuten: float = 120) -> 
             try:
                 fern_status(konfig)  # geht das Herunterfahren? Sonst sofort abbrechen
             except BigFehler as e:
+                loese_marke(konfig, name)
+                herunterfahren(konfig, "Steuerung antwortete nach dem Wecken nicht", warten_s=60)  # Versuch
                 raise BigFehler(f"pve-big wach, aber Steuerung antwortet nicht ({e}) – Abbruch") from None
         yield True
     finally:

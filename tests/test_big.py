@@ -6,6 +6,8 @@ import json
 import os
 import stat
 import subprocess
+import sys
+from time import sleep as time_sleep
 from datetime import timedelta
 from pathlib import Path
 from unittest import mock
@@ -87,11 +89,29 @@ class Waechter(MitSpeicher):
         self.assertEqual(big.marken(self.konfig), [])
 
     def test_pipeline_sperre_verhindert_aus(self):
-        with sperre(self.konfig.datenbank.with_suffix(".lock")):
+        # Ein ANDERER Prozess hält die Sperre (z. B. n8n-render)
+        lock = self.konfig.datenbank.with_suffix(".lock")
+        bereit = self.tmp / "bereit"
+        halter = subprocess.Popen([sys.executable, "-c", (
+            "import fcntl, os, sys, time; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT); "
+            "fcntl.flock(fd, fcntl.LOCK_EX); open(sys.argv[2], 'w').close(); time.sleep(30)"), str(lock), str(bereit)])
+        try:
+            for _ in range(200):
+                if bereit.exists():
+                    break
+                time_sleep(0.05)
             e = big.waechter(self.konfig)
+        finally:
+            halter.kill()
+            halter.wait()
         self.assertFalse(e["aus"])
         self.assertIn("Sperre", e["grund"])
         self.assertTrue(big.waechter(self.konfig)["aus"])  # Sperre wieder frei
+
+    def test_eigene_sperre_haelt_nicht_an(self):
+        # render-entwurf --final hält selbst die Sperre – danach muss pve-big trotzdem sofort aus
+        with sperre(self.konfig.datenbank.with_suffix(".lock")):
+            self.assertTrue(big.waechter(self.konfig)["aus"])
 
     def test_gerade_geweckt_smb_und_ffmpeg_verhindern_aus(self):
         for status, wort in (({"uptime_s": 300, "smb": 0, "ffmpeg": 0}, "min wach"),
