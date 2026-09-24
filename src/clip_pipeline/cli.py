@@ -14,7 +14,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import aufraeumen, big, caption, db, erfassung, highlight, lernen, replay, shorts, verarbeitung
+from . import aufraeumen, bestand, big, caption, db, erfassung, highlight, lernen, replay, shorts, verarbeitung
 from .konfig import KonfigFehler, SpeicherOffline, lade
 from .medien import MedienFehler
 from .sperre import Gesperrt, sperre
@@ -204,6 +204,16 @@ def _cmd_big(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_bestand(args, konfig, con) -> int:
+    ergebnis = bestand.erstelle(konfig, weitere=[Path(p) for p in args.pfad], stichprobe=args.stichprobe,
+                                messen=not args.ohne_messung)
+    if args.bericht:
+        Path(args.bericht).write_text(bestand.als_markdown(ergebnis), encoding="utf-8")
+        log.info("Bericht: %s", args.bericht)
+    _json(ergebnis)
+    return 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -262,6 +272,13 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--liste", action="store_true", help="im Probelauf die Dateien auflisten")
     s.add_argument("--taeglich", action="store_true", help="nichts tun, wenn heute schon aufgeräumt wurde")
     s.set_defaults(fn=_cmd_aufraeumen, sperren=True)
+
+    s = unter.add_parser("bestand", help="Bestandsaufnahme: Replays, Videos, Tonspuren, VA-API, Platz")
+    s.add_argument("--pfad", action="append", default=[], help="zusätzlicher Ordner (mehrfach möglich)")
+    s.add_argument("--stichprobe", type=int, default=5, help="Videos je Ordner, deren Tonspuren geprüft werden")
+    s.add_argument("--ohne-messung", action="store_true", help="Tonspuren nicht messen (schneller)")
+    s.add_argument("--bericht", help="zusätzlich als Markdown speichern, z. B. docs/BESTAND.md")
+    s.set_defaults(fn=_cmd_bestand, sperren=False)
 
     s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
     s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])
