@@ -207,5 +207,6 @@ class SteuerSkript(MitSpeicher):
         self.assertEqual(set(daten), {"uptime_s", "smb", "ffmpeg"})
 
     def test_alles_andere_abgewiesen(self):
-        for befehl in ("", "status; rm -rf /", "aus now", "bash", "status\naus"):
+        for befehl in ("", "status; rm -rf /", "aus now", "bash", "status\naus", "final ../../etc/passwd",
+                       "final a;reboot", "final", "final $(id)"):
             self.assertEqual(self.lauf(befehl).returncode, 2, befehl)

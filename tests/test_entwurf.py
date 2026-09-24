@@ -4,6 +4,7 @@ import json
 import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from clip_pipeline import entwurf, medien, regie, regie_lernen
 
@@ -61,3 +62,30 @@ class Entwurf(MitRegieMaterial):
         self.assertTrue(all(not s["datei"].startswith("/") for s in daten["segmente"]))
         self.assertTrue((self.konfig.wurzel / "regie" / "musik" / daten["musik"]["datei"]).is_file())
         self.assertEqual(entwurf.encoder(self.konfig, final=True)[2], "h264_nvenc")
+
+
+class FinalAufBig(MitRegieMaterial):
+    def test_wecken_rendern_aus(self):
+        from clip_pipeline import big
+        from clip_pipeline.zeit import iso, jetzt
+        from tests.test_big import FalscherBig
+
+        self.konfig.daten["material"] = {"ordner": str(self.tmp / "momente")}
+        self.momente_anlegen(MOMENTE[:6])
+        e = regie.erstelle(self.con, self.konfig, "short")
+        falsch = FalscherBig(self.tmp)
+        self.konfig.daten["speicher"].update(wol_mac="aa:bb:cc:dd:ee:ff", wecken_warten_s=30)
+        self.konfig.daten["big"].update(host="pve-big", ssh=[str(falsch.skript)], aus_warten_s=5)
+        big._schreibe_zustand(self.konfig, status_ok=iso(jetzt()))
+        an = {"wert": False}
+
+        def wol(_mac):
+            an["wert"] = True
+
+        with mock.patch.object(big, "wach", side_effect=lambda _k=None: an["wert"] and not (self.tmp / "aus").exists()), \
+                mock.patch.object(big, "sende_wake_on_lan", side_effect=wol), mock.patch("time.sleep"):
+            ergebnis = entwurf.final_auf_big(self.con, self.konfig, e["entwurf"])
+        self.assertEqual(falsch.aufrufe[0], "status")
+        self.assertIn("final", falsch.aufrufe)
+        self.assertEqual(falsch.aufrufe[-1], "aus")  # danach sofort aus
+        self.assertTrue(ergebnis["final"].startswith("regie/final/"))

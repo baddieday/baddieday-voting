@@ -251,3 +251,19 @@ def nvenc_verfuegbar() -> bool:
     except OSError:
         return False
     return "h264_nvenc" in text
+
+
+def final_auf_big(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> dict:
+    """Ganzer Final-Weg vom Mini aus: Auftrag anlegen, pve-big (einmal) wecken, dort mit NVENC rendern,
+    danach sofort herunterfahren. Weckt nur, wenn das Herunterfahren gesichert ist (big.wach_halten)."""
+    from . import big
+
+    minuten = float(konfig.wert("regie.final_halten_min", 60))
+    with big.wach_halten(konfig, "final", f"Final-Render Entwurf {entwurf_id}", minuten=minuten):
+        auftrag = final_auftrag(con, konfig, entwurf_id)
+        antwort = big._fern(konfig, f"final {auftrag.stem}", timeout=minuten * 60)
+    zeilen = [z for z in antwort.strip().splitlines() if z.strip()]
+    ergebnis = json.loads(zeilen[-1]) if zeilen else {}
+    ziel = konfig.relativ(konfig.wurzel / "regie" / "final" / f"{auftrag.stem}.mp4")
+    con.execute("UPDATE entwuerfe SET final_datei = ? WHERE id = ?", (ziel, entwurf_id))
+    return {"entwurf": entwurf_id, "final": ziel, **ergebnis}

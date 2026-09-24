@@ -274,8 +274,11 @@ def _cmd_render_entwurf(args, konfig, con) -> int:
     from . import entwurf
 
     if args.final:
-        auftrag = entwurf.final_auftrag(con, konfig, args.entwurf)
-        _json({"auftrag": str(auftrag), "hinweis": "auf pve-big: clip-big-steuer final " + auftrag.stem})
+        try:
+            _json(entwurf.final_auf_big(con, konfig, args.entwurf))
+        except big.WeckenVerboten as e:
+            _json({"fehler": "wecken_verboten", "hinweis": str(e)})
+            return 3
         return 0
     _json(entwurf.entwurf(con, konfig, args.entwurf))
     return 0
@@ -385,7 +388,7 @@ def baue_parser() -> argparse.ArgumentParser:
 
     s = unter.add_parser("render-entwurf", help="Entwurf eines compose-Laufs rendern (Mini) bzw. --final beauftragen")
     s.add_argument("entwurf", type=int)
-    s.add_argument("--final", action="store_true", help="Auftrag für pve-big anlegen (NVENC, volle Qualität)")
+    s.add_argument("--final", action="store_true", help="auf pve-big in voller Qualität (NVENC): 1× wecken, danach aus")
     s.set_defaults(fn=_cmd_render_entwurf, sperren=True)
 
     s = unter.add_parser("render-final", help="(auf pve-big) Auftrag in voller Qualität rendern")
