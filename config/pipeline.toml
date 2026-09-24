@@ -39,6 +39,17 @@ aus_warten_s = 180
 # Sprint-Regel bis Mo 28.09., 20:00. NACH DEM SPRINT LEEREN (frist = ""), sonst weckt die Pipeline nie mehr.
 frist = "2026-09-28T20:00:00+02:00"
 
+[material]
+# Lokale Kopie auf dem Mini (pipeline material): gleiche Ordner wie in der Speicher-Wurzel.
+ordner = "/var/lib/clip-pipeline/material"
+# So viel bleibt immer frei
+reserve_gb = 2
+# Reicht der Platz nicht für alle Rohvideos: je Video nur die letzten Sekunden, verlustfrei (-c copy)
+ende_s = 90
+# pve-big höchstens so lange für die Kopie wach halten (danach greift der Wächter)
+halten_min = 240
+stichprobe = 5
+
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.
 pfad = "/var/lib/clip-pipeline/pipeline.db"

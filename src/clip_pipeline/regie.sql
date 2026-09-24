@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS lern_meldungen (
 CREATE TABLE IF NOT EXISTS material (
     quelle        TEXT PRIMARY KEY,         -- Pfad relativ zur Speicher-Wurzel (/srv/clips)
     ziel          TEXT NOT NULL,            -- Pfad auf dem Mini
-    art           TEXT NOT NULL CHECK (art IN ('replay', 'video', 'video_ende')),
+    art           TEXT NOT NULL CHECK (art IN ('replay', 'session', 'video', 'video_ende')),
     groesse       INTEGER NOT NULL,         -- Größe der Quelle in Bytes
     sha256_quelle TEXT NOT NULL,
     sha256_ziel   TEXT NOT NULL,            -- gleich sha256_quelle, außer bei video_ende (gekürzt)
