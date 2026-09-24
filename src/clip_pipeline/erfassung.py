@@ -11,6 +11,7 @@ import json
 import sqlite3
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from . import quellen, replay
 from .konfig import Konfig
@@ -100,6 +101,13 @@ def erfasse_aufnahmen(con: sqlite3.Connection, konfig: Konfig) -> dict:
     return {**zaehler, "fehlerliste": fehler[:10]} if fehler else zaehler
 
 
+def match_zeiten(datei: Path, zonen_name: str) -> tuple[datetime, datetime]:
+    """Vorläufige (start, ende) eines Replays: Ende = letzte Änderung (Fortnite schreibt bis zum Match-Ende),
+    nie jetzt() – scan/prepare können Stunden später laufen. Start aus dem Dateinamen, sonst 30 min davor."""
+    ende = datetime.fromtimestamp(datei.stat().st_mtime, UTC)
+    return replay.startzeit_aus_name(datei, zonen_name) or ende - timedelta(minutes=30), ende
+
+
 def erfasse_replays(con: sqlite3.Connection, konfig: Konfig) -> list[str]:
     """Legt für jedes fertige Replay ein Match an (Zeiten vorläufig, genau erst nach dem Auslesen)."""
     ordner = konfig.ordner("replays")
@@ -115,8 +123,7 @@ def erfasse_replays(con: sqlite3.Connection, konfig: Konfig) -> list[str]:
         stat = datei.stat()
         if time.time() - stat.st_mtime < ruhezeit:
             continue  # Fortnite schreibt noch -> Match läuft noch
-        ende = datetime.fromtimestamp(stat.st_mtime, UTC)
-        start = replay.startzeit_aus_name(datei, zone) or ende - timedelta(minutes=30)
+        start, ende = match_zeiten(datei, zone)
         mid = replay.match_id(datei)
         if con.execute("SELECT 1 FROM matches WHERE id = ?", (mid,)).fetchone():
             mid = f"{mid}_{int(stat.st_mtime)}"

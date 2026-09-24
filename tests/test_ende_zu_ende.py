@@ -14,9 +14,9 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from clip_pipeline import cli, erfassung, medien, schema, verarbeitung
+from clip_pipeline import cli, db, erfassung, medien, schema, verarbeitung
 from clip_pipeline.replay import Match, MeinEreignis
-from clip_pipeline.zeit import UTC, aus_iso, utc_zu_lokal
+from clip_pipeline.zeit import UTC, aus_iso, iso, jetzt, utc_zu_lokal
 
 from tests.hilfen import HAT_FFMPEG, MitSpeicher, testvideo
 
@@ -183,6 +183,36 @@ class Vertrag(MitSpeicher):
         (self.konfig.wurzel / ".clip-speicher").unlink()
         code, daten = self._cli("render", "--session", SID)
         self.assertEqual((code, daten["fehler"]), (3, "speicher_offline"))
+
+
+class MatchEnde(MitSpeicher):
+    """Match-Ende = letzte Änderung des Replays, auch wenn prepare erst Stunden später läuft (Rückstand)."""
+
+    def _replay_und_aufnahmen(self) -> tuple[str, datetime]:
+        zone = self.konfig.wert("zeit.zeitzone", "Europe/Berlin")
+        ende = (jetzt() - timedelta(hours=5)).replace(microsecond=0)
+        start_lokal = utc_zu_lokal(ende - timedelta(minutes=20), zone)
+        replay = self.konfig.ordner("replays") / start_lokal.strftime("UnsavedReplay-%Y.%m.%d-%H.%M.%S.replay")
+        replay.write_bytes(b"x")
+        os.utime(replay, (ende.timestamp(), ende.timestamp()))
+        for name, beginn in (("im-match", ende - timedelta(minutes=5)), ("spaeter", ende + timedelta(hours=3))):
+            self.con.execute(
+                """INSERT INTO aufnahmen (pfad, groesse, geaendert, quelle, start_utc, ende_utc, dauer_s, tonspuren, erfasst)
+                   VALUES (?, 1, 0, 'steelseries', ?, ?, 60, 2, 'x')""",
+                (f"eingang/{name}.mp4", iso(beginn), iso(beginn + timedelta(seconds=60))),
+            )
+        return start_lokal.strftime("%Y-%m-%d_%H-%M-%S"), ende
+
+    def test_prepare_nimmt_mtime_statt_jetzt(self):
+        sid, ende = self._replay_und_aufnahmen()
+        vorbereitet = verarbeitung.prepare(self.con, self.konfig, sid)
+        self.assertEqual(db.match(self.con, sid)["ende_utc"], iso(ende))
+        self.assertEqual(vorbereitet["aufnahmen_im_match"], 1)  # die Aufnahme 3 h später gehört nicht dazu
+
+    def test_scan_rechnet_gleich(self):
+        sid, ende = self._replay_und_aufnahmen()
+        self.assertEqual(erfassung.erfasse_replays(self.con, self.konfig), [sid])
+        self.assertEqual(db.match(self.con, sid)["ende_utc"], iso(ende))
 
 
 if __name__ == "__main__":
