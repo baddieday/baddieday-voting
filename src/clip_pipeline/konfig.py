@@ -121,6 +121,8 @@ class Konfig:
             mac = str(self.wert("speicher.wol_mac", "") or "").strip()
             if not (wecken and mac):
                 raise SpeicherOffline(f"Speicher-Host {self.wert('speicher.host')} schläft oder ist nicht erreichbar")
+            if (frist := str(self.wert("big.frist", "") or "").strip()) and _vorbei(frist):
+                raise SpeicherOffline(f"Speicher-Host schläft; Wecken ist seit {frist} gesperrt ([big].frist)")
             sende_wake_on_lan(mac)
             ende = time.monotonic() + float(self.wert("speicher.wecken_warten_s", 180))
             while not self._host_erreichbar():
@@ -134,6 +136,14 @@ class Konfig:
             raise SpeicherOffline(
                 f"Markierungsdatei {self.wurzel / self.daten['speicher']['markierung']} fehlt – Speicher nicht eingehängt?"
             )
+
+
+def _vorbei(zeitpunkt: str) -> bool:
+    """Liegt ein ISO-Zeitpunkt (mit Zone) in der Vergangenheit?"""
+    from datetime import datetime, timezone
+
+    grenze = datetime.fromisoformat(zeitpunkt.replace("Z", "+00:00"))
+    return datetime.now(timezone.utc) >= (grenze if grenze.tzinfo else grenze.replace(tzinfo=timezone.utc))
 
 
 def sende_wake_on_lan(mac: str, broadcast: str = "255.255.255.255", port: int = 9) -> bytes:

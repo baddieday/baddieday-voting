@@ -34,7 +34,8 @@ def verbinde(pfad: Path | str) -> sqlite3.Connection:
         con.execute("PRAGMA busy_timeout = 30000")
         if str(pfad) != ":memory:":
             con.execute("PRAGMA journal_mode = WAL")
-        con.executescript(resources.files("clip_pipeline").joinpath("schema.sql").read_text(encoding="utf-8"))
+        for datei in ("schema.sql", "regie.sql"):  # regie.sql: Tabellen des Regisseurs (Sprint 09/2026)
+            con.executescript(resources.files("clip_pipeline").joinpath(datei).read_text(encoding="utf-8"))
         for tabelle, spalte, typ in MIGRATIONEN:
             if spalte not in {z["name"] for z in con.execute(f"PRAGMA table_info({tabelle})")}:
                 con.execute(f"ALTER TABLE {tabelle} ADD COLUMN {spalte} {typ}")
@@ -67,6 +68,15 @@ def meldung(con: sqlite3.Connection, schluessel: str, text: str) -> bool:
     """Legt eine Nachricht für den Bot an – je Schlüssel nur einmal. True = neu angelegt."""
     cursor = con.execute(
         "INSERT OR IGNORE INTO meldungen (schluessel, text, erstellt) VALUES (?, ?, ?)", (schluessel, text, iso(jetzt()))
+    )
+    return cursor.rowcount == 1
+
+
+def lern_meldung(con: sqlite3.Connection, schluessel: str, text: str) -> bool:
+    """Nachricht für den Lern-Bot (nicht den Clip-Bot) – je Schlüssel nur einmal. True = neu angelegt."""
+    cursor = con.execute(
+        "INSERT INTO lern_meldungen (schluessel, text, erstellt) VALUES (?, ?, ?) ON CONFLICT (schluessel) DO NOTHING",
+        (schluessel, text, iso(jetzt())),
     )
     return cursor.rowcount == 1
 

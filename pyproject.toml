@@ -20,4 +20,4 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-clip_pipeline = ["schema.sql", "schemas/*.json"]
+clip_pipeline = ["schema.sql", "regie.sql", "schemas/*.json"]

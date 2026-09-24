@@ -23,6 +23,22 @@ musik = "musik"                # nur lizenzierte Titel, je Titel eine <name>.liz
 archiv = "archiv"              # Multikills ab 3 Kills – wird nie aufgeräumt
 papierkorb = "papierkorb"
 
+[big]
+# Sicherheitsnetz für pve-big (src/clip_pipeline/big.py, Timer clip-big-waechter alle 10 min).
+# Host und Port für "ist er wach?" – leer = [speicher].host; Port 22 = SSH.
+host = ""
+port = 22
+# Herunterfahren per SSH mit eigenem Schlüssel (auf pve-big per command= auf clip-big-steuer festgelegt).
+# Solange ssh_ziel leer ist oder "pipeline big pruefen" nie geklappt hat, weckt die Pipeline pve-big NICHT.
+ssh_ziel = ""                                   # z. B. "root@pve-big"
+ssh_schluessel = "/var/lib/clip-pipeline/.ssh/pve-big"
+# Nach dem Aufwachen mindestens so lange an lassen (der Gaming-PC hat ihn evtl. gerade geweckt)
+mindest_wach_min = 20
+aus_warten_s = 180
+# Ab dieser Zeit wird pve-big nicht mehr geweckt; läuft er, fährt der Wächter ihn einmal herunter.
+# Sprint-Regel bis Mo 28.09., 20:00. NACH DEM SPRINT LEEREN (frist = ""), sonst weckt die Pipeline nie mehr.
+frist = "2026-09-28T20:00:00+02:00"
+
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.
 pfad = "/var/lib/clip-pipeline/pipeline.db"

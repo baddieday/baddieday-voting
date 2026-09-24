@@ -14,7 +14,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import aufraeumen, caption, db, erfassung, highlight, lernen, replay, shorts, verarbeitung
+from . import aufraeumen, big, caption, db, erfassung, highlight, lernen, replay, shorts, verarbeitung
 from .konfig import KonfigFehler, SpeicherOffline, lade
 from .medien import MedienFehler
 from .sperre import Gesperrt, sperre
@@ -159,6 +159,51 @@ def _cmd_aufraeumen(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_big(args, konfig, con) -> int:
+    """Sicherheitsnetz für pve-big: status | pruefen | waechter | aus | halten | loesen."""
+    if args.aktion == "halten":
+        m = big.setze_marke(konfig, args.name, args.minuten, args.grund or "von Hand")
+        _json({"halten": m.name, "bis": iso(m.bis)})
+        return 0
+    if args.aktion == "loesen":
+        big.loese_marke(konfig, args.name)
+        _json({"geloest": args.name})
+        return 0
+    if not big.host(konfig):
+        _json({"fehler": "nicht_eingerichtet", "hinweis": "[big].host bzw. [speicher].host fehlt"})
+        return 3
+    if args.aktion == "status":
+        e = big.pruefe(konfig)
+        _json({"wach": e.wach, "wuerde_aus": e.aus, "grund": e.grund, "wecken": big.darf_wecken(konfig) or "erlaubt",
+               "marken": [m.name for m in big.marken(konfig)], "zustand": big.lies_zustand(konfig)})
+        return 0
+    if args.aktion == "pruefen":
+        if not big.wach(konfig):
+            _json({"fehler": "schlaeft", "hinweis": "pruefen geht nur, wenn pve-big läuft"})
+            return 3
+        _json({"ok": True, "status": big.fern_status(konfig)})
+        return 0
+    if args.aktion == "aus":
+        e = big.pruefe(konfig)
+        if not e.wach:
+            _json({"aus": True, "grund": "schläft schon"})
+            return 0
+        if not (e.aus or args.sofort):
+            _json({"aus": False, "grund": e.grund, "hinweis": "--sofort erzwingt es"})
+            return 1
+        ok = big.herunterfahren(konfig, "von Hand" if args.sofort else e.grund)
+        _json({"aus": ok})
+        return 0 if ok else 1
+    ergebnis = big.waechter(konfig)  # waechter
+    if alarm := ergebnis.get("alarm"):
+        log.error(alarm)
+        db.lern_meldung(con, f"big-alarm:{jetzt():%Y-%m-%dT%H}", f"🚨 pve-big: {alarm} ({ergebnis['grund']})")
+    elif ergebnis["aus"]:
+        log.info("pve-big heruntergefahren: %s", ergebnis["grund"])
+    _json(ergebnis)
+    return 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -217,6 +262,14 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--liste", action="store_true", help="im Probelauf die Dateien auflisten")
     s.add_argument("--taeglich", action="store_true", help="nichts tun, wenn heute schon aufgeräumt wurde")
     s.set_defaults(fn=_cmd_aufraeumen, sperren=True)
+
+    s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
+    s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])
+    s.add_argument("name", nargs="?", default="hand", help="Name der Halten-Marke")
+    s.add_argument("--minuten", type=float, default=60)
+    s.add_argument("--grund")
+    s.add_argument("--sofort", action="store_true", help="aus: auch wenn ein Auftrag läuft")
+    s.set_defaults(fn=_cmd_big, sperren=False)
 
     s = unter.add_parser("bot", help="Telegram-Bot starten (läuft dauerhaft)")
     s.set_defaults(fn=_cmd_bot, sperren=False)
