@@ -1,0 +1,29 @@
+# Nächtlicher Abgleich Puffer -> Lager (E19, src/clip_pipeline/lager.py): neue Dateien mit SHA-256 nach pve-big
+# kopieren und zurücklesen. Weckt pve-big nur, wenn im Puffer etwas offen ist; danach schaltet er sich selbst ab.
+# Nur im getrennten Betrieb ([lager].wurzel gesetzt) – sonst Exit 2. Einführung: docs/PUFFER.md, R6.
+# Checkout: /opt/clip-pipeline auf main (nach dem Merge von E19) – der alte Stand kennt "pipeline lager" nicht.
+# VOR dem Aktivieren einmal von Hand ansehen:
+#   sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager abgleich --probelauf
+# Log ansehen: journalctl -u clip-lager -n 50
+[Unit]
+Description=Clip-Pipeline: Puffer nachts ins Lager (pve-big) abgleichen
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/opt/clip-pipeline
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline lager abgleich
+# 3 = pve-big nicht wach geworden, 4 = anderer Abgleich läuft -> kein Fehler in systemd, nächste Nacht wieder
+# (bleibt es dabei, meldet die Morgenprüfung). 1 = einzelne Dateien fehlgeschlagen -> Meldung im Bot.
+SuccessExitStatus=3 4
+# Hängt ein Lauf, endet er nach 4 h – so hält er pve-big nicht ewig wach (wie die Obergrenze des Herzschlags)
+TimeoutStartSec=4h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# /srv/big statt /srv/big/clips: Das NFS wird meist erst NACH dem Start eingehängt (pve-big schläft um 04:30).
+# Ein Bind direkt auf den leeren Einhängepunkt würde das spätere NFS für diesen Dienst verdecken.
+ReadWritePaths=/var/lib/clip-pipeline /srv/puffer /srv/big

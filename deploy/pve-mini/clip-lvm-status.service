@@ -1,0 +1,19 @@
+# pve-mini (Host, NICHT im CT): Füllstand des Thin-Pools für die Morgenprüfung der Pipeline (E19, docs/PUFFER.md R1).
+# Installiert von deploy/pve-mini/puffer-einrichten.sh. Von Hand:
+#   install -m 755 clip-lvm-status /usr/local/sbin/ && cp clip-lvm-status.service clip-lvm-status.timer /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now clip-lvm-status.timer
+#   cat /mnt/big/lvm-status.txt
+[Unit]
+Description=Clip-Pipeline: Füllstand des Thin-Pools nach /mnt/big/lvm-status.txt
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/clip-lvm-status
+SyslogIdentifier=clip-lvm-status
+TimeoutStartSec=2min
+# Härtung: liest nur (lvs, df) und schreibt eine Datei nach /mnt/big.
+# ProtectSystem=full statt strict: lvs legt Sperrdateien unter /run/lock/lvm an.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
