@@ -175,19 +175,28 @@ class Wecken(MitSpeicher):
         import time as zeitmodul
 
         self.konfig.daten["big"].update(ssh=None, ssh_ziel="")
-        status = self.konfig.wurzel / ".leerlauf.json"
-        status.write_text(json.dumps({"trocken": True, "stand": int(zeitmodul.time())}))
+        probe = self.konfig.wurzel / ".leerlauf-probe"
+        scharf = self.konfig.wurzel / ".leerlauf-scharf"
+        probe.touch()
         self.assertFalse(big.merke_leerlauf(self.konfig))           # Probelauf zählt nicht
         self.assertIn("nicht gesichert", big.darf_wecken(self.konfig))
-        status.write_text(json.dumps({"trocken": False, "stand": int(zeitmodul.time()) - 3600}))
-        self.assertFalse(big.merke_leerlauf(self.konfig))           # veraltet zählt nicht
-        status.write_text(json.dumps({"trocken": False, "stand": int(zeitmodul.time())}))
+        probe.unlink()
+        scharf.touch()
+        alt = zeitmodul.time() - 3600
+        os.utime(scharf, (alt, alt))
+        self.assertIsNone(big.merke_leerlauf(self.konfig))          # veraltet zählt nicht
+        self.assertIn("nicht gesichert", big.darf_wecken(self.konfig))
+        scharf.touch()
         with mock.patch.object(konfig.Konfig, "_host_erreichbar", return_value=False), \
-                mock.patch("pathlib.Path.read_text", side_effect=AssertionError("NFS-Mount angefasst")):
+                mock.patch("pathlib.Path.stat", side_effect=AssertionError("NFS-Mount angefasst")):
             self.assertIsNone(big.merke_leerlauf(self.konfig))      # pve-big antwortet nicht: Mount nicht anfassen
-        self.assertTrue(big.merke_leerlauf(self.konfig))
+        scharf.unlink()
+        scharf.mkdir()                                              # nur stat(), nie lesen (Lesen zählt als Zugriff):
+        self.assertTrue(big.merke_leerlauf(self.konfig))            # ein Verzeichnis ließe sich gar nicht lesen
+        scharf.rmdir()
+        scharf.touch()
         self.assertIsNone(big.darf_wecken(self.konfig))
-        status.unlink()                                             # pve-big schläft: gemerkt bleibt gemerkt
+        scharf.unlink()                                             # pve-big schläft: gemerkt bleibt gemerkt
         self.assertIsNone(big.merke_leerlauf(self.konfig))
         self.assertIsNone(big.darf_wecken(self.konfig))
         self.konfig.daten["big"]["frist"] = iso(jetzt() - timedelta(seconds=1))

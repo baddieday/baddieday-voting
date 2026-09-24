@@ -165,8 +165,8 @@ Statt „30 min ohne Lese-/Schreibzugriff“ prüft `clip-leerlauf` auf pve-big 
 Render, Proxmox-Tasks, von Hand gestartete Gäste, angemeldete Menschen/Web-Konsole). Nach **20 min** Ruhe (später
 10) misst er nach 15 s alles noch einmal und fährt dann herunter. Keine Aktivität sind Verbindungen,
 `stat()` und Lease-Erneuerungen; eine unlesbare Quelle zählt als „wach“. Gäste mit Autostart zählen nicht.
-Er meldet sich jede Minute in `<clips>/.leerlauf.json`. Sieht der Mini dort ein **scharfes** clip-leerlauf,
-darf er pve-big wecken (`big.darf_wecken`) – auch ohne SSH-Steuerung. Das erfüllt Regel 3: geweckt wird nur,
+Er setzt jede Minute den Zeitstempel der **leeren** Datei `<clips>/.leerlauf-scharf`. Sieht der Mini dort per
+`stat()` ein frisches Lebenszeichen, darf er pve-big wecken (`big.darf_wecken`) – auch ohne SSH-Steuerung. Das erfüllt Regel 3: geweckt wird nur,
 was sich nachweislich selbst wieder abschaltet. Einrichtung per `deploy/big/einrichten.sh` mit fest im
 Einfüge-Block eingetragenen Prüfsummen (die Freigabe ist auch vom Gaming-PC beschreibbar).
 
@@ -186,3 +186,9 @@ Deshalb kamen immer dieselben Clips mit anderer Musik. Jetzt:
   dabei gingen gelernte Vorlieben verloren).
 - Die Schnittliste zeigt je Segment Punkte, Abzug und wie oft er schon gezeigt wurde; der Bot schreibt
   „🆕 n neue · m schon gezeigt“.
+
+**Nachtrag 24.09. (vor der ersten Installation gefunden):** Die erste Fassung schrieb jede Minute eine
+Statusdatei `.leerlauf.json` in den Clips-Ordner und der Lern-Bot las sie alle 30 s. Beides hätte pve-big für
+immer wachgehalten: Das Schreiben zählt clip-leerlauf selbst als ZFS-Schreibzugriff, das Lesen über NFS als
+OPEN/READ. Jetzt: leere Marke, nur der Zeitstempel wird gesetzt (utime zählt weder ZFS noch nfsd), und der Mini
+schaut nur nach (stat = GETATTR, zählt nicht).

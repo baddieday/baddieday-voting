@@ -217,13 +217,27 @@ class Leerlauf(unittest.TestCase):
         self.assertIn("Gegenprobe: doch aktiv", ausgabe)
         self.assertFalse(self.aus)
 
-    def test_status_fuer_den_mini_im_speicher(self):
+    def test_lebenszeichen_fuer_den_mini_ohne_inhalt(self):
+        # Nur eine leere Datei mit frischem Zeitstempel: Inhalt schreiben (ZFS writes) oder über NFS lesen
+        # (OPEN/READ) zählte als Zugriff und hielte pve-big für immer wach
         self.konf(TROCKEN="0", LEERLAUF_MIN="20", MINDEST_WACH_MIN="10")
         self.uptime(600)
+        scharf, probe = self.t / "clips/.leerlauf-scharf", self.t / "clips/.leerlauf-probe"
         self.lauf()
-        daten = json.loads((self.t / "clips/.leerlauf.json").read_text())
-        self.assertIs(daten["trocken"], False)
-        self.assertAlmostEqual(daten["stand"], time.time(), delta=30)
+        self.assertEqual(scharf.stat().st_size, 0)
+        self.assertAlmostEqual(scharf.stat().st_mtime, time.time(), delta=30)
+        self.assertFalse(probe.exists())
+        os.utime(scharf, (time.time() - 3600, time.time() - 3600))
+        self.uptime(660)
+        self.lauf()                                          # jede Minute neu gesetzt
+        self.assertAlmostEqual(scharf.stat().st_mtime, time.time(), delta=30)
+        self.assertEqual(self.status["gruende"], [])        # die eigene Meldung ist kein Zugriff
+        self.konf(TROCKEN="1", LEERLAUF_MIN="20", MINDEST_WACH_MIN="10")
+        self.uptime(720)
+        self.lauf()                                          # Probelauf: andere Marke, die scharfe verschwindet
+        self.assertTrue(probe.exists())
+        self.assertFalse(scharf.exists())
+        self.assertFalse((self.t / "clips/.leerlauf.json").exists())
 
     def test_automatik_aus_datei(self):
         (self.t / "automatik-aus").touch()

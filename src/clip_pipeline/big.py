@@ -268,20 +268,27 @@ def herzschlag(konfig: Konfig, name: str, intervall_s: float = 60.0) -> Iterator
 
 # --- Wecken -----------------------------------------------------------------------
 
+LEERLAUF_MARKEN = {"scharf": ".leerlauf-scharf", "probe": ".leerlauf-probe"}  # wie in deploy/big/clip-leerlauf
+
+
 def merke_leerlauf(konfig: Konfig) -> bool | None:
-    """Liest <speicher>/.leerlauf.json (schreibt clip-leerlauf auf pve-big jede Minute) und merkt sich lokal,
-    wann zuletzt ein SCHARFES clip-leerlauf gesehen wurde. None = nichts zu sehen (pve-big schläft o. Ä.)."""
-    if not konfig._host_erreichbar():  # schläft pve-big: nicht am (vielleicht hängenden) NFS-Mount lesen
+    """Sieht nach, ob clip-leerlauf auf pve-big scharf läuft (leere Datei <speicher>/.leerlauf-scharf, deren
+    Zeitstempel es jede Minute setzt), und merkt sich das lokal. Nur stat(): über NFS ein GETATTR, das zählt auf
+    pve-big nicht als Zugriff. Den Inhalt einer Datei zu lesen (OPEN/READ) würde ihn für immer wachhalten.
+    True = scharf, False = nur Probelauf, None = nichts zu sehen (pve-big schläft o. Ä.)."""
+    if not konfig._host_erreichbar():  # schläft pve-big: nicht am (vielleicht hängenden) NFS-Mount anfassen
         return None
-    try:
-        daten = json.loads((konfig.wurzel / ".leerlauf.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    frisch = time.time() - float(daten.get("stand", 0)) < 600
-    scharf = frisch and daten.get("trocken") is False
-    if scharf:
+
+    def frisch(name: str) -> bool:
+        try:
+            return time.time() - (konfig.wurzel / name).stat().st_mtime < 600
+        except OSError:
+            return False
+
+    if frisch(LEERLAUF_MARKEN["scharf"]):
         _schreibe_zustand(konfig, leerlauf_scharf=iso(jetzt()))
-    return scharf
+        return True
+    return False if frisch(LEERLAUF_MARKEN["probe"]) else None
 
 
 def _frisch(zeitpunkt: str | None, konfig: Konfig, zeit: datetime | None) -> bool:

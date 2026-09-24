@@ -89,8 +89,9 @@ sag "Fertig. Der Entwurf kommt in ~30 s im Lern-Bot (sonst dort /start)."
 echo "Nach jeder Bewertung (✅ fertig) baut der Bot den nächsten und analysiert dabei 10 weitere Clips."
 echo "Mehr Clips auf einmal:  ANZAHL=100 bash $0"
 echo "Log des Lern-Bots:      pct exec $CT -- journalctl -u clip-lernbot -n 30"
-# Schaltet sich pve-big selbst ab? (clip-leerlauf schreibt jede Minute <clips>/.leerlauf.json)
-if im_ct python3 -c 'import json, sys, time; d = json.load(open("/srv/clips/.leerlauf.json")); sys.exit(not (d.get("trocken") is False and time.time() - d.get("stand", 0) < 600))' 2>/dev/null; then
+# Schaltet sich pve-big selbst ab? (clip-leerlauf setzt jede Minute den Zeitstempel von <clips>/.leerlauf-scharf;
+# nur nachsehen, nicht lesen – Lesen über NFS zählt auf pve-big als Zugriff)
+if [ -n "$(im_ct sh -c 'find /srv/clips/.leerlauf-scharf -mmin -10 2>/dev/null')" ]; then
   echo "✅ pve-big schaltet sich über clip-leerlauf selbst ab, wenn ihn keiner mehr braucht."
 else
   echo "⚠️  clip-leerlauf ist auf pve-big noch nicht scharf: Block aus dem Chat in der Shell von pve-big einfügen."

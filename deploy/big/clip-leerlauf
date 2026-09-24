@@ -16,6 +16,7 @@ Im Zweifel wach: Ist eine Quelle nicht lesbar, zählt die Minute als aktiv (Warn
 Ist LEERLAUF_MIN lang nichts los: 15 s warten, ALLES noch einmal messen, dann
 `systemctl poweroff --check-inhibitors=yes`. Mit TROCKEN=1 (Standard) wird nur protokolliert.
 Protokoll: journalctl -t clip-leerlauf   Zustand: /run/clip-leerlauf/status.json
+Für den Mini: leere Datei <speicher>/.leerlauf-scharf (Zeitstempel jede Minute, siehe melde_speicher).
 Konfiguration: /etc/clip-leerlauf.conf (SCHLUESSEL=wert). Jede Quelle ist per Umgebungsvariable CLIP_LL_*
 austauschbar – so wird es ohne echten Server getestet (tests/test_clip_leerlauf.py).
 """
@@ -322,15 +323,22 @@ def schreibe(name: str, daten: dict) -> None:
     tmp.replace(ordner / name)
 
 
-def melde_speicher(k: dict, status: dict) -> None:
-    """Status auch als <speicher>/.leerlauf.json: Daran sieht der Mini (über NFS), dass pve-big sich selbst
-    abschaltet – dann darf er ihn wecken, auch ohne SSH-Steuerung. Fehler hier sind egal."""
-    ziel = Path(k["SPEICHER"]) / ".leerlauf.json"
+MARKEN = {"scharf": ".leerlauf-scharf", "probe": ".leerlauf-probe"}
+
+
+def melde_speicher(k: dict) -> None:
+    """Lebenszeichen für den Mini: die LEERE Datei <speicher>/.leerlauf-scharf (bei TROCKEN=1 .leerlauf-probe),
+    deren Änderungszeit jede Minute neu gesetzt wird. Der Mini sieht per stat() – über NFS nur GETATTR, das zählt
+    nicht als Zugriff –, dass pve-big sich selbst abschaltet, und darf ihn dann wecken.
+    Bewusst ohne Inhalt: Schreiben (ZFS "writes") und Lesen über NFS (OPEN/READ) zählen hier als Zugriff und
+    hielten pve-big für immer wach. utime() zählen weder die ZFS- noch die nfsd-Zähler. Fehler hier sind egal."""
+    speicher = Path(k["SPEICHER"])
+    marke = speicher / MARKEN["probe" if k["TROCKEN"] == "1" else "scharf"]
     try:
-        tmp = ziel.with_name(".leerlauf.json.tmp")
-        tmp.write_text(json.dumps({**status, "stand": int(time.time())}, ensure_ascii=False))
-        os.chmod(tmp, 0o644)
-        tmp.replace(ziel)
+        for name in MARKEN.values():
+            if name != marke.name and (speicher / name).exists():
+                (speicher / name).unlink()  # Moduswechsel – ein einziges Mal
+        marke.touch(mode=0o644)             # neu: leer anlegen (kein write); sonst nur die Zeit setzen
     except OSError:
         pass
 
@@ -392,7 +400,7 @@ def lauf() -> int:
         z["trocken_gemeldet"] = False
     schreibe("zustand.json", z)
     schreibe("status.json", status)
-    melde_speicher(k, status)
+    melde_speicher(k)
     return 0
 
 

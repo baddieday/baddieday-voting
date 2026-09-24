@@ -103,8 +103,9 @@ Schnittliste vor dem Speichern).
 
 ## pve-big schaltet sich selbst ab (clip-leerlauf)
 `deploy/big/clip-leerlauf` läuft auf pve-big jede Minute und fährt ihn nach 20 min ohne echten Zugriff auf den
-Clips-Ordner herunter (Details im Kopf des Skripts). Er schreibt jede Minute `<clips>/.leerlauf.json`; daran
-erkennt der Mini, dass pve-big sich selbst abschaltet – erst dann darf der Lern-Bot ihn wecken (Regel 3).
+Clips-Ordner herunter (Details im Kopf des Skripts). Er setzt jede Minute den Zeitstempel der leeren Datei
+`<clips>/.leerlauf-scharf`; daran erkennt der Mini, dass pve-big sich selbst abschaltet – erst dann darf der
+Lern-Bot ihn wecken (Regel 3). Bewusst ohne Inhalt: Lesen und Schreiben zählen als Zugriff.
 
 Einrichten (einmal):
 1. pve-mini: `bash /root/regie.sh` legt die Dateien nach `<clips>/.einrichtung`.
