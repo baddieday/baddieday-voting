@@ -20,6 +20,35 @@ MOMENTE = [
 ]
 
 
+FARBEN = [(230, 30, 30), (30, 200, 30), (30, 30, 230), (230, 230, 30), (230, 30, 230), (30, 230, 230),
+          (250, 140, 20), (140, 20, 250), (120, 120, 120), (250, 250, 250), (20, 120, 60), (120, 60, 20)]
+
+
+def farbvideo(ziel: Path, farbe: tuple[int, int, int], dauer: float) -> Path:
+    """Einfarbiges Video (640x360, 30 fps) mit zwei Tonspuren – so lässt sich im Ergebnis erkennen, welcher Moment wo ist."""
+    ziel.parent.mkdir(parents=True, exist_ok=True)
+    hexfarbe = "0x%02x%02x%02x" % farbe
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", f"color=c={hexfarbe}:s=640x360:r=30:d={dauer}",
+                    "-f", "lavfi", "-i", f"sine=frequency=300:duration={dauer}",
+                    "-f", "lavfi", "-i", f"sine=frequency=600:duration={dauer}",
+                    "-map", "0:v", "-map", "1:a", "-map", "2:a", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(ziel)], check=True)
+    return ziel
+
+
+def farbe_bei(video: Path, sekunde: float) -> tuple[int, int, int]:
+    """Mittlere Farbe der Bildmitte (20 % x 20 %) zu einer Sekunde."""
+    roh = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", f"{sekunde:.3f}", "-i", str(video),
+                          "-frames:v", "1", "-vf", "crop=iw*0.2:ih*0.2,scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         capture_output=True, check=True).stdout
+    return roh[0], roh[1], roh[2]
+
+
+def naechste_farbe(rgb) -> int:
+    return min(range(len(FARBEN)), key=lambda i: sum((a - b) ** 2 for a, b in zip(FARBEN[i], rgb)))
+
+
 def klick_musik(ziel: Path, bpm: float, dauer: float) -> Path:
     ziel.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
@@ -37,10 +66,12 @@ class MitRegieMaterial(MitSpeicher):
         self.konfig.daten["musik"]["ordner"] = str(self.tmp / "musik")
         self.konfig.daten.setdefault("regie", {})["ordner"] = str(self.tmp / "regie")
 
-    def momente_anlegen(self, momente=MOMENTE, *, video_mit_ton: int = 2) -> list[int]:
+    def momente_anlegen(self, momente=MOMENTE, *, video_mit_ton: int = 2, farbig: bool = False) -> list[int]:
         ids = []
         for i, (stimmung, serie, kills, match) in enumerate(momente, 1):
-            datei = testvideo(self.tmp / "momente" / f"{i:02d}.mp4", dauer=self.DAUER, tonspuren=video_mit_ton)
+            ziel = self.tmp / "momente" / f"{i:02d}.mp4"
+            datei = farbvideo(ziel, FARBEN[(i - 1) % len(FARBEN)], self.DAUER) if farbig else \
+                testvideo(ziel, dauer=self.DAUER, tonspuren=video_mit_ton)
             mk = {"kills": len(kills), "max_gruppe": serie, "kill_sekunden": kills, "spitzen": len(kills),
                   "jubel_laut": 0, "tod_sekunde": 4.0 if stimmung == "frustriert" else None}
             cur = self.con.execute(

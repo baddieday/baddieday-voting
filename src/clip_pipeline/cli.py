@@ -270,6 +270,27 @@ def _cmd_compose(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_render_entwurf(args, konfig, con) -> int:
+    from . import entwurf
+
+    if args.final:
+        auftrag = entwurf.final_auftrag(con, konfig, args.entwurf)
+        _json({"auftrag": str(auftrag), "hinweis": "auf pve-big: clip-big-steuer final " + auftrag.stem})
+        return 0
+    _json(entwurf.entwurf(con, konfig, args.entwurf))
+    return 0
+
+
+def _cmd_render_final(args, konfig, con) -> int:
+    """Läuft auf pve-big (per clip-big-steuer): rendert einen Auftrag in voller Qualität mit NVENC."""
+    from . import entwurf
+    from .verarbeitung import pruefe_id
+
+    auftrag = konfig.wurzel / str(konfig.wert("regie.auftraege", "regie/auftraege")) / f"{pruefe_id(args.name)}.json"
+    _json(entwurf.fuehre_final_aus(konfig, auftrag))
+    return 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -361,6 +382,15 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--format", choices=["zusammenschnitt", "short"], default="zusammenschnitt")
     s.add_argument("--name", help="Name des Entwurfs (sonst Format + Zeit)")
     s.set_defaults(fn=_cmd_compose, sperren=False)
+
+    s = unter.add_parser("render-entwurf", help="Entwurf eines compose-Laufs rendern (Mini) bzw. --final beauftragen")
+    s.add_argument("entwurf", type=int)
+    s.add_argument("--final", action="store_true", help="Auftrag für pve-big anlegen (NVENC, volle Qualität)")
+    s.set_defaults(fn=_cmd_render_entwurf, sperren=True)
+
+    s = unter.add_parser("render-final", help="(auf pve-big) Auftrag in voller Qualität rendern")
+    s.add_argument("name")
+    s.set_defaults(fn=_cmd_render_final, sperren=False)
 
     s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
     s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])

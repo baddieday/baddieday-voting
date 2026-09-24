@@ -227,19 +227,21 @@ def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: d
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
     segmente, t = [], 0.0
     for nr, k in enumerate(reihe, 1):
+        # Am Dateiende 0,25 s frei lassen: Schnitt/Übergang brauchen dort noch Bilder (entwurf._griffe, UEBERHANG_S)
+        nutzbar = max(0.5, k.dauer_s - 0.25)
         muss_laenge = max(0.5, k.muss[1] - k.muss[0])
         wunsch = min(fmt["seg_max_s"], max(seg_min, k.kern[1] - k.kern[0], muss_laenge))
-        wunsch = min(wunsch, k.dauer_s)
-        unten, oben = max(seg_min, muss_laenge), min(k.dauer_s, max(wunsch, muss_laenge) + 2.0)
+        wunsch = min(wunsch, nutzbar)
+        unten, oben = max(seg_min, muss_laenge), min(nutzbar, max(wunsch, muss_laenge) + 2.0)
         passend = [b for b in raster if unten - 1e-6 <= b - t <= oben + 1e-6]
-        ende = naechster(passend, t + wunsch) if passend else t + max(min(wunsch, k.dauer_s), min(unten, k.dauer_s))
+        ende = naechster(passend, t + wunsch) if passend else t + max(min(wunsch, nutzbar), min(unten, nutzbar))
         laenge = ende - t
         # Quelle: Kern mittig, lieber etwas mehr Anlauf; die Muss-Zone bleibt immer drin
         extra = laenge - (k.kern[1] - k.kern[0])
         start = k.kern[0] - 0.6 * extra
         start = min(start, k.muss[0])
         start = max(start, k.muss[1] - laenge)
-        start = max(0.0, min(start, k.dauer_s - laenge))
+        start = max(0.0, min(start, nutzbar - laenge))
         art, dauer = UEBERGANG[k.stimmung]
         dauer = round(dauer * p["uebergang_faktor"], 3) if nr > 1 else 0.0
         segmente.append({
