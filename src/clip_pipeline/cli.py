@@ -294,6 +294,38 @@ def _cmd_render_final(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_entwurf_neu(args, konfig, con) -> int:
+    """compose + render-entwurf in einem Schritt (z. B. für einen Timer); der Lern-Bot schickt ihn dann."""
+    from . import entwurf, regie, regie_lernen
+
+    parameter, ziel = regie_lernen.aktuelle(con, konfig)
+    try:
+        e = regie.erstelle(con, konfig, args.format, parameter=parameter, ziel=ziel)
+    except regie.RegieFehler as fehler:
+        _json({"fehler": str(fehler)})
+        return 1
+    _json({**e, **entwurf.entwurf(con, konfig, e["entwurf"])})
+    return 0
+
+
+def _cmd_lernbot(args, konfig, con) -> int:
+    from .lernbot import starte  # braucht python-telegram-bot
+
+    con.close()
+    return starte(konfig)
+
+
+def _cmd_lernbot_sende(args, konfig, con) -> int:
+    """Nachricht über den Lern-Bot (Stand, Rückfrage, Abschlussbericht). Je Schlüssel nur einmal."""
+    text = Path(args.datei).read_text(encoding="utf-8") if args.datei else (args.text or "")
+    if not text.strip():
+        _json({"fehler": "--text oder --datei fehlt"})
+        return 2
+    schluessel = args.schluessel or f"hand:{jetzt():%Y-%m-%dT%H:%M:%S}"
+    _json({"neu": db.lern_meldung(con, schluessel, text.strip()), "schluessel": schluessel})
+    return 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -394,6 +426,19 @@ def baue_parser() -> argparse.ArgumentParser:
     s = unter.add_parser("render-final", help="(auf pve-big) Auftrag in voller Qualität rendern")
     s.add_argument("name")
     s.set_defaults(fn=_cmd_render_final, sperren=False)
+
+    s = unter.add_parser("entwurf-neu", help="compose + Entwurf rendern (der Lern-Bot schickt ihn)")
+    s.add_argument("--format", choices=["zusammenschnitt", "short"], default="short")
+    s.set_defaults(fn=_cmd_entwurf_neu, sperren=True)
+
+    s = unter.add_parser("lernbot", help="Lern-Bot starten (läuft dauerhaft, LEARN_BOT_TOKEN)")
+    s.set_defaults(fn=_cmd_lernbot, sperren=False)
+
+    s = unter.add_parser("lernbot-sende", help="Nachricht über den Lern-Bot schicken (Stand, Bericht)")
+    s.add_argument("--text")
+    s.add_argument("--datei", help="Textdatei, z. B. docs/ABSCHLUSSBERICHT.md")
+    s.add_argument("--schluessel", help="gleicher Schlüssel = nur einmal senden")
+    s.set_defaults(fn=_cmd_lernbot_sende, sperren=False)
 
     s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
     s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])

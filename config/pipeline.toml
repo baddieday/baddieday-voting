@@ -81,6 +81,18 @@ chill = [13, 17, 15]        # Laid Back, relaxed, Peaceful
 [regie]
 # Schnittlisten und Entwürfe des Regisseurs (auf dem Mini)
 ordner = "/var/lib/clip-pipeline/regie"
+# Entwürfe per VA-API kodieren, wenn /dev/dri da ist (sonst CPU)
+vaapi = true
+# Lernen aus 👍/👎 ohne Grund erst ab so vielen Bewertungen (Gründe wirken sofort)
+lernen_ab = 3
+# pve-big höchstens so lange für den Final-Render wach halten
+final_halten_min = 60
+
+[lernbot]
+# Abends einmal ein Satz zum Stand (Ortszeit)
+abendstand = true
+abend_uhrzeit = "21:00"
+intervall_s = 30
 
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.
