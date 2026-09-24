@@ -8,9 +8,11 @@ Aktivität (setzt die Leerlauf-Uhr zurück):
      zählt SMB, NFS und lokale Zugriffe gleich, aber kein stat/readdir/Scrub) und – falls vorhanden – die
      NFS-Datenoperationen des Kernel-nfsd (READ/WRITE/CREATE/REMOVE/RENAME …, NICHT GETATTR/LOOKUP/ACCESS).
   B  Belegt-Gründe im Moment der Prüfung: offene NFSv4-Dateien, offene SMB-Dateien mit Datenzugriff, frische
-     *.teil-Kopien, Herzschlag-Dateien in <speicher>/.aktiv/, ffmpeg/Final-Render/zfs send/vzdump, dpkg,
-     aktive Proxmox-Tasks, Shutdown-Inhibitoren, Resilver, laufende Gäste, angemeldete Menschen, Halten-Datei.
-Ausdrücklich KEINE Aktivität: Verbindungen auf 445/2049, stat() auf .clip-speicher, Lease-Erneuerung.
+     *.teil-Kopien, Herzschlag-Dateien in <speicher>/.aktiv/ (höchstens HERZSCHLAG_MAX_H Stunden je Schritt),
+     ffmpeg/Final-Render/zfs send/vzdump, dpkg, aktive Proxmox-Tasks, Shutdown-Inhibitoren, Resilver, laufende
+     Gäste, angemeldete Menschen, die in den letzten LEERLAUF_MIN Minuten getippt haben, Halten-Datei.
+Ausdrücklich KEINE Aktivität: Verbindungen auf 445/2049, stat() auf .clip-speicher, Lease-Erneuerung, eine offene
+Konsole, in der niemand mehr tippt (sonst hielte ein vergessener Browser-Tab pve-big für immer wach).
 Im Zweifel wach: Ist eine Quelle nicht lesbar, zählt die Minute als aktiv (Warnung höchstens stündlich).
 
 Ist LEERLAUF_MIN lang nichts los: 15 s warten, ALLES noch einmal messen, dann
@@ -201,14 +203,22 @@ def teil_dateien(k: dict) -> list[str]:
 
 
 def herzschlag(k: dict) -> list[str]:
+    """Frische Dateien in <speicher>/.aktiv/ (der Mini berührt sie jede Minute, solange ein Schritt läuft).
+    Name <rechner>-<schritt>-<pid>-<startzeit>: Läuft ein Schritt länger als HERZSCHLAG_MAX_H, hängt er
+    vermutlich – dann hält er pve-big nicht mehr wach (die Datei bleibt liegen, der Mini räumt sie weg)."""
     ordner = Path(k["SPEICHER"]) / ".aktiv"
     jetzt = time.time()
     gruende = []
     for datei in ordner.glob("*") if ordner.is_dir() else []:
-        alter = jetzt - datei.stat().st_mtime
+        try:
+            alter = jetzt - datei.stat().st_mtime
+        except OSError:
+            continue  # gerade weggeräumt
+        start = datei.name.rsplit("-", 1)[-1]
+        if start.isdigit() and len(start) >= 9 and jetzt - int(start) > float(k["HERZSCHLAG_MAX_H"]) * 3600:
+            continue
         if alter < float(k["HERZSCHLAG_MIN"]) * 60:
             gruende.append(f"Herzschlag: {datei.name}")
-    # zu alte Einträge ignorieren (hängender Schritt) – nur protokollieren, nicht löschen
     return gruende
 
 
@@ -234,6 +244,8 @@ def lokale_arbeit(k: dict) -> list[str]:
                                       "--output-format", "json") or "[]")
         except json.JSONDecodeError:
             raise Unklar("pvesh-Ausgabe unlesbar") from None
+        # Konsolen (Web-Shell, VNC/SPICE) sind keine Arbeit an sich – ob dort jemand tippt, prüft menschen()
+        aktiv = [a for a in aktiv if a.get("type") not in KONSOLEN_AUFGABEN]
         if aktiv:
             gruende.append(f"Proxmox-Aufgabe: {aktiv[0].get('type', '?')}")
     return gruende
@@ -252,10 +264,25 @@ def gaeste(k: dict) -> list[str]:
     return gruende
 
 
+KONSOLEN_AUFGABEN = {"vncshell", "termproxy", "vncproxy", "spiceshell", "spiceproxy"}
+
+
 def menschen(k: dict) -> list[str]:
-    gruende = [f"angemeldet: {z.split()[0]} {z.split()[1]}" for z in befehl("who").splitlines() if len(z.split()) >= 2]
-    if befehl("pgrep", "-f", "termproxy|vncproxy").strip():
-        gruende.append("Web-Konsole offen")
+    """Angemeldete Menschen (auch die Proxmox-Web-Shell: termproxy startet ein login mit utmp-Eintrag) – aber nur,
+    wer in den letzten LEERLAUF_MIN Minuten getippt hat. Maß ist die Zugriffszeit des Terminals /dev/<tty>, die
+    der Kernel bei Eingaben setzt (daraus rechnet auch `who -u` die Leerlaufzeit). Unlesbar = aktiv."""
+    grenze = time.time() - float(k["LEERLAUF_MIN"]) * 60
+    gruende = []
+    for zeile in befehl("who").splitlines():
+        teile = zeile.split()
+        if len(teile) < 2:
+            continue
+        try:
+            getippt = (Path(E("CLIP_LL_DEV", "/dev")) / teile[1]).stat().st_atime
+        except OSError:
+            getippt = time.time()
+        if getippt >= grenze:
+            gruende.append(f"angemeldet: {teile[0]} {teile[1]}")
     return gruende
 
 
@@ -274,15 +301,17 @@ def belegt(k: dict) -> tuple[list[str], list[str]]:
 
 
 def messung(k: dict) -> tuple[dict, list[str], list[str]]:
-    zaehler, unklar = {}, []
+    # Erst die langsamen Prüfungen (pvesh, qm, pct … dauern Sekunden), die Zähler zuletzt: So ist die Lücke
+    # zwischen letztem Blick und Ausschalten so klein wie möglich.
+    gruende, unklar = belegt(k)
+    zaehler = {}
     if k["ZFS_ZAEHLER"] == "1":
         try:
             zaehler.update(zfs_zaehler(k))
         except Unklar as e:
             unklar.append(str(e))
     zaehler.update(nfs_zaehler())
-    gruende, u = belegt(k)
-    return zaehler, gruende, unklar + u
+    return zaehler, gruende, unklar
 
 
 def bewegung(alt: dict, neu: dict, k: dict) -> list[str]:

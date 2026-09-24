@@ -43,7 +43,8 @@ class Wecken(MitSpeicher):
         with mock.patch.object(konfig.Konfig, "_host_erreichbar", side_effect=[False, False, True]), \
                 mock.patch("clip_pipeline.konfig.sende_wake_on_lan") as wol, mock.patch("time.sleep"):
             self.konfig.pruefe_speicher(wecken=True)
-        wol.assert_called_once_with("aa:bb:cc:dd:ee:ff")
+        # je Warterunde erneut (ein einzelnes Paket verpufft, wenn der Host gerade noch herunterfährt)
+        self.assertEqual(wol.call_args_list, [mock.call("aa:bb:cc:dd:ee:ff")] * 2)
 
     def test_ohne_wecken_sofort_offline(self):
         with mock.patch.object(konfig.Konfig, "_host_erreichbar", return_value=False), \

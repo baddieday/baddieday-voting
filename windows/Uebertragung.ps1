@@ -6,7 +6,8 @@
   - Überträgt nur fertige Dateien (seit RuhezeitSekunden unverändert).
   - Schreibt zuerst "<name>.teil" und benennt erst nach geprüfter Größe um:
     die Pipeline sieht nie eine halbe Datei.
-  - Weckt den großen Host per Wake-on-LAN, wenn er schläft.
+  - Weckt den großen Host per Wake-on-LAN, wenn er schläft – aber NUR, wenn es etwas zu kopieren gibt (oder eine
+    Session-Datei fällig ist). Sonst weckte der Lauf alle 2 min pve-big, obwohl der sich nach Leerlauf abschaltet.
   - Merkt sich übertragene Dateien lokal – schnell auch bei tausenden Clips.
   - Löscht auf dem Gaming-PC nur mit -Verschieben und nur nach SHA-256-Vergleich.
     Replays werden nie gelöscht (NurKopieren).
@@ -65,6 +66,14 @@ function Sende-WakeOnLan([string]$mac) {
     } finally { $udp.Dispose() }
 }
 
+function Melde-Offene($k, $zuMelden) {
+    # Match-Enden an n8n melden; was nicht klappt, bleibt in zu-melden.txt für den nächsten Lauf
+    if ($k.WebhookUrl -and $zuMelden.Count -and -not $Probelauf) {
+        $offen = @($zuMelden | Select-Object -Unique | Where-Object { -not (Melde-Session $_ $k) })
+        [IO.File]::WriteAllLines($meldeDatei, [string[]]$offen)
+    }
+}
+
 function Datei-Schluessel($datei) { '{0}|{1}|{2}' -f $datei.FullName, $datei.Length, $datei.LastWriteTimeUtc.Ticks }
 
 function Datei-Frei([string]$pfad) {
@@ -99,14 +108,19 @@ function Melde-Session([string]$sid, $k) {
     }
 }
 
-function Pruefe-SessionVorbei($k) {
+function Session-Faellig($k) {
     # Session vorbei = Fortnite läuft nicht UND seit SessionVorbeiMinuten ist kein Match dazugekommen.
-    if (-not (Test-Path $sessionDatei)) { return }
+    if ([int]$k.SessionVorbeiMinuten -le 0 -or -not (Test-Path $sessionDatei)) { return $false }
     $ids = @(Get-Content $sessionDatei -Encoding UTF8 | Where-Object { $_ } | Select-Object -Unique)
-    if (-not $ids.Count) { return }
-    if (Get-Process -Name 'FortniteClient-Win64-Shipping' -ErrorAction SilentlyContinue) { return }
+    if (-not $ids.Count) { return $false }
+    if (Get-Process -Name 'FortniteClient-Win64-Shipping' -ErrorAction SilentlyContinue) { return $false }
     $ruhe = (Get-Date) - (Get-Item $sessionDatei).LastWriteTime
-    if ($ruhe.TotalMinutes -lt [int]$k.SessionVorbeiMinuten) { return }
+    return $ruhe.TotalMinutes -ge [int]$k.SessionVorbeiMinuten
+}
+
+function Pruefe-SessionVorbei($k) {
+    if (-not (Session-Faellig $k)) { return }
+    $ids = @(Get-Content $sessionDatei -Encoding UTF8 | Where-Object { $_ } | Select-Object -Unique)
     $name = 'session_{0:yyyy-MM-dd_HH-mm-ss}' -f (Get-Date)
     $ordner = Join-Path $k.Ziel 'sitzungen'
     New-Item -ItemType Directory -Force -Path $ordner | Out-Null
@@ -127,6 +141,37 @@ try {
     if (-not (Test-Path $Konfig)) { throw "Konfiguration fehlt: $Konfig (Vorlage: uebertragung.beispiel.psd1)" }
     $k = Import-PowerShellDataFile $Konfig
 
+    # --- Was wurde schon übertragen? ----------------------------------------------
+    $erledigt = New-Object 'System.Collections.Generic.HashSet[string]'
+    if (Test-Path $statusDatei) { Get-Content $statusDatei -Encoding UTF8 | ForEach-Object { [void]$erledigt.Add($_) } }
+
+    $grenzeAlt = (Get-Date).AddDays(-[int]$k.MaxAlterTage)
+    $zaehler = @{ kopiert = 0; geloescht = 0; fehler = 0; bytes = 0 }
+    $zuMelden = New-Object 'System.Collections.Generic.List[string]'
+    if (Test-Path $meldeDatei) { Get-Content $meldeDatei -Encoding UTF8 | Where-Object { $_ } | ForEach-Object { $zuMelden.Add($_) } }
+
+    # --- Erst hier auf dem PC klären, ob es etwas zu tun gibt (weckt nichts) ------------
+    $arbeit = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($q in $k.Quellen) {
+        $quelle = [Environment]::ExpandEnvironmentVariables($q.Pfad)
+        if (-not (Test-Path $quelle)) { Log "Quelle fehlt: $quelle"; continue }
+        $ruhe = if ($q.RuhezeitSekunden) { [int]$q.RuhezeitSekunden } else { [int]$k.RuhezeitSekunden }
+        $grenzeJung = (Get-Date).AddSeconds(-$ruhe)
+        $rekursiv = [bool]$q.Unterordner
+        $dateien = foreach ($muster in $q.Muster) { Get-ChildItem -Path $quelle -Filter $muster -File -Recurse:$rekursiv }
+
+        foreach ($datei in ($dateien | Sort-Object LastWriteTime)) {
+            if ($datei.LastWriteTime -gt $grenzeJung -or $datei.LastWriteTime -lt $grenzeAlt) { continue }
+            if ($erledigt.Contains((Datei-Schluessel $datei))) { continue }
+            if (-not (Datei-Frei $datei.FullName)) { continue }   # wird noch geschrieben -> nächster Lauf
+            $arbeit.Add(@{ q = $q; quelle = $quelle; datei = $datei })
+        }
+    }
+    if (-not $arbeit.Count -and -not (Session-Faellig $k)) {
+        Melde-Offene $k $zuMelden   # braucht nur n8n, nicht den Speicher
+        exit 0                      # nichts zu kopieren: pve-big NICHT wecken
+    }
+
     # --- Ziel erreichbar? Sonst wecken -------------------------------------------
     if ($k.ZielHost -and -not (Port-Offen $k.ZielHost 445)) {
         if (-not $k.WakeOnLanMac) { Log "Ziel $($k.ZielHost) nicht erreichbar, kein Wake-on-LAN konfiguriert."; exit 3 }
@@ -140,66 +185,43 @@ try {
         throw "Im Ziel $($k.Ziel) fehlt die Datei .clip-speicher – falsches Laufwerk oder nicht verbunden?"
     }
 
-    # --- Was wurde schon übertragen? ----------------------------------------------
-    $erledigt = New-Object 'System.Collections.Generic.HashSet[string]'
-    if (Test-Path $statusDatei) { Get-Content $statusDatei -Encoding UTF8 | ForEach-Object { [void]$erledigt.Add($_) } }
-
-    $grenzeAlt = (Get-Date).AddDays(-[int]$k.MaxAlterTage)
-    $zaehler = @{ kopiert = 0; geloescht = 0; fehler = 0; bytes = 0 }
-    $zuMelden = New-Object 'System.Collections.Generic.List[string]'
-    if (Test-Path $meldeDatei) { Get-Content $meldeDatei -Encoding UTF8 | Where-Object { $_ } | ForEach-Object { $zuMelden.Add($_) } }
-
-    foreach ($q in $k.Quellen) {
-        $quelle = [Environment]::ExpandEnvironmentVariables($q.Pfad)
-        if (-not (Test-Path $quelle)) { Log "Quelle fehlt: $quelle"; continue }
-        $ruhe = if ($q.RuhezeitSekunden) { [int]$q.RuhezeitSekunden } else { [int]$k.RuhezeitSekunden }
-        $grenzeJung = (Get-Date).AddSeconds(-$ruhe)
-        $rekursiv = [bool]$q.Unterordner
-        $dateien = foreach ($muster in $q.Muster) { Get-ChildItem -Path $quelle -Filter $muster -File -Recurse:$rekursiv }
-
-        foreach ($datei in ($dateien | Sort-Object LastWriteTime)) {
-            if ($datei.LastWriteTime -gt $grenzeJung -or $datei.LastWriteTime -lt $grenzeAlt) { continue }
-            $schluessel = Datei-Schluessel $datei
-            if ($erledigt.Contains($schluessel)) { continue }
-            if (-not (Datei-Frei $datei.FullName)) { continue }   # wird noch geschrieben -> nächster Lauf
-
-            $unterpfad = $datei.FullName.Substring($quelle.TrimEnd('\').Length).TrimStart('\')
-            $ziel = Join-Path (Join-Path $k.Ziel $q.Ziel) $unterpfad
-            if ($Probelauf) { Log "würde kopieren: $($datei.FullName) -> $ziel"; continue }
-            try {
-                New-Item -ItemType Directory -Force -Path (Split-Path $ziel) | Out-Null
-                if (-not ((Test-Path $ziel) -and (Get-Item $ziel).Length -eq $datei.Length)) {
-                    Copy-Item -LiteralPath $datei.FullName -Destination "$ziel.teil" -Force
-                    if ((Get-Item -LiteralPath "$ziel.teil").Length -ne $datei.Length) { throw 'Größe stimmt nicht' }
-                    Move-Item -LiteralPath "$ziel.teil" -Destination $ziel -Force
-                    (Get-Item -LiteralPath $ziel).LastWriteTimeUtc = $datei.LastWriteTimeUtc
-                    $zaehler.kopiert++; $zaehler.bytes += $datei.Length
-                }
-                if ($Verschieben -and -not $q.NurKopieren) {
-                    $a = (Get-FileHash -LiteralPath $datei.FullName -Algorithm SHA256).Hash
-                    $b = (Get-FileHash -LiteralPath $ziel -Algorithm SHA256).Hash
-                    if ($a -ne $b) { throw 'SHA-256 unterschiedlich – Quelle bleibt erhalten' }
-                    Remove-Item -LiteralPath $datei.FullName
-                    $zaehler.geloescht++
-                }
-                Add-Content -Path $statusDatei -Value $schluessel -Encoding UTF8
-                [void]$erledigt.Add($schluessel)
-                if ($q.Melden) {
-                    $zuMelden.Add((Session-Id $datei.Name))
-                    if ([int]$k.SessionVorbeiMinuten -gt 0) { Add-Content -Path $sessionDatei -Value (Session-Id $datei.Name) -Encoding UTF8 }
-                }
-            } catch {
-                $zaehler.fehler++
-                Log "FEHLER bei $($datei.Name): $($_.Exception.Message)"
-                Remove-Item -LiteralPath "$ziel.teil" -ErrorAction SilentlyContinue
+    # --- Kopieren --------------------------------------------------------------------
+    foreach ($eintrag in $arbeit) {
+        $q, $quelle, $datei = $eintrag.q, $eintrag.quelle, $eintrag.datei
+        $schluessel = Datei-Schluessel $datei
+        $unterpfad = $datei.FullName.Substring($quelle.TrimEnd('\').Length).TrimStart('\')
+        $ziel = Join-Path (Join-Path $k.Ziel $q.Ziel) $unterpfad
+        if ($Probelauf) { Log "würde kopieren: $($datei.FullName) -> $ziel"; continue }
+        try {
+            New-Item -ItemType Directory -Force -Path (Split-Path $ziel) | Out-Null
+            if (-not ((Test-Path $ziel) -and (Get-Item $ziel).Length -eq $datei.Length)) {
+                Copy-Item -LiteralPath $datei.FullName -Destination "$ziel.teil" -Force
+                if ((Get-Item -LiteralPath "$ziel.teil").Length -ne $datei.Length) { throw 'Größe stimmt nicht' }
+                Move-Item -LiteralPath "$ziel.teil" -Destination $ziel -Force
+                (Get-Item -LiteralPath $ziel).LastWriteTimeUtc = $datei.LastWriteTimeUtc
+                $zaehler.kopiert++; $zaehler.bytes += $datei.Length
             }
+            if ($Verschieben -and -not $q.NurKopieren) {
+                $a = (Get-FileHash -LiteralPath $datei.FullName -Algorithm SHA256).Hash
+                $b = (Get-FileHash -LiteralPath $ziel -Algorithm SHA256).Hash
+                if ($a -ne $b) { throw 'SHA-256 unterschiedlich – Quelle bleibt erhalten' }
+                Remove-Item -LiteralPath $datei.FullName
+                $zaehler.geloescht++
+            }
+            Add-Content -Path $statusDatei -Value $schluessel -Encoding UTF8
+            [void]$erledigt.Add($schluessel)
+            if ($q.Melden) {
+                $zuMelden.Add((Session-Id $datei.Name))
+                if ([int]$k.SessionVorbeiMinuten -gt 0) { Add-Content -Path $sessionDatei -Value (Session-Id $datei.Name) -Encoding UTF8 }
+            }
+        } catch {
+            $zaehler.fehler++
+            Log "FEHLER bei $($datei.Name): $($_.Exception.Message)"
+            Remove-Item -LiteralPath "$ziel.teil" -ErrorAction SilentlyContinue
         }
     }
     # Match-Enden an n8n melden (erst jetzt: alle Aufnahmen dieses Laufs liegen schon auf dem Server)
-    if ($k.WebhookUrl -and $zuMelden.Count -and -not $Probelauf) {
-        $offen = @($zuMelden | Select-Object -Unique | Where-Object { -not (Melde-Session $_ $k) })
-        [IO.File]::WriteAllLines($meldeDatei, [string[]]$offen)
-    }
+    Melde-Offene $k $zuMelden
     if ([int]$k.SessionVorbeiMinuten -gt 0 -and -not $Probelauf) { Pruefe-SessionVorbei $k }
     if ($zaehler.kopiert -or $zaehler.fehler -or $zaehler.geloescht) {
         Log ('kopiert {0} ({1:N0} MB), gelöscht {2}, Fehler {3}' -f $zaehler.kopiert, ($zaehler.bytes / 1MB), $zaehler.geloescht, $zaehler.fehler)

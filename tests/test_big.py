@@ -187,18 +187,43 @@ class Wecken(MitSpeicher):
         self.assertIsNone(big.merke_leerlauf(self.konfig))          # veraltet zählt nicht
         self.assertIn("nicht gesichert", big.darf_wecken(self.konfig))
         scharf.touch()
+        echt_stat = Path.stat
+
+        def stat_ohne_speicher(pfad, *a, **kw):
+            if pfad.name.startswith(".leerlauf") or pfad.name == ".clip-speicher":
+                raise AssertionError("NFS-Mount angefasst")
+            return echt_stat(pfad, *a, **kw)
+
         with mock.patch.object(konfig.Konfig, "_host_erreichbar", return_value=False), \
-                mock.patch("pathlib.Path.stat", side_effect=AssertionError("NFS-Mount angefasst")):
+                mock.patch.object(Path, "stat", stat_ohne_speicher):
             self.assertIsNone(big.merke_leerlauf(self.konfig))      # pve-big antwortet nicht: Mount nicht anfassen
         scharf.unlink()
         scharf.mkdir()                                              # nur stat(), nie lesen (Lesen zählt als Zugriff):
         self.assertTrue(big.merke_leerlauf(self.konfig))            # ein Verzeichnis ließe sich gar nicht lesen
         scharf.rmdir()
-        scharf.touch()
         self.assertIsNone(big.darf_wecken(self.konfig))
-        scharf.unlink()                                             # pve-big schläft: gemerkt bleibt gemerkt
+        with mock.patch.object(konfig.Konfig, "_host_erreichbar", return_value=False):
+            self.assertIsNone(big.merke_leerlauf(self.konfig))      # pve-big schläft: gemerkt bleibt gemerkt
+        self.assertIsNone(big.darf_wecken(self.konfig))
+        # Wach und eingehängt, aber keine Marke: kurz nach dem Aufwachen normal – erst nach 10 min erlischt die Erlaubnis
         self.assertIsNone(big.merke_leerlauf(self.konfig))
         self.assertIsNone(big.darf_wecken(self.konfig))
+        big._schreibe_zustand(self.konfig, leerlauf_fehlt_seit=iso(jetzt() - timedelta(minutes=11)))
+        with self.assertLogs("pipeline", "WARNING"):
+            self.assertIsNone(big.merke_leerlauf(self.konfig))
+        self.assertIn("nicht gesichert", big.darf_wecken(self.konfig))
+        # wieder scharf -> erlaubt; dann Probelauf (TROCKEN=1) -> sofort nicht mehr
+        scharf.touch()
+        self.assertTrue(big.merke_leerlauf(self.konfig))
+        self.assertIsNone(big.darf_wecken(self.konfig))
+        scharf.unlink()
+        probe.touch()
+        with self.assertLogs("pipeline", "WARNING"):
+            self.assertFalse(big.merke_leerlauf(self.konfig))
+        self.assertIn("nicht gesichert", big.darf_wecken(self.konfig))
+        probe.unlink()
+        scharf.touch()
+        big.merke_leerlauf(self.konfig)
         self.konfig.daten["big"]["frist"] = iso(jetzt() - timedelta(seconds=1))
         self.assertIn("Frist", big.darf_wecken(self.konfig))        # Frist gilt immer
 

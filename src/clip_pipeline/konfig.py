@@ -134,6 +134,8 @@ class Konfig:
                 if time.monotonic() > ende:
                     raise SpeicherOffline(f"Speicher-Host {self.wert('speicher.host')} ist nach Wake-on-LAN nicht aufgewacht")
                 time.sleep(5)
+                # erneut senden: fährt der Host gerade noch herunter, verpufft ein einzelnes Paket
+                sende_wake_on_lan(mac)
             # Der NFS-Mount braucht nach dem Aufwachen einen Moment, bis er wieder antwortet
             while not self._markierung_da() and time.monotonic() < ende:
                 time.sleep(5)

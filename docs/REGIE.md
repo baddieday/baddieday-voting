@@ -108,11 +108,13 @@ Clips-Ordner herunter (Details im Kopf des Skripts). Er setzt jede Minute den Ze
 Lern-Bot ihn wecken (Regel 3). Bewusst ohne Inhalt: Lesen und Schreiben zählen als Zugriff.
 
 Einrichten (einmal):
-1. pve-mini: `bash /root/regie.sh` legt die Dateien nach `<clips>/.einrichtung`.
-2. pve-big-Shell (Weboberfläche → pve-big → Shell): den Block aus dem Chat einfügen. Er kopiert die Dateien
-   in einen Ordner nur für root, **prüft die SHA-256-Summen** (im Block fest eingetragen – eine veränderte Datei
-   auf der Freigabe wird nicht ausgeführt) und startet `einrichten.sh`: Konfiguration aus ZFS, Gäste mit
-   Autostart zählen nicht, `TROCKEN=0`.
+1. pve-mini: `bash /root/regie.sh` legt die Dateien nach `<clips>/.einrichtung` und **gibt den Einfüge-Block
+   aus** (Prüfsummen aus dem git-Stand im CT, nicht von der Freigabe).
+2. pve-big-Shell (Weboberfläche → pve-big → Shell): den Block einfügen. Er kopiert die Dateien in einen Ordner
+   nur für root, **prüft die SHA-256-Summen** (eine veränderte Datei auf der Freigabe wird nicht ausgeführt) und
+   startet `einrichten.sh`: Konfiguration aus ZFS, Gäste mit Autostart zählen nicht, `TROCKEN=0`.
+3. **Shell-Fenster schließen.** Eine Konsole, in der getippt wird, hält pve-big wach; nach 20 min ohne Tippen
+   zählt sie nicht mehr.
 
 Pause bis zum nächsten Neustart: `touch /run/clip-halten` · Ganz aus: `systemctl disable --now clip-leerlauf.timer`
-· Mitlesen: `journalctl -t clip-leerlauf -f`. Eine offene Web-Konsole hält pve-big wach.
+· Nachsehen: `journalctl -t clip-leerlauf --since -2h` (nicht mit `-f` offen lassen).

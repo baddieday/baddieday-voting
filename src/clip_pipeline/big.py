@@ -230,12 +230,13 @@ def pipeline_beschaeftigt(konfig: Konfig) -> bool:
 
 @contextmanager
 def herzschlag(konfig: Konfig, name: str, intervall_s: float = 60.0) -> Iterator[None]:
-    """Berührt <speicher>/.aktiv/<rechner>-<name>-<pid> jede Minute, solange der Block läuft.
+    """Berührt <speicher>/.aktiv/<rechner>-<name>-<pid>-<startzeit> jede Minute, solange der Block läuft.
+    Die Startzeit im Namen begrenzt auf pve-big, wie lange ein (vielleicht hängender) Schritt wach hält.
 
     clip-leerlauf auf pve-big sieht daran, dass hier gearbeitet wird – auch in Phasen ohne Dateizugriff
     (Whisper, claude -p). Alles läuft in einem Hintergrund-Thread: ein hängender NFS-Mount blockiert den
     eigentlichen Schritt nie. Fehlt die Markierung (Speicher nicht eingehängt), wird nichts geschrieben."""
-    datei = konfig.wurzel / ".aktiv" / f"{socket.gethostname()}-{name}-{os.getpid()}"
+    datei = konfig.wurzel / ".aktiv" / f"{socket.gethostname()}-{name}-{os.getpid()}-{int(time.time())}"
     stopp = threading.Event()
 
     def schlagen() -> None:
@@ -269,14 +270,22 @@ def herzschlag(konfig: Konfig, name: str, intervall_s: float = 60.0) -> Iterator
 # --- Wecken -----------------------------------------------------------------------
 
 LEERLAUF_MARKEN = {"scharf": ".leerlauf-scharf", "probe": ".leerlauf-probe"}  # wie in deploy/big/clip-leerlauf
+LEERLAUF_FEHLT_S = 600  # so lange darf die Marke bei wachem, eingehängtem pve-big fehlen, bevor die Erlaubnis erlischt
 
 
 def merke_leerlauf(konfig: Konfig) -> bool | None:
     """Sieht nach, ob clip-leerlauf auf pve-big scharf läuft (leere Datei <speicher>/.leerlauf-scharf, deren
     Zeitstempel es jede Minute setzt), und merkt sich das lokal. Nur stat(): über NFS ein GETATTR, das zählt auf
     pve-big nicht als Zugriff. Den Inhalt einer Datei zu lesen (OPEN/READ) würde ihn für immer wachhalten.
-    True = scharf, False = nur Probelauf, None = nichts zu sehen (pve-big schläft o. Ä.)."""
+    True = scharf, False = nur Probelauf, None = nichts zu sehen (pve-big schläft o. Ä.).
+
+    Ist pve-big wach und eingehängt, aber clip-leerlauf nicht (mehr) scharf – Probelauf, Timer aus, Automatik aus –,
+    wird die Weck-Erlaubnis zurückgenommen: sofort bei einer frischen Probelauf-Marke, sonst nach LEERLAUF_FEHLT_S
+    ohne frische Marke (direkt nach dem Aufwachen ist die Marke noch alt: clip-leerlauf startet 2 min nach dem Boot)."""
+    zustand = lies_zustand(konfig)
     if not konfig._host_erreichbar():  # schläft pve-big: nicht am (vielleicht hängenden) NFS-Mount anfassen
+        if zustand.get("leerlauf_fehlt_seit"):
+            _schreibe_zustand(konfig, leerlauf_fehlt_seit=None)  # Schlafzeit zählt nicht
         return None
 
     def frisch(name: str) -> bool:
@@ -286,9 +295,22 @@ def merke_leerlauf(konfig: Konfig) -> bool | None:
             return False
 
     if frisch(LEERLAUF_MARKEN["scharf"]):
-        _schreibe_zustand(konfig, leerlauf_scharf=iso(jetzt()))
+        _schreibe_zustand(konfig, leerlauf_scharf=iso(jetzt()), leerlauf_fehlt_seit=None)
         return True
-    return False if frisch(LEERLAUF_MARKEN["probe"]) else None
+    if not konfig._markierung_da():  # Speicher (noch) nicht eingehängt: daraus lässt sich nichts schließen
+        return None
+    if frisch(LEERLAUF_MARKEN["probe"]):
+        if zustand.get("leerlauf_scharf"):
+            log.warning("clip-leerlauf auf pve-big läuft nur im Probelauf – Wecken ist nicht mehr erlaubt")
+        _schreibe_zustand(konfig, leerlauf_scharf=None, leerlauf_fehlt_seit=None)
+        return False
+    seit = zustand.get("leerlauf_fehlt_seit")
+    if not seit:
+        _schreibe_zustand(konfig, leerlauf_fehlt_seit=iso(jetzt()))
+    elif jetzt() - aus_iso(seit) > timedelta(seconds=LEERLAUF_FEHLT_S) and zustand.get("leerlauf_scharf"):
+        log.warning("clip-leerlauf auf pve-big meldet sich nicht mehr – Wecken ist nicht mehr erlaubt")
+        _schreibe_zustand(konfig, leerlauf_scharf=None)
+    return None
 
 
 def _frisch(zeitpunkt: str | None, konfig: Konfig, zeit: datetime | None) -> bool:
@@ -341,6 +363,8 @@ def wach_halten(konfig: Konfig, name: str, grund: str, minuten: float = 120) -> 
                 if time.monotonic() > ende:
                     raise BigFehler("pve-big ist nach Wake-on-LAN nicht aufgewacht")
                 time.sleep(5)
+                # erneut: fährt pve-big gerade noch herunter, verpufft ein einzelnes Paket (harmlos, wenn er schon hochfährt)
+                sende_wake_on_lan(str(konfig.wert("speicher.wol_mac")))
             try:
                 if ssh_befehl(konfig):
                     fern_status(konfig)  # geht das Herunterfahren? Sonst sofort abbrechen

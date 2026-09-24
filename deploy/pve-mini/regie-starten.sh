@@ -18,20 +18,54 @@ als_pipeline() { pct exec "$CT" -- runuser -l pipeline -c "export GIT_TERMINAL_P
 
 [ "$(pct status "$CT" | awk '{print $2}')" = running ] || { echo "CT $CT läuft nicht – erst: pct start $CT"; exit 1; }
 
-sag "1/7 pve-big wecken (falls er schläft) und warten, bis der Clips-Speicher da ist"
-if ! findmnt -rn "$Z" >/dev/null 2>&1; then
-  MAC="${WOL_MAC:-$(im_ct awk -F'"' '/^[[:space:]]*wol_mac/ {print $2; exit}' "$PROD/config/lokal.toml" 2>/dev/null || true)}"
-  [ -n "$MAC" ] || { echo "Keine MAC gefunden (wol_mac in config/lokal.toml). pve-big von Hand einschalten, dann nochmal."; exit 1; }
-  echo "Wake-on-LAN an $MAC"
-  # Magisches Paket: 6x 0xFF, dann 16x die MAC – per UDP-Broadcast an Port 9
+# Magisches Paket: 6x 0xFF, dann 16x die MAC – per UDP-Broadcast an Port 9
+wecken() {
   perl -MSocket -e '
     ($mac, $ziel) = @ARGV; $mac =~ s/[:-]//g; length($mac) == 12 or die "MAC ungültig\n";
     socket(S, PF_INET, SOCK_DGRAM, getprotobyname("udp")) or die "socket: $!\n";
     setsockopt(S, SOL_SOCKET, SO_BROADCAST, 1);
     send(S, pack("H*", "ff" x 6 . $mac x 16), 0, sockaddr_in(9, inet_aton($ziel))) or die "senden: $!\n";
   ' "$MAC" "${WOL_ZIEL:-255.255.255.255}"
+}
+
+# Einfüge-Block für pve-big. Die Prüfsummen kommen aus dem git-Stand im CT, NICHT von der Freigabe (die kann auch
+# der Gaming-PC beschreiben) – so passt der Block immer zu den bereitgelegten Dateien.
+SUMMEN=""
+leerlauf_block() {
+  [ -n "$SUMMEN" ] || return 0
+  echo "---- in die Shell von pve-big einfügen (Weboberfläche → pve-big → Shell), danach das Fenster schließen ----"
+  cat <<'BLOCK'
+D=$(ls -d /*/clips/.einrichtung /*/*/clips/.einrichtung 2>/dev/null | head -n 1); T=$(mktemp -d) && cp "${D:?.einrichtung nicht gefunden}"/{clip-leerlauf,clip-leerlauf.service,clip-leerlauf.timer,einrichten.sh} "$T"/ && cd "$T" && sha256sum -c <<'H' && bash einrichten.sh "${D%/.einrichtung}"
+BLOCK
+  printf '%s\n' "$SUMMEN"
+  echo "H"
+  echo "---- Ende ----"
+}
+
+# Am Ende – auch bei einem Abbruch –: Schaltet sich pve-big selbst ab? (clip-leerlauf setzt jede Minute den
+# Zeitstempel der leeren Datei <clips>/.leerlauf-scharf; nur nachsehen, nicht lesen – Lesen zählt als Zugriff)
+schluss() {
+  findmnt -rn "$Z" >/dev/null 2>&1 || return 0
+  if [ -n "$(im_ct sh -c 'find /srv/clips/.leerlauf-scharf -mmin -10 2>/dev/null')" ]; then
+    echo "✅ pve-big schaltet sich über clip-leerlauf selbst ab, wenn ihn keiner mehr braucht."
+  else
+    echo
+    echo "⚠️  clip-leerlauf ist auf pve-big noch NICHT scharf – pve-big bleibt an, bis du ihn einrichtest"
+    echo "    oder von Hand herunterfährst (Weboberfläche → pve-big → Shutdown)."
+    leerlauf_block
+  fi
+}
+trap schluss EXIT
+
+sag "1/7 pve-big wecken (falls er schläft) und warten, bis der Clips-Speicher da ist"
+if ! findmnt -rn "$Z" >/dev/null 2>&1; then
+  MAC="${WOL_MAC:-$(im_ct awk -F'"' '/^[[:space:]]*wol_mac/ {print $2; exit}' "$PROD/config/lokal.toml" 2>/dev/null || true)}"
+  [ -n "$MAC" ] || { echo "Keine MAC gefunden (wol_mac in config/lokal.toml). pve-big von Hand einschalten, dann nochmal."; exit 1; }
+  echo "Wake-on-LAN an $MAC"
+  wecken
   echo "warte bis zu 6 min (der Nachzieher hängt alle 30 s ein) ..."
-  for _ in $(seq "${WARTE_RUNDEN:-72}"); do findmnt -rn "$Z" >/dev/null 2>&1 && break; sleep "${WARTE_S:-5}"; done
+  # je Runde erneut wecken: fährt pve-big gerade noch herunter, verpufft ein einzelnes Paket
+  for _ in $(seq "${WARTE_RUNDEN:-72}"); do findmnt -rn "$Z" >/dev/null 2>&1 && break; sleep "${WARTE_S:-5}"; wecken || true; done
   findmnt -rn "$Z" >/dev/null 2>&1 || { echo "pve-big ist nicht aufgewacht oder NFS antwortet nicht – einschalten und nochmal."; exit 1; }
 fi
 if im_ct ls /srv/clips/.clip-speicher >/dev/null 2>&1; then echo "Clips-Speicher im CT sichtbar"
@@ -61,9 +95,14 @@ if [ -z "${REGIE_NEU:-}" ] && [ -f "$0" ]; then
   rm -rf "$tmp"
 fi
 
-sag "3/7 clip-leerlauf für pve-big bereitlegen (Einrichten: Block aus dem Chat in der Shell von pve-big)"
+sag "3/7 clip-leerlauf für pve-big bereitlegen"
 if als_pipeline "install -d -m 755 /srv/clips/.einrichtung && cd $REGIE/deploy/big && cp clip-leerlauf clip-leerlauf.service clip-leerlauf.timer einrichten.sh /srv/clips/.einrichtung/"; then
   echo "liegt auf pve-big unter <clips>/.einrichtung"
+  SUMMEN="$(im_ct sh -c "cd $REGIE/deploy/big && sha256sum clip-leerlauf clip-leerlauf.service clip-leerlauf.timer einrichten.sh" | tr -d '\r')"
+  if [ -z "$(im_ct sh -c 'find /srv/clips/.leerlauf-scharf -mmin -10 2>/dev/null')" ]; then
+    echo "Jetzt schon einrichten, während der Rest läuft:"
+    leerlauf_block
+  fi
 else
   echo "⚠️  konnte nicht bereitlegen (Schreibrecht auf /srv/clips?) – bitte melden; der Rest läuft weiter."
 fi
@@ -89,11 +128,4 @@ sag "Fertig. Der Entwurf kommt in ~30 s im Lern-Bot (sonst dort /start)."
 echo "Nach jeder Bewertung (✅ fertig) baut der Bot den nächsten und analysiert dabei 10 weitere Clips."
 echo "Mehr Clips auf einmal:  ANZAHL=100 bash $0"
 echo "Log des Lern-Bots:      pct exec $CT -- journalctl -u clip-lernbot -n 30"
-# Schaltet sich pve-big selbst ab? (clip-leerlauf setzt jede Minute den Zeitstempel von <clips>/.leerlauf-scharf;
-# nur nachsehen, nicht lesen – Lesen über NFS zählt auf pve-big als Zugriff)
-if [ -n "$(im_ct sh -c 'find /srv/clips/.leerlauf-scharf -mmin -10 2>/dev/null')" ]; then
-  echo "✅ pve-big schaltet sich über clip-leerlauf selbst ab, wenn ihn keiner mehr braucht."
-else
-  echo "⚠️  clip-leerlauf ist auf pve-big noch nicht scharf: Block aus dem Chat in der Shell von pve-big einfügen."
-  echo "    Bis dahin pve-big von Hand herunterfahren, wenn du fertig bist (Weboberfläche → Shutdown)."
-fi
+# (die Prüfung, ob pve-big sich selbst abschaltet, macht schluss() beim Beenden)

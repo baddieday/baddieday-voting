@@ -192,3 +192,27 @@ Statusdatei `.leerlauf.json` in den Clips-Ordner und der Lern-Bot las sie alle 3
 immer wachgehalten: Das Schreiben zählt clip-leerlauf selbst als ZFS-Schreibzugriff, das Lesen über NFS als
 OPEN/READ. Jetzt: leere Marke, nur der Zeitstempel wird gesetzt (utime zählt weder ZFS noch nfsd), und der Mini
 schaut nur nach (stat = GETATTR, zählt nicht).
+
+## E17 · Prüfung des Abschalt-Mechanismus vor der Installation (24.09.)
+Weil schon zwei Fehler pve-big für immer wachgehalten hätten, habe ich den ganzen Mechanismus (clip-leerlauf,
+einrichten.sh, Weck-Logik auf dem Mini, Lern-Bot, Windows-Helfer) unabhängig prüfen lassen: 5 Blickwinkel,
+jeder Befund von 2 Gegenprüfern angegriffen. 19 Befunde, 9 bestätigt, alle behoben:
+1. **Vergessene Konsole hält ewig wach.** Eine offene Web-Shell (login + Proxmox-Aufgabe „vncshell“) zählte immer.
+   Jetzt zählt eine Sitzung nur, wenn in den letzten LEERLAUF_MIN Minuten getippt wurde (Zugriffszeit des
+   Terminals, wie `who -u`); Konsolen-Aufgaben sind keine Arbeit an sich. einrichten.sh sagt: Fenster schließen.
+2. **Gaming-PC weckte alle 2 min** (ab Dienstag): Uebertragung.ps1 weckte vor der Suche nach neuen Dateien.
+   Jetzt erst suchen, nur mit Arbeit (oder fälliger Session-Datei) wecken.
+3. **Ein einziges WoL-Paket** verpufft, wenn pve-big gerade noch herunterfährt → in jeder Warterunde erneut
+   (Pipeline, wach_halten, regie-starten.sh).
+4. **Lücke vor dem Ausschalten:** Die Zähler werden jetzt zuletzt gelesen (nach pvesh/qm/pct, die Sekunden
+   dauern). Ein Rest-Fenster von Bruchteilen einer Sekunde bleibt; ein Auftrag, der genau dann startet,
+   scheitert sauber und lässt sich wiederholen (keine Daten in Gefahr).
+5. **Weck-Erlaubnis nie zurückgenommen:** Sieht der Mini pve-big wach und eingehängt, aber im Probelauf oder
+   10 min ohne frische Marke, erlischt die Erlaubnis.
+6. **Herzschlag ohne Obergrenze:** HERZSCHLAG_MAX_H stand nur in der Konfig. Jetzt trägt der Dateiname die
+   Startzeit; ein Schritt, der länger als 4 h läuft (hängt), hält pve-big nicht mehr wach.
+7. **Prüfsummen nur im Chat:** regie-starten.sh gibt den Einfüge-Block jetzt selbst aus, mit Summen aus dem
+   git-Stand im CT (nicht von der Freigabe) – er kann nicht mehr veralten.
+8. regie-starten.sh sagt am Ende (auch bei Abbruch), ob pve-big sich selbst abschaltet, sonst Block + Hinweis.
+Verworfen (Gegenprüfer überzeugt, dass es auf diesem Aufbau nicht passiert), u. a.: Herzschlag von
+`pipeline sitzungen` ohne Arbeit, pgrep sieht Prozesse in LXC-Gästen, scp/rsync ohne Terminal.

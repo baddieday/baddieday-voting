@@ -23,7 +23,8 @@ class RegieStarten(unittest.TestCase):
 echo "pct $*" >> "$STUB/aufrufe"
 case "$1" in
   status) echo "status: running" ;;
-  exec) shift 3; case "$1" in awk) echo "40:61:86:2e:9a:ff" ;; test|python3) exit 1 ;; esac ;;
+  exec) shift 3; case "$1" in awk) echo "40:61:86:2e:9a:ff" ;; test|python3) exit 1 ;;
+        sh) case "$*" in *sha256sum*) printf 'aaaa  clip-leerlauf\r\nbbbb  einrichten.sh\r\n' ;; esac ;; esac ;;
   pull) [ -n "$NEUE_VERSION" ] && printf '#!/usr/bin/env bash\necho "NEU $REGIE_NEU $*"\n' > "$4" ;;
 esac''',
             # findmnt: erst nach 3 Abfragen "eingehängt" (pve-big fährt hoch)
@@ -62,7 +63,13 @@ n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo $n > "$STUB/n"; [ $n -
         self.assertIn("GIT_TERMINAL_PROMPT=0", aufrufe)
         self.assertNotIn("/opt/clip-pipeline/.venv", aufrufe)  # Produktion wird nie benutzt/verändert
         self.assertIn("im Lern-Bot", r.stdout)
-        self.assertIn("noch nicht scharf", r.stdout)  # clip-leerlauf meldet sich (noch) nicht
+        self.assertIn("noch NICHT scharf", r.stdout)  # clip-leerlauf meldet sich (noch) nicht ...
+        # ... also der Einfüge-Block, mit den Prüfsummen aus dem git-Stand (ohne \r aus pct exec)
+        block = r.stdout[r.stdout.rindex("---- in die Shell von pve-big"):]
+        self.assertIn("sha256sum -c <<'H' && bash einrichten.sh \"${D%/.einrichtung}\"\naaaa  clip-leerlauf\n"
+                      "bbbb  einrichten.sh\nH\n", block)
+        self.assertNotIn("\r", block)
+        self.assertEqual(r.stdout.count("---- in die Shell von pve-big"), 2)  # nach dem Bereitlegen und am Ende
         self.assertEqual(SKRIPT.read_text()[:2], "#!")  # keine neue Version -> Skript unverändert
 
     def test_neue_version_uebernimmt_sich_selbst(self):

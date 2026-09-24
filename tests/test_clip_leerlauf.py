@@ -24,8 +24,10 @@ class Leerlauf(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         t = self.t = Path(self._tmp.name)
-        for d in ("stub", "kstat/tank", "clients", "zustand", "clips/eingang", "clips/.aktiv"):
+        for d in ("stub", "kstat/tank", "clients", "zustand", "clips/eingang", "clips/.aktiv", "dev/pts"):
             (t / d).mkdir(parents=True)
+        for tty in ("pts/0", "pts/1"):  # Terminals: Zugriffszeit = letzte Eingabe (frisch = es wird getippt)
+            (t / "dev" / tty).touch()
         (t / "clips/.clip-speicher").touch()
         (t / "leasetime").write_text("90\n")
         self.zfs(writes=10, nread=1000)
@@ -68,7 +70,7 @@ class Leerlauf(unittest.TestCase):
                "CLIP_LL_NFSD_STAT": str(t / "nfsd"), "CLIP_LL_NFSD_CLIENTS": str(t / "clients"),
                "CLIP_LL_LEASETIME": str(t / "leasetime"), "CLIP_LL_ZUSTAND": str(t / "zustand"),
                "CLIP_LL_HALTEN": str(t / "halten"), "CLIP_LL_AUS_DATEI": str(t / "automatik-aus"),
-               "CLIP_LL_AUS_BEFEHL": f"touch {t}/AUSGESCHALTET", "CLIP_LL_WARTE": "0"}
+               "CLIP_LL_AUS_BEFEHL": f"touch {t}/AUSGESCHALTET", "CLIP_LL_WARTE": "0", "CLIP_LL_DEV": str(t / "dev")}
         r = subprocess.run(["python3", str(SKRIPT)], capture_output=True, text=True, env=env, timeout=30)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.status = json.loads((t / "zustand/status.json").read_text()) if (t / "zustand/status.json").exists() else {}
@@ -194,6 +196,37 @@ class Leerlauf(unittest.TestCase):
         (self.t / "halten").touch()
         self.lauf()
         self.assertEqual(sorted(self.status["gruende"]), sorted(["Halten-Datei", "ffmpeg läuft", "angemeldet: root pts/0"]))
+
+    def test_vergessene_konsole_haelt_nicht_wach(self):
+        # Web-Shell offen (login auf pts/0, Proxmox-Aufgabe vncshell), aber seit 30 min nichts getippt
+        self.konf(TROCKEN="0", LEERLAUF_MIN="20", MINDEST_WACH_MIN="10")
+        self.stub("who", "echo 'root pts/0 2026-09-24 10:00'")
+        self.stub("pvesh", """echo '[{"type": "vncshell", "user": "root@pam"}]'""")
+        alt = time.time() - 1800
+        os.utime(self.t / "dev/pts/0", (alt, alt))
+        self.uptime(600)
+        self.lauf()
+        self.assertEqual(self.status["gruende"], [])
+        self.uptime(1900)
+        self.lauf()
+        self.assertTrue(self.aus)                            # nach 20 min Ruhe aus, obwohl der Tab offen ist
+        # ... wer tippt, hält ihn wach; echte Proxmox-Aufgaben auch
+        (self.t / "AUSGESCHALTET").unlink()
+        (self.t / "dev/pts/0").touch()
+        self.stub("pvesh", """echo '[{"type": "vncshell"}, {"type": "vzdump"}]'""")
+        self.uptime(1960)
+        self.lauf()
+        self.assertEqual(sorted(self.status["gruende"]), ["Proxmox-Aufgabe: vzdump", "angemeldet: root pts/0"])
+
+    def test_haengender_herzschlag_haelt_hoechstens_max_h(self):
+        jetzt = int(time.time())
+        (self.t / "clips/.aktiv" / f"clips-lernbot-4711-{jetzt - 5 * 3600}").touch()  # läuft seit 5 h: hängt
+        (self.t / "clips/.aktiv" / f"clips-stimmung-4712-{jetzt - 600}").touch()      # seit 10 min: echt
+        (self.t / "clips/.aktiv" / "clips-alt-4713").touch()                            # altes Format: zählt
+        self.uptime(1500)
+        self.lauf()
+        self.assertEqual(sorted(self.status["gruende"]),
+                         ["Herzschlag: clips-alt-4713", f"Herzschlag: clips-stimmung-4712-{jetzt - 600}"])
 
     def test_kaputte_quelle_heisst_wach(self):
         (self.t / "kstat/tank/objset-0x36").unlink()

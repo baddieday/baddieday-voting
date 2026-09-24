@@ -41,3 +41,6 @@ Legende: ✅ fertig und hier getestet · 🧪 gebaut, nur mit künstlichem Mater
 - `clip-leerlauf` für pve-big (E14): Probelauf-Tests, jetzt `einrichten.sh` für den scharfen Betrieb.
 - Lernschleife (E15): nach ✅ sofort der nächste Entwurf; weckt pve-big nur mit gesichertem Aus.
 - Du: „Warum immer die gleichen Clips mit anderer Musik?“ → Ursache gefunden und behoben (E16).
+- Du: „Warum ist pve-big noch an?“ – clip-leerlauf war noch nicht installiert. Dabei zwei Fehler gefunden, die
+  ihn auch danach wachgehalten hätten (eigene Statusdatei, Lesen über NFS) → leere Marke. Danach unabhängige
+  Prüfung des ganzen Mechanismus: 9 bestätigte Befunde, alle behoben (E17).

@@ -60,4 +60,7 @@ echo "   Gäste mit Autostart (zählen nicht): ${AUTOSTART:-keine}"
 if [ -z "${KEIN_SYSTEMD:-}" ] && [ -r /run/clip-leerlauf/status.json ]; then
   echo "   Gerade hält ihn wach: $(python3 -c 'import json; g = json.load(open("/run/clip-leerlauf/status.json"))["gruende"]; print(" · ".join(g) or "nichts")')"
 fi
-echo "   Mitlesen: journalctl -t clip-leerlauf -f   ·   Pause bis Neustart: touch /run/clip-halten"
+echo
+echo "👉 Jetzt dieses Shell-Fenster schließen (exit oder Tab zu)."
+echo "   Eine Konsole, in der getippt wird, hält pve-big wach; nach $LEERLAUF_MIN min ohne Tippen zählt sie nicht mehr."
+echo "   Später nachsehen: journalctl -t clip-leerlauf --since -2h   ·   Pause bis Neustart: touch /run/clip-halten"
