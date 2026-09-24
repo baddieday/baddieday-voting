@@ -23,6 +23,7 @@ import os
 import re
 import socket
 import subprocess
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -225,6 +226,45 @@ def pipeline_beschaeftigt(konfig: Konfig) -> bool:
         os.close(fd)
 
 
+# --- Herzschlag für clip-leerlauf auf pve-big ----------------------------------------------
+
+@contextmanager
+def herzschlag(konfig: Konfig, name: str, intervall_s: float = 60.0) -> Iterator[None]:
+    """Berührt <speicher>/.aktiv/<rechner>-<name>-<pid> jede Minute, solange der Block läuft.
+
+    clip-leerlauf auf pve-big sieht daran, dass hier gearbeitet wird – auch in Phasen ohne Dateizugriff
+    (Whisper, claude -p). Alles läuft in einem Hintergrund-Thread: ein hängender NFS-Mount blockiert den
+    eigentlichen Schritt nie. Fehlt die Markierung (Speicher nicht eingehängt), wird nichts geschrieben."""
+    datei = konfig.wurzel / ".aktiv" / f"{socket.gethostname()}-{name}-{os.getpid()}"
+    stopp = threading.Event()
+
+    def schlagen() -> None:
+        geschrieben = False
+        while True:
+            try:
+                if (konfig.wurzel / str(konfig.wert("speicher.markierung", ".clip-speicher"))).is_file():
+                    datei.parent.mkdir(exist_ok=True)
+                    datei.touch()
+                    geschrieben = True
+            except OSError:
+                pass
+            if stopp.wait(intervall_s):
+                break
+        if geschrieben:
+            try:
+                datei.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    faden = threading.Thread(target=schlagen, name="herzschlag", daemon=True)
+    faden.start()
+    try:
+        yield
+    finally:
+        stopp.set()
+        faden.join(timeout=5)
+
+
 # --- Wecken -----------------------------------------------------------------------
 
 def darf_wecken(konfig: Konfig, zeit: datetime | None = None) -> str | None:
@@ -258,6 +298,7 @@ def wach_halten(konfig: Konfig, name: str, grund: str, minuten: float = 120) -> 
         if grund_dagegen := darf_wecken(konfig):
             raise WeckenVerboten(grund_dagegen)
     setze_marke(konfig, name, minuten, grund)
+    schlag = herzschlag(konfig, name)
     try:
         if not schon_wach:
             log.info("wecke pve-big: %s", grund)
@@ -274,7 +315,8 @@ def wach_halten(konfig: Konfig, name: str, grund: str, minuten: float = 120) -> 
                 loese_marke(konfig, name)
                 herunterfahren(konfig, "Steuerung antwortete nach dem Wecken nicht", warten_s=60)  # Versuch
                 raise BigFehler(f"pve-big wach, aber Steuerung antwortet nicht ({e}) – Abbruch") from None
-        yield True
+        with schlag:
+            yield True
     finally:
         loese_marke(konfig, name)
         if not schon_wach:
@@ -314,7 +356,14 @@ def pruefe(konfig: Konfig, zeit: datetime | None = None) -> Entscheidung:
     mindest = float(_b(konfig, "mindest_wach_min", 20)) * 60
     if float(status.get("uptime_s", 0)) < mindest and not _von_uns_geweckt(zustand, status, zeit):
         return Entscheidung(True, False, f"erst seit {int(status.get('uptime_s', 0)) // 60} min wach", status)
-    if int(status.get("smb", 0)) > 0:
+    leerlauf = status.get("leerlauf")
+    if isinstance(leerlauf, dict):
+        # clip-leerlauf auf pve-big weiß es genauer (echte Zugriffe statt bloßer Verbindungen)
+        if leerlauf.get("gruende"):
+            return Entscheidung(True, False, "pve-big meldet: " + " · ".join(leerlauf["gruende"][:3]), status)
+        if float(leerlauf.get("ruhig_seit_s", 0)) < 120:
+            return Entscheidung(True, False, "pve-big: Zugriff vor weniger als 2 min", status)
+    elif int(status.get("smb", 0)) > 0:
         return Entscheidung(True, False, f"{status['smb']} SMB-Verbindung(en) – Gaming-PC kopiert?", status)
     if int(status.get("ffmpeg", 0)) > 0:
         return Entscheidung(True, False, "ffmpeg läuft auf pve-big", status)

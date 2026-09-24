@@ -1,0 +1,16 @@
+# pve-big: prüft, ob er noch gebraucht wird, und fährt sonst herunter (siehe deploy/big/clip-leerlauf).
+# Installieren (auf pve-big als root):
+#   install -m 755 clip-leerlauf /usr/local/sbin/ && cp clip-leerlauf.conf.beispiel /etc/clip-leerlauf.conf
+#   cp clip-leerlauf.service clip-leerlauf.timer /etc/systemd/system/ && systemctl daemon-reload
+#   systemctl enable --now clip-leerlauf.timer
+#   journalctl -t clip-leerlauf -f      # was würde er tun? (TROCKEN=1 schaltet nie aus)
+[Unit]
+Description=pve-big herunterfahren, wenn der Clips-Speicher nicht gebraucht wird
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/clip-leerlauf
+SyslogIdentifier=clip-leerlauf
+RuntimeDirectory=clip-leerlauf
+RuntimeDirectoryPreserve=yes
+TimeoutStartSec=2min

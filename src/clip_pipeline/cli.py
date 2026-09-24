@@ -479,7 +479,8 @@ def main(argv: list[str] | None = None) -> int:
             with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=warten, melde=log.info):
                 if args.befehl in WECKEN:
                     konfig.pruefe_speicher(wecken=True)
-                return args.fn(args, konfig, con)
+                with big.herzschlag(konfig, args.befehl):  # hält pve-big über clip-leerlauf wach
+                    return args.fn(args, konfig, con)
         return args.fn(args, konfig, con)
     # Jeder Fehler steht auch auf stderr – der n8n-Fehler-Alarm zeigt stderr an
     except SpeicherOffline as e:

@@ -24,7 +24,9 @@ case "$befehl" in
     wach_s=$(cut -d' ' -f1 /proc/uptime | cut -d. -f1)
     smb=$(ss -Htn state established '( sport = :445 )' 2>/dev/null | wc -l)
     ffmpeg=$(pgrep -c -x ffmpeg 2>/dev/null || true)
-    printf '{"uptime_s": %s, "smb": %s, "ffmpeg": %s}\n' "$wach_s" "$smb" "${ffmpeg:-0}"
+    # Einschätzung von clip-leerlauf (falls installiert): seit wann ruhig, welche Gründe halten wach
+    leerlauf=$(cat /run/clip-leerlauf/status.json 2>/dev/null | tr -d '\n' || true)
+    printf '{"uptime_s": %s, "smb": %s, "ffmpeg": %s, "leerlauf": %s}\n' "$wach_s" "$smb" "${ffmpeg:-0}" "${leerlauf:-null}"
     ;;
   aus)
     echo '{"aus": true}'

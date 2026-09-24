@@ -224,9 +224,46 @@ class SteuerSkript(MitSpeicher):
         ergebnis = self.lauf("status")
         self.assertEqual(ergebnis.returncode, 0, ergebnis.stderr)
         daten = json.loads(ergebnis.stdout)
-        self.assertEqual(set(daten), {"uptime_s", "smb", "ffmpeg"})
+        self.assertEqual(set(daten), {"uptime_s", "smb", "ffmpeg", "leerlauf"})
 
     def test_alles_andere_abgewiesen(self):
         for befehl in ("", "status; rm -rf /", "aus now", "bash", "status\naus", "final ../../etc/passwd",
                        "final a;reboot", "final", "final $(id)"):
             self.assertEqual(self.lauf(befehl).returncode, 2, befehl)
+
+
+class Herzschlag(MitSpeicher):
+    def test_schlaegt_und_raeumt_auf(self):
+        ordner = self.konfig.wurzel / ".aktiv"
+        with big.herzschlag(self.konfig, "render", intervall_s=0.05):
+            time_sleep(0.2)
+            dateien = list(ordner.glob("*-render-*"))
+            self.assertEqual(len(dateien), 1)
+            vorher = dateien[0].stat().st_mtime_ns
+            time_sleep(0.2)
+            self.assertGreaterEqual(dateien[0].stat().st_mtime_ns, vorher)
+        self.assertEqual(list(ordner.glob("*")), [])  # nach dem Schritt weg
+
+    def test_ohne_markierung_kein_schreiben(self):
+        (self.konfig.wurzel / ".clip-speicher").unlink()
+        with big.herzschlag(self.konfig, "render", intervall_s=0.05):
+            time_sleep(0.15)
+        self.assertFalse((self.konfig.wurzel / ".aktiv").exists())
+
+    def test_cli_schritt_schlaegt(self):
+        gesehen = []
+
+        def schritt(con, konfig, sid):
+            for _ in range(50):  # der erste Schlag kommt aus dem Hintergrund-Thread
+                if list((konfig.wurzel / ".aktiv").glob("*")) if (konfig.wurzel / ".aktiv").is_dir() else []:
+                    break
+                time_sleep(0.02)
+            gesehen.extend(p.name for p in (konfig.wurzel / ".aktiv").glob("*"))
+            return {"session": sid}
+
+        with mock.patch("clip_pipeline.cli.lade", return_value=self.konfig), \
+                mock.patch.dict("clip_pipeline.verarbeitung.__dict__", {"analyze": schritt}), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["analyze", "--session", "s1"]), 0)
+        self.assertTrue(any("-analyze-" in n for n in gesehen), gesehen)
+        self.assertEqual(list((self.konfig.wurzel / ".aktiv").glob("*")), [])

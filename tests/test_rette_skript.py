@@ -1,6 +1,6 @@
 """deploy/pve-mini/rette-clips-start.sh gegen einen nachgebauten pve-mini (Stubs für pct, mount, systemctl).
 
-Braucht root (pct exec läuft wirklich, in einem eigenen Mount-Namespace mit Attrappen für /srv und /opt des CT).
+Der Container ist ein Ordner (ROOTFS), pct mount/pull/push arbeiten darauf. Braucht root (chown pipeline).
 """
 
 import os
@@ -37,23 +37,26 @@ snaptime: 1
 
 STUBS = {
     # pct: status aus Datei, set --delete/--onboot bearbeitet die Konfig wie Proxmox (nur aktiver Abschnitt)
-    "pct": r'''#!/bin/bash
+    "pct": r"""#!/bin/bash
 echo "pct $*" >> "$STUB/aufrufe"
 case "$1" in
   status) echo "status: $(cat "$STUB/status")" ;;
   start) echo running > "$STUB/status" ;;
+  mount) [ "$(cat "$STUB/status")" = stopped ] || exit 2; echo "mounted CT $2" ;;
+  unmount) : ;;
   set)
     if [ "$3" = --delete ]; then
       awk -v k="$4:" '/^\[/ {s=1} !(s==0 && index($0, k) == 1) {print}' "$KONF" > "$STUB/k" && cat "$STUB/k" > "$KONF"
     elif [ "$3" = --onboot ]; then
       awk -v v="$4" '/^\[/ && !d {print "onboot: " v; d=1} !(index($0, "onboot:") == 1 && !s) {print} /^\[/ {s=1} END {if (!d) print "onboot: " v}' "$KONF" > "$STUB/k" && cat "$STUB/k" > "$KONF"
     fi ;;
-  exec)
-    shift 4  # exec 102 -- sh
-    [ "$1" = -c ] || exit 9
-    exec unshare -m bash -c '/usr/bin/mount --bind "$CTROOT/srv" /srv && /usr/bin/mount --bind "$CTROOT/opt" /opt && exec sh -c "$1"' _ "$2" ;;
+  pull) cp "$ROOTFS$3" "$4" ;;
+  push)
+    [ "$(cat "$STUB/status")" = running ] || exit 2
+    cp "$3" "$ROOTFS$4"; shift 4
+    while [ $# -gt 0 ]; do case "$1" in --user) chown "$2" "$ROOTFS/opt/clip-pipeline/.env";; --group) chgrp "$2" "$ROOTFS/opt/clip-pipeline/.env";; --perms) chmod "$2" "$ROOTFS/opt/clip-pipeline/.env";; esac; shift 2; done ;;
 esac
-''',
+""",
     "findmnt": r'''#!/bin/bash
 ziel="${@: -1}"
 grep -qxF "$ziel" "$STUB/eingehaengt" 2>/dev/null || exit 1
@@ -66,7 +69,7 @@ grep -qxF "$ziel" "$STUB/eingehaengt" 2>/dev/null || exit 1
 }
 
 
-@unittest.skipUnless(os.geteuid() == 0 and shutil.which("unshare"), "braucht root und unshare")
+@unittest.skipUnless(os.geteuid() == 0, "braucht root")
 class RetteSkript(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -92,13 +95,15 @@ class RetteSkript(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
         self.assertFalse(Path("/srv/clips").is_symlink(), "Test hat das echte /srv verändert!")
+        self.assertFalse(Path("/var/lib/lxc/102").exists(), "Test hat einen echten CT-Pfad benutzt!")
 
     def lauf(self, eingabe=""):
         t = self.t
         umgebung = {**os.environ, "PATH": f"{t}/stub:{os.environ['PATH']}", "STUB": str(t / "stub"),
                     "CTROOT": str(t / "ct"), "FSTAB": str(t / "etc/fstab"), "KONF": str(t / "etc/102.conf"),
                     "SBIN": str(t / "sbin"), "UNITS": str(t / "units"), "SICH": str(t / "sicherung"),
-                    "BIG": str(t / "mnt/big"), "ALT": "/mnt/clips"}
+                    "BIG": str(t / "mnt/big"), "ALT": "/mnt/clips", "ROOTFS": str(t / "ct"),
+                    "ORIGINAL": str(t / "original")}
         return subprocess.run(["bash", str(SKRIPT)], input=eingabe, capture_output=True, text=True, env=umgebung,
                               timeout=60)
 
@@ -107,10 +112,12 @@ class RetteSkript(unittest.TestCase):
         r = self.lauf(TOKEN + "\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         big = t / "mnt/big"
-        fstab = (t / "etc/fstab").read_text()
-        self.assertIn(f"pve-big:/tank/clips {big}/clips nfs soft,timeo=50,retrans=3,bg,nofail,_netdev 0 0", fstab)
-        self.assertIn(f"{big} {big} none bind,shared 0 0", fstab)
-        self.assertIn("/dev/pve/root / ext4 errors=remount-ro 0 1", fstab)  # Rest unverändert
+        zeilen = (t / "etc/fstab").read_text().splitlines()
+        bind = zeilen.index(f"{big} {big} none bind,shared 0 0")
+        nfs = zeilen.index(f"pve-big:/tank/clips {big}/clips nfs soft,timeo=50,retrans=3,nofail,_netdev,"
+                           "x-systemd.mount-timeout=20 0 0")  # bg raus
+        self.assertLess(bind, nfs)                                    # Bind VOR dem NFS (mount -a)
+        self.assertIn("/dev/pve/root / ext4 errors=remount-ro 0 1", zeilen)
 
         konf = (t / "etc/102.conf").read_text()
         aktiv, snapshot = konf.split("[vorher]")
@@ -122,7 +129,7 @@ class RetteSkript(unittest.TestCase):
         aufrufe = (t / "stub/aufrufe").read_text()
         self.assertIn("umount -l /mnt/clips", aufrufe)          # toter Mount nur gelöst
         self.assertIn("systemctl enable --now clips-nfs-einhaengen.timer", aufrufe)
-        self.assertIn("pct start 102", aufrufe)
+        self.assertLess(aufrufe.index("pct mount 102"), aufrufe.index("pct start 102"))  # Link vor dem Start
         self.assertNotIn(TOKEN, aufrufe + r.stdout + r.stderr)  # Token nie in Befehlszeilen oder Ausgabe
 
         link = t / "ct/srv/clips"
@@ -132,17 +139,22 @@ class RetteSkript(unittest.TestCase):
         self.assertEqual(env.read_text(), f"TELEGRAM_BOT_TOKEN=alt\nLEARN_BOT_TOKEN={TOKEN}\n")
         st = env.stat()
         self.assertEqual((pwd.getpwuid(st.st_uid).pw_name, stat.S_IMODE(st.st_mode)), ("pipeline", 0o600))
-        self.assertTrue((t / "sicherung/fstab").read_text() == FSTAB)
-        self.assertTrue((t / "sicherung/102.conf").read_text() == KONF)
+        self.assertEqual((t / "original/fstab").read_text(), FSTAB)
+        self.assertEqual((t / "original/102.conf").read_text(), KONF)
+        self.assertTrue(os.access(t / "original/zurueck.sh", os.X_OK))
+        self.assertEqual(subprocess.run(["bash", "-n", str(t / "original/zurueck.sh")]).returncode, 0)
+        self.assertEqual(list(Path("/run").glob("clips-token.*")), [])  # Token-Zwischendatei weg
 
-        # Zweiter Lauf (z. B. nach Neustart des Hosts): nichts doppelt, Token ersetzt statt verdoppelt
-        (t / "stub/status").write_text("stopped\n")
+        # Zweiter Lauf bei LAUFENDEM, schon umgebautem CT: kein Stopp nötig, nichts doppelt, Original bleibt
         r = self.lauf(TOKEN + "\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual((t / "etc/fstab").read_text().count("bind,shared"), 1)
+        self.assertIn("Link und Start übersprungen", r.stdout)
+        fstab2 = (t / "etc/fstab").read_text()
+        self.assertEqual(fstab2.count("bind,shared"), 1)
+        self.assertEqual(fstab2.count("x-systemd.mount-timeout=20"), 1)
         self.assertEqual((t / "etc/102.conf").read_text().count("rbind,rslave"), 1)
         self.assertEqual(env.read_text().count("LEARN_BOT_TOKEN="), 1)
-        self.assertIn("Link steht schon", r.stdout)
+        self.assertEqual((t / "original/fstab").read_text(), FSTAB)  # Rückweg zeigt weiter auf den Urzustand
 
     def test_ohne_token_und_mit_falschem_token(self):
         r = self.lauf("\n")
@@ -160,32 +172,48 @@ class RetteSkript(unittest.TestCase):
         self.assertEqual((self.t / "etc/fstab").read_text(), FSTAB)
         self.assertEqual((self.t / "etc/102.conf").read_text(), KONF)
 
+    def test_unbekannter_aufbau_aendert_nichts(self):
+        (self.t / "etc/fstab").write_text("/dev/pve/root / ext4 defaults 0 1\n")
+        r = self.lauf()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unbekannter Aufbau", r.stdout)
+        self.assertEqual((self.t / "etc/102.conf").read_text(), KONF)
+        self.assertFalse((self.t / "original").exists())
+
     def test_nicht_leeres_srv_clips_bleibt(self):
         (self.t / "ct/srv/clips/wichtig.mp4").write_text("x")
         r = self.lauf("\n")
         self.assertIn("nicht leer – nichts verändert", r.stdout)
         self.assertTrue((self.t / "ct/srv/clips/wichtig.mp4").is_file())
 
-    def test_nachzieher_haengt_nur_ein_wenn_pve_big_antwortet(self):
+    def test_nachzieher_haengt_ein_und_loest_tote_mounts(self):
         self.lauf("\n")
         nachzieher = self.t / "sbin/clips-nfs-einhaengen"
         fstab = self.t / "etc/nachzieher-fstab"
         umgebung = {**os.environ, "PATH": f"{self.t}/stub:{os.environ['PATH']}", "STUB": str(self.t / "stub"),
-                    "FSTAB": str(fstab), "Z": "/mnt/big/clips"}
-        (self.t / "stub/aufrufe").write_text("")
+                    "FSTAB": str(fstab), "Z": "/mnt/big/clips", "ZAEHLER": str(self.t / "still")}
+        aufrufe = self.t / "stub/aufrufe"
+        aufrufe.write_text("")
+        (self.t / "stub/eingehaengt").write_text("")
         fstab.write_text("127.0.0.1:/tank/clips /mnt/big/clips nfs soft 0 0\n")
         subprocess.run([str(nachzieher)], env=umgebung, check=True, timeout=30)
-        self.assertNotIn("mount", (self.t / "stub/aufrufe").read_text())  # Port 2049 zu -> kein Mount-Versuch
+        self.assertNotIn("mount", aufrufe.read_text())  # Port 2049 zu -> kein Mount-Versuch
         server = socket.socket()
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("127.0.0.1", 2049))
         server.listen(1)
-        threading.Thread(target=lambda: server.accept(), daemon=True).start()
+        threading.Thread(target=lambda: server.accept()[0].close(), daemon=True).start()
         try:
             subprocess.run([str(nachzieher)], env=umgebung, check=True, timeout=30)
         finally:
             server.close()
-        self.assertIn("mount /mnt/big/clips", (self.t / "stub/aufrufe").read_text())
+        self.assertIn("mount /mnt/big/clips", aufrufe.read_text())
+        # pve-big schläft wieder: nach 3 stillen Prüfungen (90 s) wird der tote Mount gelöst
+        for _ in range(2):
+            subprocess.run([str(nachzieher)], env=umgebung, check=True, timeout=30)
+        self.assertNotIn("umount", aufrufe.read_text())
+        subprocess.run([str(nachzieher)], env=umgebung, check=True, timeout=30)
+        self.assertIn("umount -l /mnt/big/clips", aufrufe.read_text())
 
 
 if __name__ == "__main__":

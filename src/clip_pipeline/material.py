@@ -207,7 +207,8 @@ def hole(konfig: Konfig, con: sqlite3.Connection, *, probelauf: bool = False) ->
     if erreichbar:
         big.setze_marke(konfig, "material", minuten, "Material auf den Mini kopieren")
         try:
-            return {**_arbeit(konfig, con, probelauf), "big": "lief schon"}
+            with big.herzschlag(konfig, "material"):
+                return {**_arbeit(konfig, con, probelauf), "big": "lief schon"}
         finally:
             big.loese_marke(konfig, "material")
     with big.wach_halten(konfig, "material", "Material auf den Mini kopieren", minuten=minuten):
