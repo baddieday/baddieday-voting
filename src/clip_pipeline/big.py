@@ -210,10 +210,21 @@ def loese_marke(konfig: Konfig, name: str) -> None:
     (halten_ordner(konfig) / f"{name}.json").unlink(missing_ok=True)
 
 
+def lager_sperre(konfig: Konfig) -> Path:
+    """Eigene Sperre für Lager-Abgleich und Übernahme (getrennter Betrieb) – nicht die Pipeline-Sperre."""
+    return konfig.datenbank.with_suffix(".lager.lock")
+
+
 def pipeline_beschaeftigt(konfig: Konfig) -> bool:
     """Hält gerade ein ANDERER Pipeline-Schritt die flock-Sperre? (Wir nehmen sie nur probeweise.)
-    Hält dieser Prozess sie selbst (z. B. render-entwurf --final), zählt das nicht."""
-    pfad = konfig.datenbank.with_suffix(".lock")
+    Hält dieser Prozess sie selbst (z. B. render-entwurf --final), zählt das nicht.
+
+    Getrennter Betrieb: die Pipeline arbeitet nur im Puffer und braucht pve-big nicht – dann zählt
+    stattdessen die Lager-Sperre (Abgleich/Übernahme)."""
+    return _sperre_belegt(lager_sperre(konfig) if konfig.getrennt else konfig.datenbank.with_suffix(".lock"))
+
+
+def _sperre_belegt(pfad: Path) -> bool:
     if not pfad.exists() or str(pfad.resolve()) in GEHALTEN:
         return False
     fd = os.open(pfad, os.O_RDWR)
@@ -229,21 +240,31 @@ def pipeline_beschaeftigt(konfig: Konfig) -> bool:
 # --- Herzschlag für clip-leerlauf auf pve-big ----------------------------------------------
 
 @contextmanager
-def herzschlag(konfig: Konfig, name: str, intervall_s: float = 60.0) -> Iterator[None]:
+def herzschlag(konfig: Konfig, name: str, intervall_s: float = 60.0, *, lager: bool = False) -> Iterator[None]:
     """Berührt <speicher>/.aktiv/<rechner>-<name>-<pid>-<startzeit> jede Minute, solange der Block läuft.
     Die Startzeit im Namen begrenzt auf pve-big, wie lange ein (vielleicht hängender) Schritt wach hält.
 
     clip-leerlauf auf pve-big sieht daran, dass hier gearbeitet wird – auch in Phasen ohne Dateizugriff
     (Whisper, claude -p). Alles läuft in einem Hintergrund-Thread: ein hängender NFS-Mount blockiert den
-    eigentlichen Schritt nie. Fehlt die Markierung (Speicher nicht eingehängt), wird nichts geschrieben."""
-    datei = konfig.wurzel / ".aktiv" / f"{socket.gethostname()}-{name}-{os.getpid()}-{int(time.time())}"
+    eigentlichen Schritt nie. Fehlt die Markierung (Speicher nicht eingehängt), wird nichts geschrieben.
+
+    Getrennter Betrieb: geschrieben wird nach <lager>/.aktiv/ (nur mit Lager-Markierung) und nur für
+    wach_halten (lager=True). Alle anderen Schritte arbeiten im Puffer – ihr Herzschlag hielte pve-big nur
+    unnötig per NFS wach (Stolperfalle 11), er schlägt dann nicht."""
+    if konfig.getrennt:
+        wurzel, markierung = konfig.lager_wurzel, konfig._lager_markierung()
+    else:
+        wurzel = konfig.wurzel
+        markierung = wurzel / str(konfig.wert("speicher.markierung", ".clip-speicher"))
+    schlagen_erlaubt = lager or not konfig.getrennt
+    datei = wurzel / ".aktiv" / f"{socket.gethostname()}-{name}-{os.getpid()}-{int(time.time())}"
     stopp = threading.Event()
 
     def schlagen() -> None:
         geschrieben = False
         while True:
             try:
-                if (konfig.wurzel / str(konfig.wert("speicher.markierung", ".clip-speicher"))).is_file():
+                if markierung.is_file():
                     datei.parent.mkdir(exist_ok=True)
                     datei.touch()
                     geschrieben = True
@@ -258,6 +279,9 @@ def herzschlag(konfig: Konfig, name: str, intervall_s: float = 60.0) -> Iterator
             except OSError:
                 pass
 
+    if not schlagen_erlaubt:
+        yield
+        return
     faden = threading.Thread(target=schlagen, name="herzschlag", daemon=True)
     faden.start()
     try:
@@ -281,23 +305,29 @@ def merke_leerlauf(konfig: Konfig) -> bool | None:
 
     Ist pve-big wach und eingehängt, aber clip-leerlauf nicht (mehr) scharf – Probelauf, Timer aus, Automatik aus –,
     wird die Weck-Erlaubnis zurückgenommen: sofort bei einer frischen Probelauf-Marke, sonst nach LEERLAUF_FEHLT_S
-    ohne frische Marke (direkt nach dem Aufwachen ist die Marke noch alt: clip-leerlauf startet 2 min nach dem Boot)."""
+    ohne frische Marke (direkt nach dem Aufwachen ist die Marke noch alt: clip-leerlauf startet 2 min nach dem Boot).
+
+    Getrennter Betrieb: pve-big ist das Lager – Erreichbarkeit, Marken und Markierung kommen von dort."""
+    if konfig.getrennt:
+        erreichbar, wurzel, eingehaengt = konfig.lager_erreichbar, konfig.lager_wurzel, konfig._lager_markierung_da
+    else:
+        erreichbar, wurzel, eingehaengt = konfig._host_erreichbar, konfig.wurzel, konfig._markierung_da
     zustand = lies_zustand(konfig)
-    if not konfig._host_erreichbar():  # schläft pve-big: nicht am (vielleicht hängenden) NFS-Mount anfassen
+    if not erreichbar():  # schläft pve-big: nicht am (vielleicht hängenden) NFS-Mount anfassen
         if zustand.get("leerlauf_fehlt_seit"):
             _schreibe_zustand(konfig, leerlauf_fehlt_seit=None)  # Schlafzeit zählt nicht
         return None
 
     def frisch(name: str) -> bool:
         try:
-            return time.time() - (konfig.wurzel / name).stat().st_mtime < 600
+            return time.time() - (wurzel / name).stat().st_mtime < 600
         except OSError:
             return False
 
     if frisch(LEERLAUF_MARKEN["scharf"]):
         _schreibe_zustand(konfig, leerlauf_scharf=iso(jetzt()), leerlauf_fehlt_seit=None)
         return True
-    if not konfig._markierung_da():  # Speicher (noch) nicht eingehängt: daraus lässt sich nichts schließen
+    if not eingehaengt():  # Speicher (noch) nicht eingehängt: daraus lässt sich nichts schließen
         return None
     if frisch(LEERLAUF_MARKEN["probe"]):
         if zustand.get("leerlauf_scharf"):
@@ -352,7 +382,7 @@ def wach_halten(konfig: Konfig, name: str, grund: str, minuten: float = 120) -> 
         if grund_dagegen := darf_wecken(konfig):
             raise WeckenVerboten(grund_dagegen)
     setze_marke(konfig, name, minuten, grund)
-    schlag = herzschlag(konfig, name)
+    schlag = herzschlag(konfig, name, lager=True)  # im getrennten Betrieb der einzige Herzschlag im Lager
     try:
         if not schon_wach:
             log.info("wecke pve-big: %s", grund)
@@ -407,6 +437,8 @@ def pruefe(konfig: Konfig, zeit: datetime | None = None) -> Entscheidung:
     if gueltig := marken(konfig, zeit):
         return Entscheidung(True, False, "Halten: " + ", ".join(f"{m.name} bis {m.bis:%H:%M} UTC" for m in gueltig))
     if pipeline_beschaeftigt(konfig):
+        if konfig.getrennt:
+            return Entscheidung(True, False, "Lager-Abgleich/Übernahme läuft (Lager-Sperre belegt)")
         return Entscheidung(True, False, "Pipeline-Schritt läuft (Sperre belegt)")
     try:
         status = fern_status(konfig)

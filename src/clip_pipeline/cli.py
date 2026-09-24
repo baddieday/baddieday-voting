@@ -517,6 +517,10 @@ def main(argv: list[str] | None = None) -> int:
             with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=warten, melde=log.info):
                 if args.befehl in WECKEN:
                     konfig.pruefe_speicher(wecken=True)
+                if konfig.getrennt:
+                    # Getrennter Betrieb: der Schritt arbeitet nur im Puffer. Ein Herzschlag im Lager hielte
+                    # pve-big per NFS wach (Stolperfalle 11) – dort schlägt nur noch big.wach_halten.
+                    return args.fn(args, konfig, con)
                 with big.herzschlag(konfig, args.befehl):  # hält pve-big über clip-leerlauf wach
                     return args.fn(args, konfig, con)
         return args.fn(args, konfig, con)

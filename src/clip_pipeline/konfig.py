@@ -144,6 +144,98 @@ class Konfig:
                 f"Markierungsdatei {self.wurzel / self.daten['speicher']['markierung']} fehlt – Speicher nicht eingehängt?"
             )
 
+    # --- Getrennter Betrieb (E19): Puffer auf dem Mini, Lager auf pve-big ---------------
+
+    @property
+    def getrennt(self) -> bool:
+        """[lager].wurzel gesetzt: [speicher] ist dann der Puffer auf dem Mini, das Lager liegt auf pve-big.
+        Leer = wie bisher ([speicher] ist direkt pve-big)."""
+        return bool(str(self.wert("lager.wurzel", "") or "").strip())
+
+    @property
+    def lager_wurzel(self) -> Path:
+        if not self.getrennt:
+            raise KonfigFehler("kein getrennter Betrieb: [lager].wurzel leer")
+        return Path(str(self.wert("lager.wurzel")).strip())
+
+    def _lager_markierung(self) -> Path:
+        return self.lager_wurzel / str(self.wert("lager.markierung", ".clip-lager"))
+
+    def _lager_markierung_da(self) -> bool:
+        return self._lager_markierung().is_file()  # nur stat() – Lesen hielte pve-big per NFS wach
+
+    def _lager_host(self) -> str:
+        from . import big  # erst hier: big importiert konfig
+
+        return big.host(self)
+
+    def lager_erreichbar(self) -> bool:
+        """Kurzer TCP-Versuch auf pve-big ([big].host, sonst [speicher].host) : [lager].port.
+        Ohne Host True – dann entscheidet nur die Markierung."""
+        host = self._lager_host()
+        if not host:
+            return True
+        try:
+            with socket.create_connection((host, int(self.wert("lager.port", 2049))), timeout=2):
+                return True
+        except OSError:
+            return False
+
+    def pruefe_lager(self, warten_s: float = 0) -> None:
+        """Wirft SpeicherOffline, wenn das Lager nicht erreichbar oder nicht eingehängt ist (Markierung fehlt).
+        warten_s: nach dem Wecken so lange warten (alle 5 s) – der NFS-Mount kommt erst etwas später."""
+        markierung = self._lager_markierung()  # ohne getrennten Betrieb: sofort KonfigFehler
+        ende = time.monotonic() + float(warten_s)
+        while True:
+            # Erst den Host fragen: an einem hängenden NFS-Mount (pve-big schläft) nichts anfassen
+            erreichbar = self.lager_erreichbar()
+            if erreichbar and markierung.is_file():
+                return
+            if time.monotonic() >= ende:
+                break
+            time.sleep(5)
+        if not erreichbar:
+            raise SpeicherOffline(f"Lager-Host {self._lager_host()} schläft oder ist nicht erreichbar")
+        raise SpeicherOffline(f"Markierungsdatei {markierung} fehlt – Lager nicht eingehängt?")
+
+    def pruefe_getrennt(self, mit_lager: bool = True) -> None:
+        """Wirft KonfigFehler mit Klartext, wenn Puffer und Lager verwechselt werden könnten.
+
+        Nur stat()/exists – nie Inhalte lesen (NFS OPEN/READ hielte pve-big wach). mit_lager=False prüft nur die
+        Puffer-Seite (vor dem Wecken: das Lager nicht anfassen). Mit Lager: schläft pve-big, SpeicherOffline
+        statt am hängenden Mount zu warten."""
+        puffer = self.wurzel
+        lager = self.lager_wurzel
+        m_puffer = str(self.wert("puffer.markierung", ".clip-puffer"))
+        m_lager = str(self.wert("lager.markierung", ".clip-lager"))
+        if not puffer.is_dir():
+            raise KonfigFehler(f"Puffer {puffer} ([speicher].wurzel) gibt es nicht")
+        if not (puffer / m_puffer).is_file():
+            raise KonfigFehler(f"Im Puffer {puffer} fehlt {m_puffer} – ist {puffer} wirklich der Puffer auf dem Mini?")
+        if os.path.lexists(puffer / m_lager):
+            raise KonfigFehler(f"Im Puffer {puffer} liegt {m_lager} – Puffer und Lager vertauscht?")
+        if not mit_lager:
+            return
+        if not self.lager_erreichbar():
+            raise SpeicherOffline(f"Lager-Host {self._lager_host()} schläft – Lager kann nicht geprüft werden")
+        if not lager.is_dir():
+            raise KonfigFehler(f"Lager {lager} ([lager].wurzel) gibt es nicht")
+        if os.path.samefile(puffer, lager):
+            raise KonfigFehler(f"Puffer {puffer} und Lager {lager} sind derselbe Ordner – Link /srv/clips prüfen")
+        if _dateisystem(puffer) == _dateisystem(lager):
+            raise KonfigFehler(f"Puffer {puffer} und Lager {lager} liegen auf demselben Dateisystem – "
+                               "ist das Lager (NFS von pve-big) eingehängt?")
+        if not (lager / m_lager).is_file():
+            raise KonfigFehler(f"Im Lager {lager} fehlt {m_lager} – Lager nicht eingehängt oder falscher Ordner?")
+        if os.path.lexists(lager / m_puffer):
+            raise KonfigFehler(f"Im Lager {lager} liegt {m_puffer} – Puffer und Lager vertauscht?")
+
+
+def _dateisystem(pfad: Path) -> int:
+    """Gerätenummer des Dateisystems (st_dev). Eigene Funktion, damit Tests sie ersetzen können
+    (zwei Temp-Ordner liegen immer auf demselben Dateisystem)."""
+    return os.stat(pfad).st_dev
+
 
 def _vorbei(zeitpunkt: str) -> bool:
     """Liegt ein ISO-Zeitpunkt (mit Zone) in der Vergangenheit?"""

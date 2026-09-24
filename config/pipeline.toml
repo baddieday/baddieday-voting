@@ -4,6 +4,7 @@
 
 [speicher]
 # Wurzel des Clip-Speichers. Auf dem Mini ist das der NFS-Mount vom großen Host.
+# Im getrennten Betrieb ([lager].wurzel gesetzt) ist das der Puffer auf dem Mini (host = "", weckt nie).
 wurzel = "/srv/clips"
 # Diese Datei muss in der Wurzel liegen. Fehlt sie (großer Host aus, Mount fehlt),
 # fasst die Pipeline nichts an – so wird nie ein leerer Mount-Ordner befüllt.
@@ -41,8 +42,34 @@ frist = "2026-09-28T20:00:00+02:00"
 # Auch der bisherige Weckweg (n8n-Schritte, /paket, highlight) weckt nur, wenn das Herunterfahren gesichert ist.
 # Bis die SSH-Steuerung eingerichtet ist, enden diese Schritte bei schlafendem pve-big mit Exit 3 (Alarm).
 alter_weckweg_nur_mit_aus = true
-# So lange gilt ein erfolgreicher Test der Steuerung (der Wächter erneuert ihn, solange pve-big läuft)
-status_gueltig_tage = 14
+# So lange gilt ein erfolgreicher Test der Steuerung (der Wächter erneuert ihn, solange pve-big läuft).
+# 60 statt 14 (E19): mit Puffer ist pve-big oft tagelang aus – danach soll der nächtliche Abgleich ihn trotzdem wecken.
+status_gueltig_tage = 60
+
+[lager]
+# Langzeit-Lager auf pve-big (E19). Leer = kein getrennter Betrieb: [speicher] ist dann direkt pve-big (wie bisher).
+# Im getrennten Betrieb: [speicher] = Puffer auf dem Mini (host = ""), Lager = NFS von pve-big.
+wurzel = ""                    # z. B. "/srv/big/clips"
+markierung = ".clip-lager"     # liegt NUR im Lager (auf pve-big anlegen)
+port = 2049                    # "erreichbar?" = TCP [big].host:port
+warten_s = 240                 # nach dem Wecken so lange auf die Markierung warten (Nachzieher hängt NFS alle 30 s ein)
+ordner = ["eingang", "replays", "sessions", "highlights", "sitzungen", "musik", "archiv", "sicherung"]
+roh = ["eingang", "replays"]   # Rohdaten: im Lager nie überschreiben, nie löschen
+ruhe_min = 10                  # jüngere Dateien (mtime ODER ctime) gelten als "wird noch geschrieben"
+sicherungen_behalten = 30      # so viele nächtliche DB-Sicherungen in sicherung/ behalten
+
+[puffer]
+# Puffer auf dem Mini (E19, nur im getrennten Betrieb): hier arbeitet die Pipeline, nachts geht alles ins Lager.
+markierung = ".clip-puffer"    # liegt NUR im Puffer
+freigeben = false              # Stufe B5 (später, nur mit OK): bestätigte Rohdaten im Puffer löschen
+warnung_frei_gb = 20           # Morgenprüfung: Meldung, wenn weniger frei
+alarm_frei_gb = 8
+pool_status = "/srv/big/lvm-status.txt"   # Thin-Pool des Mini, schreibt der Host (deploy/pve-mini/clip-lvm-status)
+pool_warnung_prozent = 85      # Thin-Pool des Mini (aus pool_status, vom Host geschrieben)
+pool_alarm_prozent = 90
+lager_spaetestens_h = 36       # offene Dateien, aber seit so vielen Stunden kein erfolgreicher Abgleich → Meldung
+pc_status_datei = "sitzungen/pc-status.json"   # schreibt der Gaming-PC (Uebertragung.ps1)
+pc_stau_h = 24                 # älteste nicht übertragene Datei auf dem PC älter → Meldung
 
 [material]
 # Lokale Kopie auf dem Mini (pipeline material): gleiche Ordner wie in der Speicher-Wurzel.
@@ -264,6 +291,9 @@ erinnerung_h = 24
 
 [telegram]
 outbox_intervall_s = 30
+# Ruhezeit (Ortszeit): Meldungen aus Puffer/Lager werden dann nicht verschickt, sie bleiben bis leise_bis liegen.
+leise_von = "23:00"
+leise_bis = "08:00"
 
 [aufraeumen]
 # Nach so vielen Tagen wird recycelt (erst Papierkorb, dann endgültig) ...
