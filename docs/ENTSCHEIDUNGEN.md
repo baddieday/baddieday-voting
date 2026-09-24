@@ -216,3 +216,18 @@ jeder Befund von 2 Gegenprüfern angegriffen. 19 Befunde, 9 bestätigt, alle beh
 8. regie-starten.sh sagt am Ende (auch bei Abbruch), ob pve-big sich selbst abschaltet, sonst Block + Hinweis.
 Verworfen (Gegenprüfer überzeugt, dass es auf diesem Aufbau nicht passiert), u. a.: Herzschlag von
 `pipeline sitzungen` ohne Arbeit, pgrep sieht Prozesse in LXC-Gästen, scp/rsync ohne Terminal.
+
+## E18 · Neuer Datenweg: einmal pro Abend wecken, VPS als Arbeits- und Backup-Kopie (entschieden 24.09., Umsetzung folgt)
+Mit dir abgestimmt (Energie: pve-big nicht ständig an/aus):
+- **Nach jedem Spielabend weckt der Gaming-PC pve-big genau einmal** („Session vorbei“), alle neuen Aufnahmen
+  kommen in einem Rutsch rüber, der Mini schneidet die Clips, danach geht pve-big aus. Kein Wecken alle 2 min.
+- **pve-big behält alles** (Archiv, Rohdaten nie gelöscht). Zusätzlich eine Kopie auf dem **VPS** als Arbeits-
+  und Backup-Kopie für 7–14 Tage; der VPS löscht seine Kopie erst, wenn Alter erreicht UND die Prüfsumme auf
+  pve-big bestätigt ist. Kein Rück-Download in Blöcken nötig.
+- **pve-big 1× pro Woche zur festen Zeit** für das Highlight-Video (NVENC, jede 2. Woche) und Abgleich; danach aus.
+- Shorts auf dem Mini (VA-API), bei Bedarf parallel auf dem VPS.
+- Upload daheim ≤ 50 Mbit/s: Wer wann wie viel hochlädt (pve-big während des Abend-Weckens, gedrosselt vom
+  Mini oder nur das für Highlights Nötige), entscheide ich nach dem Messen der echten Mengen auf pve-big.
+- Sprint-Regel „VPS nicht verändern“ hebst du dafür auf; n8n-Workflows bleiben, solange es geht, unverändert.
+- **Zugang:** du gibst mir root auf pve-mini, pve-big und dem VPS über Tailscale SSH (Tags `tag:claude` →
+  `tag:heim`, kurzlebiger Schlüssel nur in den Umgebungs-Einstellungen, nie im Chat).
