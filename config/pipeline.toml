@@ -66,6 +66,18 @@ unsicher_unter = 0.35
 claude_max = 40
 claude_timeout_s = 180
 
+[musik]
+# Musik für den Regisseur liegt auf dem Mini (pve-big darf schlafen). Je Titel <name>.lizenz.txt daneben.
+ordner = "/var/lib/clip-pipeline/musik"
+
+[musik.ncs_stimmungen]
+# `pipeline musik ncs --stimmung X` sucht auf ncs.io mit diesen Mood-Filtern (IDs aus der NCS-Suche)
+episch = [4, 32, 38]        # Epic, powerful, majestic
+spannend = [23, 41, 26]     # Suspense, tense, Chasing
+lustig = [8, 16, 11]        # Funny, Quirky, Happy
+frustriert = [1, 30, 18]    # Angry, Heavy, Restless
+chill = [13, 17, 15]        # Laid Back, relaxed, Peaceful
+
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.
 pfad = "/var/lib/clip-pipeline/pipeline.db"

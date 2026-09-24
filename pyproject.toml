@@ -3,11 +3,13 @@ name = "clip-pipeline"
 version = "0.1.0"
 description = "Fortnite-Aufnahmen -> Highlights -> Bewertung per Telegram -> clip-battle.de"
 requires-python = ">=3.11"
-dependencies = ["python-telegram-bot>=21,<23"]
+dependencies = ["python-telegram-bot>=21,<23", "numpy>=1.26"]
 
 [project.optional-dependencies]
 # Unter Windows fehlt die Zeitzonen-Datenbank; unter Linux bringt sie das System mit.
 windows = ["tzdata"]
+# Stimmung: Transkription der Mikro-Spur (lädt beim ersten Lauf das Modell "small", ca. 480 MB)
+whisper = ["faster-whisper>=1.0"]
 
 [project.scripts]
 pipeline = "clip_pipeline.cli:main"

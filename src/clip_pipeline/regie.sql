@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     bpm        REAL,
     energie    REAL,                        -- 0..1
     beats      TEXT,                        -- JSON: Beat-Zeitpunkte in Sekunden
+    verlauf    TEXT,                        -- JSON: Energie je Sekunde (0..1), zeigt Aufbau und Drop
     stimmungen TEXT,                        -- JSON: passende Stimmungen (abgeleitet)
     erstellt   TEXT NOT NULL
 );

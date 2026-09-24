@@ -230,6 +230,33 @@ def _cmd_stimmung(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_musik(args, konfig, con) -> int:
+    from . import musik  # braucht numpy
+
+    if args.aktion == "analysieren":
+        a = musik.analysiere(Path(args.datei))
+        _json({k: v for k, v in a.items() if k not in ("beats", "verlauf")} | {"beats": len(a["beats"]),
+              "stimmungen": musik.passende_stimmungen(a["bpm"], a["energie"])[:2]})
+    elif args.aktion == "hinzufuegen":
+        if not args.quelle:
+            _json({"fehler": "--quelle (Quellenangabe/Lizenz) fehlt"})
+            return 2
+        t = musik.hinzufuegen(con, konfig, Path(args.datei), titel=args.titel or Path(args.datei).stem,
+                              kuenstler=args.kuenstler, quelle=args.quelle)
+        _json({"id": t["id"], "datei": t["datei"], "bpm": t["bpm"], "energie": t["energie"]})
+    elif args.aktion == "ncs":
+        neu = musik.ncs_laden(con, konfig, args.stimmung, args.anzahl)
+        _json({"neu": [{"titel": t["titel"], "kuenstler": t["kuenstler"], "bpm": t["bpm"], "energie": t["energie"]}
+                       for t in neu]})
+    else:
+        zeilen = con.execute("SELECT id, titel, kuenstler, bpm, energie, stimmungen FROM tracks ORDER BY id").fetchall()
+        for z in zeilen:
+            print(f"{z['id']:>3}  {z['bpm'] or 0:>5.1f} BPM  E {z['energie'] or 0:.2f}  {z['stimmungen']}  "
+                  f"{z['kuenstler'] or '?'} – {z['titel']}", file=sys.stderr)
+        _json({"tracks": len(zeilen)})
+    return 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -306,6 +333,16 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--ohne-claude", action="store_true")
     s.add_argument("--ohne-whisper", action="store_true")
     s.set_defaults(fn=_cmd_stimmung, sperren=True)
+
+    s = unter.add_parser("musik", help="Musik: analysieren, hinzufügen (mit Quelle), NCS laden, Liste")
+    s.add_argument("aktion", choices=["analysieren", "hinzufuegen", "ncs", "liste"])
+    s.add_argument("datei", nargs="?")
+    s.add_argument("--titel")
+    s.add_argument("--kuenstler")
+    s.add_argument("--quelle", help="Quellenangabe/Lizenz – Pflicht beim Hinzufügen")
+    s.add_argument("--stimmung", choices=["episch", "spannend", "lustig", "frustriert", "chill"], default="episch")
+    s.add_argument("--anzahl", type=int, default=3)
+    s.set_defaults(fn=_cmd_musik, sperren=False)
 
     s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
     s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])
