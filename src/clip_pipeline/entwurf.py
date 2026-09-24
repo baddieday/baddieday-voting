@@ -27,6 +27,7 @@ from .medien import MedienFehler, fuehre_aus, probe
 
 ENTWURF_KURZE_SEITE = 720
 UEBERHANG_S = 0.2
+ENTWURF_KBIT = 4000
 
 
 def schnitt_dauer(fps: int) -> float:
@@ -162,10 +163,11 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
     eingang, video, name = encoder(konfig, final)
     if encoder_name == "libx264":
         eingang, video, name = [], ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"], "libx264"
-    # Bitrate so, dass der Entwurf sicher unter max_bytes bleibt
-    kbit = int(max_bytes * 8 * 0.88 / max(gesamt, 1) / 1000) - 160
-    rate = [] if final else ["-b:v", f"{max(400, min(kbit, 8000))}k", "-maxrate", f"{max(400, min(kbit, 8000))}k",
-                             "-bufsize", f"{2 * max(400, min(kbit, 8000))}k"]
+    # Entwurf: gute Qualität, aber gedeckelt – höchstens ENTWURF_KBIT und sicher unter max_bytes (Telegram).
+    # (Das volle Budget auszuschöpfen hieße 40 MB für 40 s – unnötig für eine Vorschau auf dem Handy.)
+    kbit = max(400, min(int(max_bytes * 8 * 0.88 / max(gesamt, 1) / 1000) - 160, ENTWURF_KBIT))
+    deckel = ["-maxrate", f"{kbit}k", "-bufsize", f"{2 * kbit}k"]
+    rate = [] if final else (["-b:v", f"{kbit}k", *deckel] if name == "h264_vaapi" else ["-crf", "23", *deckel])
     if name == "h264_vaapi":  # VA-API: Filter-Ausgang auf die GPU hochladen
         graph = graph.replace("null[vout]", "format=nv12,hwupload[vout]")
     ziel.parent.mkdir(parents=True, exist_ok=True)

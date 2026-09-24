@@ -89,3 +89,34 @@ class FinalAufBig(MitRegieMaterial):
         self.assertIn("final", falsch.aufrufe)
         self.assertEqual(falsch.aufrufe[-1], "aus")  # danach sofort aus
         self.assertTrue(ergebnis["final"].startswith("regie/final/"))
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class VaApi(MitRegieMaterial):
+    """Ohne GPU nicht echt ausführbar: Befehlsaufbau prüfen und den Rückfall auf die CPU."""
+
+    def test_befehl_und_rueckfall(self):
+        from clip_pipeline.medien import MedienFehler
+
+        self.momente_anlegen(MOMENTE[:6])
+        e = regie.erstelle(self.con, self.konfig, "short")
+        geraet = self.tmp / "renderD128"
+        geraet.touch()  # "vorhanden"
+        self.konfig.daten["schnitt"]["vaapi_geraet"] = str(geraet)
+        befehle = []
+        echt = entwurf.fuehre_aus
+
+        def lauf(befehl, was, timeout=None):
+            befehle.append(befehl)
+            if "h264_vaapi" in befehl:
+                raise MedienFehler("VA-API geht nicht")
+            return echt(befehl, was, timeout)
+
+        with mock.patch.object(entwurf, "fuehre_aus", side_effect=lauf):
+            r = entwurf.entwurf(self.con, self.konfig, e["entwurf"])
+        vaapi, cpu = befehle
+        self.assertLess(vaapi.index("-vaapi_device"), vaapi.index("-i"))  # Gerät vor den Eingängen
+        self.assertNotIn("-vf", vaapi)                                     # kein -vf neben -filter_complex
+        self.assertIn("hwupload[vout]", vaapi[vaapi.index("-filter_complex") + 1])
+        self.assertEqual((r["encoder"], "-vaapi_device" in cpu), ("libx264", False))
+        self.assertTrue(Path(r["datei"]).is_file())
