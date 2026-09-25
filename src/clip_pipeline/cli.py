@@ -75,7 +75,10 @@ def _cmd_process(args, konfig, con) -> int:
 
 
 def _cmd_replay(args, konfig, con) -> int:
-    """Zeigt meine Ereignisse eines Replays in Ortszeit – zum Kalibrieren und Nachsehen."""
+    """Zeigt meine Ereignisse eines Replays in Ortszeit – zum Kalibrieren und Nachsehen.
+
+    Stufe 2: je Ereignis auch Waffe (GunType-ZAHL für [merkmale.waffen]), Bot (ja/nein/? = unbekannt) und die
+    verbleibenden Spieler (? ohne spieler_gesamt). So ordnet man die Zahlen an bekannten Kills zu (docs/PUBLIKUM.md)."""
     match, roh = replay.lies(Path(args.datei), konfig)
     zone = konfig.wert("zeit.zeitzone", "Europe/Berlin")
     ich = roh.get("ich") or {}
@@ -84,12 +87,16 @@ def _cmd_replay(args, konfig, con) -> int:
     print(f"Platz {match.platzierung} · Kills laut Replay {match.kills_stats}")
     print(f"Start {utc_zu_lokal(match.start_utc, zone):%d.%m.%Y %H:%M:%S} · Ende {utc_zu_lokal(match.ende_utc, zone):%H:%M:%S}")
     namen = {"kill": "Kill", "knock": "Knock", "tod": "gestorben", "knock_erlitten": "selbst am Boden"}
+    bot_text = {True: "ja", False: "nein", None: "?"}  # None = unbekannt (replay2json liefert null)
     for e in match.ereignisse:
         zeile = f"  {utc_zu_lokal(e.zeit_utc, zone):%H:%M:%S.%f}"[:-3] + f"  {namen.get(e.art, e.art)}"
         if e.art == "kill" and e.aktion_utc is not None and e.aktion_utc != e.zeit_utc:
             # Aktion = mein Umhauen: dort beginnt der Clip (beim Team-Wipe Sekunden vor dem Kill)
             vorher = (e.zeit_utc - e.aktion_utc).total_seconds()
             zeile += f"  (umgehauen {utc_zu_lokal(e.aktion_utc, zone):%H:%M:%S}, {vorher:.1f} s vorher)"
+        waffe = "?" if e.waffe is None else e.waffe
+        uebrig = "?" if e.verbleibend is None else e.verbleibend
+        zeile += f"  [Waffe {waffe} · Bot {bot_text[e.opfer_bot]} · {uebrig} übrig]"
         print(zeile)
     for w in match.warnungen:
         print(f"  ⚠️ {w}")
