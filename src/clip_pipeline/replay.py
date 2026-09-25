@@ -29,6 +29,12 @@ class ReplayFehler(RuntimeError):
 class MeinEreignis:
     zeit_utc: datetime
     art: str  # kill | knock | tod | knock_erlitten
+    aktion_utc: datetime | None = None  # nur bei kill: mein Umhauen dieses Gegners (None = kein eigenes Umhauen)
+
+    @property
+    def aktion(self) -> datetime:
+        """Wann die Action zu diesem Ereignis stattfand: mein Umhauen, sonst der Zeitpunkt selbst."""
+        return self.aktion_utc or self.zeit_utc
 
 
 @dataclass
@@ -46,6 +52,11 @@ class Match:
     @property
     def kills(self) -> list[datetime]:
         return [e.zeit_utc for e in self.ereignisse if e.art == "kill"]
+
+    @property
+    def kill_aktionen(self) -> list[tuple[datetime, datetime]]:
+        """(Kill-Zeitpunkt, Aktions-Zeitpunkt) je Kill, sortiert nach Kill – für Clip-Fenster mit Anlauf."""
+        return sorted((e.zeit_utc, e.aktion) for e in self.ereignisse if e.art == "kill")
 
     @property
     def victory_royale(self) -> bool:
@@ -105,6 +116,11 @@ def _meine_ereignisse(eliminierungen: list[dict], start: datetime, meine_ids: se
       Teammate haut um, ich erledige   -> Kill des Teammates (so zählt es auch Fortnite)
       ich haue um und erledige selbst  -> mein Kill, Zeitpunkt = das Erledigen
       direkter Kill ohne Umhauen (Solo) -> Kill dessen, der erledigt
+
+    Zusätzlich je Kill die AKTION (aktion_utc) = mein Umhauen, falls ich umgehauen habe, sonst None.
+    Gezählt und gruppiert wird weiter nach dem Kill-Zeitpunkt; die Aktion bestimmt nur, wo ein Clip beginnt.
+    Wichtig beim Team-Wipe: Ist der letzte Gegner eines Teams umgehauen, sterben alle umgehauenen Gegner
+    gleichzeitig – die Kill-Zeitpunkte fallen dann zusammen, das eigentliche Umhauen liegt Sekunden davor.
     """
     ereignisse: list[MeinEreignis] = []
     letzter_knock: dict[str, tuple[datetime, str]] = {}  # Opfer -> (Zeitpunkt, wer umgehauen hat)
@@ -129,7 +145,9 @@ def _meine_ereignisse(eliminierungen: list[dict], start: datetime, meine_ids: se
         # Selbst-Eliminierung (Sturm, Sturz) zählt nur, wenn vorher jemand umgehauen hat – dann für den
         if gutgeschrieben in meine_ids and opfer and (knock or not e.get("selbst")):
             eigener_finish = taeter in meine_ids
-            ereignisse.append(MeinEreignis(zeitpunkt if eigener_finish or not knock else knock[0], "kill"))
+            # knock ist hier schon mein eigenes Umhauen (gutgeschrieben) und höchstens KNOCK_GUELTIG_S alt
+            ereignisse.append(MeinEreignis(zeitpunkt if eigener_finish or not knock else knock[0], "kill",
+                                           aktion_utc=knock[0] if knock else None))
     ereignisse.sort(key=lambda e: e.zeit_utc)
     return ereignisse
 

@@ -46,6 +46,7 @@ Stand und Host-Änderungen: `docs/ABSCHLUSSBERICHT.md`.
 | `pipeline short <clip>` · `pipeline caption <clip>` | Short rendern · Caption erzeugen |
 | `pipeline gewichte [--neu]` · `pipeline status` | Lernstand · Überblick |
 | `pipeline aufraeumen [--liste] [--ausfuehren]` | Probelauf bzw. wirklich aufräumen |
+| `pipeline momente nachschneiden [--tage 14] [--probe]` | Multikill-Momente ab dem ersten Umhauen neu schneiden (nur Puffer, neue Dateien, weckt nie; erst `--probe`) |
 | `pipeline bot` | Telegram-Bot (läuft als Dienst) |
 
 Telegram: `/battle` `/rangliste` `/gewichte` `/uploads` `/paket <nr>` `/link <nr> <url>` `/offen` `/status` `/hilfe`

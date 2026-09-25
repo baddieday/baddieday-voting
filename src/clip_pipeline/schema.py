@@ -1,13 +1,15 @@
 """Kleiner JSON-Schema-Prüfer (Teilmenge von JSON Schema, ohne Zusatzpaket).
 
 Unterstützt: type, required, properties, additionalProperties (false), items,
-minimum, maximum, minLength, maxLength, enum, pattern, minItems.
+minimum, maximum, minLength, maxLength, enum, pattern, minItems, maxItems.
+Zahlen müssen endlich sein (NaN/Infinity aus json.loads gelten nicht als number).
 Gibt eine Liste lesbarer Fehler zurück; leere Liste = gültig.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 from functools import lru_cache
 from importlib import resources
@@ -25,7 +27,7 @@ def _passt_typ(wert, typ: str) -> bool:
     if typ == "integer":
         return isinstance(wert, int) and not isinstance(wert, bool)
     if typ == "number":
-        return isinstance(wert, (int, float)) and not isinstance(wert, bool)
+        return isinstance(wert, (int, float)) and not isinstance(wert, bool) and math.isfinite(wert)
     return isinstance(wert, _TYPEN[typ])
 
 
@@ -63,6 +65,8 @@ def pruefe(wert, schema: dict, pfad: str = "$") -> list[str]:
     if isinstance(wert, list):
         if "minItems" in schema and len(wert) < schema["minItems"]:
             fehler.append(f"{pfad}: weniger als {schema['minItems']} Einträge")
+        if "maxItems" in schema and len(wert) > schema["maxItems"]:
+            fehler.append(f"{pfad}: mehr als {schema['maxItems']} Einträge")
         if "items" in schema:
             for i, eintrag in enumerate(wert):
                 fehler += pruefe(eintrag, schema["items"], f"{pfad}[{i}]")

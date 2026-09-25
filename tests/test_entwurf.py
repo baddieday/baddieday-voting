@@ -70,6 +70,78 @@ class Entwurf(MitRegieMaterial):
         self.assertEqual(entwurf.encoder(self.konfig, final=True)[2], "h264_nvenc")
 
 
+class BildGraph(unittest.TestCase):
+    """fps zuerst (spart Rechenzeit), Hintergrund-Unschärfe auf b/4 × h/4 – reiner String-Test ohne ffmpeg."""
+
+    @staticmethod
+    def liste(fmt: str) -> dict:
+        arten = [("schnitt", 0.0), ("fade", 0.5), ("schnitt", 0.0)]
+        return {"format": fmt, "fps": 30, "segmente": [
+            {"zeit_start": 4.0 * i, "zeit_ende": 4.0 * (i + 1), "uebergang": {"art": art, "dauer_s": d}}
+            for i, (art, d) in enumerate(arten)]}
+
+    @staticmethod
+    def bild_teile(graph: str, i: int) -> str:
+        """Die Teile des Graphen, die das Bild von Segment i bauen, in ihrer Reihenfolge."""
+        marken = (f"[{i}:v]", f"[hg{i}]", f"[vg{i}]", f"[hgb{i}]")
+        return ";".join(t for t in graph.split(";") if t.startswith(marken))
+
+    def test_fps_zuerst_und_unschaerfe_auf_viertel(self):
+        for fmt, b, h, viertel in (("short", 720, 1280, (180, 320)), ("short", 1080, 1920, (270, 480)),
+                                   ("zusammenschnitt", 1280, 720, None)):
+            graph, _ = entwurf.filtergraph(self.liste(fmt), [2, 2, 2], b=b, h=h, musik_eingang=None, schrift=None)
+            for i in range(3):
+                teil = self.bild_teile(graph, i)
+                with self.subTest(fmt=fmt, b=b, segment=i):
+                    self.assertTrue(teil.startswith(f"[{i}:v]fps=30,"), teil)
+                    self.assertEqual(teil.count("fps="), 1)
+                    for spaeter in ("split", "scale", "boxblur", "overlay", "pad"):
+                        if spaeter in teil:
+                            self.assertLess(teil.index("fps="), teil.index(spaeter), spaeter)
+                    if viertel:
+                        b4, h4 = viertel
+                        self.assertIn(f"[hg{i}]scale={b4}:{h4}:force_original_aspect_ratio=increase,crop={b4}:{h4},"
+                                      f"boxblur=5:2,scale={b}:{h},eq=brightness=-0.08[hgb{i}]", teil)
+                        self.assertEqual(teil.count("boxblur"), 1)
+                    else:
+                        self.assertNotIn("boxblur", teil)
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class Messen(MitRegieMaterial):
+    """`render-entwurf <id> --messen`: echte Renderzeit, aber keine Datei bleibt liegen und die DB bleibt gleich."""
+
+    def test_hinterlaesst_nichts_und_aendert_db_nicht(self):
+        import contextlib
+        import io
+
+        from clip_pipeline import cli
+
+        self.momente_anlegen(MOMENTE[:6])
+        e = regie.erstelle(self.con, self.konfig, "short")
+        schnittliste = Path(e["datei"])
+        liste = json.loads(schnittliste.read_text())
+        liste["segmente"] = liste["segmente"][:2]  # kurz halten: zwei Segmente reichen zum Messen
+        schnittliste.write_text(json.dumps(liste))
+        dateien = sorted(regie.ordner(self.konfig).rglob("*"))
+        tabelle = [tuple(z) for z in self.con.execute("SELECT * FROM entwuerfe")]
+        ausgabe = io.StringIO()
+        with mock.patch("clip_pipeline.cli.lade", return_value=self.konfig), \
+                contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(["render-entwurf", str(e["entwurf"]), "--messen"])
+        antwort = json.loads(ausgabe.getvalue().splitlines()[-1])  # letzte Zeile: JSON
+        self.assertEqual(code, 0, antwort)
+        self.assertLessEqual({"sekunden", "encoder", "dauer_s", "aufloesung"}, set(antwort))
+        self.assertGreater(antwort["sekunden"], 0)
+        self.assertEqual(antwort["aufloesung"], [720, 1280])
+        self.assertIn(antwort["encoder"], ("libx264", "h264_vaapi"))
+        self.assertEqual(sorted(regie.ordner(self.konfig).rglob("*")), dateien)  # auch keine .messen-/.tmp-Reste
+        self.assertEqual([tuple(z) for z in self.con.execute("SELECT * FROM entwuerfe")], tabelle)
+        # --final und --messen schließen sich aus
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            cli.baue_parser().parse_args(["render-entwurf", str(e["entwurf"]), "--final", "--messen"])
+
+
 class FinalAufBig(MitRegieMaterial):
     def test_wecken_rendern_aus(self):
         from clip_pipeline import big

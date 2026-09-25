@@ -1,10 +1,11 @@
-# Jeden Morgen um 09:30 – nach der Ruhezeit (bis 08:00) und lange nach dem Abgleich um 04:30.
+# Jeden Tag um 11:00 – nach der Ruhezeit (bis 08:00) und nach dem Abgleich um 10:00 (bis zu 10 min Zufall,
+# typisch 1–3 min Kopieren).
 # Aktivieren (erst nach dem Umschalten, docs/PUFFER.md R6): sudo systemctl enable --now clip-puffer-pruefen.timer
 [Unit]
 Description=Clip-Pipeline: Morgenprüfung von Puffer und Lager
 
 [Timer]
-OnCalendar=*-*-* 09:30
+OnCalendar=*-*-* 11:00
 Persistent=true
 
 [Install]

@@ -1,4 +1,4 @@
-"""Puffer ↔ Lager (E19): nächtlicher Abgleich Puffer → Lager, einmalige Übernahme Lager → Puffer.
+"""Puffer ↔ Lager (E19): täglicher Abgleich Puffer → Lager (10:00), einmalige Übernahme Lager → Puffer.
 
 Puffer = [speicher].wurzel auf dem Mini (hier arbeitet die Pipeline), Lager = [lager].wurzel auf pve-big (NFS).
 
@@ -8,7 +8,10 @@ Harte Regeln:
     eine andere Fassung, kommt die aus dem Puffer daneben: name~<mtime_ns>.ext – und du bekommst eine Meldung.
   - pve-big wird nur geweckt, wenn im Puffer etwas offen ist. Vorher wird das Lager nicht angefasst: ein Blick
     auf den NFS-Mount eines schlafenden pve-big hinge.
-  - Im Puffer wird nichts gelöscht – außer alten DB-Sicherungen (keine Rohdaten, im Lager bleiben sie).
+  - In der Nachtruhe ([lager].nachtruhe_von/_bis) weckt der Abgleich nie – sein Lüfter soll niemanden wecken.
+    Läuft pve-big ohnehin, darf abgeglichen werden.
+  - Im Puffer wird nichts gelöscht – außer alten DB-Sicherungen (keine Rohdaten, im Lager bleiben sie). Im Lager
+    auch nicht: Wird es knapp, warnt die Morgenprüfung (freier Platz, beim Abgleich per statvfs gemessen).
 
 Eigene Sperre <datenbank>.lager.lock (nicht die Pipeline-Sperre): Abgleich und Übernahme laufen nie doppelt,
 die Pipeline arbeitet währenddessen im Puffer weiter.
@@ -38,13 +41,13 @@ from . import big, db
 from .konfig import Konfig, KonfigFehler, SpeicherOffline
 from .material import BLOCK, sha256
 from .sperre import sperre
-from .zeit import UTC, aus_iso, iso, jetzt, utc_zu_lokal
+from .zeit import UTC, aus_iso, im_zeitfenster, iso, jetzt, utc_zu_lokal
 
 log = logging.getLogger("pipeline")
 
 ORDNER = ["eingang", "replays", "sessions", "highlights", "sitzungen", "musik", "archiv", "sicherung"]
 ROH = ["eingang", "replays"]
-SICHERUNG = "sicherung"                               # nächtliche DB-Sicherungen (steht in [lager].ordner)
+SICHERUNG = "sicherung"                               # tägliche DB-Sicherungen (steht in [lager].ordner)
 SICHERUNG_NAME = re.compile(r"^pipeline-\d{4}-\d{2}-\d{2}\.db$")
 TEIL = re.compile(r"^\..+\.\d+\.teil$")               # eigene Zwischendateien: .<name>.<pid>.teil
 TEIL_ALT_S = 3600
@@ -183,15 +186,42 @@ def _marken_da(konfig: Konfig) -> None:
         raise SpeicherOffline(f"Puffer-Markierung {puffer} verschwunden – Puffer nicht eingehängt?")
 
 
+def nachtruhe(konfig: Konfig, zeit: datetime | None = None) -> bool:
+    """Liegt zeit (Ortszeit) in [lager].nachtruhe_von … nachtruhe_bis? Dann weckt der Abgleich pve-big nicht.
+    Leer = aus. Anders als bei [telegram].leise_* schaltet ein Tippfehler diese Grenze nicht still ab: KonfigFehler."""
+    von, bis = (str(konfig.wert(f"lager.nachtruhe_{n}", s) or "") for n, s in (("von", "22:00"), ("bis", "08:00")))
+    try:
+        return im_zeitfenster(zeit or jetzt(), von, bis, konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+    except ValueError:
+        raise KonfigFehler(f"[lager] nachtruhe_von/nachtruhe_bis ungültig ({von!r}/{bis!r}) – "
+                           "erwartet z. B. \"22:00\", leer = aus") from None
+
+
 @contextmanager
-def _wach(konfig: Konfig, name: str, grund: str) -> Iterator[None]:
+def _wach(konfig: Konfig, name: str, grund: str, wecken: bool = True) -> Iterator[None]:
     """pve-big für die Aufgabe wach halten (weckt nur, wenn nötig und erlaubt, und fährt ihn danach herunter).
-    Ohne eingetragenen Host gibt es nichts zu wecken – dann entscheiden nur die Marken."""
+    Ohne eingetragenen Host gibt es nichts zu wecken – dann entscheiden nur die Marken.
+    wecken=False (Nachtruhe): nur, wenn er schon läuft – sonst WeckenVerboten."""
     if not big.host(konfig):
         yield
         return
-    with big.wach_halten(konfig, name, grund, minuten=float(konfig.wert("lager.halten_min", 240))):
+    with big.wach_halten(konfig, name, grund, minuten=float(konfig.wert("lager.halten_min", 240)), wecken=wecken):
         yield
+
+
+def _miss_platz(lager: Path, e: dict) -> None:
+    """Freien Platz im Lager ins Ergebnis schreiben (lager_frei_gb, lager_gesamt_gb) – für Morgenprüfung und /status.
+    Nur statvfs (über NFS ein GETATTR bzw. FSSTAT): kein Dateiinhalt, für clip-leerlauf kein Zugriff. Nur aufrufen,
+    wenn das Lager eben geprüft eingehängt ist – auf dem Mount eines schlafenden pve-big hinge auch statvfs."""
+    if not hasattr(os, "statvfs"):
+        return
+    try:
+        st = os.statvfs(lager)
+    except OSError as f:
+        log.warning("Lager: freier Platz nicht messbar: %s", f)
+        return
+    e["lager_frei_gb"] = _gb(st.f_bavail * st.f_frsize)
+    e["lager_gesamt_gb"] = _gb(st.f_blocks * st.f_frsize)
 
 
 def raeume_teile(ordner: Iterable[Path]) -> int:
@@ -325,7 +355,7 @@ def sichere_datenbank(con: sqlite3.Connection, konfig: Konfig) -> str:
 
 
 def _wecken_noetig(con: sqlite3.Connection, konfig: Konfig, offen: list[Offen]) -> bool:
-    """Neue Clips, Replays, Sessions … wecken pve-big. Die DB-Sicherung allein nicht jede Nacht (Ziel 2: nur an
+    """Neue Clips, Replays, Sessions … wecken pve-big. Die DB-Sicherung allein nicht jeden Tag (Ziel 2: nur an
     Tagen mit neuen Daten) – nur, wenn die letzte bestätigte älter als [lager].sicherung_wecken_tage ist (Standard 7,
     0 = nie allein). Sonst reist sie beim nächsten Wecken mit."""
     if any(not o.relativ.startswith(SICHERUNG + "/") for o in offen):
@@ -394,19 +424,23 @@ def _melde(con: sqlite3.Connection, konfig: Konfig, e: dict, abbruch_melden: boo
 
 
 def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -> dict:
-    """Nächtlicher Abgleich (Timer 04:30): DB sichern, Offenes sammeln, nur dann pve-big wecken, jede Datei
+    """Täglicher Abgleich (Timer 10:00): DB sichern, Offenes sammeln, nur dann pve-big wecken, jede Datei
     kopieren und zurücklesen. Fehler je Datei werden gezählt, der Rest läuft weiter; ist das Lager selbst weg
     (Markierung fehlt, EIO …), endet die Schleife mit "abbruch".
+
+    Nachtruhe (auch beim Nachholen per Persistent=true nach einem Neustart): Schläft pve-big, wird er nicht geweckt –
+    Ergebnis "nachtruhe": true, keine Meldung, das Offene wartet auf den nächsten Abgleich. Läuft er, wird abgeglichen.
 
     Ausnahmen: KonfigFehler (Puffer/Lager verwechselbar – nichts kopiert), SpeicherOffline (Lager nicht erreichbar),
     big.WeckenVerboten/BigFehler (pve-big nicht geweckt), Gesperrt (anderer Abgleich läuft)."""
     lager = konfig.lager_wurzel  # ohne getrennten Betrieb: KonfigFehler
     with sperre(big.lager_sperre(konfig)):
+        ruhe = nachtruhe(konfig)  # vor dem Lauf-Eintrag: ein Tippfehler ist ein Konfig-Fehler, keine Verwechslung
         if probelauf:
             konfig.pruefe_getrennt(mit_lager=False)
             offen = sammle(con, konfig)
             return {"probelauf": True, **_umfang(offen), "wuerde_wecken": _wecken_noetig(con, konfig, offen),
-                    "dateien": [o.relativ for o in offen[:50]]}
+                    "nachtruhe": ruhe, "dateien": [o.relativ for o in offen[:50]]}
         lauf = con.execute("INSERT INTO lager_laeufe (art, start) VALUES ('abgleich', ?)", (iso(jetzt()),)).lastrowid
         e: dict = {"offen": 0, "offen_gb": 0.0, "kopiert": 0, "bestaetigt": 0, "versioniert": 0, "fehler": 0,
                    "lager_gebraucht": False, "fehler_liste": [], "versioniert_liste": []}
@@ -419,11 +453,19 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
             if not _wecken_noetig(con, konfig, offen):
                 log.info("Lager-Abgleich: nichts Neues (%d offen) – pve-big bleibt aus", len(offen))
                 return e
-            log.info("Lager-Abgleich: %d Datei(en), %.2f GB", e["offen"], e["offen_gb"])
-            with _wach(konfig, "lager", f"Lager-Abgleich ({e['offen']} Dateien)"):
+            if ruhe and big.host(konfig) and not big.wach(konfig):
+                e["nachtruhe"] = True
+                log.info("Lager-Abgleich: Nachtruhe (%s–%s) – pve-big schläft und wird nicht geweckt, %d Datei(en) "
+                         "warten auf den nächsten Abgleich", konfig.wert("lager.nachtruhe_von", "22:00"),
+                         konfig.wert("lager.nachtruhe_bis", "08:00"), e["offen"])
+                return e
+            log.info("Lager-Abgleich: %d Datei(en), %.2f GB%s", e["offen"], e["offen_gb"],
+                     " (Nachtruhe, pve-big läuft schon)" if ruhe else "")
+            with _wach(konfig, "lager", f"Lager-Abgleich ({e['offen']} Dateien)", wecken=not ruhe):
                 e["lager_gebraucht"] = True
                 konfig.pruefe_lager(float(konfig.wert("lager.warten_s", 240)))
                 konfig.pruefe_getrennt()
+                _miss_platz(lager, e)  # schon hier: bricht der Lauf ab (z. B. ENOSPC), gibt es trotzdem einen Wert
                 raeume_teile({(lager / o.relativ).parent for o in offen})
                 for o in offen:
                     try:
@@ -444,6 +486,8 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
                     if art == "versioniert":
                         log.warning("%s: im Lager liegt eine andere Fassung – daneben abgelegt", o.relativ)
                         e["versioniert_liste"].append(o.relativ)
+                if not e.get("abbruch"):
+                    _miss_platz(lager, e)  # nach dem Kopieren: mit diesem Stand rechnen die nächsten Tage
             abbruch_melden = bool(e.get("abbruch"))
             if e.get("abbruch"):
                 log.error("Lager-Abgleich abgebrochen: %s", e["abbruch"])
@@ -520,7 +564,7 @@ def _hinweis_zu_jung(k: Konfig, anzahl: int) -> str:
             "geschrieben) – noch nicht im Puffer. In ein paar Minuten wiederholen; Gleiches wird übersprungen.")
 
 
-def uebernahme(con: sqlite3.Connection, konfig: Konfig, von: Path, nach: Path, eingang_tage: int = 3,
+def uebernahme(con: sqlite3.Connection, konfig: Konfig, von: Path, nach: Path, eingang_tage: int = 14,
                probelauf: bool = False) -> dict:
     """Einmalig vor dem Umschalten (docs/PUFFER.md R4/R5): Lager → Puffer mit AUSDRÜCKLICHEN Pfaden, unabhängig von
     [lager].wurzel. Alle [lager].ordner außer eingang/ ganz, von eingang/ nur Dateien der letzten eingang_tage.
@@ -599,16 +643,29 @@ def uebernahme(con: sqlite3.Connection, konfig: Konfig, von: Path, nach: Path, e
 # --- Status ------------------------------------------------------------------------------
 
 def _letzte_laeufe(con: sqlite3.Connection) -> tuple[dict | None, str | None]:
-    """Letzter Abgleich und Ende des letzten erfolgreichen (höchstens 50 Läufe zurück)."""
+    """Letzter Abgleich und Ende des letzten erfolgreichen (höchstens 50 Läufe zurück). Ein Lauf, der in der
+    Nachtruhe nicht wecken durfte, ist kein Erfolg: das Offene liegt dann noch im Puffer."""
     letzter = None
     for z in con.execute("SELECT start, ende, ergebnis FROM lager_laeufe WHERE art = 'abgleich' ORDER BY id DESC LIMIT 50"):
         e = json.loads(z["ergebnis"]) if z["ergebnis"] else {}
-        lauf = {"start": z["start"], "ende": z["ende"], "ok": bool(z["ende"] and e.get("ok"))}
-        lauf.update({s: e[s] for s in ("offen", "kopiert", "fehler", "versioniert", "abbruch") if s in e})
+        lauf = {"start": z["start"], "ende": z["ende"], "ok": bool(z["ende"] and e.get("ok") and not e.get("nachtruhe"))}
+        lauf.update({s: e[s] for s in ("offen", "kopiert", "fehler", "versioniert", "abbruch", "nachtruhe") if s in e})
         letzter = letzter or lauf
         if lauf["ok"]:
             return letzter, z["ende"]
     return letzter, None
+
+
+def letzte_messung(con: sqlite3.Connection) -> dict | None:
+    """Zuletzt beim Abgleich gemessener Platz im Lager: {"frei_gb", "gesamt_gb", "zeit"} oder None.
+    Nur aus der Tabelle – fasst das Lager nie an (pve-big schläft meist)."""
+    for z in con.execute("SELECT start, ende, ergebnis FROM lager_laeufe WHERE art = 'abgleich' AND ergebnis LIKE ? "
+                         "ORDER BY id DESC LIMIT 5", ('%"lager_frei_gb"%',)):
+        e = json.loads(z["ergebnis"])
+        if isinstance(e.get("lager_frei_gb"), (int, float)):
+            return {"frei_gb": e["lager_frei_gb"], "gesamt_gb": e.get("lager_gesamt_gb"),
+                    "zeit": z["ende"] or z["start"]}
+    return None
 
 
 def _uhr(konfig: Konfig, zeitpunkt: str) -> str:
@@ -618,7 +675,9 @@ def _uhr(konfig: Konfig, zeitpunkt: str) -> str:
 
 
 def _zeile(konfig: Konfig, stand: dict) -> str:
-    """Eine Zeile für /status im Bot, z. B. „Puffer 61 GB frei · Lager: letzter Abgleich 04:37 ok · 0 offen“."""
+    """Eine Zeile für /status im Bot, z. B. „Puffer 61 GB frei · Lager: 1840 GB frei, letzter Abgleich 10:07 ok ·
+    0 offen“. Den Platz im Lager gibt es erst nach dem ersten Abgleich, der pve-big gebraucht hat; stammt er nicht von
+    heute, steht „(Stand …)“ dabei."""
     teile = []
     if stand.get("puffer_frei_gb") is not None:
         teile.append(f"Puffer {stand['puffer_frei_gb']:.0f} GB frei")
@@ -627,12 +686,20 @@ def _zeile(konfig: Konfig, stand: dict) -> str:
         text = "noch kein Abgleich"
     elif not lauf["ende"]:
         text = f"Abgleich läuft seit {_uhr(konfig, lauf['start'])}"
+    elif lauf.get("nachtruhe"):
+        text = f"letzter Abgleich {_uhr(konfig, lauf['ende'])} in der Nachtruhe übersprungen"
     elif lauf["ok"]:
         text = f"letzter Abgleich {_uhr(konfig, lauf['ende'])} ok"
     elif lauf.get("abbruch"):
         text = f"letzter Abgleich {_uhr(konfig, lauf['ende'])} abgebrochen"
     else:
         text = f"letzter Abgleich {_uhr(konfig, lauf['ende'])} mit {lauf.get('fehler', 0)} Fehler(n)"
+    if stand.get("lager_frei_gb") is not None:
+        platz = f"{stand['lager_frei_gb']:.0f} GB frei"
+        gemessen = utc_zu_lokal(aus_iso(stand["lager_gemessen"]), konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+        if gemessen.date().isoformat() != _heute(konfig):
+            platz += f" (Stand {_uhr(konfig, stand['lager_gemessen'])})"
+        text = f"{platz}, {text}"
     teile.append(f"Lager: {text}")
     if stand["pruefung"] != "ok":
         teile.append(f"⚠️ {stand['pruefung']}")
@@ -643,8 +710,9 @@ def _zeile(konfig: Konfig, stand: dict) -> str:
 
 def status(con: sqlite3.Connection, konfig: Konfig) -> dict:
     """Stand für `pipeline lager status` und /status im Bot. Weckt nie und fasst das Lager nicht an – nur die
-    Tabelle und der Puffer (lokal). "offen" zählt ohne die DB-Sicherungen: die warten absichtlich aufs nächste
-    Wecken (sicherung_offen), sonst stünde nach jedem guten Lauf „1 offen“ da."""
+    Tabellen und der Puffer (lokal); der Platz im Lager ist der beim letzten Abgleich gemessene (lager_gemessen).
+    "offen" zählt ohne die DB-Sicherungen: die warten absichtlich aufs nächste Wecken (sicherung_offen), sonst stünde
+    nach jedem guten Lauf „1 offen“ da."""
     if not konfig.getrennt:
         return {"getrennt": False, "pruefung": "kein getrennter Betrieb: [lager].wurzel leer"}
     stand: dict = {"getrennt": True, "pruefung": "ok", "offen": None, "offen_gb": None, "aelteste": None,
@@ -661,5 +729,8 @@ def status(con: sqlite3.Connection, konfig: Konfig) -> dict:
             stand["aelteste"] = iso(datetime.fromtimestamp(min(o.mtime_ns for o in offen) / 1e9, UTC))
         stand["puffer_frei_gb"] = round(shutil.disk_usage(konfig.wurzel).free / 1e9, 1)
     stand["letzter_lauf"], stand["letzter_erfolg"] = _letzte_laeufe(con)
+    messung = letzte_messung(con) or {}
+    stand.update(lager_frei_gb=messung.get("frei_gb"), lager_gesamt_gb=messung.get("gesamt_gb"),
+                 lager_gemessen=messung.get("zeit"))
     stand["zeile"] = _zeile(konfig, stand)
     return stand

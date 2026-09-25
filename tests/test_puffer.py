@@ -1,8 +1,8 @@
 """Morgenprüfung des Puffers (E19): je Thema höchstens eine Meldung am Tag, montags ein Lebenszeichen.
 
 Puffer und Lager sind Temp-Ordner (MitAbgleich aus test_lager). Die Prüfung darf pve-big nie wecken und das Lager
-nie anfassen – wach_halten zählt mit, lager_tabu macht jeden Blick ins Lager zum Fehler. Freier Platz und Samba
-sind ersetzt, damit das Ergebnis nicht vom Testrechner abhängt.
+nie anfassen – wach_halten zählt mit, lager_tabu macht jeden Blick ins Lager zum Fehler. Freier Platz (Puffer und
+Lager) und Samba sind ersetzt, damit das Ergebnis nicht vom Testrechner abhängt.
 """
 
 import json
@@ -11,6 +11,7 @@ import subprocess
 import unittest
 from collections import namedtuple
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest import mock
 
 from clip_pipeline import db, lager, puffer
@@ -40,9 +41,11 @@ class MitPuffer(MitAbgleich):
         self.konfig.daten["puffer"].update(pool_status=str(self.pool_datei), warnung_frei_gb=20, alarm_frei_gb=8,
                                            pool_warnung_prozent=85, pool_alarm_prozent=90, lager_spaetestens_h=36,
                                            pc_stau_h=24, pc_status_datei="sitzungen/pc-status.json")
+        lager_platte = SimpleNamespace(f_frsize=4096, f_bavail=1000 * 10**9 // 4096, f_blocks=4000 * 10**9 // 4096)
         patcher = [mock.patch("shutil.disk_usage", return_value=Platte(500e9, 400e9, 100e9)),
-                   mock.patch.object(puffer, "_samba_aktiv", return_value=None)]
-        self.platte, self.samba = (p.start() for p in patcher)
+                   mock.patch.object(puffer, "_samba_aktiv", return_value=None),
+                   mock.patch("os.statvfs", return_value=lager_platte)]  # echter Abgleich misst sonst den Testrechner
+        self.platte, self.samba, _ = (p.start() for p in patcher)
         for p in patcher:
             self.addCleanup(p.stop)
         self.zeit = _wochentag(1)  # Dienstag: kein Lebenszeichen
@@ -255,12 +258,24 @@ class LagerThema(MitPuffer):
 
     def test_einzelner_weck_fehlschlag_still(self):
         """Ein Abbruch (pve-big nicht geweckt) ist meist vorübergehend: keine Meldung, solange der letzte Erfolg
-        jünger als lager_spaetestens_h ist – sonst käme nach jeder schlechten Nacht ein Fehlalarm."""
+        jünger als lager_spaetestens_h ist – sonst käme nach jedem schlechten Abgleich ein Fehlalarm."""
         self.datei(self.puffer, "eingang/a.mp4", b"x" * 1000)
         self.con.execute("DELETE FROM lager_laeufe")
         self.lauf_eintragen(20)
         self.lauf_eintragen(3, ok=False, abbruch="SpeicherOffline: Lager-Host pve-big schläft")
         self.assertEqual(self.pruefe(), [])
+
+    def test_nachtruhe_zaehlt_nicht_als_erfolg(self):
+        """Ein Abgleich, der in der Nachtruhe nicht wecken durfte, hat nichts ins Lager gebracht. Hält das an (z. B.
+        der Timer steht versehentlich wieder nachts), meldet die Morgenprüfung – mit dem Grund."""
+        self.datei(self.puffer, "eingang/a.mp4", b"x" * 1000)
+        self.con.execute("DELETE FROM lager_laeufe")
+        self.lauf_eintragen(40)
+        self.lauf_eintragen(1, nachtruhe=True, offen=1)
+        self.assertEqual(self.pruefe(), [f"puffer:lager:{self.tag()}"])
+        text = self.text(f"puffer:lager:{self.tag()}")
+        self.assertIn("seit 40 h kein erfolgreicher Abgleich", text)
+        self.assertIn("in der Nachtruhe", text)
 
     def test_nichts_offen_keine_meldung(self):
         self.lauf_eintragen(100)  # lange her, aber nichts wartet
@@ -308,6 +323,76 @@ class LagerThema(MitPuffer):
         self.assertIn("nichts kopiert", self.text(f"lager:{self.tag()}"))
         ohne_woche = lambda neu: [s for s in neu if not s.startswith("puffer:woche:")]  # heute evtl. Montag
         self.assertEqual(ohne_woche(self.pruefe()), [])
+
+
+class LagerPlatz(MitPuffer):
+    """Nie löschen, aber warnen – auch fürs Lager auf pve-big. Gemessen wird beim Abgleich; die Prüfung liest nur
+    die Tabelle (lager_tabu in pruefe(): kein stat/statvfs im Lager)."""
+
+    def messen(self, frei: float, gesamt: float = 4000, vor_h: float = 1) -> None:
+        self.lauf_eintragen(vor_h, lager_frei_gb=frei, lager_gesamt_gb=gesamt)
+
+    def befund(self) -> str:
+        return puffer.status(self.con, self.konfig, self.zeit)["befunde"].get("lager_platz") or ""
+
+    def test_ohne_messung_still(self):
+        self.assertEqual(self.pruefe(), [])  # Grundzustand: ein Abgleich ohne Messung
+        stand = puffer.status(self.con, self.konfig, self.zeit)
+        self.assertNotIn("lager_platz", stand["befunde"])
+        self.assertIn("noch nicht gemessen", stand["lager_platz"]["hinweis"])
+        self.con.execute("DELETE FROM lager_laeufe")  # auch ganz ohne Lauf
+        self.assertEqual(self.befund(), "")
+
+    def test_grenzen(self):
+        """Gewarnt wird UNTER der Schwelle: genau 200 GB frei ist noch gut, genau 50 GB noch kein Alarm."""
+        for frei, erwartet in ((1000, ""), (200, ""), (199.99, "wird knapp"), (50, "wird knapp"), (49.99, "fast voll"),
+                               (0, "fast voll")):
+            self.messen(frei)
+            text = self.befund()
+            if erwartet:
+                self.assertIn(erwartet, text, frei)
+            else:
+                self.assertEqual(text, "", frei)
+        self.konfig.daten["puffer"].update(lager_warnung_frei_gb=500, lager_alarm_frei_gb=100)  # konfigurierbar
+        self.messen(300)
+        self.assertIn("wird knapp", self.befund())
+        self.assertIn("Warnung unter 500 GB", self.befund())
+
+    def test_text_freundlich_mit_naechstem_schritt(self):
+        self.messen(120, gesamt=3600, vor_h=26)
+        self.assertEqual(self.pruefe(), [f"puffer:lager_platz:{self.tag()}"])
+        text = self.text(f"puffer:lager_platz:{self.tag()}")
+        self.assertIn("🗄️ Lager auf pve-big wird knapp: noch 120 GB frei von 3600 GB (Warnung unter 200 GB", text)
+        wann = utc_zu_lokal(self.zeit - timedelta(hours=26), "Europe/Berlin")
+        self.assertIn(f"gemessen beim Abgleich am {wann:%d.%m. %H:%M}", text)
+        self.assertIn("Nichts verloren, nichts gelöscht", text)
+        self.assertIn("Nächster Schritt: bitte Platz auf pve-big schaffen oder die Platte erweitern", text)
+        self.messen(20)
+        self.assertIn("🚨 Lager auf pve-big fast voll: nur noch 20 GB frei", self.befund())
+        self.assertIn("Alarm unter 50 GB", self.befund())
+
+    def test_eine_meldung_am_tag(self):
+        self.messen(150)
+        self.assertEqual(self.pruefe(), [f"puffer:lager_platz:{self.tag()}"])
+        self.assertEqual(self.pruefe(), [])  # zweiter Lauf am selben Tag
+        self.messen(10)  # auch der Alarm kommt am selben Tag nicht noch einmal
+        self.assertEqual(self.pruefe(), [])
+        morgen = self.zeit + timedelta(days=1)
+        self.assertEqual(self.pruefe(morgen), [f"puffer:lager_platz:{self.tag(morgen)}"])
+        self.assertIn("fast voll", self.text(f"puffer:lager_platz:{self.tag(morgen)}"))
+
+    def test_letzte_messung_zaehlt_auch_nach_laeufen_ohne_wecken(self):
+        self.messen(30, vor_h=30)
+        self.lauf_eintragen(2)  # danach nur Läufe ohne pve-big (nichts Neues): keine Messung
+        self.assertIn("fast voll", self.befund())
+        self.messen(900, vor_h=0.5)  # aufgeräumt, neu gemessen: still
+        self.assertEqual(self.befund(), "")
+
+    def test_lebenszeichen_zeigt_den_platz_im_lager(self):
+        self.messen(1840)
+        montag = _wochentag(0)
+        [schluessel] = self.pruefe(montag)
+        self.assertRegex(self.text(schluessel), r"Lager: 1840 GB frei.*, letzter Abgleich .+ ok · 0 offen")
 
 
 class Lebenszeichen(MitPuffer):

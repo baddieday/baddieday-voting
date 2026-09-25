@@ -35,3 +35,6 @@ logs/
 *.flac
 *.ogg
 *.opus
+
+# Arbeitsordner von Claude Code/Agenten (Worktrees, lokale Einstellungen) – nie committen
+.claude/

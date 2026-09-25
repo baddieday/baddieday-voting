@@ -16,8 +16,15 @@ Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der K
                  zweimal hintereinander, wenn es sich vermeiden lässt.
   3. Musik       passend zur vorherrschenden Stimmung (Quellen-Stimmung, Energie relativ zur Bibliothek,
                  Tempo); Start so versetzt, dass der "Drop" des Titels auf den Höhepunkt fällt.
-  4. Schnitt     jede Grenze auf einem Beat (jedem n-ten); kein Kill wird abgeschnitten.
+  4. Schnitt     jede Grenze auf einem Beat (jedem n-ten); kein Kill wird abgeschnitten. Mit Aktions-Zeiten
+                 (merkmale.aktion_sekunden = mein Umhauen) beginnt der Moment vor der ersten Aktion; eine Serie
+                 (≥ 2 Kills) bleibt ein Stück bis serie_max_s, Pausen > luecke_max_s zwischen zwei Aktionen
+                 werden per Jump-Cut übersprungen (Teile desselben Moments, harter Schnitt).
   5. Übergänge   je Stimmung des folgenden Moments; die Mitte des Übergangs liegt genau auf dem Beat.
+                 Mit Effekten (Regisseur 2.0): Rotation aus effekte.PROFIL, in einen epischen/spannenden Höhepunkt
+                 ein harter Schnitt auf den Drop.
+  6. Effekte     effekte.plane: Zoom-Punch, Kill-Titel, Zähler, Klänge, Look – als Plan in der Schnittliste
+                 (version 4). Aus mit [regie.effekte] an = false: Schnitt und Übergänge wie vorher.
 Die Schnittliste wird gegen schemas/regie.schema.json und fachlich geprüft, bevor sie gespeichert wird.
 """
 
@@ -29,7 +36,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import schema
+from . import effekte, entwurf, schema
 from .konfig import Konfig
 from .musik import ZIEL
 from .zeit import iso, jetzt
@@ -37,9 +44,11 @@ from .zeit import iso, jetzt
 log = logging.getLogger("pipeline")
 
 FORMATE = {
-    # Dauer gesamt, Segmentlänge, Auflösung
-    "zusammenschnitt": {"min_s": 180.0, "max_s": 300.0, "seg_min_s": 3.0, "seg_max_s": 25.0, "b": 1920, "h": 1080},
-    "short": {"min_s": 30.0, "max_s": 45.0, "seg_min_s": 2.5, "seg_max_s": 12.0, "b": 1080, "h": 1920},
+    # Dauer gesamt, Segmentlänge, Serie am Stück (Multikill, Teile per Jump-Cut zusammen), Auflösung
+    "zusammenschnitt": {"min_s": 180.0, "max_s": 300.0, "seg_min_s": 3.0, "seg_max_s": 25.0, "serie_max_s": 30.0,
+                        "b": 1920, "h": 1080},
+    "short": {"min_s": 30.0, "max_s": 45.0, "seg_min_s": 2.5, "seg_max_s": 12.0, "serie_max_s": 20.0,
+              "b": 1080, "h": 1920},
 }
 STIMMUNG_WERT = {"episch": 3.0, "spannend": 2.0, "lustig": 1.5, "frustriert": 1.0, "chill": 0.5}
 KILL_PUNKTE = [0, 1, 3, 6, 10]
@@ -61,8 +70,21 @@ PARAMETER = {
     "moment_bonus": {},           # Moment -> Zusatzpunkte (👍 +, 👎 ohne Grund −, "Clips langweilig" −−)
     "abwechslung": 0.7,           # Anteil der Punkte, den ein Moment aus dem letzten Entwurf verliert (je älter: halb)
     "max_je_match": 3,
+    "luecke_max_s": 4.0,          # längere Pause zwischen zwei Aktionen -> Jump-Cut
+    "effekt_staerke": {},         # Stimmung -> Faktor auf alle Effekte, fehlt = 1,0 ("zu viele Effekte" ×0,85,
+                                  # "mehr Action" ×1,15)
+    "effekt_hektik": 1.0,         # dämpft Beat-Akzente und Glitch-Übergänge ("zu hektisch" ×0,9)
 }
 ABWECHSLUNG_FENSTER = 12          # so viele letzte Entwürfe zählen für die Abwechslung
+# Jump-Cut: so lange bleibt das Bild nach der Aktion vor der Lücke, so früh vor der nächsten geht es weiter.
+# Wirksame Lücke mindestens NACH + VOR + 0,5 s – so überlappen sich die Teile nie, auch wenn Gelerntes sie verkleinert.
+SPRUNG_NACH_S = 1.5
+SPRUNG_VOR_S = 2.0
+# Schnittliste version 4 (Regisseur 2.0): Grenzen der fachlichen Prüfung
+MAX_EREIGNISSE = 400
+MAX_LUPEN = 1                     # Standard von [regie.effekte].max_lupen
+HOOK_MAX_S = 2.5
+V4_FELDER = ("rolle", "kill_s", "lupe", "effekte")
 
 
 class RegieFehler(RuntimeError):
@@ -85,15 +107,52 @@ class Kandidat:
     merkmale: dict = field(default_factory=dict)
     abzug: float = 0.0             # schon gezeigt (Abwechslung): Punkte, die in `punkte` schon abgezogen sind
     gezeigt: int = 0               # in wie vielen der letzten Entwürfe
+    teile: list[tuple[float, float]] = field(default_factory=list)       # Quelle je Teil (Jump-Cut); leer = [kern]
+    teile_muss: list[tuple[float, float]] = field(default_factory=list)  # Muss-Zone je Teil
+    serie: bool = False            # ≥ 2 Kills mit Aktions-Zeiten: bleibt ein Stück, bis serie_max_s
+    max_gruppe: int = 0            # größte Kill-Serie (wie Bot und Elo zählen) – Kill-Titel
+    victory: bool = False          # Victory Royale – Titel VICTORY ROYALE
+
+    def __post_init__(self) -> None:
+        if not self.teile:  # alte Momente: genau ein Teil = Kern (wie bisher)
+            self.teile, self.teile_muss = [self.kern], [self.muss]
+
+    @property
+    def kern_laenge(self) -> float:
+        """Gewünschte Länge im Video: Summe der Teile (ohne die übersprungenen Lücken)."""
+        return sum(b - a for a, b in self.teile)
+
+    @property
+    def min_laenge(self) -> float:
+        """Kürzeste Länge ohne angeschnittene Action: außen bis zur Muss-Zone, innere Teile ganz."""
+        if len(self.teile) == 1:
+            return max(0.5, self.muss[1] - self.muss[0])
+        innen = sum(b - a for a, b in self.teile[1:-1])
+        return (self.teile[0][1] - self.teile_muss[0][0]) + innen + (self.teile_muss[-1][1] - self.teile[-1][0])
+
+    def max_laenge(self, fmt: dict) -> float:
+        return fmt["serie_max_s"] if self.serie else fmt["seg_max_s"]
 
 
 # --- 1. Auswahl ----------------------------------------------------------------------
 
+def _aktionen(mk: dict) -> list[float] | None:
+    """Aktions-Zeitpunkte parallel zu kill_sekunden (mein Umhauen, sonst der Kill selbst).
+    None bei alten Momenten ohne aktion_sekunden oder wenn die Listen nicht zusammenpassen."""
+    kills, aktionen = mk.get("kill_sekunden") or [], mk.get("aktion_sekunden")
+    if not kills or not isinstance(aktionen, list) or len(aktionen) != len(kills):
+        return None
+    # Umhauen kommt nie nach dem Kill – so bleibt der letzte Kill auch das Ende der Action
+    return [float(k) if a is None else min(float(a), float(k)) for k, a in zip(kills, aktionen)]
+
+
 def _kern(mk: dict, dauer: float, p: dict) -> tuple[tuple[float, float], tuple[float, float], str]:
     kills = sorted(mk.get("kill_sekunden") or [])
     if kills:
-        kern = (kills[0] - p["puffer_vor_s"], kills[-1] + p["puffer_nach_s"])
-        muss = (kills[0] - 1.0, kills[-1] + 0.5)
+        aktionen = _aktionen(mk)
+        erste = min(kills[0], *aktionen) if aktionen else kills[0]  # mit Aktionen: ab dem ersten Umhauen
+        kern = (erste - p["puffer_vor_s"], kills[-1] + p["puffer_nach_s"])
+        muss = (erste - 1.0, kills[-1] + 0.5)
         grund = f"{len(kills)} Kill(s)"
     else:
         ereignisse = [t for t in [mk.get("tod_sekunde"), *(mk.get("jubel_laut_s") or []), *(mk.get("spitzen_s") or [])]
@@ -106,6 +165,62 @@ def _kern(mk: dict, dauer: float, p: dict) -> tuple[tuple[float, float], tuple[f
     nutzbar = max(0.5, dauer - 0.25)
     klemme = lambda a, b: (max(0.0, min(a, nutzbar)), max(0.0, min(b, nutzbar)))  # noqa: E731
     return klemme(*kern), klemme(*muss), grund
+
+
+def anker(mk: dict, dauer: float) -> list[float]:
+    """Jump-Cut-Anker: Aktionen und Kills, sortiert, eindeutig, hinten auf den nutzbaren Teil geklemmt.
+    Aktionen vor dem Dateibeginn bleiben negativ: sie grenzen die Lücke davor ab (sprung_teile lässt, was ganz vor
+    der Datei liegt, weg), statt als künstlicher Anker bei 0 einen Schnipsel zu erzeugen.
+    Auch die Kills, damit kein Erledigen in einer übersprungenen Lücke landet. Leer bei alten Momenten."""
+    aktionen = _aktionen(mk)
+    if aktionen is None:
+        return []
+    nutzbar = max(0.5, dauer - 0.25)
+    return sorted({round(min(float(t), nutzbar), 3) for t in [*aktionen, *mk["kill_sekunden"]]})
+
+
+def sprung_teile(anker_: list[float], kern: tuple[float, float], luecke_max_s: float
+                 ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """(Teile, Muss je Teil) in der Quelle. Lücke x -> y > luecke_max_s: Schnitt bei x + 1,5 s, weiter bei y − 2,0 s.
+    Der erste Teil beginnt am Kern-Anfang, der letzte endet am Kern-Ende. Gruppen ganz vor dem Dateibeginn
+    (Anker < 0) fallen weg – der nächste Teil beginnt dann 2,0 s vor seiner Aktion (nicht vor 0).
+    Ohne Anker: genau ein Teil = Kern."""
+    punkte = sorted(set(anker_))
+    if not punkte:
+        return [kern], [kern]
+    luecke = max(float(luecke_max_s), SPRUNG_NACH_S + SPRUNG_VOR_S + 0.5)
+    gruppen = [[punkte[0]]]
+    for x, y in zip(punkte, punkte[1:]):
+        if round(y - x, 3) > luecke:  # Anker auf ms: genau luecke_max_s ist noch keine Lücke
+            gruppen.append([y])
+        else:
+            gruppen[-1].append(y)
+    # Von einer Gruppe vor der Datei wäre nur der Rest nach ihrer Aktion zu sehen (ein Schnipsel ohne Action)
+    erste = next((i for i, g in enumerate(gruppen) if g[-1] >= 0), len(gruppen) - 1)
+    teile, muss = [], []
+    for i, g in enumerate(gruppen[erste:], erste):
+        von = kern[0] if i == 0 else max(0.0, g[0] - SPRUNG_VOR_S)
+        bis = kern[1] if i == len(gruppen) - 1 else g[-1] + SPRUNG_NACH_S
+        teile.append((round(von, 3), round(bis, 3)))
+        muss.append((round(max(von, g[0] - 1.0), 3), round(min(bis, g[-1] + 0.5), 3)))
+    return teile, muss
+
+
+def _teile(mk: dict, dauer: float, kern: tuple[float, float], muss: tuple[float, float], p: dict
+           ) -> tuple[tuple[float, float], tuple[float, float], list[tuple[float, float]], list[tuple[float, float]],
+                      bool]:
+    """(Kern, Muss, Teile, Muss je Teil, Serie?) eines Moments. Alte Momente ohne aktion_sekunden: ein Teil = Kern,
+    keine Serie. Bleibt ein Teil übrig, weil alles davor vor dem Dateibeginn lag, sind Kern und Muss dieser Teil."""
+    punkte = anker(mk, dauer)
+    if not punkte:
+        return kern, muss, [kern], [muss], False
+    teile, teile_muss = sprung_teile(punkte, kern, float(p.get("luecke_max_s", PARAMETER["luecke_max_s"])))
+    if len(teile) == 1:
+        if teile[0][0] > kern[0] + 1e-3:  # Aktionen vor der Datei übersprungen: ein Stück ab 2 s vor der Aktion
+            kern, muss = teile[0], teile_muss[0]
+        else:
+            teile_muss = [muss]  # ein Stück: dieselbe Muss-Zone wie ohne Jump-Cut
+    return kern, muss, teile, teile_muss, len(mk.get("kill_sekunden") or []) >= 2
 
 
 def gezeigte_momente(con: sqlite3.Connection, fenster: int = ABWECHSLUNG_FENSTER) -> list[list[str]]:
@@ -144,10 +259,12 @@ def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None
         if z["clip_status"] == "verworfen" or not Path(z["datei"]).is_file():
             continue
         mk = json.loads(z["merkmale"])
-        dauer = float(z["ende_s"]) - float(z["start_s"])
-        serie = int(z["max_gruppe"] if z["max_gruppe"] is not None else mk.get("max_gruppe", 0) or 0)
+        # Kill-/Aktions-Sekunden zählen ab Dateibeginn (Vertrag mit stimmung.py) – nutzbar ist die Datei bis ende_s.
+        # Bisher ist start_s immer 0; ein Nachschnitt mit start_s > 0 darf den Anlauf davor mitnehmen.
+        dauer = float(z["ende_s"])
+        gruppe = int(z["max_gruppe"] if z["max_gruppe"] is not None else mk.get("max_gruppe", 0) or 0)
         victory = int(z["victory_royale"] or mk.get("victory_royale", 0) or 0)
-        intensitaet = (KILL_PUNKTE[min(serie, 4)] + 5 * victory + STIMMUNG_WERT[z["stimmung"]]
+        intensitaet = (KILL_PUNKTE[min(gruppe, 4)] + 5 * victory + STIMMUNG_WERT[z["stimmung"]]
                        + 0.5 * min(mk.get("spitzen", 0), 4) / 4 + 0.5 * min(mk.get("jubel_laut", 0), 2))
         punkte = intensitaet + float(p["stimmung_bonus"].get(z["stimmung"], 0.0))
         if z["clip_status"] in ("freigegeben", "veroeffentlicht", "im_highlight"):
@@ -158,17 +275,32 @@ def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None
         anteil, gezeigt = schon.get(z["schluessel"], (0.0, 0))
         abzug = round(anteil * max(punkte, 1.0), 2)  # auch schwache Momente (< 1 Punkt) verlieren etwas
         kern, muss, grund = _kern(mk, dauer, p)
+        kern, muss, teile, teile_muss, serie = _teile(mk, dauer, kern, muss, p)
+        if len(teile) > 1:
+            grund += f", {len(teile)} Teile (Jump-Cut)"
         ergebnis.append(Kandidat(z["schluessel"], z["datei"], dauer, z["stimmung"], round(intensitaet, 2),
                                  round(punkte - abzug, 2), z["clip_id"], z["match_id"], kern, muss, grund, mk,
-                                 abzug, gezeigt))
+                                 abzug, gezeigt, teile, teile_muss, serie, max_gruppe=gruppe, victory=bool(victory)))
     return ergebnis
+
+
+def plan_laenge(k: Kandidat, fmt: dict, seg_min: float) -> float:
+    """Ungefähre Länge im Video (vor dem Einrasten auf den Beat). Eine Serie wird nie unter ihre Mindestlänge
+    gekürzt – auch wenn sie länger als serie_max_s ist (im Zusammenschnitt kommt sie dann ganz)."""
+    laenge = min(k.max_laenge(fmt), max(seg_min, k.kern_laenge))
+    return max(laenge, k.min_laenge) if (k.serie or len(k.teile) > 1) else laenge
+
+
+def serie_zu_lang(k: Kandidat, fmt: dict) -> bool:
+    """Serie, die selbst mit Jump-Cuts nicht in serie_max_s passt (im Short: nicht wählen statt zerteilen)."""
+    return k.serie and k.min_laenge > fmt["serie_max_s"] + 1e-6
 
 
 def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandidat], float, list[str]]:
     """Beste Momente, bis die Ziel-Dauer erreicht ist. Ziel richtet sich nach dem Material."""
     hinweise = []
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
-    laenge = lambda k: min(fmt["seg_max_s"], max(seg_min, k.kern[1] - k.kern[0]))  # noqa: E731
+    laenge = lambda k: plan_laenge(k, fmt, seg_min)  # noqa: E731
     vorrat = sum(laenge(k) for k in kandidaten_)
     ziel = min(fmt["max_s"], max(fmt["min_s"], 0.8 * vorrat)) * p["dauer_faktor"]
     ziel = min(fmt["max_s"], max(fmt["min_s"], ziel))
@@ -262,39 +394,88 @@ def naechster(werte: list[float], ziel: float) -> float:
 
 # --- 4./5. Zeitleiste auf dem Beat, Übergänge ------------------------------------------------
 
-def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: dict, fps: int) -> list[dict]:
-    """Legt Segmentgrenzen auf Beats. Gibt Segmente mit Quelle (start/ende) und Zeitleiste (zeit_*) zurück."""
+def _mehrteilig(k: Kandidat, t: float, raster: list[float], fmt: dict, seg_min: float, nutzbar: float
+                ) -> list[tuple[float, float, tuple[float, float], float, float, bool]]:
+    """Moment mit Jump-Cuts: [(Quelle von, bis, Muss, Zeit von, bis, auf dem Beat)] je Teil.
+    Die Schnittpunkte zwischen den Teilen liegen fest (an der Action). Beweglich sind nur der Anfang des ersten
+    Teils (mehr oder weniger Anlauf) und das Ende des letzten – dieses rastet auf den Beat ein."""
+    teile, tm = k.teile, k.teile_muss
+    innen = sum(b - a for a, b in teile[1:-1])
+    erst_min, erst_max = teile[0][1] - tm[0][0], teile[0][1]                  # Teil 1: bis zur Muss-Zone / zum Dateianfang
+    letzt_min, letzt_max = tm[-1][1] - teile[-1][0], nutzbar - teile[-1][0]   # letzter Teil: Muss-Ende / Dateiende
+    min_ges, max_ges = erst_min + innen + letzt_min, erst_max + innen + letzt_max
+    wunsch = min(max_ges, k.max_laenge(fmt), max(seg_min, k.kern_laenge, min_ges))
+    unten, oben = max(seg_min, min_ges), min(max_ges, max(wunsch, min_ges) + 2.0)
+    t = round(t, 3)  # alles auf ms: Quelle und Zeitleiste bleiben exakt gleich lang
+    passend = [b for b in raster if unten - 1e-6 <= b - t <= oben + 1e-6]
+    ende = round(naechster(passend, t + wunsch) if passend else t + max(min(wunsch, max_ges), min(unten, max_ges)), 3)
+    laenge = ende - t
+    # wie bei einem Stück: 60 % der Abweichung vorne (lieber etwas mehr Anlauf), der Rest hinten
+    erst = (teile[0][1] - teile[0][0]) + 0.6 * (laenge - k.kern_laenge)
+    erst = round(min(max(erst, erst_min, laenge - innen - letzt_max), erst_max, laenge - innen - letzt_min), 3)
+    stuecke, z = [], t
+    for (von, bis), muss in zip([(teile[0][1] - erst, teile[0][1]), *teile[1:-1]], tm[:-1]):
+        stuecke.append((von, bis, muss, z, z + (bis - von), False))
+        z += bis - von
+    stuecke.append((teile[-1][0], teile[-1][0] + (ende - z), tm[-1], z, ende, bool(passend)))
+    return stuecke
+
+
+def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: dict, fps: int,
+                     fx: dict | None = None) -> list[dict]:
+    """Legt Segmentgrenzen auf Beats. Gibt Segmente mit Quelle (start/ende) und Zeitleiste (zeit_*) zurück.
+    Ein Moment mit Jump-Cuts wird zu mehreren aufeinanderfolgenden Segmenten (Feld `teil`, harter Schnitt).
+    fx: effekte.einstellungen() – ohne (oder an = false) Übergänge wie bisher (UEBERGANG)."""
+    fx = fx or {"an": False}
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
     segmente, t = [], 0.0
-    for nr, k in enumerate(reihe, 1):
+    je_stimmung: dict[str, int] = {}   # Rotation der Übergänge: frühere Momente derselben Stimmung
+    glitches = 0
+    for k in reihe:
         # Am Dateiende 0,25 s frei lassen: Schnitt/Übergang brauchen dort noch Bilder (entwurf._griffe, UEBERHANG_S)
         nutzbar = max(0.5, k.dauer_s - 0.25)
-        muss_laenge = max(0.5, k.muss[1] - k.muss[0])
-        wunsch = min(fmt["seg_max_s"], max(seg_min, k.kern[1] - k.kern[0], muss_laenge))
-        wunsch = min(wunsch, nutzbar)
-        unten, oben = max(seg_min, muss_laenge), min(nutzbar, max(wunsch, muss_laenge) + 2.0)
-        passend = [b for b in raster if unten - 1e-6 <= b - t <= oben + 1e-6]
-        ende = naechster(passend, t + wunsch) if passend else t + max(min(wunsch, nutzbar), min(unten, nutzbar))
-        laenge = ende - t
-        # Quelle: Kern mittig, lieber etwas mehr Anlauf; die Muss-Zone bleibt immer drin
-        extra = laenge - (k.kern[1] - k.kern[0])
-        start = k.kern[0] - 0.6 * extra
-        start = min(start, k.muss[0])
-        start = max(start, k.muss[1] - laenge)
-        start = max(0.0, min(start, nutzbar - laenge))
-        art, dauer = UEBERGANG[k.stimmung]
-        dauer = round(dauer * p["uebergang_faktor"], 3) if nr > 1 else 0.0
-        segmente.append({
-            "nr": nr, "moment": k.schluessel, "clip_id": k.clip_id, "match_id": k.match_id, "datei": k.datei,
-            "stimmung": k.stimmung, "intensitaet": k.intensitaet, "grund": k.grund,
-            "punkte": k.punkte, "abzug": k.abzug, "gezeigt": k.gezeigt,
-            "quelle_start_s": round(start, 3), "quelle_ende_s": round(start + laenge, 3),
-            "quelle_dauer_s": round(k.dauer_s, 3), "muss": [round(k.muss[0], 3), round(k.muss[1], 3)],
-            "zeit_start": round(t, 3), "zeit_ende": round(ende, 3),
-            "uebergang": {"art": art if nr > 1 else "schnitt", "dauer_s": dauer},
-            "auf_beat": bool(passend),
-        })
-        t = ende
+        if len(k.teile) > 1:
+            stuecke = _mehrteilig(k, t, raster, fmt, seg_min, nutzbar)
+        else:
+            muss_laenge = max(0.5, k.muss[1] - k.muss[0])
+            wunsch = min(k.max_laenge(fmt), max(seg_min, k.kern_laenge, muss_laenge))
+            wunsch = min(wunsch, nutzbar)
+            unten, oben = max(seg_min, muss_laenge), min(nutzbar, max(wunsch, muss_laenge) + 2.0)
+            passend = [b for b in raster if unten - 1e-6 <= b - t <= oben + 1e-6]
+            ende = naechster(passend, t + wunsch) if passend else t + max(min(wunsch, nutzbar), min(unten, nutzbar))
+            laenge = ende - t
+            # Quelle: Kern mittig, lieber etwas mehr Anlauf; die Muss-Zone bleibt immer drin
+            extra = laenge - k.kern_laenge
+            start = k.kern[0] - 0.6 * extra
+            start = min(start, k.muss[0])
+            start = max(start, k.muss[1] - laenge)
+            start = max(0.0, min(start, nutzbar - laenge))
+            stuecke = [(start, start + laenge, k.muss, t, ende, bool(passend))]
+        for teil, (von, bis, muss, z_von, z_bis, auf_beat) in enumerate(stuecke, 1):
+            nr = len(segmente) + 1
+            if teil == 1 and nr > 1:
+                art, dauer = effekte.uebergang(k.stimmung, je_stimmung.get(k.stimmung, 0), k is reihe[-1], p,
+                                               bool(fx["an"]), glitches, profil_=fx.get("profile", {}).get(k.stimmung),
+                                               max_glitch=int(fx.get("max_glitch", 1)))
+                glitches += art == "glitch"
+                uebergang = {"art": art, "dauer_s": dauer}
+            else:  # erstes Segment, Jump-Cut innerhalb des Moments
+                uebergang = {"art": "schnitt", "dauer_s": 0.0}
+            segment = {
+                "nr": nr, "moment": k.schluessel, "clip_id": k.clip_id, "match_id": k.match_id, "datei": k.datei,
+                "stimmung": k.stimmung, "intensitaet": k.intensitaet, "grund": k.grund,
+                "punkte": k.punkte, "abzug": k.abzug, "gezeigt": k.gezeigt,
+                "quelle_start_s": round(von, 3), "quelle_ende_s": round(bis, 3),
+                "quelle_dauer_s": round(k.dauer_s, 3), "muss": [round(muss[0], 3), round(muss[1], 3)],
+                "zeit_start": round(z_von, 3), "zeit_ende": round(z_bis, 3),
+                "uebergang": uebergang,
+                "auf_beat": auf_beat,
+            }
+            if len(stuecke) > 1:
+                segment["teil"] = teil
+            segmente.append(segment)
+        t = stuecke[-1][4]
+        je_stimmung[k.stimmung] = je_stimmung.get(k.stimmung, 0) + 1
     # Übergänge brauchen "Griffe": die halbe Übergangsdauer vor und nach dem Segment aus der Quelle.
     # Gibt die Quelle das nicht her, wird der Übergang kürzer (bis hin zum harten Schnitt).
     for i in range(1, len(segmente)):
@@ -308,24 +489,68 @@ def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: d
     return segmente
 
 
-def pruefe_liste(liste: dict) -> list[str]:
-    """Schema plus fachliche Regeln: Zeitleiste lückenlos, Quelle im Video, kein Kill angeschnitten, Dauer im Rahmen."""
+def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN) -> list[str]:
+    """Schema plus fachliche Regeln: Zeitleiste lückenlos, Quelle im Video, kein Kill angeschnitten, Dauer im Rahmen,
+    Teile eines Moments (Jump-Cut) direkt hintereinander, aus derselben Datei, vorwärts, mit hartem Schnitt.
+    version 4 (Effekte): Ereignisse im Quellfenster ihres Segments mit ihren Pflichtfeldern, höchstens
+    MAX_EREIGNISSE; Zeitlupe im Segment (Länge mit Zuschlag), höchstens max_lupen; Hook nur vorn (Stufe 4)."""
     fehler = schema.pruefe(liste, schema.lade("regie"))
     if fehler:
         return fehler
-    t = 0.0
-    for s in liste["segmente"]:
+    v4 = liste["version"] >= 4
+    if not v4 and "effekte" in liste:
+        fehler.append("effekte erst ab version 4")
+    t, vorher, ereignisse, lupen, hooks = 0.0, None, 0, 0, []
+    for n, s in enumerate(liste["segmente"]):
+        felder = [f for f in V4_FELDER if f in s]
+        if not v4 and felder:
+            fehler.append(f"Segment {s['nr']}: {', '.join(felder)} erst ab version 4")
         if abs(s["zeit_start"] - t) > 1e-3:
             fehler.append(f"Segment {s['nr']}: Lücke in der Zeitleiste")
         t = s["zeit_ende"]
+        if s.get("teil", 1) > 1 and (vorher is None or vorher["moment"] != s["moment"] or vorher["datei"] != s["datei"]
+                                     or vorher.get("teil") != s["teil"] - 1 or s["uebergang"]["art"] != "schnitt"
+                                     or s["quelle_start_s"] < vorher["quelle_ende_s"] - 1e-3):
+            fehler.append(f"Segment {s['nr']}: Teil {s['teil']} passt nicht zum vorigen Teil")
+        vorher = s
         if s["quelle_start_s"] < -1e-3 or s["quelle_ende_s"] > s["quelle_dauer_s"] + 1e-3:
             fehler.append(f"Segment {s['nr']}: außerhalb des Videos")
         if s["quelle_start_s"] > s["muss"][0] + 1e-3 or s["quelle_ende_s"] < s["muss"][1] - 1e-3:
             fehler.append(f"Segment {s['nr']}: schneidet die Action an")
-        if abs((s["zeit_ende"] - s["zeit_start"]) - (s["quelle_ende_s"] - s["quelle_start_s"])) > 1e-3:
+        qs, qe, zuschlag = s["quelle_start_s"], s["quelle_ende_s"], 0.0
+        if lupe := s.get("lupe"):
+            lupen += 1
+            if not (qs + 0.1 - 1e-3 <= lupe["ab_s"] < lupe["bis_s"] <= qe - 0.1 + 1e-3) \
+                    or lupe["bis_s"] - lupe["ab_s"] > 1.5 + 1e-3:
+                fehler.append(f"Segment {s['nr']}: Zeitlupe außerhalb des Segments oder länger als 1,5 s")
+            zuschlag = (lupe["bis_s"] - lupe["ab_s"]) * (1 / lupe["faktor"] - 1)
+        if abs((s["zeit_ende"] - s["zeit_start"]) - ((qe - qs) + zuschlag)) > 1e-3:
             fehler.append(f"Segment {s['nr']}: Länge Quelle ≠ Zeitleiste")
+        for k in s.get("kill_s") or []:
+            if not qs - 1e-3 <= k <= qe + 1e-3:
+                fehler.append(f"Segment {s['nr']}: Kill bei {k} außerhalb des Segments")
+        for e in s.get("effekte") or []:
+            if not qs - 1e-3 <= e["t_s"] <= qe + 1e-3:
+                fehler.append(f"Segment {s['nr']}: Effekt {e['art']} bei {e['t_s']} außerhalb des Segments")
+            pflicht = {"titel": "text", "zaehler": "zahl", "sfx": "klang"}.get(e["art"])
+            if pflicht and pflicht not in e:
+                fehler.append(f"Segment {s['nr']}: Effekt {e['art']} ohne {pflicht}")
+        ereignisse += len(s.get("effekte") or [])
+        if s.get("rolle") == "hook":
+            hooks.append((n, s))
     if abs(t - liste["dauer_s"]) > 1e-3:
         fehler.append("Gesamtdauer stimmt nicht")
+    if ereignisse > MAX_EREIGNISSE:
+        fehler.append(f"{ereignisse} Effekt-Ereignisse – höchstens {MAX_EREIGNISSE}")
+    if lupen > max_lupen:
+        fehler.append(f"{lupen} Zeitlupen – höchstens {max_lupen}")
+    for n, s in hooks:
+        if n != 0 or len(hooks) > 1:
+            fehler.append(f"Segment {s['nr']}: Hook nur als erstes Segment und höchstens einer")
+        if s["zeit_ende"] - s["zeit_start"] > HOOK_MAX_S + 1e-3:
+            fehler.append(f"Segment {s['nr']}: Hook länger als {HOOK_MAX_S} s")
+        if len(liste["segmente"]) < 2 or s["moment"] != liste["segmente"][-1]["moment"] or not s.get("kill_s"):
+            fehler.append(f"Segment {s['nr']}: Hook ohne Kill oder nicht aus dem Höhepunkt")
     return fehler
 
 
@@ -343,27 +568,39 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     fmt = FORMATE[fmt_name]
     p = {**PARAMETER, **(parameter or {})}
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
+    fx, fx_hinweise = effekte.einstellungen(konfig)
     frueher = gezeigte_momente(con)
     alle = [k for k in kandidaten(con, p, frueher) if nur_matches is None or k.match_id in nur_matches]
     if not alle:
         raise RegieFehler("Keine Momente mit Stimmung" + (" in diesen Matches" if nur_matches else "")
                           + " – erst `pipeline stimmung`")
+    # Short: eine Serie, die selbst mit Jump-Cuts nicht in serie_max_s passt, wird nicht gewählt statt zerteilt
+    # (im Zusammenschnitt kommt sie ganz)
+    zu_lang = [k for k in alle if fmt_name == "short" and serie_zu_lang(k, fmt)]
+    if zu_lang:
+        alle = [k for k in alle if not any(k is z for z in zu_lang)]
+        if not alle:
+            raise RegieFehler(f"Alle {len(zu_lang)} Momente sind Serien, die für einen Short zu lang sind "
+                              f"(> {fmt['serie_max_s']:.0f} s am Stück) – Zusammenschnitt nehmen")
     gewaehlt, ziel_s, hinweise = waehle(alle, fmt, p)
+    if zu_lang:
+        hinweise.append(f"{len(zu_lang)} Serie(n) zu lang für Short (> {fmt['serie_max_s']:.0f} s am Stück)")
     reihe = bogen(gewaehlt, fmt_name)
 
     # Vorherrschende Stimmung (nach Länge gewichtet) bestimmt die Musik
     anteile: dict[str, float] = {}
     for k in reihe:
-        anteile[k.stimmung] = anteile.get(k.stimmung, 0.0) + (k.kern[1] - k.kern[0])
+        anteile[k.stimmung] = anteile.get(k.stimmung, 0.0) + k.kern_laenge
     haupt = max(anteile, key=lambda s: (anteile[s], STIMMUNG_WERT[s]))
     track, wertung = waehle_musik(con, haupt, ziel_s, p, ziel)
 
     raster: list[float] = []
+    schlaege: list[float] = []
     versatz = 0.0
     if track is not None:
         schlaege = json.loads(track["beats"])
         # Höhepunkt (letztes Segment) beginnt ungefähr bei ziel_s minus seiner Länge
-        hoehe_start = max(0.0, ziel_s - min(fmt["seg_max_s"], reihe[-1].kern[1] - reihe[-1].kern[0]))
+        hoehe_start = max(0.0, ziel_s - min(reihe[-1].max_laenge(fmt), reihe[-1].kern_laenge))
         versatz = max(0.0, drop(json.loads(track["verlauf"] or "[]")) - hoehe_start)
         if versatz + ziel_s > float(track["dauer_s"]):
             versatz = max(0.0, float(track["dauer_s"]) - ziel_s)
@@ -373,22 +610,23 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     else:
         hinweise.append("keine Musik in der Bibliothek – ohne Musik, Schnitte nicht auf dem Beat")
 
-    segmente = plane_zeitleiste(reihe, raster, fmt, p, fps)
+    segmente = plane_zeitleiste(reihe, raster, fmt, p, fps, fx)
     # Beat-Raster kürzt Segmente -> bis zum Ziel nachlegen: erst mit Match-Grenze, notfalls ohne
+    passt_nicht: list[Kandidat] = []  # eigene Liste: `alle` bleibt die ganze Auswahl (für Zählung und Hinweis)
     for mit_grenze in (True, False):
         while segmente and segmente[-1]["zeit_ende"] < ziel_s - 1e-6:
             je_match: dict[str, int] = {}
             for k in reihe:
                 je_match[k.match_id or ""] = je_match.get(k.match_id or "", 0) + 1
-            rest = [k for k in alle if k not in gewaehlt
+            rest = [k for k in alle if k not in gewaehlt and k not in passt_nicht
                     and (not mit_grenze or not k.match_id or je_match.get(k.match_id, 0) < int(p["max_je_match"]))]
             if not rest:
                 break
             naechster_ = max(rest, key=lambda k: (k.punkte, k.schluessel))
             neue_reihe = bogen([*gewaehlt, naechster_], fmt_name)
-            neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps)
+            neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
             if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
-                alle = [k for k in alle if k is not naechster_]  # passt nicht mehr hinein
+                passt_nicht.append(naechster_)
                 continue
             gewaehlt.append(naechster_)
             reihe, segmente = neue_reihe, neue_segmente
@@ -399,13 +637,23 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     while segmente and segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6 and len(reihe) > 1:
         mitte = reihe[:-1]
         reihe.remove(min(mitte, key=lambda k: (k.punkte, k.intensitaet, k.schluessel)))
-        segmente = plane_zeitleiste(reihe, raster, fmt, p, fps)
+        segmente = plane_zeitleiste(reihe, raster, fmt, p, fps, fx)
     gesamt = segmente[-1]["zeit_ende"] if segmente else 0.0
     if gesamt < fmt["min_s"] - 1e-6:
         hinweise.append(f"Dauer {gesamt:.1f} s unter {fmt['min_s']:.0f} s – zu wenig Material")
-    neu = sum(1 for s in segmente if s["gezeigt"] == 0)
-    if frueher and len(alle) < 3 * len(segmente):
+    # Gezählt werden Momente, nicht Segmente (ein Moment mit Jump-Cut hat mehrere Teile, der Hook wiederholt einen)
+    momente = [s for s in segmente if s.get("teil", 1) == 1 and s.get("rolle") != "hook"]
+    neu = sum(1 for s in momente if s["gezeigt"] == 0)
+    if frueher and len(alle) < 3 * len(momente):
         hinweise.append(f"nur {len(alle)} Momente zur Auswahl – für mehr Abwechslung mehr Clips analysieren")
+
+    # 6. Effekte: Plan in die Segmente (Aus: Schnitt und Übergänge wie vorher, kein Plan)
+    hinweise += [h for h in fx_hinweise if h not in hinweise]
+    if fx["an"] and segmente:
+        beats = [round(b - versatz, 3) for b in schlaege if 0 < b - versatz < gesamt]
+        fx_plan = effekte.plane(segmente, reihe, p, konfig, fmt_name, fps, beats, stimmung=haupt)
+    else:
+        fx_plan = {"an": False}
 
     if name is None:
         name = basis = f"{fmt_name}-{jetzt():%Y%m%d-%H%M%S}"
@@ -414,7 +662,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             n += 1
             name = f"{basis}-{n}"
     liste = {
-        "version": 3, "art": "regie", "name": name, "format": fmt_name,
+        "version": 4, "art": "regie", "name": name, "format": fmt_name,
         "aufloesung": [fmt["b"], fmt["h"]], "fps": fps, "dauer_s": round(gesamt, 3),
         "stimmung": haupt, "parameter": p,
         "musik": None if track is None else {
@@ -423,15 +671,19 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             "pegel": float(p["musik_pegel"]), "wertung": {str(k): v for k, v in wertung.items()},
         },
         "overlay": str(konfig.wert("shorts.overlay_text", "clip-battle.de")) if fmt_name == "short" else None,
-        "bogen": [s["intensitaet"] for s in segmente],
-        "auswahl": {"kandidaten": len(alle), "neu": neu, "schon_gezeigt": len(segmente) - neu,
+        "effekte": fx_plan,
+        "bogen": [s["intensitaet"] for s in momente],
+        "auswahl": {"kandidaten": len(alle), "neu": neu, "schon_gezeigt": len(momente) - neu,
                     "abwechslung": float(p.get("abwechslung", 0.0))},
         "segmente": segmente,
         "hinweise": hinweise,
         "erstellt": iso(jetzt()),
     }
-    if fehler := pruefe_liste(liste):
+    if fehler := pruefe_liste(liste, max_lupen=int(konfig.wert("regie.effekte.max_lupen", MAX_LUPEN))):
         raise RegieFehler("Schnittliste ungültig: " + "; ".join(fehler[:3]))
+    # Passt der Filtergraph samt Effekten auf die Befehlszeile? Sonst scheiterte erst das Rendern.
+    if fx_plan["an"] and (fehler := entwurf.graph_fehler(liste, konfig)):
+        raise RegieFehler("Schnittliste zu groß: " + fehler[0])
     ziel_datei = ordner(konfig) / f"{name}.json"
     ziel_datei.parent.mkdir(parents=True, exist_ok=True)
     tmp = ziel_datei.with_suffix(".tmp")
@@ -444,5 +696,5 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
          round(gesamt, 3), iso(jetzt())),
     )
     return {"entwurf": cur.lastrowid, "name": name, "format": fmt_name, "datei": str(ziel_datei),
-            "dauer_s": round(gesamt, 1), "segmente": len(segmente), "stimmung": haupt,
+            "dauer_s": round(gesamt, 1), "segmente": len(segmente), "momente": len(momente), "stimmung": haupt,
             "musik": liste["musik"]["titel"] if track else None, "neu": neu, "hinweise": hinweise}
