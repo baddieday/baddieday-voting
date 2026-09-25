@@ -111,7 +111,7 @@ def moment_score(con: sqlite3.Connection, konfig: Konfig, art: str, ziel_id: int
                  gewichte: dict[str, float]) -> float | None:
     """Moment-Score eines Clips bzw. Mittel über die Momente eines Entwurfs (roh_score, aus momente neu gerechnet).
 
-    None, wenn Clip/Entwurf unbekannt ist. Paket E.
+    None, wenn Clip/Entwurf unbekannt ist.
 
     Clip: roh_score(fuer_moment(clips.merkmale, momente.merkmale von „clip:<id>“, kill_punkte), gewichte); fehlt die
     momente-Zeile, zählen nur clips.merkmale. Entwurf: Mittel über die eindeutigen Momente seiner Schnittliste, jeder
@@ -193,6 +193,8 @@ def _modell(con: sqlite3.Connection, konfig: Konfig, art: str, version: int,
     if not basis:
         return None  # ohne Vergleich kein z (robust_z bräuchte mindestens einen Wert)
     daten: list[tuple[float, float, int]] = []  # (z, rezept, Urteil)
+    # median/mad hängen nur von basis ab – bei jedem Urteil dieselben; robust_z liefert sie mit (die MAD-Formel steht
+    # nur dort), der letzte Durchlauf bleibt stehen
     median = mad = 0.0
     for ziel_id, gut in urteile:
         score = moment_score(con, konfig, art, ziel_id, gewichte)
@@ -223,7 +225,7 @@ def _modell(con: sqlite3.Connection, konfig: Konfig, art: str, version: int,
 
 
 def modell(con: sqlite3.Connection, konfig: Konfig, art: str) -> dict | None:
-    """Geschätzte Parameter {"a", "b", "c", "n_urteile", "median", "mad"}; None unter mindest_urteile. Paket E.
+    """Geschätzte Parameter {"a", "b", "c", "n_urteile", "median", "mad"}; None unter mindest_urteile.
 
     Zusätzlich "gewichte_version" (mit welchen Gewichten die Moment-Scores gerechnet sind).
     Ablauf: Gewichte per lernen.aktuelle; Vergleichsbasis = Moment-Scores der letzten [erwartung].referenz gesendeten
@@ -248,7 +250,7 @@ def festschreiben(con: sqlite3.Connection, konfig: Konfig, art: str, ziel_id: in
     """Erwartung beim Senden festschreiben (INSERT … ON CONFLICT (art, ziel_id) DO NOTHING).
 
     Gibt den GESPEICHERTEN Wert zurück (auch beim zweiten Aufruf den ersten); None unter mindest_urteile (dann keine
-    Zeile). Paket E.
+    Zeile).
 
     Gibt es schon eine Zeile, wird nichts gerechnet (nur gelesen). Sonst: Gewichte einmal per lernen.aktuelle,
     Modell schätzen, Moment-Score des Objekts gegen dieselbe Basis standardisieren, p = σ(a·z + b·0 + c), Zeile mit
@@ -281,7 +283,7 @@ def festschreiben(con: sqlite3.Connection, konfig: Konfig, art: str, ziel_id: in
 
 
 def gespeichert(con: sqlite3.Connection, art: str, ziel_id: int) -> float | None:
-    """Nur lesen: festgeschriebene Wahrscheinlichkeit oder None. Paket E.
+    """Nur lesen: festgeschriebene Wahrscheinlichkeit oder None.
 
     Für /offen und die Bildunterschrift nach einem Klick – dort wird nie gerechnet.
     Fehler: ValueError bei unbekannter Art. Beispiel: gespeichert(con, "clip", 17) → 0.78."""
@@ -308,7 +310,7 @@ def anzeige(wahrschein: float | None, ja: str, nein: str) -> str:
 # --- Trefferquote --------------------------------------------------------------------------------------------------
 
 def trefferquote(con: sqlite3.Connection, art: str, letzte: int | None = None) -> tuple[int, int]:
-    """(Treffer, geurteilte Erwartungen) einer Art, optional nur die letzten n nach erwartungen.erstellt. Paket E.
+    """(Treffer, geurteilte Erwartungen) einer Art, optional nur die letzten n nach erwartungen.erstellt.
 
     Gezählt werden nur Erwartungen, deren Objekt schon ein Urteil hat (Clip: BEWERTET oder verworfen; Entwurf: eine
     Zeile in entwurf_bewertungen). Treffer = (wahrschein ≥ 0,5) == positiv. „Letzte“ nach erstellt absteigend, bei
@@ -320,23 +322,13 @@ def trefferquote(con: sqlite3.Connection, art: str, letzte: int | None = None) -
     _pruefe_art(art)
     if letzte is not None and letzte < 1:
         raise ValueError(f"letzte muss mindestens 1 sein, nicht {letzte}")
-    if art == "clip":
-        positiv = ", ".join("?" for _ in db.BEWERTET)
-        sql = f"""SELECT e.wahrschein, CASE WHEN c.status = 'verworfen' THEN 0 ELSE 1 END AS gut
-                  FROM erwartungen e JOIN clips c ON c.id = e.ziel_id
-                  WHERE e.art = 'clip' AND (c.status = 'verworfen' OR c.status IN ({positiv}))"""
-        parameter: list = list(db.BEWERTET)
-    else:
-        sql = """SELECT e.wahrschein, CASE WHEN b.daumen > 0 THEN 1 ELSE 0 END AS gut
-                 FROM erwartungen e JOIN entwurf_bewertungen b ON b.entwurf_id = e.ziel_id
-                 WHERE e.art = 'entwurf'"""
-        parameter = []
-    sql += " ORDER BY e.erstellt DESC, e.ziel_id DESC"
-    if letzte is not None:
-        sql += " LIMIT ?"
-        parameter.append(letzte)
-    zeilen = con.execute(sql, parameter).fetchall()
-    treffer = sum(1 for z in zeilen if (z["wahrschein"] >= SCHWELLE) == bool(z["gut"]))
+    # Die Urteilsregel steht nur in _urteile; je Objekt gibt es höchstens ein Urteil (entwurf_bewertungen.entwurf_id
+    # ist PRIMARY KEY), daher verlustfrei als dict
+    urteil = dict(_urteile(con, art))
+    zeilen = con.execute("SELECT ziel_id, wahrschein FROM erwartungen WHERE art = ?"
+                         " ORDER BY erstellt DESC, ziel_id DESC", (art,)).fetchall()
+    zeilen = [z for z in zeilen if z["ziel_id"] in urteil][:letzte]  # [:None] = alle
+    treffer = sum(1 for z in zeilen if (z["wahrschein"] >= SCHWELLE) == bool(urteil[z["ziel_id"]]))
     return treffer, len(zeilen)
 
 
@@ -352,7 +344,8 @@ def trefferquote_text(con: sqlite3.Connection, konfig: Konfig) -> str:
 
     Je Art mit mindestens einer geurteilten Erwartung eine Zeile: erst die letzten 20 (nach erstellt), dahinter
     „· alle …“ – nur wenn es mehr als 20 sind (sonst stünde zweimal dieselbe Zahl da). Klartext ohne HTML; die
-    Aufrufer maskieren selbst. konfig wird noch nicht gebraucht (Signatur aus dem Vertrag). Fehler: keine eigenen.
+    Aufrufer maskieren selbst. konfig ist für später reserviert, damit die Aufrufer gleich bleiben.
+    Fehler: keine eigenen.
     Beispiel: „Erwartung getroffen: Clips 14/20 (70 %) · alle 34/45 (76 %)“ und darunter
     „Erwartung getroffen: Entwürfe 3/4 (75 %)“.
     """

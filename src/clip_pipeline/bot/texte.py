@@ -6,6 +6,7 @@ import json
 from datetime import date
 from html import escape
 
+from ..erwartung import anzeige
 from ..lernen import Ergebnis, anzeige_zeilen, datenbasis_text
 from ..vorbewertung import MERKMAL_NAMEN, MERKMALE, gruppiere, zahl
 from ..zeit import aus_iso, utc_zu_lokal
@@ -40,9 +41,6 @@ def clip_text(clip, match, zonen_name: str, erwartung: float | None = None) -> s
     Begründung –, wird nur die Begründung gekürzt (mit „…“); Titel, Punkte, Erwartung und Status bleiben ganz.
     Gekürzt wird der Klartext VOR dem Maskieren, damit nie ein HTML-Zeichen wie &amp; zerschnitten wird.
     Beispiel: Begründung mit 3000 Zeichen → Text genau bis 1024 Zeichen, Begründung endet auf „…“."""
-    # Import hier statt oben: Paket E ändert in texte.py nur clip_text (Paket D baut parallel an gewichte_text)
-    from ..erwartung import anzeige
-
     caption_max = 1024  # Telegram: Bildunterschrift eines Videos höchstens 1024 Zeichen
     zeiten = [aus_iso(z) for z in json.loads(clip["kill_zeiten"])]
     serie = max(gruppiere(zeiten, 10.0), key=len)

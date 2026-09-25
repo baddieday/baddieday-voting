@@ -95,7 +95,7 @@ def prepare(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
 def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
     """Replay lesen → Kills → Kandidaten mit Merkmalen und Punkten → analyse.json (idempotent: überschreibt sie).
 
-    Stufe 2 (Paket A2): Je Kandidat kommen die sieben Replay-Merkmale (merkmale.aus_replay: Platzierung, Waffen,
+    Stufe 2: Je Kandidat kommen die sieben Replay-Merkmale (merkmale.aus_replay: Platzierung, Waffen,
     Bot-Opfer, Phase, Endgame, Clutch) vor der Bewertung dazu; neue Waffen-Nummern meldet einmal je Session
     merkmale.melde_unbekannte_waffen. Gewichte holt analyze als äußerster Aufrufer einmal (lernen.aktuelle).
     """

@@ -56,8 +56,8 @@ FORMATE = {
               "b": 1080, "h": 1920},
 }
 # Rangfolge der Stimmungen. Seit Stufe 2 (Spec §8.2) nicht mehr Teil der Momentstärke, nur noch Tiebreak bei der
-# Musikwahl (gleich lange Anteile: die "stärkere" Stimmung bestimmt die Musik). Rückfrage 2 an Florian ist offen:
-# eventuell kommt sie als Stimmungs-Bonus in `punkte` zurück.
+# Musikwahl (gleich lange Anteile: die "stärkere" Stimmung bestimmt die Musik). Rückfrage S2-R2
+# (docs/ENTSCHEIDUNGEN.md) ist offen: eventuell kommt sie als Stimmungs-Bonus in `punkte` zurück.
 STIMMUNG_WERT = {"episch": 3.0, "spannend": 2.0, "lustig": 1.5, "frustriert": 1.0, "chill": 0.5}
 # Übergang in einen Moment hinein, je Stimmung: (xfade-Art, Dauer in s). "schnitt" = harter Schnitt.
 UEBERGANG = {"episch": ("schnitt", 0.0), "spannend": ("schnitt", 0.0), "lustig": ("wipeleft", 0.3),
@@ -623,7 +623,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     anteile: dict[str, float] = {}
     for k in reihe:
         anteile[k.stimmung] = anteile.get(k.stimmung, 0.0) + k.kern_laenge
-    # STIMMUNG_WERT nur noch als Tiebreak (Spec §8.2 nimmt ihn aus der Momentstärke; Rückfrage 2 ist offen)
+    # STIMMUNG_WERT nur noch als Tiebreak (Spec §8.2 nimmt ihn aus der Momentstärke; Rückfrage S2-R2 in
+    # docs/ENTSCHEIDUNGEN.md ist offen)
     haupt = max(anteile, key=lambda s: (anteile[s], STIMMUNG_WERT[s]))
     track, wertung = waehle_musik(con, haupt, ziel_s, p, ziel)
 
