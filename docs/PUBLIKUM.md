@@ -33,7 +33,9 @@ Alles läuft auf dem Mini, im Puffer-Betrieb; **nichts davon weckt pve-big**. Ze
 
 ### 1. Vom Short zum Post
 - **Lern-Bot (Entwürfe):** 👍 auf einen Short → ✅ fertig → unter dem Entwurf steht „📦 Upload-Paket“. Der Bot
-  rendert die Upload-Fassung (1080×1920, auf dem Mini) und schickt sie als **Datei**, dazu die Caption zum Kopieren
+  rendert die Upload-Fassung (1080×1920, auf dem Mini – aus derselben Schnittliste wie der Entwurf, also mit
+  denselben Effekten des Regisseurs 2.0; Kill-Titel und Zähler bleiben im unscharfen Rand, nie im Spielbild)
+  und schickt sie als **Datei**, dazu die Caption zum Kopieren
   (mit der Quellenangabe der Musik – die muss in die Beschreibung) und ein Häkchen je Plattform. Nur 👍-Shorts
   bekommen ein Paket (kein Short ohne deine Freigabe; ein Zusammenschnitt 16:9 liefert kein TikTok-Signal).
 - Du postest auf TikTok, dann: `/link 41 https://www.tiktok.com/@…/video/…` (auch `/link e41 …`). Der Bot legt den

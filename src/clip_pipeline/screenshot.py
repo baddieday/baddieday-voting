@@ -78,8 +78,11 @@ def prompt(konfig: Konfig, bild_name: str) -> str:
 def normalisiere(antwort: dict) -> dict:
     """Bringt Claudes (schon schema-geprüfte) Antwort in die Form einer Messung: alle Felder aus publikum.FELDER,
     Zähler als int (1240.0 → 1240), wiedergabe_s und voll_prozent als float, fehlende Felder als None.
-    ValueError bei Unsinn: Zähler mit Nachkommastellen (12.5 Views), NaN oder Unendlich (json.loads nimmt „NaN“
-    an, das Schema lässt es als number durch – math.isfinite prüft hier). Negative Werte lehnt schon das Schema ab.
+    ValueError bei Unsinn: Zähler mit Nachkommastellen (12.5 Views), NaN oder Unendlich. json.loads nimmt „NaN“
+    an; seit dem Merge mit Regisseur 2.0 lehnt schon schema.pruefe es ab (number heißt dort endlich), lies_zahlen
+    kommt damit gar nicht bis hierher. Regel 1 bleibt als zweite Sicherung für jeden anderen Aufrufer: ohne sie ginge
+    NaN bei wiedergabe_s still durch, und int(inf) bei einem Zähler endete in einem OverflowError statt in einem
+    lesbaren Hinweis. Negative Werte lehnt schon das Schema ab.
     Unbekannte Schlüssel (z. B. "profilaufrufe", wenn TikTok mehr anzeigt) werden ignoriert und nur mit ihrem
     Namen geloggt – das Schema ist tolerant (Spec §15). Ob die Werte zur letzten Messung passen (z. B. voll_prozent
     über 100), prüft nicht dieses Modul, sondern publikum.pruefe_plausibel – mit Rückfrage statt Ablehnung.

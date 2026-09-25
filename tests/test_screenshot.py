@@ -319,11 +319,13 @@ class LiesZahlen(MitClaudeKonfig):
             self.assertEqual(self.temp_reste(), [])
 
     def test_nan_von_claude_wird_hinweis(self):
-        # json.loads nimmt „NaN“ an, das Schema auch (number) – erst normalisiere lehnt es ab
+        # json.loads nimmt „NaN“ an. Seit dem Merge mit Regisseur 2.0 lehnt schon das Schema es ab (schema.pruefe:
+        # number = endliche Zahl) – vorher erst normalisiere. Für dich gleich: keine Werte, ein Hinweis, die Hand-
+        # Eingabe als Rückfall; roh bleibt erhalten, der Aufruf zählt (claude lief). Nur der Hinweistext ist anders.
         with FakeClaude('{"views": NaN, "likes": 3}').aktiv():
             lesung = screenshot.lies_zahlen(self.konfig, self.bild())
         self.assertIsNone(lesung.werte)
-        self.assertEqual(lesung.hinweis, "Zahlen unbrauchbar: Views: nan ist keine endliche Zahl")
+        self.assertEqual(lesung.hinweis, "Antwort passt nicht zum Schema: $.views: erwartet number/null, bekommen float")
         self.assertEqual(lesung.roh, '{"views": NaN, "likes": 3}')
         self.assertEqual(lesung.claude.hinweis, lesung.hinweis)
         self.assertIsNone(lesung.claude.daten)

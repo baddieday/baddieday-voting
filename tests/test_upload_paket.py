@@ -9,6 +9,8 @@ Telegram-Grenze. Geprüft wird hier:
   - die Wiederholung bei zu großer Datei (rendere gepatcht: 75 % der benutzten Rate, max_bytes bleibt),
   - der Rückfall VA-API → CPU mit derselben Rate (ohne GPU: ffmpeg gepatcht),
   - die Rate selbst: das Budget der Upload-Fassung, nicht der 4000k-Deckel des Entwurfs (bei 45 s genau 7349k),
+  - mit Effekten (Regisseur 2.0): derselbe Plan in 1080×1920, Zoom nur auf dem Spielbild, Kill-Titel und Zähler
+    im unscharfen Rand – nie im Spielbild (ffmpeg ersetzt, der Filtergraph geprüft),
   - nie wecken, nie Netz,
   - die Caption nur aus Fakten der Datenbank, mit Pflicht-Quellenangabe der Musik.
 """
@@ -16,11 +18,12 @@ Telegram-Grenze. Geprüft wird hier:
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from clip_pipeline import big, caption, entwurf, konfig, medien, regie
+from clip_pipeline import big, caption, effekt_filter, effekte, entwurf, konfig, medien, regie, sfx
 from clip_pipeline.caption import CaptionFehler
 from clip_pipeline.entwurf import ZuGross
 from clip_pipeline.konfig import KonfigFehler
@@ -270,7 +273,13 @@ class UploadFassungVaApi(MitUpload):
         self.assertNotIn("-crf", vaapi)
         self.assertEqual(cpu[cpu.index("-c:v") + 1], "libx264")
         self.assertEqual(cpu[cpu.index("-crf") + 1], "20")
-        self.assertIn("crop=1080:1920", cpu[cpu.index("-filter_complex") + 1])  # volle Auflösung, nicht 720×1280
+        # Volle Auflösung, nicht 720×1280: das Spielbild in voller Breite und der Hintergrund auf 1080×1920. (Seit
+        # Regisseur 2.0 wird der Hintergrund auf Viertelgröße weichgezeichnet – crop=270:480 – und erst dann
+        # hochskaliert; ein „crop=1080:1920“ gibt es deshalb nicht mehr.)
+        graph = cpu[cpu.index("-filter_complex") + 1]
+        self.assertIn("[vg0]scale=1080:-2", graph)
+        self.assertIn("scale=1080:1920", graph)
+        self.assertNotIn("720", graph)
         self.assertNotIn("-vaapi_device", cpu)
         self.assertFalse(any("nvenc" in " ".join(b) for b in befehle))
         self.assertEqual((r["encoder"], r["aufloesung"]), ("libx264", [1080, 1920]))
@@ -304,6 +313,62 @@ class UploadFassungRate(MitUpload):
             entwurf.upload_fassung(self.con, self.konfig, eid)
         (befehl,) = befehle
         self.assertEqual(befehl[befehl.index("-maxrate") + 1], "7349k")
+
+
+# --- upload_fassung mit Effekten (Regisseur 2.0) -----------------------------------------------------------
+
+SCHRIFT = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")  # wie tests/test_effekte_graph.py
+
+
+@unittest.skipUnless(HAT_FFMPEG and SCHRIFT.is_file(), "ffmpeg oder DejaVu-Schrift fehlt")
+class UploadFassungMitEffekten(MitUpload):
+    """Nach dem Merge mit Regisseur 2.0: Die Upload-Fassung rendert dieselbe v4-Schnittliste wie der Entwurf, nur in
+    voller Größe. Zoom, Look und Texte rechnet effekt_filter aus b × h – hier wird geprüft, dass das bei 1080×1920
+    stimmt: Zoom nur auf dem Spielbild (der unscharfe Hintergrund zoomt nie mit) und jeder Text samt Pop und Rand
+    außerhalb des Spielbilds. ffmpeg und die Klang-WAVs sind ersetzt, ffprobe misst die echten Testvideos."""
+
+    def test_1080x1920_zoom_nur_im_spielbild_texte_im_rand(self):
+        self.konfig.daten["regie"]["effekte"]["an"] = True  # regie_hilfen schaltet sie für Bestandstests aus
+        eid = self.short_entwurf(echte_videos=True)  # rendere misst die Moment-Dateien mit ffprobe
+        liste = self.liste(eid)
+        self.assertTrue(liste["effekte"]["an"])
+        befehle = []
+
+        def lauf(befehl, was, timeout=None):
+            befehle.append(befehl)
+            Path(befehl[-1]).write_bytes(b"x" * 1000)  # die .tmp-Ausgabe, klein genug
+            return ""
+
+        with mock.patch.object(entwurf, "fuehre_aus", side_effect=lauf), \
+                mock.patch.object(sfx, "datei", side_effect=lambda _k, name: Path("/sfx") / f"{name}.wav"), \
+                mock.patch.object(entwurf.shorts, "schrift", return_value=SCHRIFT):
+            r = entwurf.upload_fassung(self.con, self.konfig, eid)
+        self.assertEqual(r["aufloesung"], [1080, 1920])
+        (befehl,) = befehle
+        g = befehl[befehl.index("-filter_complex") + 1]
+
+        # Zoom: auf dem Vordergrund in voller Breite, bevor er in den unscharfen Hintergrund gesetzt wird
+        gezoomt = [i for i in range(len(liste["segmente"])) if f"[vg{i}]scale=1080:-2,split=2[zo{i}]" in g]
+        self.assertTrue(gezoomt, "kein Segment mit Zoom")
+        for teil in g.split(";"):
+            if teil.startswith("[hg"):
+                self.assertNotIn("eval=frame", teil)  # der Hintergrund zoomt nie
+
+        # Texte: Mitte wie effekt_filter.lage für 1080×1920 und die gemessene Spielbild-Höhe, ganz außerhalb
+        spiel_h = max(effekt_filter.spiel_hoehe(1080, info.breite, info.hoehe)
+                      for info in (medien.probe(Path(s["datei"])) for s in liste["segmente"]))
+        oben, unten = effekt_filter.spielbild(1080, 1920, spiel_h)
+        breite = entwurf._zeichenbreite(self.konfig)
+        texte = [(e.text, e.art) for e in effekte.zeitleiste(liste) if e.art == "titel"]
+        texte += [(t, "zaehler") for t in sorted(set(re.findall(r"text='(KILLS \d+)'", g)))]
+        self.assertTrue(any(art == "titel" for _, art in texte) and any(art == "zaehler" for _, art in texte))
+        for text, art in texte:
+            with self.subTest(text=text):
+                mitte, groesse = effekt_filter.lage(1080, 1920, True, len(text), breite, spiel_h)[art]
+                teil = [t for t in re.split(r",(?=drawtext)", g) if f"text='{text}'" in t][0]
+                self.assertIn(f"y='{effekt_filter._z(mitte)}-text_h/2", teil)
+                halb = effekt_filter._halbe_hoehe(groesse)  # beim Pop, samt schwarzem Rand
+                self.assertTrue(mitte - halb > unten or mitte + halb < oben, (text, mitte, groesse, oben, unten))
 
 
 # --- nie wecken --------------------------------------------------------------------------------------------

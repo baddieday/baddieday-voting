@@ -483,17 +483,18 @@ def upload_fassung(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> 
         der Lern-Bot würde dort schreiben oder hängen → KonfigFehler mit Klartext (wie cli._cmd_lager)
       - alle Moment-Dateien und die Musik vorhanden – sonst MedienFehler „Moment-Datei fehlt … (der Puffer hält
         Rohvideos 14 Tage)“, ohne dass ffmpeg startet
-    max_bytes wie entwurf(): int([vorschau].max_mb · 1 000 000) – inline, nach dem Merge mit Regisseur 2.0 dessen
-    _max_bytes(konfig) benutzen.
+    max_bytes wie entwurf(): _max_bytes(konfig) = int([vorschau].max_mb · 1 000 000) – dieselbe Funktion, also eine
+    einzige Stelle für die Telegram-Grenze.
+    Effekte (Regisseur 2.0, liste["effekte"].an): gehen ohne Zusatz mit – rendere() rechnet Zoom, Blenden und die
+    Lage der Kill-Texte aus b × h (hier 1080×1920) und der gemessenen Höhe des Spielbilds; die Texte bleiben im
+    unscharfen Rand, nie im Spielbild (effekt_filter.lage).
 
     Idempotent über entwuerfe.upload_pfad (absoluter Pfad wie entwuerfe.datei): liegt die Datei schon da, wird
     nicht neu gerendert. Die Pipeline-Sperre holt der Aufrufer (Lern-Bot bzw. CLI). Rückgabe wie rendere() plus
     "entwurf" und "uebersprungen", z. B. {"entwurf": 41, "datei": "…_upload.mp4", "mb": 31.2, "dauer_s": 38.5,
     "encoder": "h264_vaapi", "aufloesung": [1080, 1920], "versuche": 1, "uebersprungen": False}.
     Übersprungen: nur {"entwurf", "datei", "uebersprungen": True} (wie entwurf())."""
-    zeile = con.execute("SELECT * FROM entwuerfe WHERE id = ?", (entwurf_id,)).fetchone()
-    if zeile is None:
-        raise MedienFehler(f"Entwurf {entwurf_id} unbekannt")
+    zeile = _zeile(con, entwurf_id)  # MedienFehler „Entwurf … unbekannt“, wenn es ihn nicht gibt
 
     # Regel 1: nur Shorts – ein Zusammenschnitt bekäme im 48-MB-Budget eine unbrauchbare Bildrate
     if zeile["format"] != "short":
@@ -525,7 +526,7 @@ def upload_fassung(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> 
         if not (musik.ordner(konfig) / m["datei"]).is_file():
             raise MedienFehler(f"Musik fehlt: {musik.ordner(konfig) / m['datei']}")
 
-    max_bytes = int(float(konfig.wert("vorschau.max_mb", 48)) * 1_000_000)  # wie entwurf() (Telegram-Grenze)
+    max_bytes = _max_bytes(konfig)  # wie entwurf(): Telegram-Grenze für Bots
     kbit_max = int(konfig.wert("shorts.max_kbit", 12000))  # erster Versuch: das Budget begrenzt, nicht dieser Deckel
     for versuch in range(1, UPLOAD_VERSUCHE + 1):
         try:
