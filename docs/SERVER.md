@@ -149,9 +149,6 @@ systemd-run --unit=clip-rueckstand --uid=pipeline --gid=pipeline \
   -p WorkingDirectory=/opt/clip-pipeline --collect /opt/clip-pipeline/deploy/rueckstand.sh
 tail -f /var/lib/clip-pipeline/rueckstand.log                           # Fortschritt ansehen
 ```
-Seit Lernschleife Stufe 2 startet jedes render einen Mic-Schritt im Hintergrund. Die Mic-Kinder eines Rückstand-
-Laufs beendet systemd mit dem Ende von `clip-rueckstand`; danach einmal
-`sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline stimmung --clips --max 5` (mehrmals möglich).
 
 ### B5. Tailscale und SSH für n8n
 ```bash

@@ -622,4 +622,6 @@ Stand beim Vertrag (25.09.). Die Bauer-Annahmen und die Befunde des Panels komme
 - **S2-R5:** `kommentar` bleibt (immer 0 → ändert das Lernen nicht, Streichen brächte nichts).
 - **S2-R6:** Ja – `merkmale nachtragen` rechnet Merkmale, Punkte und Begründung aller Clips neu, auch gesendeter und
   nach einer Waffen-Kalibrierung. **S2-A5 ist damit aufgehoben.**
-- **S2-R3:** Antwort betraf „fremde Stimmen auf eigener Spur herausfiltern“ – Rückfrage offen.
+- **S2-R3:** systemd. render schreibt nur `mikro.anstoss`; `clip-mikro.path` startet `clip-mikro.service`
+  (`stimmung --clips`, Nice 15, MemoryMax 3G), `clip-mikro.timer` alle 30 min. Ersetzt den Kindprozess
+  aus S2-A7 (und damit die logind-Frage). Offen dazu: „fremde Stimmen auf eigener Spur herausfiltern“.

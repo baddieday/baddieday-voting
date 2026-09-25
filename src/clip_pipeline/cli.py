@@ -45,9 +45,9 @@ def _cmd_schritt(args, konfig, con) -> int:
     log.info("%s --session %s", args.befehl, args.session)
     ergebnis = schritt(con, konfig, args.session)
     if args.befehl == "render" and ergebnis.get("neu", 0) > 0:
-        # Mic-Analyse (Whisper) losgelöst im Hintergrund (Spec §8.2, §12): schreibt nichts auf unser stdout/stderr,
-        # Fehler beim Start sind nur eine Log-Warnung – die JSON-Zeile und der Exit-Code bleiben gleich (n8n-Vertrag)
-        mikro.starte_im_hintergrund(konfig, args.session)
+        # Mic-Analyse (Whisper) im Dienst clip-mikro (Spec §8.2, §12, Rückfrage S2-R3): render schreibt nur die
+        # Anstoß-Datei; ein Fehler dabei ist eine Log-Warnung – JSON-Zeile und Exit-Code bleiben gleich (n8n-Vertrag)
+        mikro.anstossen(konfig, args.session)
     _json(ergebnis)
     return 0
 

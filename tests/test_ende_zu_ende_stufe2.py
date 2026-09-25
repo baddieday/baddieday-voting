@@ -449,26 +449,26 @@ class MigrationGleichzeitig(MitSpeicher):
             self.verbinde_mit_wettlauf(self.tmp / "kaputt.db", fehler_statt_alter="disk I/O error")
 
 
-class MicKindprozess(unittest.TestCase):
-    def test_render_startet_mic_schritt_mit_testkonfig(self):
+class MicAnstoss(unittest.TestCase):
+    """render mit echter Testkonfig: schreibt die Anstoß-Datei für clip-mikro.path neben die Test-DB und startet
+    selbst keinen Mic-Prozess (Rückfrage S2-R3: systemd); stdout bleibt genau eine JSON-Zeile."""
+
+    def test_render_stoesst_mic_schritt_an(self):
         welt = umgebung(self)
         welt.konfig.daten["lager"]["wurzel"] = str(welt.tmp / "lager")  # getrennter Betrieb (Puffer)
         welt.konfig.daten["merkmale"].update(mic=True, mic_je_lauf=3)
         match_bis_decide(welt, bot=True)
-        # Die Testkonfig als echte Datei: render liest sie über `pipeline --konfig …` selbst (cli.lade)
         testkonfig = welt.tmp / "konfig" / "test.toml"
         testkonfig.parent.mkdir()
         testkonfig.write_text(toml_text(welt.konfig.daten), encoding="utf-8")
-        self.assertEqual(tomllib.loads(testkonfig.read_text(encoding="utf-8")), welt.konfig.daten)
 
         echt = subprocess.Popen
-        mic_aufrufe = []
+        fremde = []
 
         def popen(befehl, *args, **kwargs):
-            # Nur der Mic-Schritt ist gefälscht; ffmpeg/ffprobe laufen echt weiter
-            if befehl[:1] == ["nice"]:
-                mic_aufrufe.append((befehl, kwargs))
-                return mock.Mock()
+            # ffmpeg/ffprobe laufen echt; alles andere wäre ein unerwarteter Prozess
+            if Path(str(befehl[0])).name not in ("ffmpeg", "ffprobe"):
+                fremde.append(befehl)
             return echt(befehl, *args, **kwargs)
 
         aus = io.StringIO()
@@ -476,7 +476,6 @@ class MicKindprozess(unittest.TestCase):
                          if k not in ("CLIP_KONFIG", "CLIP_SPEICHER", "CLIP_DATENBANK", "CLIP_EPIC_ID")}
         with mock.patch.dict(os.environ, ohne_umgebung, clear=True), \
                 mock.patch("subprocess.Popen", side_effect=popen), \
-                mock.patch.object(mikro, "whisper_da", return_value=True), \
                 mock.patch.object(konfig_modul.Konfig, "_host_erreichbar", return_value=True), \
                 mock.patch("clip_pipeline.konfig.sende_wake_on_lan") as wol, \
                 contextlib.redirect_stdout(aus), contextlib.redirect_stderr(io.StringIO()):
@@ -484,19 +483,10 @@ class MicKindprozess(unittest.TestCase):
         self.assertEqual(code, 0)
         zeilen = aus.getvalue().splitlines()
         self.assertEqual(len(zeilen), 1, zeilen)  # n8n-Vertrag: genau eine JSON-Zeile
-        ergebnis = json.loads(zeilen[0])
-        self.assertEqual((ergebnis["clips"], ergebnis["neu"], ergebnis["top_label"]), (1, 1, "Double Kill"))
-
-        (befehl, kwargs), = mic_aufrufe
-        self.assertEqual(befehl[befehl.index("--konfig") + 1], str(testkonfig))
-        self.assertLess(befehl.index("--konfig"), befehl.index("stimmung"))
-        self.assertEqual(befehl[befehl.index("stimmung"):],
-                         ["stimmung", "--clips", "--session", SID, "--max", "3"])
-        # Befund B-4: stdout und stderr des Kindes gehen ins selbe Log (nie an den render-Prozess, n8n-Vertrag)
-        self.assertIs(kwargs["stdout"], kwargs["stderr"])
-        self.assertEqual(kwargs["stdout"].name, str(welt.tmp / mikro.LOG_NAME))
-        self.assertTrue(kwargs["start_new_session"])
-        self.assertTrue((welt.tmp / mikro.LOG_NAME).is_file())  # Log neben der Test-DB
+        self.assertEqual(json.loads(zeilen[0])["neu"], 1)
+        self.assertEqual(fremde, [])
+        anstoss = welt.tmp / mikro.ANSTOSS_NAME   # neben der Test-DB
+        self.assertEqual(anstoss.read_text(encoding="utf-8").split()[0], SID)
         wol.assert_not_called()
 
 

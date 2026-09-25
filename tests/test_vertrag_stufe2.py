@@ -210,34 +210,27 @@ class Verdrahtung(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("stimmung --clips arbeitet nur im Puffer", daten["hinweis"])
 
-    def test_mic_kindprozess_argv_erreicht_clips_nachziehen(self):
-        """Der Weg argv → Parser → _cmd_stimmung → mikro.clips_nachziehen im Puffer-Betrieb (render startet ihn)."""
-        sid = "2026-09-23_20-15-33"
+    def test_mic_dienst_befehl_erreicht_clips_nachziehen(self):
+        """Der ExecStart von deploy/systemd/clip-mikro.service → Parser → _cmd_stimmung → mikro.clips_nachziehen im
+        Puffer-Betrieb (Rückfrage S2-R3: systemd statt Kindprozess)."""
+        dienst = (WURZEL / "deploy" / "systemd" / "clip-mikro.service").read_text(encoding="utf-8")
+        exec_start = next(z for z in dienst.splitlines() if z.startswith("ExecStart="))
+        argv = exec_start.split()[1:]  # ohne das Programm /opt/clip-pipeline/.venv/bin/pipeline
+        self.assertEqual(argv, ["stimmung", "--clips"])
         with tempfile.TemporaryDirectory() as tmp:
-            toml = Path(tmp) / "test.toml"
-            toml.write_text((WURZEL / "config" / "pipeline.toml").read_text(encoding="utf-8"), encoding="utf-8")
             umgebung = {"CLIP_SPEICHER": str(Path(tmp) / "speicher"), "CLIP_DATENBANK": str(Path(tmp) / "t.db")}
-            ergebnis = {"geprueft": 1, "gemessen": 1, "fehler": 0, "offen": 0}
+            ergebnis = {"uebernommen": 0, "analysiert": 1, "mit_fehler": 0, "offen": 0}
             ausgabe = io.StringIO()
             with mock.patch.dict(os.environ, umgebung), \
                     mock.patch("clip_pipeline.konfig.Konfig.getrennt", new_callable=mock.PropertyMock,
                                return_value=True), \
-                    mock.patch.object(mikro, "whisper_da", return_value=True), \
-                    mock.patch.object(mikro.subprocess, "Popen") as popen, \
                     mock.patch.object(mikro, "clips_nachziehen", return_value=ergebnis) as nachziehen, \
                     mock.patch("clip_pipeline.konfig.Konfig._host_erreichbar") as erreichbar, \
                     mock.patch("clip_pipeline.konfig.sende_wake_on_lan") as wol, \
                     contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
-                k = konfig_modul.lade(toml)
-                k.daten["merkmale"]["mic_je_lauf"] = 4
-                self.assertTrue(mikro.starte_im_hintergrund(k, sid))
-                argv = popen.call_args.args[0]
-                kind = argv[argv.index("--konfig"):]  # was `python -m clip_pipeline` an cli.main gibt
-                self.assertEqual(kind, ["--konfig", str(toml), "stimmung", "--clips", "--session", sid,
-                                        "--max", "4"])
-                code = cli.main(kind)
+                code = cli.main(argv)
         self.assertEqual(code, 0)
-        nachziehen.assert_called_once_with(mock.ANY, mock.ANY, session=sid, maximal=4)
+        nachziehen.assert_called_once_with(mock.ANY, mock.ANY, session=None, maximal=None)  # mic_je_lauf aus Konfig
         self.assertEqual(json.loads(ausgabe.getvalue().strip().splitlines()[-1]), ergebnis)
         erreichbar.assert_not_called()
         wol.assert_not_called()

@@ -376,7 +376,8 @@ Art), `/gewichte` zeigt zwei Quoten („du“ und „Publikum“). Beim Senden s
 **Was du davon merkst:**
 - Ein Clip mit Bot-Opfern bekommt weniger Punkte (Startgewicht `bot_opfer = −2`: nur Bots → −2).
 - Nach `render` startet im Hintergrund der Mic-Schritt (`pipeline stimmung --clips`, `nice 15`, höchstens
-  `[merkmale].mic_je_lauf` Clips). n8n wartet nicht darauf; sein Log steht in `/var/lib/clip-pipeline/mikro.log`.
+  `[merkmale].mic_je_lauf` Clips) als eigener Dienst `clip-mikro`. n8n wartet nicht darauf; Log:
+  `journalctl -u clip-mikro`.
 - Neue Waffen-Nummern meldet der Clip-Bot einmal je Match als Sammelmeldung (nach der Ruhezeit).
 - `pipeline merkmale nachtragen` rechnet Merkmale, Punkte und Begründung **aller** Clips neu – auch schon
   gesendeter (Rückfrage S2-R6: ja). Der Bot zeigt danach die neuen Punkte.
@@ -438,23 +439,20 @@ Fehlende Mic-Analysen holt der Mic-Schritt nach (S4) – von Hand: `pipeline sti
 möglich; je Lauf höchstens so viele Clips, die Pipeline-Sperre bleibt kurz belegt).
 **Ohne Puffer-Betrieb** lehnen beide Befehle mit Exit 2 ab.
 
-### S4 · Mic-Schritt prüfen
+### S4 · Mic-Dienst einschalten
 
+`render` schreibt nur die Anstoß-Datei `/var/lib/clip-pipeline/mikro.anstoss`; den Mic-Schritt startet systemd
+(`clip-mikro.path` → `clip-mikro.service`), dazu stößt `clip-mikro.timer` alle 30 min nach (Rückfrage S2-R3).
 ```bash
-# Ist faster-whisper da? (sonst startet render keinen Mic-Schritt – nur Spitzen kommen über clip-sitzungen)
+# im CT als root
+cp /opt/clip-pipeline/deploy/systemd/clip-mikro.{service,path,timer} /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now clip-mikro.path clip-mikro.timer
+# Ist faster-whisper da? (ohne übernimmt der Dienst nur vorhandene Werte)
 sudo -u pipeline /opt/clip-pipeline/.venv/bin/python -c "import importlib.util as u; print(u.find_spec('faster_whisper') is not None)"
-# Beendet logind Prozesse, wenn die SSH-Sitzung von n8n endet? Erwartet: no (Debian-Standard)
-loginctl show-user pipeline -p KillUserProcesses 2>/dev/null; grep -i '^KillUserProcesses' /etc/systemd/logind.conf
-# Nach dem nächsten Match: läuft er, und was sagt er?
-tail -n 20 /var/lib/clip-pipeline/mikro.log
+# Probe ohne Match: Anstoß von Hand, dann ins Journal sehen
+sudo -u pipeline touch /var/lib/clip-pipeline/mikro.anstoss && sleep 5 && journalctl -u clip-mikro -n 20
 ```
-Steht bei logind `yes`: Der Mic-Schritt würde mit dem Ende des SSH-Aufrufs beendet. Dann `[merkmale] mic = false` in
-`lokal.toml` und melden – eine eigene systemd-Einheit ist Rückfrage S2-R3. **Ehrlich zum Rückfall:** Der Timer
-`clip-sitzungen` misst nur einmal je Spielabend (neue `session_*.json`) Clips **ohne** momente-Zeile; unvollständige
-Mic-Werte holt nur `stimmung --clips` nach – das nächste render oder du von Hand (`pipeline stimmung --clips --max 5`).
-Hat ein Match mehr Clips als `[merkmale].mic_je_lauf` (3), nimmt das nächste render die übrigen mit.
-Ein Rückstand-Lauf (`deploy/rueckstand.sh`, systemd-run) beendet seine Mic-Kinder mit dem Ende der Unit – danach
-einmal `pipeline stimmung --clips --max 5` von Hand.
+Aus: `systemctl disable --now clip-mikro.path clip-mikro.timer` (oder `[merkmale] mic = false` in `lokal.toml`).
 
 ### Abnahme (Stufe 2)
 

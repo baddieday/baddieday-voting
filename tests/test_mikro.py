@@ -5,7 +5,7 @@ Geprüft wird:
     Datei-Moment ohne Clip bleibt unberührt)
   - Mic nachholen ohne Stimmungsverlust (Annahme S2-A18): Zeile mit quelle = "claude" behält Stimmung und Quelle
   - Zeilen mit Messfehler werden nicht wiederholt; Reihenfolge (Session zuerst, dann Punkte) und --max
-  - starte_im_hintergrund: Popen-Argumente, Log neben der DB, wann NICHT gestartet wird, kein Import von faster-whisper
+  - anstossen: Anstoß-Datei für clip-mikro.path neben der DB, wann NICHT, kein Import von faster-whisper
   - n8n-Vertrag: stdout von `pipeline render` endet weiter mit genau einer JSON-Zeile; process/scan starten nichts
   - nichts davon weckt pve-big
 Gewichte kommen aus der Test-Konfig ([vorbewertung.startgewichte] wird hier ausdrücklich gesetzt) – die Tests
@@ -19,9 +19,8 @@ import io
 import json
 import builtins
 import sqlite3
-import subprocess
-import sys
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from clip_pipeline import cli, db, lernen, mikro, stimmung, verarbeitung
@@ -481,55 +480,34 @@ class Hintergrund(MitPuffer):
         with mock.patch("importlib.util.find_spec", return_value=None):
             self.assertFalse(mikro.whisper_da())
 
-    def test_popen_argumente(self):
-        self.konfig.daten["merkmale"]["mic_je_lauf"] = 4
-        with mock.patch.object(mikro, "whisper_da", return_value=True), \
-                mock.patch.object(mikro.subprocess, "Popen") as popen:
-            self.assertTrue(mikro.starte_im_hintergrund(self.konfig, SID))
-        popen.assert_called_once()
-        befehl = popen.call_args.args[0]
-        self.assertEqual(befehl, ["nice", "-n", "15", sys.executable, "-m", "clip_pipeline", "--konfig",
-                                  str(self.tmp / "test.toml"), "stimmung", "--clips", "--session", SID, "--max", "4"])
-        self.assertLess(befehl.index("--konfig"), befehl.index("stimmung"))
-        kw = popen.call_args.kwargs
-        self.assertEqual((kw["stdin"], kw["start_new_session"]), (subprocess.DEVNULL, True))
-        # Befund B-4: auch stdout (die JSON-Zeile mit „offen“) geht ins Log des Kinds – nie an render/n8n
-        self.assertIs(kw["stdout"], kw["stderr"])
-        self.assertIsNot(kw["stdout"], sys.stdout)
-        self.assertNotIn(kw["stdout"], (None, subprocess.DEVNULL, subprocess.PIPE))
-        self.assertEqual(kw["stderr"].name, str(self.tmp / mikro.LOG_NAME))  # neben der Test-DB
-        self.assertIn("a", kw["stderr"].mode)  # angehängt, nicht überschrieben
-        self.assertTrue((self.tmp / mikro.LOG_NAME).is_file())
+    def anstoss(self) -> Path:
+        return self.konfig.datenbank.parent / mikro.ANSTOSS_NAME
 
-    def test_startfehler_nur_warnung(self):
-        with mock.patch.object(mikro, "whisper_da", return_value=True), \
-                mock.patch.object(mikro.subprocess, "Popen", side_effect=OSError("nice fehlt")), \
-                self.assertLogs("pipeline", "WARNING"):
-            self.assertFalse(mikro.starte_im_hintergrund(self.konfig, SID))
-
-    def test_log_nicht_zu_oeffnen(self):
-        self.konfig.daten["datenbank"]["pfad"] = str(self.tmp / "gibt-es-nicht" / "x.db")
-        with mock.patch.object(mikro, "whisper_da", return_value=True), \
-                mock.patch.object(mikro.subprocess, "Popen") as popen, self.assertLogs("pipeline", "WARNING"):
-            self.assertFalse(mikro.starte_im_hintergrund(self.konfig, SID))
+    def test_anstoss_datei_neben_der_datenbank(self):
+        # S2-R3 (Florian: systemd): render startet keinen Prozess mehr, es schreibt nur die Anstoß-Datei, auf die
+        # clip-mikro.path wartet
+        with mock.patch("subprocess.Popen") as popen:
+            self.assertTrue(mikro.anstossen(self.konfig, SID))
+            self.assertTrue(mikro.anstossen(self.konfig, "2026-09-25_21-00-00"))
         popen.assert_not_called()
+        self.assertEqual(self.anstoss().read_text(encoding="utf-8").split()[0], "2026-09-25_21-00-00")
 
-    def test_kein_start(self):
-        faelle = (("mic aus", {"mic": False}, "x", mock.sentinel.spec),
-                  ("ohne Puffer", {"mic": True}, "", mock.sentinel.spec),
-                  ("ohne faster-whisper", {"mic": True}, "x", None))
-        for name, merkmale, lager, spec in faelle:
+    def test_kein_anstoss(self):
+        for name, mic, lager in (("mic aus", False, "x"), ("ohne Puffer", True, "")):
             with self.subTest(name):
-                self.konfig.daten["merkmale"].update(merkmale)
+                self.konfig.daten["merkmale"]["mic"] = mic
                 self.konfig.daten["lager"]["wurzel"] = lager
-                with mock.patch("importlib.util.find_spec", return_value=spec), verbiete_faster_whisper(), \
-                        mock.patch.object(mikro.subprocess, "Popen") as popen:
-                    self.assertFalse(mikro.starte_im_hintergrund(self.konfig, SID))
-                popen.assert_not_called()
+                self.assertFalse(mikro.anstossen(self.konfig, SID))
+                self.assertFalse(self.anstoss().exists())
+
+    def test_schreibfehler_nur_warnung(self):
+        self.konfig.daten["datenbank"]["pfad"] = str(self.tmp / "gibt-es-nicht" / "x.db")
+        with self.assertLogs("pipeline", "WARNING"):
+            self.assertFalse(mikro.anstossen(self.konfig, SID))
 
 
 class RenderVertrag(MitPuffer):
-    """cli: nur render mit neu > 0 startet den Mic-Schritt; stdout bleibt genau eine JSON-Zeile."""
+    """cli: nur render mit neu > 0 stößt den Mic-Schritt an; stdout bleibt genau eine JSON-Zeile."""
 
     def _cli(self, *argv) -> tuple[int, list[str]]:
         ausgabe = io.StringIO()
@@ -538,39 +516,33 @@ class RenderVertrag(MitPuffer):
             code = cli.main(list(argv))
         return code, ausgabe.getvalue().splitlines()
 
-    def _render(self, neu, popen=None):
+    def _render(self, neu):
         ergebnis = {"session": SID, "clips": 2, "neu": neu, "top_label": "Double Kill", "top_score": 3}
         with mock.patch.object(verarbeitung, "render", return_value=ergebnis), \
-                mock.patch.object(mikro, "whisper_da", return_value=True), \
-                mock.patch.object(mikro.subprocess, "Popen", **(popen or {})) as p:
+                mock.patch("subprocess.Popen") as popen:
             code, zeilen = self._cli("render", "--session", SID)
-        return code, zeilen, p
-
-    def test_render_startet_und_eine_json_zeile(self):
-        code, zeilen, popen = self._render(2)
-        self.assertEqual(code, 0)
-        self.assertEqual(len(zeilen), 1)
-        self.assertEqual(json.loads(zeilen[-1])["top_score"], 3)
-        popen.assert_called_once()
-
-    def test_render_ohne_neue_clips_startet_nichts(self):
-        code, zeilen, popen = self._render(0)
-        self.assertEqual((code, len(zeilen)), (0, 1))
         popen.assert_not_called()
+        return code, zeilen
 
-    def test_render_startfehler_aendert_nichts(self):
-        code, zeilen, _ = self._render(2, {"side_effect": OSError("kaputt")})
+    def test_render_stoesst_an_und_eine_json_zeile(self):
+        code, zeilen = self._render(2)
         self.assertEqual((code, len(zeilen)), (0, 1))
-        self.assertEqual(json.loads(zeilen[0])["neu"], 2)
+        self.assertEqual(json.loads(zeilen[-1])["top_score"], 3)
+        self.assertTrue((self.konfig.datenbank.parent / mikro.ANSTOSS_NAME).is_file())
 
-    def test_process_und_scan_starten_nichts(self):
+    def test_render_ohne_neue_clips_stoesst_nicht_an(self):
+        code, zeilen = self._render(0)
+        self.assertEqual((code, len(zeilen)), (0, 1))
+        self.assertFalse((self.konfig.datenbank.parent / mikro.ANSTOSS_NAME).exists())
+
+    def test_process_und_scan_stossen_nicht_an(self):
         ergebnis = {"session": SID, "clips": 2, "neu": 2}
         with mock.patch.object(verarbeitung, "process", return_value=ergebnis), \
                 mock.patch.object(cli.erfassung, "scan", return_value={"offen": [SID]}), \
-                mock.patch.object(mikro, "starte_im_hintergrund") as starte:
+                mock.patch.object(mikro, "anstossen") as anstossen:
             self.assertEqual(self._cli("process", SID)[0], 0)
             self.assertEqual(self._cli("scan", "--verarbeiten")[0], 0)
-        starte.assert_not_called()
+        anstossen.assert_not_called()
 
 
 class WecktNie(MitPuffer):
@@ -584,14 +556,34 @@ class WecktNie(MitPuffer):
                 mock.patch("clip_pipeline.konfig.sende_wake_on_lan") as wol, \
                 mock.patch.object(stimmung, "merkmale", side_effect=messe), \
                 mock.patch.object(mikro, "whisper_da", return_value=True), \
-                mock.patch.object(stimmung.Transkription, "verfuegbar", return_value=False), \
-                mock.patch.object(mikro.subprocess, "Popen"):
+                mock.patch.object(stimmung.Transkription, "verfuegbar", return_value=False):
             mikro.clips_nachziehen(self.con, self.konfig)
             mikro.nachtragen(self.con, self.konfig, GEWICHTE, 0)
             mikro.in_clip_uebernehmen(self.con, cid, {"mikro_spur": None}, GEWICHTE, 0)
-            mikro.starte_im_hintergrund(self.konfig, SID)
+            mikro.anstossen(self.konfig, SID)
         wol.assert_not_called()
         host.assert_not_called()
+
+
+class DienstDateien(unittest.TestCase):
+    """clip-mikro.path/.service/.timer passen zum Code (Rückfrage S2-R3: systemd statt Kindprozess)."""
+
+    SYSTEMD = Path(__file__).resolve().parent.parent / "deploy" / "systemd"
+
+    def test_path_wartet_auf_die_anstoss_datei_neben_der_datenbank(self):
+        import tomllib
+        pipeline = tomllib.loads((self.SYSTEMD.parent.parent / "config" / "pipeline.toml").read_text(encoding="utf-8"))
+        db_ordner = Path(pipeline["datenbank"]["pfad"]).parent
+        text = (self.SYSTEMD / "clip-mikro.path").read_text(encoding="utf-8")
+        self.assertIn(f"PathChanged={db_ordner / mikro.ANSTOSS_NAME}", text)
+        self.assertIn("Unit=clip-mikro.service", text)
+
+    def test_dienst_ruft_den_mic_schritt(self):
+        text = (self.SYSTEMD / "clip-mikro.service").read_text(encoding="utf-8")
+        self.assertIn("ExecStart=/opt/clip-pipeline/.venv/bin/pipeline stimmung --clips", text)
+        self.assertIn("SuccessExitStatus=4", text)  # Sperre belegt ist kein Fehler
+        self.assertIn("Nice=15", text)
+        self.assertIn("OnUnitActiveSec=30min", (self.SYSTEMD / "clip-mikro.timer").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,27 @@
+# Mic-Schritt (Lernschleife Stufe 2, docs/PUBLIKUM.md S4): Whisper hört die Mikro-Spur neuer Clips ab und schreibt
+# Lachen/Jubel/Frust/laute Spitzen in clips.merkmale. Gestartet von clip-mikro.path (render schreibt die Anstoß-Datei)
+# und von clip-mikro.timer (alle 30 min, holt Liegengebliebenes nach). Höchstens [merkmale].mic_je_lauf Clips je Lauf,
+# damit die Pipeline-Sperre nicht lange belegt ist. Weckt pve-big NIE (arbeitet nur im Puffer).
+# 4 = Sperre belegt (render/highlight läuft) → kein Fehler, der nächste Anstoß oder Timer versucht es wieder.
+# Von Hand: sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline stimmung --clips --max 5
+# Log ansehen: journalctl -u clip-mikro -n 50
+[Unit]
+Description=Clip-Pipeline: Mic-Merkmale für neue Clips (Whisper)
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/opt/clip-pipeline
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline stimmung --clips
+SuccessExitStatus=4
+# Whisper darf den Bot und n8n-Schritte nie ausbremsen – und den Mini (6 GB RAM) nicht in den Swap treiben
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=3G
+# 3 Clips à 30–60 s plus Warten auf die Sperre; hängt etwas, soll der Lauf nicht ewig stehen
+TimeoutStartSec=2h
+NoNewPrivileges=true
+ProtectSystem=strict
+# read-only wie clip-sitzungen: Whisper liest sein Modell aus dem Home-Cache von pipeline
+ProtectHome=read-only
+ReadWritePaths=/var/lib/clip-pipeline /srv/clips -/srv/puffer

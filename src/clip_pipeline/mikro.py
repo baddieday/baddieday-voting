@@ -5,26 +5,24 @@ und Spielton-Spitzen. Diese Zahlen landen in momente.merkmale. Hier werden sie z
 übernommen (merkmale.aus_momente → merkmale.aktualisiere_clip), und clips.mic_stand bekommt einen Zeitstempel, sobald
 die Analyse vollständig ist (merkmale.mic_vollstaendig).
 
-Warum losgelöst: Whisper braucht je Clip 30–60 s. Liefe es in `render`, wartete n8n per SSH darauf. Deshalb startet
-render nur einen Kindprozess (`pipeline stimmung --clips --session ID`, nice 15, eigene Sitzung, stdout und stderr
-ins Log mikro.log statt an den render-Prozess) und endet sofort mit seiner JSON-Zeile – der n8n-Vertrag bleibt
-unverändert. Das Kind holt die Pipeline-Sperre selbst (die Sperr-Datei wird nicht vererbt, PEP 446).
-Rückfall (Annahme S2-A7, ehrlich nach Befund B-1): Der Timer clip-sitzungen misst nur, wenn eine neue session_*.json
-fertig ist („Session vorbei“), und dann nur Clips OHNE momente-Zeile. Unvollständige Zeilen (Mikro da, Whisper fehlt)
-holt nur `stimmung --clips` nach – also das nächste render-Kind (es nimmt Reste aller Sessions mit) oder von Hand
-`pipeline stimmung --clips --max 5`.
+Warum als eigener Dienst (Rückfrage S2-R3, Florian: systemd): Whisper braucht je Clip 30–60 s. Liefe es in
+`render`, wartete n8n per SSH darauf. Deshalb schreibt render nur eine kleine Anstoß-Datei (anstossen) neben die
+Datenbank und endet sofort mit seiner JSON-Zeile – der n8n-Vertrag bleibt unverändert. systemd wartet mit
+`clip-mikro.path` auf diese Datei und startet `clip-mikro.service` (`pipeline stimmung --clips`, Nice 15, eigene
+Speichergrenze, Log im Journal). Vorteile gegenüber einem Kindprozess von render: unabhängig von der SSH-Sitzung
+(logind), immer nur eine Instanz, und `clip-mikro.timer` stößt alle 30 min nach – so bleibt nichts liegen.
 
 Lernidee: Solange ein Clip keine Mic-Analyse hat, sind seine Mic-Merkmale unbekannt (nicht 0) – /gewichte zeigt die
 Zahl „ohne Mic-Analyse“, und lernen.py vergleicht sie nicht.
 
 Nie wecken: Alles arbeitet im Puffer und in der Datenbank. Befehle ohne getrennten Betrieb lehnt cli mit Exit 2 ab.
-Der Kindprozess `stimmung --clips` steht nicht in cli.WECKEN – er prüft den Speicher also gar nicht erst.
+Der Dienst-Befehl `stimmung --clips` steht nicht in cli.WECKEN – er prüft den Speicher also gar nicht erst.
 
-Ablauf in Alltagssprache: render schneidet neue Clips und ruft starte_im_hintergrund. Das startet `pipeline stimmung
---clips` im Hintergrund und kehrt sofort zurück. Der Hintergrundlauf (clips_nachziehen) übernimmt zuerst alles, was
-schon in momente steht (schnell), und hört dann höchstens [merkmale].mic_je_lauf Clips mit Whisper ab – die Session
-von eben zuerst. Den Rest holt der nächste Lauf (nächstes render-Kind oder von Hand). Scheitert eine Messung
-(kaputte Datei), bekommt die Zeile `fehler` und wird nicht wieder gewählt (merkmale.mic_nachholen, S2-A18).
+Ablauf in Alltagssprache: render schneidet neue Clips und ruft anstossen. systemd sieht die geänderte Datei und
+startet clip-mikro.service. Der Dienst (clips_nachziehen) übernimmt zuerst alles, was schon in momente steht
+(schnell), und hört dann höchstens [merkmale].mic_je_lauf Clips mit Whisper ab, die besten zuerst. Den Rest holt der
+nächste Anstoß oder der Timer. Scheitert eine Messung (kaputte Datei), bekommt die Zeile `fehler` und wird nicht
+wieder gewählt (merkmale.mic_nachholen, S2-A18).
 
 Import-Regel (Plan Stufe 2, Leitplanke 7; tests/test_vertrag_stufe2.py prüft sie):
     mikro → db, lernen, merkmale, konfig, zeit      stimmung NUR innerhalb von clips_nachziehen (Funktions-Import)
@@ -37,8 +35,6 @@ import importlib.util
 import json
 import logging
 import sqlite3
-import subprocess
-import sys
 
 from . import db, lernen, merkmale
 from .konfig import Konfig
@@ -46,8 +42,8 @@ from .zeit import iso, jetzt
 
 log = logging.getLogger("pipeline")
 
-LOG_NAME = "mikro.log"   # Log des Kindprozesses, liegt neben der Datenbank (konfig.datenbank.parent)
-NICE = 15                # niedrigste sinnvolle Priorität: Whisper darf den Bot und n8n-Schritte nie ausbremsen
+# Anstoß-Datei neben der Datenbank; deploy/systemd/clip-mikro.path wartet genau auf diesen Namen
+ANSTOSS_NAME = "mikro.anstoss"
 MIC_JE_LAUF = 3          # Rückfall, falls [merkmale].mic_je_lauf fehlt (Whisper ~30–60 s je Clip, hält die Sperre)
 
 
@@ -189,44 +185,30 @@ def nachtragen(con: sqlite3.Connection, konfig: Konfig, gewichte: dict[str, floa
     return _uebernehmen(con, gewichte, version, session)
 
 
-def starte_im_hintergrund(konfig: Konfig, sid: str) -> bool:
-    """Startet den Mic-Schritt als losgelösten Kindprozess (aufgerufen nur von cli._cmd_schritt nach render).
+def anstossen(konfig: Konfig, sid: str) -> bool:
+    """Den Mic-Schritt anstoßen: schreibt die Anstoß-Datei, auf die clip-mikro.path wartet (aufgerufen nur von
+    cli._cmd_schritt nach render mit neuen Clips).
 
-    subprocess.Popen(["nice", "-n", "15", sys.executable, "-m", "clip_pipeline", "--konfig", str(konfig.quelle),
-    "stimmung", "--clips", "--session", sid, "--max", str(n)], stdin=DEVNULL, stdout und stderr = Log neben der DB
-    (angehängt), start_new_session=True). Nur wenn [merkmale].mic, getrennter Betrieb und whisper_da().
-    Fehler beim Start → nur Log-Warnung, Rückgabe False; render bleibt unverändert.
-
-    Warum so: `--konfig` sorgt dafür, dass das Kind dieselbe Konfig und damit dieselbe Datenbank nutzt wie render
-    (die Umgebung erbt es ohnehin). stdout und stderr des Kinds gehen in eine eigene Datei, nie an den
-    render-Prozess – n8n liest dort genau eine JSON-Zeile. Dass auch stdout ins Log geht (Befund B-4), hilft bei der
-    Diagnose: Die JSON-Zeile des Kinds ({"offen": …}) steht dort auch, wenn nichts zu messen war. start_new_session löst das Kind von der SSH-Sitzung von n8n. Die Pipeline-Sperre holt das Kind
-    selbst: Es wartet, bis render sie freigibt (die Sperr-Datei wird nicht vererbt, PEP 446).
-    Parameter: sid – die gerade gerenderte Session (von render schon geprüft). Rückgabe: True = gestartet.
-    Beispiel: [merkmale].mic = true, mic_je_lauf 3, Puffer-Betrieb, faster-whisper installiert → True, im
-    Hintergrund läuft `nice -n 15 python -m clip_pipeline --konfig … stimmung --clips --session <sid> --max 3`.
+    Startet selbst keinen Prozess – das macht systemd (Rückfrage S2-R3). Nur mit [merkmale].mic (fehlt = an) und im
+    getrennten Betrieb (ohne Puffer wäre [speicher] pve-big selbst). Inhalt: Session-ID und Zeit, nur zum Nachsehen
+    (`cat /var/lib/clip-pipeline/mikro.anstoss`); der Dienst liest sie nicht, er nimmt die besten offenen Clips.
+    Parameter: sid – die gerade gerenderte Session (von render schon geprüft). Rückgabe: True = angestoßen.
+    Fehler: Kann die Datei nicht geschrieben werden, nur eine Log-Warnung und False – render bleibt unverändert,
+    der Timer clip-mikro.timer holt es nach.
+    Beispiel: mic an, Puffer-Betrieb → /var/lib/clip-pipeline/mikro.anstoss enthält „2026-09-25_21-00-00 …“, True.
     """
     if not konfig.wert("merkmale.mic", True):
         return False
-    if not konfig.getrennt:  # ohne Puffer wäre [speicher] pve-big selbst – der Mic-Schritt arbeitet nur im Puffer
+    if not konfig.getrennt:
         return False
-    if not whisper_da():
-        # Ohne Whisper gibt es nichts, was sich lohnt: laute Spitzen übernimmt clip-sitzungen ohnehin
-        log.info("Mic-Schritt nicht gestartet: faster-whisper nicht installiert")
-        return False
-    n = int(konfig.wert("merkmale.mic_je_lauf", MIC_JE_LAUF))
-    befehl = ["nice", "-n", str(NICE), sys.executable, "-m", "clip_pipeline", "--konfig", str(konfig.quelle),
-              "stimmung", "--clips", "--session", sid, "--max", str(n)]
-    log_pfad = konfig.datenbank.parent / LOG_NAME
+    ziel = konfig.datenbank.parent / ANSTOSS_NAME
     try:
-        # "ab": anhängen – das Log erzählt die Geschichte aller Läufe. Das Kind bekommt eine eigene Kopie des
-        # Dateideskriptors; wir dürfen unsere nach dem Start schließen.
-        with open(log_pfad, "ab") as log_datei:
-            subprocess.Popen(befehl, stdin=subprocess.DEVNULL, stdout=log_datei, stderr=log_datei,
-                             start_new_session=True)
-    except (OSError, ValueError, subprocess.SubprocessError) as e:
-        log.warning("Mic-Schritt nicht gestartet (%s: %s) – das nächste render-Kind oder `pipeline stimmung --clips`"
-                    " holt ihn nach", type(e).__name__, e)
+        # erst in eine Nebendatei, dann umbenennen: systemd sieht nie eine halb geschriebene Datei
+        neben = ziel.with_suffix(".neu")
+        neben.write_text(f"{sid} {iso(jetzt())}\n", encoding="utf-8")
+        neben.replace(ziel)
+    except OSError as e:
+        log.warning("Mic-Schritt nicht angestoßen (%s) – clip-mikro.timer holt ihn nach", e)
         return False
-    log.info("Mic-Schritt im Hintergrund gestartet (Session %s, höchstens %s Clips, Log %s)", sid, n, log_pfad)
+    log.info("Mic-Schritt angestoßen (Session %s)", sid)
     return True
