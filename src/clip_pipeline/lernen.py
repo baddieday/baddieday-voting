@@ -16,10 +16,13 @@ Gewichte werden so lange ein bisschen verschoben, bis die Formel möglichst viel
 Wie oft sie das tut, heißt Sortier-Quote – getrennt für dich (Battles + Freigaben) und für das Publikum. So sieht
 man, wenn du etwas anderes magst als deine Zuschauer.
 
-„Fehlt = unbekannt“ (Annahme S2-A17): Die zwölf neuen Merkmale (merkmale.REPLAY_MERKMALE und MIC_MERKMALE) werden in
-einem Paar nur verglichen, wenn sie auf BEIDEN Seiten gemessen sind. Sonst lernten die Gewichte „analysiert gegen
-nicht analysiert“ (z. B. ein Clip mit Mic-Analyse gegen einen ohne) statt „lustig gegen nicht lustig“. Die alten
-fünf Merkmale bleiben wie vor Stufe 2: fehlt = 0. Deshalb werden die Paar-Dicts nie mit 0 aufgefüllt.
+„Fehlt = unbekannt“ (Annahme S2-A17): Die zwölf neuen Merkmale (merkmale.REPLAY_MERKMALE und MIC_MERKMALE) sowie
+laenge und lautstaerke (UNBEKANNT_WENN_FEHLT) werden in einem Paar nur verglichen, wenn sie auf BEIDEN Seiten
+gemessen sind. Sonst lernten die Gewichte „analysiert gegen nicht analysiert“ (z. B. ein Clip mit Mic-Analyse gegen
+einen ohne) statt „lustig gegen nicht lustig“. laenge und lautstaerke fehlen nur bei Datei-Momenten (kein Clip,
+Annahme S2-A9) – Clips haben beide immer, Battles und Freigaben vergleichen sie also wie vor Stufe 2.
+kill_punkte, victory_royale und kommentar bleiben wie vor Stufe 2: fehlt = 0. Die Paar-Dicts werden deshalb nie mit
+0 aufgefüllt.
 
 Sicherungen: Mindestmenge, langsam wachsendes Vertrauen, Leine um die Startgewichte
 und ein Vergleich mit den Startgewichten (nie schlechter werden) – für deine Quote immer, für die
@@ -27,9 +30,9 @@ Publikums-Quote erst ab [lernen].mindest_publikum_paare Paaren (Annahme S2-A10).
 Alles wird jedes Mal komplett neu aus der Historie berechnet -> reproduzierbar.
 
 Import-Regel (Plan Stufe 2, Leitplanke 7; tests/test_vertrag_stufe2.py prüft sie):
-    lernen → db, vorbewertung, zeit, merkmale (ab Paket D)      nie: mikro, stimmung, verarbeitung
-    Paket D nimmt zusätzlich publikum (nur VERMERK_BASIS_ZU_KLEIN und einstellung – eine Wahrheit für beides;
-    publikum importiert lernen nicht, also kein Kreis).
+    lernen → db, vorbewertung, zeit, merkmale, publikum      nie: mikro, stimmung, verarbeitung
+publikum liefert nur VERMERK_BASIS_ZU_KLEIN und einstellung (eine Wahrheit für beides); publikum importiert lernen
+nicht, also kein Kreis.
 """
 
 from __future__ import annotations
@@ -52,8 +55,11 @@ from .zeit import aus_iso, iso, jetzt, spielabend
 MARGE = 1.0
 # Unterschiede unter einem Milliardstel sind Rundungsrauschen der Gleitkomma-Rechnung, kein echter Vorsprung
 GLEICHSTAND = 1e-9
-# Die zwölf neuen Merkmale: fehlt eins auf einer Seite eines Paars, wird es nicht verglichen (Annahme S2-A17)
+# Die zwölf neuen Merkmale (Annahme S2-A17)
 NEUE_MERKMALE = frozenset(merkmal_modul.REPLAY_MERKMALE + merkmal_modul.MIC_MERKMALE)
+# Fehlt eins davon auf einer Seite eines Paars, wird es nicht verglichen: die neuen zwölf und laenge/lautstaerke
+# (die fehlen bei Datei-Momenten – „Datei gegen Clip“ ist kein Unterschied in der Länge)
+UNBEKANNT_WENN_FEHLT = NEUE_MERKMALE | {"laenge", "lautstaerke"}
 QUELLEN = ("battle", "freigabe", "publikum")
 
 log = logging.getLogger("pipeline")
@@ -64,7 +70,7 @@ class Paar:
     besser: dict[str, float]      # NICHT mit 0 auffüllen: fehlt = unbekannt (Annahme S2-A17)
     schlechter: dict[str, float]
     art: str  # battle | freigabe | publikum  (= Quelle, Spec §8.3)
-    gewicht: float = 1.0          # battle 1,0 · freigabe [lernen].gewicht_freigabe · publikum 1,0 (Paket D)
+    gewicht: float = 1.0          # battle 1,0 · freigabe [lernen].gewicht_freigabe · publikum 1,0
 
 
 @dataclass
@@ -79,13 +85,14 @@ class Ergebnis:
     trefferquote_start: float | None
     aktiv: bool
     grund: str
-    # Stufe 2 (Paket D) – Standardwerte, damit bisherige Aufrufer unverändert laufen. trefferquote oben = deine Quote.
+    # Mit Standardwerten, damit Aufrufer, die nur die Felder oben kennen, unverändert laufen. trefferquote oben =
+    # deine Quote (Battles + Freigaben), die folgenden gehören zum Publikum.
     trefferquote_publikum: float | None = None          # ab dem 1. Publikums-Paar; None nur bei 0 Paaren
     trefferquote_publikum_start: float | None = None
     paare_je_quelle: dict[str, int] = field(default_factory=dict)   # {"battle": n, "freigabe": n, "publikum": n}
     ohne_mic: int = 0                                   # Clips ohne Mic-Analyse (mic_stand NULL, nicht verworfen)
     auseinander: str | None = None                      # „Du magst X, das Publikum Y“ (ab 10 Publikums-Paaren)
-    # Paket D (Befund: nicht im Vertrag): ab so vielen Publikums-Paaren prüft die Schranke die Publikums-Quote –
+    # Ab so vielen Publikums-Paaren prüft die Schranke die Publikums-Quote ([lernen].mindest_publikum_paare) –
     # /gewichte braucht die Zahl für „zählt für die Schranke erst ab 10“. Standard wie config/pipeline.toml.
     mindest_publikum_paare: int = 10
 
@@ -96,24 +103,19 @@ def startgewichte(konfig) -> dict[str, float]:
     return {m: float(konfig.wert(f"vorbewertung.startgewichte.{m}", 0.0)) for m in MERKMALE}
 
 
-def score(gewichte: dict[str, float], merkmal_werte: dict[str, float]) -> float:
-    """Score eines Clips: vorbewertung.roh_score (die eine Formel), hier nur mit vertauschter Reihenfolge der
-    Parameter wie vor Stufe 2. Beispiel: score({"kill_punkte": 1, "bot_opfer": −2}, {"kill_punkte": 3,
-    "bot_opfer": 0.5}) == 2.0."""
-    return roh_score(merkmal_werte, gewichte)
-
-
 def differenz(paar: Paar) -> dict[str, float]:
     """Merkmals-Unterschied besser − schlechter, nur über die Merkmale, die verglichen werden dürfen.
 
-    Alte fünf Merkmale: fehlt = 0 (wie vor Stufe 2). Neue zwölf (NEUE_MERKMALE): fehlt der Schlüssel auf einer
-    Seite, steht das Merkmal NICHT im Ergebnis (unbekannt wird nicht verglichen, Annahme S2-A17).
-    Beispiel: besser {"kill_punkte": 3, "mic_lachen": 2}, schlechter {"kill_punkte": 1} → {"kill_punkte": 2.0,
-    "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0, "kommentar": 0.0} – mic_lachen fehlt.
+    kill_punkte, victory_royale, kommentar: fehlt = 0 (wie vor Stufe 2). UNBEKANNT_WENN_FEHLT (die neuen zwölf
+    sowie laenge und lautstaerke): fehlt der Schlüssel auf einer Seite, steht das Merkmal NICHT im Ergebnis
+    (unbekannt wird nicht verglichen, Annahme S2-A17). laenge/lautstaerke fehlen nur bei Datei-Momenten.
+    Beispiel: besser {"kill_punkte": 3, "mic_lachen": 2} (Datei-Moment), schlechter {"kill_punkte": 1,
+    "laenge": 1.5} → {"kill_punkte": 2.0, "victory_royale": 0.0, "kommentar": 0.0} – mic_lachen, laenge und
+    lautstaerke fehlen.
     Rückgabe: neues Dict. Fehler: ein Wert, der keine Zahl ist → ValueError/TypeError (float())."""
     d: dict[str, float] = {}
     for m in MERKMALE:
-        if m in NEUE_MERKMALE and (m not in paar.besser or m not in paar.schlechter):
+        if m in UNBEKANNT_WENN_FEHLT and (m not in paar.besser or m not in paar.schlechter):
             continue  # auf einer Seite nicht gemessen → kein Vergleich
         d[m] = float(paar.besser.get(m, 0.0)) - float(paar.schlechter.get(m, 0.0))
     return d
@@ -144,7 +146,9 @@ def trainiere(paare: list[Paar], start: dict[str, float], einstellungen: dict) -
     schritt · Paar-Gewicht · Unterschied – danach zurück an die Leine (Start ± max(leine_minimum,
     |Start| · leine_anteil)). Unbekannte neue Merkmale (nicht in differenz) bleiben unberührt.
     Parameter: einstellungen – [lernen] mit schritt, durchlaeufe, leine_anteil, leine_minimum.
-    Beispiel: Start lautstaerke 0, schritt 0,1, ein Freigabe-Paar (Gewicht 0,5) mit Unterschied 1 → 0,05.
+    Beispiel: Start lautstaerke 0, schritt 0,1, durchlaeufe 1, ein Freigabe-Paar (Gewicht 0,5) mit Unterschied 1
+    → 0,05. Mit der Konfig (schritt 0,05, durchlaeufe 5) → 0,125: Das Paar bleibt mit Vorsprung 0 … 0,1 unter
+    MARGE und schiebt deshalb in jedem der 5 Durchläufe erneut um 0,025.
     Rückgabe: Gewichte aller MERKMALE auf 4 Stellen. Fehler: fehlender Schlüssel in einstellungen → KeyError."""
     schritt = float(einstellungen["schritt"])
     anteil = float(einstellungen["leine_anteil"])
@@ -192,11 +196,6 @@ def sammle_paare(con: sqlite3.Connection, *, zonen_name: str, wechsel_stunde: in
     return paare, len(entschieden), len(battles)
 
 
-def _nur_zahlen(werte: dict) -> dict:
-    """Nur die Zahlen eines eingefrorenen Merkmals-Dicts (Listen, Texte, None und bool fallen weg)."""
-    return {k: v for k, v in werte.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
-
-
 def _hook_merkmale(con: sqlite3.Connection, post: sqlite3.Row, kill_tabelle: list[float]) -> tuple[str, dict] | None:
     """(Moment-Schlüssel, Merkmale) des Moments, für den ein Post steht – None, wenn es keinen gibt.
 
@@ -221,7 +220,7 @@ def _hook_merkmale(con: sqlite3.Connection, post: sqlite3.Row, kill_tabelle: lis
         return hook, merkmal_modul.fuer_moment(None, moment_merkmale, kill_tabelle)
     if eingefroren is None:
         return None  # nichts über diesen Moment bekannt – ein leeres Dict wäre ein erfundener Vergleich
-    return hook, {k: float(v) for k, v in _nur_zahlen(eingefroren.get("merkmale") or {}).items()}
+    return hook, merkmal_modul.nur_zahlen(eingefroren.get("merkmale") or {})
 
 
 def _basis_zu_klein(post: sqlite3.Row) -> bool:
@@ -284,7 +283,9 @@ def _publikum_paare_mit_posts(con: sqlite3.Connection, konfig) -> tuple[list[Paa
 def publikum_paare(con: sqlite3.Connection, konfig) -> list[Paar]:
     """Paare aus dem Publikum (Spec §8.3): je zwei bewertete Posts derselben Plattform und Art mit
     |score_A − score_B| ≥ [publikum].paar_abstand, ohne „Basis zu klein“, nicht derselbe Moment; Clip → Clip-Merkmale,
-    Entwurf → Hook-Moment. Höchstens [publikum].max_paare jüngste. Paket D.
+    Entwurf → Hook-Moment. Höchstens [publikum].max_paare jüngste.
+    Öffentlicher Einstieg (Vertrag, Tests); die Produktion (berechne) ruft _publikum_paare_mit_posts, weil sie
+    zusätzlich die Post-ids für die Datenbasis braucht.
 
     Bewertet = bewertet_utc und score gesetzt. Merkmale je Post: aktuell über merkmale.fuer_moment (Clip:
     clips.merkmale + Mic aus momente; Entwurf: sein Hook-Moment), Rückfall die eingefrorenen Zahlen aus

@@ -165,7 +165,9 @@ class BotOpfer(unittest.TestCase):
         self.assertEqual((mk_mensch["bot_opfer"], mk_bot["bot_opfer"]), (0.0, 1.0))
         self.assertEqual({m: v for m, v in mk_bot.items() if m != "bot_opfer"},
                          {m: v for m, v in mk_mensch.items() if m != "bot_opfer"})
-        self.assertEqual(set(REPLAY_MERKMALE) - set(mk_bot), set())  # alle sieben Replay-Merkmale gemessen
+        # Befund S-3: [merkmale.waffen] ist noch nicht kalibriert (leere Listen) → sniper/nahkampf unbekannt (fehlen),
+        # die übrigen fünf Replay-Merkmale sind gemessen
+        self.assertEqual(set(REPLAY_MERKMALE) - set(mk_bot), {"sniper", "nahkampf"})
         self.assertEqual((mk_bot["kill_punkte"], mk_bot["platzierung"]), (3.0, 1 / 3))
         # Fertig-Kriterium: Punkte-Differenz = bot_opfer × 2 (Startgewicht −2), render hat sie eingefroren
         startgewicht = lernen.startgewichte(konfig_modul.lade())["bot_opfer"]
@@ -492,7 +494,7 @@ class MerkmaleNachtragen(MitSpeicher):
                                         "mic": {"clips": 0, "geaendert": 0}})
             zeile = dict(db.clip(self.con, self.cid))
             mk = json.loads(zeile["merkmale"])
-            self.assertEqual(set(REPLAY_MERKMALE) - set(mk), set())
+            self.assertEqual(set(REPLAY_MERKMALE) - set(mk), {"sniper", "nahkampf"})  # Befund S-3: Listen leer
             self.assertEqual((mk["bot_opfer"], mk["platzierung"]), (1.0, 0.25))
             # 1 Kill + Platz 0,25 × 2 − Bot 1 × 2 + Phase (10 min 10 s von 20 min ≈ 0,508) × 0,5 ≈ −0,25
             self.assertAlmostEqual(zeile["punkte"], 1 + 0.5 - 2 + 0.5 * mk["phase"], delta=0.006)
@@ -501,7 +503,8 @@ class MerkmaleNachtragen(MitSpeicher):
 
             code, ergebnis, _ = self.pipeline("merkmale", "nachtragen")
             self.assertEqual(code, 0)
-            self.assertEqual(ergebnis["replay"], {"clips": 0, "geaendert": 0, "ohne_replay": 0, "waffen_gemeldet": []})
+            # Befund S-3: sniper/nahkampf fehlen noch (Listen leer) → der Clip zählt weiter, geändert wird nichts
+            self.assertEqual(ergebnis["replay"], {"clips": 1, "geaendert": 0, "ohne_replay": 0, "waffen_gemeldet": []})
             self.assertEqual(dict(db.clip(self.con, self.cid)), zeile)  # zweiter Lauf ändert nichts
         wol.assert_not_called()
         host.assert_not_called()

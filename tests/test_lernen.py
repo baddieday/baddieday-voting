@@ -21,9 +21,10 @@ from datetime import datetime, timedelta
 from unittest import mock
 
 from clip_pipeline import cli, lernen, publikum
+from clip_pipeline import merkmale as merkmal_modul
 from clip_pipeline.bot import texte
 from clip_pipeline.lernen import Paar
-from clip_pipeline.vorbewertung import MERKMAL_NAMEN, MERKMALE
+from clip_pipeline.vorbewertung import MERKMAL_NAMEN, MERKMALE, roh_score
 from clip_pipeline.zeit import UTC, iso
 
 from tests.hilfen import MitSpeicher
@@ -171,10 +172,24 @@ class Trainieren(MitPosts):
         self.assertGreater(w["mic_lachen"], start["mic_lachen"])
 
     def test_alte_merkmale_fehlend_zaehlen_null(self):
-        """Die alten fünf wie vor Stufe 2: fehlt = 0 (nicht „unbekannt“)."""
+        """kill_punkte, victory_royale, kommentar wie vor Stufe 2: fehlt = 0 (nicht „unbekannt“).
+        Befund K-3: laenge und lautstaerke gelten seitdem als unbekannt, wenn sie fehlen (Datei-Momente) – das
+        Beispiel nimmt deshalb kommentar statt lautstaerke."""
         start = dict.fromkeys(MERKMALE, 0.0)
-        w = lernen.trainiere([Paar({"lautstaerke": 1.0}, {}, "battle")], start, self.einstellungen())
-        self.assertAlmostEqual(w["lautstaerke"], 0.1)
+        w = lernen.trainiere([Paar({"kommentar": 1.0}, {}, "battle")], start, self.einstellungen())
+        self.assertAlmostEqual(w["kommentar"], 0.1)
+
+    def test_laenge_und_lautstaerke_fehlend_werden_nicht_verglichen(self):
+        """Befund K-3: Ein Datei-Moment hat kein laenge/lautstaerke – das ist unbekannt, nicht 0."""
+        datei = {"kill_punkte": 3.0, "victory_royale": 0.0, "mic_lachen": 1.0}
+        clip_hook = alt(1.0, 0.8) | {"laenge": 1.5}
+        d = lernen.differenz(Paar(datei, clip_hook, "publikum"))
+        self.assertNotIn("laenge", d)
+        self.assertNotIn("lautstaerke", d)
+        self.assertEqual(d["kill_punkte"], 2.0)
+        # Clip gegen Clip (Battles, Freigaben): beide Schlüssel stehen immer da und werden verglichen
+        d = lernen.differenz(Paar(alt(1.0, 0.9) | {"laenge": 1.0}, alt(1.0, 0.1) | {"laenge": 1.5}, "battle"))
+        self.assertEqual((d["laenge"], round(d["lautstaerke"], 4)), (-0.5, 0.8))
 
     def test_trefferquote_gewichtet_und_gleichstand_halb(self):
         g = {"kill_punkte": 1.0}
@@ -190,8 +205,15 @@ class Trainieren(MitPosts):
         self.assertEqual(lernen.trefferquote(g, [Paar({"mic_lachen": 3.0}, {}, "publikum")]), 0.5)
 
     def test_score_ist_roh_score(self):
+        # Befund E-8: lernen.score (nur ein zweiter Name für roh_score) ist gestrichen – eine Formel, ein Name
         g = {"kill_punkte": 1.0, "bot_opfer": -2.0}
-        self.assertEqual(lernen.score(g, {"kill_punkte": 3.0, "bot_opfer": 0.5}), 2.0)
+        self.assertEqual(roh_score({"kill_punkte": 3.0, "bot_opfer": 0.5}, g), 2.0)
+        self.assertFalse(hasattr(lernen, "score"))
+
+    def test_nur_zahlen_eine_regel(self):
+        # Befund E-7: lernen nutzt merkmale.nur_zahlen statt einer eigenen Kopie
+        self.assertEqual(merkmal_modul.nur_zahlen({"a": 1, "b": [2], "c": "x", "d": True, "e": None}), {"a": 1.0})
+        self.assertFalse(hasattr(lernen, "_nur_zahlen"))
 
     def test_paar_dicts_werden_nicht_aufgefuellt(self):
         self.clip_post({"kill_punkte": 1.0}, 1.0, tag=1)
@@ -272,6 +294,24 @@ class PublikumPaare(MitPosts):
         (p,) = lernen.publikum_paare(self.con, self.konfig)
         self.assertEqual(p.besser, {"kill_punkte": 3.0, "victory_royale": 0.0, "mic_lachen": 1.0})
         self.assertEqual(p.schlechter, {"kill_punkte": 1.0})   # nur Zahlen aus dem Eingefrorenen
+
+    def test_datei_hook_gegen_clip_hook_verschiebt_laenge_und_lautstaerke_nicht(self):
+        """Befund K-3: Publikums-Paar Datei-Moment gegen Clip-Moment – laenge/lautstaerke fehlen beim Datei-Moment,
+        also lernt das Paar nichts über sie (sonst hieße es „Datei gegen Clip“ statt „kurz gegen lang“)."""
+        self.con.execute("INSERT INTO momente (schluessel, clip_id, datei, start_s, ende_s, stimmung, sicherheit,"
+                         " quelle, merkmale, erstellt, geaendert) VALUES ('datei:c', NULL, 'c.mp4', 0, 10, 'lustig', 1,"
+                         " 'regel', ?, ?, ?)", (json.dumps({"max_gruppe": 2, "lachen": 1}), iso(T0), iso(T0)))
+        # gleiche Kill-Punkte (Double = 3), damit das Paar unter MARGE bleibt und das Training wirklich schiebt
+        cid = self.clip_anlegen(status="gesendet", merkmale=alt(3.0, 0.8) | {"laenge": 1.5}, match_id="p9",
+                                start=datetime(2026, 8, 1, 19, 0, tzinfo=UTC))
+        self.entwurf_post(1, "datei:c", [{"moment": "datei:c", "clip_id": None, "merkmale": {}}], 1.0, tag=1)
+        self.entwurf_post(2, f"clip:{cid}", [{"moment": f"clip:{cid}", "clip_id": cid, "merkmale": {}}], 0.0, tag=2)
+        (p,) = lernen.publikum_paare(self.con, self.konfig)
+        self.assertNotIn("laenge", p.besser)
+        self.assertEqual(p.schlechter["laenge"], 1.5)
+        start = lernen.startgewichte(self.konfig)
+        w = lernen.trainiere([p], start, self.konfig.abschnitt("lernen"))
+        self.assertEqual((w["laenge"], w["lautstaerke"]), (start["laenge"], start["lautstaerke"]))
 
     def test_clip_geloescht_rueckfall_eingefroren(self):
         cid, _ = self.clip_post(alt(3.0), 1.0, tag=1)
