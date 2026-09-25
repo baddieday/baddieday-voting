@@ -19,6 +19,7 @@ import contextlib
 import io
 import json
 import re
+import sqlite3
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 from types import SimpleNamespace
@@ -125,6 +126,18 @@ class CliBewerten(MitBewertung):
         self.assertTrue(any(f"#{opfer}" in z for z in logs.output), logs.output)
         self.assertIsNone(publikum.post(self.con, opfer)["bewertet_utc"])
         self.assertTrue(ergebnis["meldung"])  # der bewertete Post wird trotzdem gemeldet
+
+    def test_meldung_kommt_auch_wenn_das_lernen_mit_sqlite_fehler_scheitert(self):
+        # Befund B-5: Die Meldung hängt nicht vom Lernen ab – sie wird VOR dem Lernen angelegt. Ein IntegrityError
+        # (Clip-Bot schrieb dieselbe Gewichts-Version gleichzeitig) fliegt weiter durch (Exit 1), die Meldung bleibt.
+        self.gemessener_post()
+        aus = io.StringIO()
+        with mock.patch.object(cli, "lade", return_value=self.konfig), mock.patch.object(cli, "jetzt", return_value=tag(8)), \
+                mock.patch.object(cli.lernen, "aktualisiere", side_effect=sqlite3.IntegrityError("UNIQUE version")), \
+                contextlib.redirect_stdout(aus), contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(["publikum", "bewerten"])
+        self.assertEqual(code, 1)
+        self.assertEqual([m["schluessel"] for m in self.lern_meldungen()], ["publikum:bewertet:2026-09-09"])
 
     def test_fehlender_konfig_schluessel_exit_2(self):
         self.gemessener_post()

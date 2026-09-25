@@ -546,11 +546,16 @@ Stand beim Vertrag (25.09.). Die Bauer-Annahmen und die Befunde des Panels komme
   `GunType` nur ein gelesenes Byte ohne Namen (`elim.GunType = archive.ReadByte()`, am 25.09. im Quellcode
   nachgesehen) – es gibt keine Enum zum Vorbelegen. Neue Zahlen kommen als eine Sammelmeldung je Session (Vermerk je
   Zahl, nie verschickt), die die Ruhezeit abwartet; kalibriert wird am echten System mit `pipeline replay` (🏠).
+  Nach dem Panel: Solange alle drei Listen leer sind, bleiben `sniper`/`nahkampf` **unbekannt** (fehlen), damit
+  `merkmale nachtragen` sie nach der Kalibrierung nachholt. Teilweise kalibriert oder neue Nummern nach einem
+  Fortnite-Update: zählen als `sonstige` (gemessen 0) – dafür gibt es die Sammelmeldung.
 - **S2-A5** Neue Merkmale ändern `punkte`/`begruendung` nur bei Clips im Status `vorbewertet`.
 - **S2-A6** `mic_stand` wird gesetzt, wenn Whisper lief (`lachen` vorhanden) oder die Aufnahme sicher kein Mikro hat
   (`mikro_spur` None, kein `fehler`); Messfehler zählen nicht als vollständig.
 - **S2-A7** Mic-Schritt als losgelöster Kindprozess aus `render` (nice 15, `--konfig` der render-Konfig, Log
-  `mikro.log` neben der Datenbank, `mic_je_lauf = 3`); Rückfall ist der Timer `clip-sitzungen`.
+  `mikro.log` neben der Datenbank, `mic_je_lauf = 3`). Nach dem Panel richtiggestellt: `clip-sitzungen` misst nur
+  einmal je Spielabend Clips ohne momente-Zeile; unvollständige Mic-Werte holt nur `stimmung --clips` nach (das
+  nächste render nimmt Reste aller Sessions mit, sonst von Hand). Eigene systemd-Einheit: Rückfrage S2-R3.
 - **S2-A8** Der Mic-Schritt legt neue momente-Zeilen ohne Claude an; sie bekommen keine spätere Claude-Nachprüfung.
 - **S2-A9** Abweichung von Spec §8.1: Datei-Momente (ohne Clip) bekommen keine Replay-Merkmale, kein `laenge`, kein
   `lautstaerke` – sie haben weder Match noch Kills (`stimmung.momente_aus_dateien`).
@@ -571,3 +576,42 @@ Stand beim Vertrag (25.09.). Die Bauer-Annahmen und die Befunde des Panels komme
 - **S2-A18** Fehlt einer momente-Zeile die Mic-Analyse, holt der Mic-Schritt nur die Mic-Werte nach; Stimmung,
   Sicherheit und Quelle bleiben. Zeilen mit Messfehler werden nicht wiederholt.
 - **S2-A19** Neue Testdateien je Paket statt Erweiterung von `test_ende_zu_ende.py`/`test_publikum.py`.
+
+### Stufe 2 – Panel und Bauer (nach dem Prüfer-Panel, 25.09.)
+- **S2-A20 „Unbekannt“ hat Vorrang vor „Rest 0“ (Befund K-1/S-1):** Ohne lesbares Replay liefert `aus_replay` nichts,
+  beim Rekorder-Rückfall nur `platzierung` (falls bekannt); Clips, deren Kill-Zeiten keinem Ereignis zugeordnet werden
+  (vor der Kill-Regel vom 24.09. gerendert, K-5), nur `platzierung` und `phase` plus Log-Warnung. Die Plan-Zeile A2
+  „Rest 0“ widersprach Leitplanke 4/S2-A17 – gemessene Nullen hätte `merkmale nachtragen` nie repariert.
+- **S2-A21 Datei-Momente beim Lernen (K-3):** Fehlen `laenge`/`lautstaerke` auf einer Seite eines Paars, werden sie
+  nicht verglichen (wie die neuen Merkmale). Im Regisseur bleibt S2-A9.
+- **S2-A22 Mic-Messfehler (K-2):** Scheitert Lautheit, WAV oder Whisper, bekommt der Moment `fehler` und wird nicht
+  wieder gewählt; der Lauf geht weiter. Beim Nachholen bleibt die alte Zeile, nur `fehler` kommt dazu.
+- **S2-A23 Erwartungs-Anzeige:** Unter 50 % zeigt der Bot das Gegenteil mit dessen Sicherheit („🗑️ 65 %“, im
+  Lern-Bot 👎); „· alle …“ erscheint erst ab mehr als 20 Urteilen (vorher gleich „letzte 20“).
+- **Abweichungen vom Vertrag (bewusst, ohne Kreis-Import, AST-Test grün):** `lernen` importiert `publikum`
+  (`VERMERK_BASIS_ZU_KLEIN`, `einstellung` – keine zweite Wahrheit); `stimmung` importiert `merkmale`; `mikro`
+  importiert `zeit`; neues Feld `Ergebnis.mindest_publikum_paare` (die Anzeige braucht die Zahl ohne Konfig);
+  `erwartung.anzeige` für dasselbe Zeilenformat in beiden Bots; `nachtragen` liefert `{"clips", "geaendert"}`.
+- **Bauer-Annahmen, kurz:** A1 `roh_score` summiert per Schleife in der Reihenfolge von MERKMALE, nicht mit `sum()`
+  (seit Python 3.12 kompensiert – `bewerte` bliebe sonst nicht byte-gleich) · A2 `verbleibend` am Erledigen gezählt,
+  gleiche Zeitpunkte zählen mit; `opfer_bot` null zählt nicht als Bot; Vermerk-Text „Waffen-Nummer n gemeldet“ ·
+  B `mic_stand` wird nur gesetzt, solange er leer ist; `[merkmale].mic` fehlt = an; Transkript per COALESCE ·
+  C `_balken` normiert vom Minimum aus (auch rein positive Bögen) · D max_paare nach dem jüngeren Post des Paars,
+  Toleranz 1e-9 beim Score-Abstand, kaputte Posts werden geloggt und übersprungen · E L2-Term l2/2·(a²+b²); scheitert
+  das Festschreiben, geht das Video trotzdem raus („noch keine“).
+
+### Offene Rückfragen an Florian (Stufe 2, nach Wichtigkeit – der Bau wartet nicht)
+- **S2-R1 MAD-Minimum des Publikums-Scores** (vor dem ersten echten Score): gehört inzwischen zu Paket G (andere
+  Sitzung, Stufe 1).
+- **S2-R2 Regisseur und Stimmung:** Der feste Stimmungswert (episch +3 … chill +0,5) zählt laut Spec nicht mehr zur
+  Momentstärke; Datei-Momente ohne Kills haben dadurch Stärke ≈ 0 statt 0,5–3. So lassen, oder als Stimmungs-Bonus in
+  den Punkten behalten?
+- **S2-R3 Mic-Schritt:** Kindprozess aus render (heute) oder eigene systemd-Einheit? Nötig, falls logind
+  `KillUserProcesses=yes` meldet (PUBLIKUM.md S4).
+- **S2-R4 Datei-Momente** ohne Replay-Merkmale und Längen-Abzug (S2-A9): später über die Aufnahmezeit einem Match
+  zuordnen?
+- **S2-R5 `kommentar`** ist immer 0 und wird durch `mic_*` ersetzt – streichen (16 Merkmale)?
+- **S2-R6 Alte Clips:** Punkte/Begründung schon gesendeter Clips beim Nachtragen neu rechnen (Bot zeigte andere
+  Zahlen) oder nur die Merkmale fürs Lernen (heute)? Dazu: sollen schon gemessene `sniper`/`nahkampf` nach einer
+  späteren Kalibrierung neu gerechnet werden?
+- **S2-R7 Publikum gegen dich:** Ab wie vielen Publikums-Paaren darf das Publikum dein Modell blockieren (heute 10)?

@@ -195,6 +195,7 @@ MAD-Minima). Weiter offen: R1, R2, A35, A44.
    bleiben als Nummern (Florian 25.09.). Annahmen A1–A44 und Rückfragen (R3–R5 entschieden; R1, R2, A35, A44 offen):
    `docs/ENTSCHEIDUNGEN.md`, ‚Annahmen im Sprint Lernschleife‘.“ Bis dahin sagt ENTSCHEIDUNGEN.md (L1–L6, A2)
    ausdrücklich „kein Umnummerieren“. **Muss vor dem PR nach main erledigt sein.**
+   **Erledigt (b4e8d3e):** Florian hat „L1–L6 ok“ geantwortet; die Zeile in CLAUDE.md ist angepasst.
 2. **MAD-Minima als „entschieden (Florian)“ geführt, obwohl R3 nur nach „je Komponente“ fragte** (klein) –
    **bestätigt:** Florians Wortlaut liegt weder im Repo noch in den Uploads; der Commit ea88402 nennt die Werte nur als
    Umsetzung. Also nicht geraten: R3 ist nur als Prinzip „je Komponente“ entschieden, die Werte sind neu **A44** (mit
@@ -215,3 +216,73 @@ Verworfen: keiner.
 - `PYTHONPATH=src python -m unittest $(ls tests/test_*.py | grep -v rette | sed …)` → `Ran 847 tests in 1247.011s` /
   `OK (skipped=3)`. Ohne `tests.test_rette_skript` (6 Tests, bewusst ausgelassen) – mit ihm also dieselben 853 wie
   beim `discover`-Lauf oben; die Befunde haben nur Subtests in einem vorhandenen Test ergänzt.
+## Stufe 2 · Merkmale und eine Bewertung
+
+### Stand
+- Umgebung: LXC `claude-bau` auf pve-mini (10 Kerne, 6 GB RAM), kein Zugriff auf Host, echte Datenbank oder Telegram.
+  Alles ist mit künstlichem Material geprüft (künstliche Replays, Farbtest-Videos, Fake-Telegram) – 🧪.
+- Plan: `docs/superpowers/plans/2026-09-25-lernschleife-stufe-2.md`. Paket G (MAD-Minimum je Komponente,
+  erweiterte Hand-Eingabe) baut eine andere Sitzung in Stufe 1 ein; hier nur der Parameter `minimum` an `robust_z`.
+- Gebaut: Vertrag (17 Merkmale, `merkmale.py`, `mikro.py`, `erwartung.py`, Konfig, Migration, neue Befehle) →
+  A1 Bausteine (`roh_score` = die eine Formel, Moment-Merkmale, `aktualisiere_clip`) → parallel A2 Replay-Merkmale,
+  B Mic-Schritt im Hintergrund nach render, C Regisseur mit derselben Bewertung, D Lernen aus drei Quellen mit
+  getrennten Quoten, E Erwartung in beiden Bots → F Ende-zu-Ende-Test → Panel → Nachbesserung N1–N3 + Doku.
+- GunType: In FortniteReplayReader 3.1.0 ist `GunType` nur ein gelesenes Byte ohne Namen (Quellcode am 25.09.
+  nachgesehen) – `[merkmale.waffen]` startet leer, kalibriert wird am echten System (PUBLIKUM.md S2).
+- Fertig-Kriterium 🧪 (`tests.test_ende_zu_ende_stufe2`): Bot-Clip nach prepare/analyze/decide/render genau 2 Punkte
+  weniger, Begründung „Bot-Opfer 1,00 × −2,00 = −2,0“; `/gewichte` über das echte `cmd_gewichte`: „Sortier-Quote
+  Publikum: 100 % (Start 100 %) – 1 Paar, zählt für die Schranke erst ab 10“.
+
+### Testläufe (volle Suite ohne `test_rette_skript`, `PYTHONPATH=src`, nice)
+- Vor Stufe 2: `Ran 820 tests in 311.855s` / `OK (skipped=21)`
+- Mit Vertrag: `Ran 833 tests in 314.637s` / `OK (skipped=21)`
+- Nach A1–F: `Ran 1037 tests in 342.614s` / `OK (skipped=21)` – kein alter Test gebrochen
+- Nach der Nachbesserung: `Ran 1059 tests in 327.371s` / `OK (skipped=21)`
+
+### Prüfer-Panel (5 Linsen) und Gegenprüfer
+33 Befunde (2 Duplikate: S-1 = K-1, S-2 = B-1), davon 4 als wichtig gemeldet. Kein Befund ganz verworfen.
+Bestätigt und behoben:
+- **K-1 wichtig** Ohne Replay/Rekorder-Rückfall wurden Replay-Merkmale als gemessene 0 gespeichert und nie
+  nachgetragen → unbekannt statt 0 (S2-A20). **K-5** Clips von vor der Kill-Regel: nur platzierung/phase + Warnung.
+  **S-3** leere Waffenlisten → sniper/nahkampf unbekannt, nach der Kalibrierung holt `nachtragen` sie nach.
+- **K-2 wichtig** Ein Medienfehler brach den Mic-Lauf ab (Messungen verloren) und der Clip blockierte jeden Lauf →
+  `fehler` gesetzt, Lauf geht weiter; `_ergaenze_mic` schreibt bei Fehler nur `fehler` (S2-A22).
+- **K-3 wichtig (Lernteil)** Datei-Momente ohne laenge/lautstaerke lernten gegen eine erfundene 0 → nicht verglichen
+  (S2-A21). **K-4** Schreiben in stimmung/mikro in `db.transaktion`. **K-6** Sammelmeldung je neuer Nummernfolge.
+- **B-2** Gleichzeitiges `db.verbinde` → „duplicate column name“ (gab es schon seit Stufe 1) → abgefangen, Test.
+  **B-4** Ausgabe des Mic-Kinds ins Log. **B-5** Meldung „Posts bewertet“ vor dem Lernen.
+- **E-3** Docstring-Beispiel trainiere · **E-4** `merkmale.mic_nachholen` · **E-5** `db.ohne_mic_analyse` ·
+  **E-6** eine Urteilsregel in erwartung · **E-7** `merkmale.nur_zahlen` · **E-8** `lernen.score` gestrichen ·
+  **E-1/E-9** Bau-Marker weg, Import-Regeln in den Docstrings stimmen · **E-10** Kommentar.
+- **T-1** Import-Regel-Test erkennt auch absolute Importe · **T-2** argv des Mic-Kinds über `cli.main` · **T-3**
+  Import von faster_whisper im Test verboten · **T-4/T-5** schärfere Prüfungen.
+- Doku: **B-1** Rückfall ehrlich (clip-sitzungen misst nur je Spielabend) · **B-3** erst Waffen kalibrieren, dann
+  nachtragen · **B-6** Rückstand beendet Mic-Kinder · **S-4** REGIE.md, README, lokal.beispiel.toml · **S-5/S-6**
+  Abweichungen und Bauer-Annahmen in ENTSCHEIDUNGEN.md · **E-2** Rückfragen S2-R1–R7.
+
+### Verworfen – in Teilen (mit Begründung)
+- **K-3, Teil Regisseur:** Die Asymmetrie ist S2-A9/Rückfrage S2-R4; „systematisch bevorzugt“ stimmt nicht (laenge
+  kostet, lautstaerke bringt Punkte – die Richtung hängt am Clip).
+- **K-2, Panel-Vorschlag allein:** reichte nicht (Endlosschleife über `_ergaenze_mic`), deshalb zweiteilig behoben.
+- **K-4, Alternative `WHERE merkmale = ?`:** hätte Mic-Werte still verloren, während `mic_stand` gesetzt wird.
+- **B-1, `stimmung --clips` im Timer:** neues Verhalten (Whisper alle 10 min unter der Sperre) – gehört zu S2-R3.
+- **B-2, „Migration zuerst wie in P1“:** P1 hat dieselbe Reihenfolge; behoben im Code, S1 zusätzlich umgestellt.
+- **B-6, `KillMode=process`:** ließe verwaiste Prozesse ohne Unit bis zu 2 h auf die Sperre warten – nur Hinweis.
+- **S-5, „alle …“ erst ab 20 Urteilen:** keine Abweichung, bis 20 wäre es dieselbe Zahl wie „letzte 20“.
+- **S-6, `gewichte_version` in `erwartung.modell`:** steht im Plan (Paket E).
+- **T-3, Szenario (a):** ein `import faster_whisper` statt `find_spec` fiele schon an `assert_called_once_with` auf.
+- **E-4, doppeltes JSON-Lesen · E-7, bool-Prüfung an > 10 älteren Stellen · E-8, `differenz`/`auseinander_satz`
+  privat machen:** Geschmack, nicht umgesetzt. **E-10, median/mad vor der Schleife rechnen:** hätte die MAD-Formel aus
+  `robust_z` verdoppelt – nur ein Kommentar.
+
+### Annahmen
+S2-A1–S2-A23, Abweichungen vom Vertrag und Bauer-Annahmen: `docs/ENTSCHEIDUNGEN.md`, „Stufe 2 – Plan“ und
+„Stufe 2 – Panel und Bauer“. Rückfragen S2-R1–S2-R7 ebenda.
+
+### 🏠 Braucht das echte System
+- Installation S1–S4 aus `docs/PUBLIKUM.md` (Code einspielen, Waffen-Nummern kalibrieren, `merkmale nachtragen`,
+  faster-whisper und logind `KillUserProcesses` prüfen). Nichts davon ist hier gelaufen.
+- Abnahme: ein echtes Match gegen Bots → Begründung nennt „Bot-Opfer“; `/gewichte` zeigt beide Quoten (die
+  Publikums-Quote erst ab zwei echten Scores derselben Plattform und Art).
+- Ob der Mic-Kindprozess nach dem SSH-Aufruf von n8n weiterläuft und Whisper auf dem Mini in `mic_je_lauf = 3`
+  Clips die Sperre nicht zu lange hält (`mikro.log`).

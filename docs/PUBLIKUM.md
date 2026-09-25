@@ -1,4 +1,4 @@
-# Lernschleife „Publikum“ – Bedienung und Installation (Stufe 1)
+# Lernschleife „Publikum“ – Bedienung und Installation (Stufe 1 und 2)
 
 Bisher lernt der Regisseur nur aus deinem 👍/👎. Ob ein Short **auf TikTok** ankommt, erfährt er nie. Die
 Lernschleife „Publikum“ (Spec `docs/superpowers/specs/2026-09-25-lernschleife-publikum-design.md`) schließt diese
@@ -363,6 +363,107 @@ keinen Score ≠ 0. Danach `alter_tage = 3` **wieder entfernen**, aus beiden Dat
 `grep -n alter_tage /opt/clip-pipeline/config/lokal.toml /opt/clip-regie/config/lokal.toml` nichts mehr finden.
 Warum so gründlich: Scores werden nie überschrieben – bleibt die Zeile in `/opt/clip-pipeline` stehen, bekommen alle
 Posts dauerhaft Tag-3-Scores; Posts, die in dieser Probezeit bewertet werden, behalten ihre Tag-3-Messung für immer.
+
+## Stufe 2 · Merkmale und eine Bewertung
+
+**Was neu ist:** Die Vorbewertung kennt 17 statt 5 Merkmale (Spec §8.1). Aus dem Replay: Platzierung, Anteil Sniper-
+und Nahkampf-Kills, Anteil Bot-Opfer, Match-Phase, Endgame, Clutch. Aus Mikro und Spielton: Lachen, Jubel, Frust,
+laute Mikro-Spitzen, Spielton-Spitzen. Clip-Bot und Regisseur rechnen mit **derselben** Formel
+(`vorbewertung.roh_score`). Das Lernen nimmt zusätzlich Publikums-Paare (zwei bewertete Posts derselben Plattform und
+Art), `/gewichte` zeigt zwei Quoten („du“ und „Publikum“). Beim Senden schreibt jeder Bot eine **Erwartung** fest
+(„Erwartung: ✅ 78 %“) – ab 10 Urteilen je Art.
+
+**Was du davon merkst:**
+- Ein Clip mit Bot-Opfern bekommt weniger Punkte (Startgewicht `bot_opfer = −2`: nur Bots → −2).
+- Nach `render` startet im Hintergrund der Mic-Schritt (`pipeline stimmung --clips`, `nice 15`, höchstens
+  `[merkmale].mic_je_lauf` Clips). n8n wartet nicht darauf; sein Log steht in `/var/lib/clip-pipeline/mikro.log`.
+- Neue Waffen-Nummern meldet der Clip-Bot einmal je Match als Sammelmeldung (nach der Ruhezeit).
+- Punkte ändern sich nur bei **neu gerenderten** Clips und bei Clips, die noch nicht gesendet sind (`vorbewertet`,
+  Annahme S2-A5). Was der Bot dir schon gezeigt hat, bleibt.
+
+| Schritt | Freigabe nötig? | Rückweg |
+|---|---|---|
+| S1 Code einspielen | **ja** – Produktion ändern; Tabelle `gewichte` bekommt drei Spalten | alten Stand auschecken |
+| S2 Waffen-Nummern eintragen | nein – nur `lokal.toml` | Zeilen entfernen |
+| S3 Merkmale nachtragen | nein – nur Datenbank, weckt nie, beliebig oft | Datenbank-Sicherung aus S1 |
+| S4 Mic-Schritt prüfen | nein – nur lesen | `[merkmale] mic = false` |
+
+### S1 · Code einspielen
+
+Wie P1 oben, mit eigener Sicherung (Dateinamen `vor-stufe2.*`), dann beide Bots neu starten:
+```bash
+# im CT als root
+cd /opt/clip-pipeline
+[ -e /var/lib/clip-pipeline/vor-stufe2.sha ] || sudo -u pipeline git rev-parse HEAD | tee /var/lib/clip-pipeline/vor-stufe2.sha
+[ -e /var/lib/clip-pipeline/vor-stufe2.db ] || sudo -u pipeline sqlite3 /var/lib/clip-pipeline/pipeline.db ".backup /var/lib/clip-pipeline/vor-stufe2.db"
+sudo -u pipeline git fetch -q origin && sudo -u pipeline git pull --ff-only
+sudo -u pipeline .venv/bin/pipeline status     # verbindet einmal: neue Spalten, bevor die Bots gleichzeitig starten
+[ -d /opt/clip-regie ] && sudo -u pipeline git -C /opt/clip-regie fetch -q origin \
+  && sudo -u pipeline git -C /opt/clip-regie checkout -q --detach origin/main
+systemctl restart clip-bot clip-lernbot
+sudo -u pipeline .venv/bin/pipeline gewichte   # 17 Zeilen, „Sortier-Quote du …“, „Publikum: noch keine Paare“
+```
+**Was du lernst:** Neue Merkmale ohne gespeichertes Gewicht bekommen ihr Startgewicht aus `pipeline.toml`
+(`lernen.aktuelle` füllt auf) – eine alte Gewichts-Version bleibt gültig.
+
+### S2 · Waffen-Nummern kalibrieren
+
+Das Replay speichert die Waffe nur als **Zahl** (FortniteReplayReader 3.1.0 liest ein Byte, Namen gibt es nicht).
+Solange `[merkmale.waffen]` leer ist, bleiben `sniper` und `nahkampf` **unbekannt** (sie zählen 0 und werden beim
+Lernen nicht verglichen). Deshalb zuerst kalibrieren, dann nachtragen (S3):
+1. Ein Match nehmen, in dem du weißt, womit du welchen Kill gemacht hast, und ansehen (geht erst nach S1 – die
+   Waffen-Spalte ist neu):
+   `sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline replay /srv/clips/replays/<datei>.replay`
+   Jede Zeile endet mit `[Waffe n · Bot ja/nein/? · n übrig]`.
+2. In `/opt/clip-pipeline/config/lokal.toml` eintragen (ein `[merkmale.waffen]`-Kopf, nicht zweimal):
+   ```toml
+   [merkmale.waffen]
+   sniper = [12]
+   nahkampf = [3, 27]
+   sonstige = [5]
+   ```
+Nummern, die später neu auftauchen (Fortnite-Update), meldet der Clip-Bot als Sammelmeldung; sie zählen bis zum
+Eintragen als `sonstige`.
+
+### S3 · Merkmale für vorhandene Clips nachtragen
+
+```bash
+sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline merkmale nachtragen
+# JSON: {"replay": {"clips", "geaendert", "ohne_replay", "waffen_gemeldet"}, "mic": {"clips", "geaendert"}}
+```
+**Was:** rechnet die Replay-Merkmale aus `sessions/<ID>/replay.json` im Puffer und übernimmt vorhandene Mic-Werte
+aus den momente-Zeilen – ohne Whisper, ohne Sperre, weckt nie. `ohne_replay` zählt Clips, deren replay.json nicht
+(mehr) im Puffer liegt; die behalten „unbekannt“ und werden beim Lernen für diese Merkmale nicht verglichen.
+Fehlende Mic-Analysen holt der Mic-Schritt nach (S4) – von Hand: `pipeline stimmung --clips --max 5` (mehrmals
+möglich; je Lauf höchstens so viele Clips, die Pipeline-Sperre bleibt kurz belegt).
+**Ohne Puffer-Betrieb** lehnen beide Befehle mit Exit 2 ab.
+
+### S4 · Mic-Schritt prüfen
+
+```bash
+# Ist faster-whisper da? (sonst startet render keinen Mic-Schritt – nur Spitzen kommen über clip-sitzungen)
+sudo -u pipeline /opt/clip-pipeline/.venv/bin/python -c "import importlib.util as u; print(u.find_spec('faster_whisper') is not None)"
+# Beendet logind Prozesse, wenn die SSH-Sitzung von n8n endet? Erwartet: no (Debian-Standard)
+loginctl show-user pipeline -p KillUserProcesses 2>/dev/null; grep -i '^KillUserProcesses' /etc/systemd/logind.conf
+# Nach dem nächsten Match: läuft er, und was sagt er?
+tail -n 20 /var/lib/clip-pipeline/mikro.log
+```
+Steht bei logind `yes`: Der Mic-Schritt würde mit dem Ende des SSH-Aufrufs beendet. Dann `[merkmale] mic = false` in
+`lokal.toml` und melden – eine eigene systemd-Einheit ist Rückfrage S2-R3. **Ehrlich zum Rückfall:** Der Timer
+`clip-sitzungen` misst nur einmal je Spielabend (neue `session_*.json`) Clips **ohne** momente-Zeile; unvollständige
+Mic-Werte holt nur `stimmung --clips` nach – das nächste render oder du von Hand (`pipeline stimmung --clips --max 5`).
+Hat ein Match mehr Clips als `[merkmale].mic_je_lauf` (3), nimmt das nächste render die übrigen mit.
+Ein Rückstand-Lauf (`deploy/rueckstand.sh`, systemd-run) beendet seine Mic-Kinder mit dem Ende der Unit – danach
+einmal `pipeline stimmung --clips --max 5` von Hand.
+
+### Abnahme (Stufe 2)
+
+„Fertig, wenn `/gewichte` beide Quoten zeigt und ein Clip mit Bot-Opfern sichtbar weniger Punkte bekommt.“
+1. Ein Match gegen Bots spielen (z. B. ein normales Solo am Anfang der Saison), `render` läuft wie immer.
+2. Im Clip-Bot: die Begründung nennt „Bot-Opfer 1,00 × −2,00 = −2,0“ (bzw. den Anteil).
+3. `/gewichte`: „Sortier-Quote du: …“ und „Sortier-Quote Publikum: …“ bzw. „Publikum: noch keine Paare“ – die
+   Publikums-Quote erscheint, sobald zwei Posts derselben Plattform und Art einen echten Score haben (ohne „Basis zu
+   klein“, also frühestens ab dem 7. bewerteten Post dieser Art).
 
 ## Im Alltag
 

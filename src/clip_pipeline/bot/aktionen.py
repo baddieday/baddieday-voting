@@ -84,8 +84,9 @@ def rueckgaengig(con: sqlite3.Connection, clip_id: int) -> Antwort:
 
 # --- Ruhezeit -------------------------------------------------------------------
 
-# Meldungen mit diesen Schlüssel-Anfängen (Morgenprüfung, Lager-Abgleich) warten die Ruhezeit ab
-LEISE_MELDUNGEN = ("puffer:", "lager:")
+# Meldungen mit diesen Schlüssel-Anfängen (Morgenprüfung, Lager-Abgleich, neue Waffen-Nummern nach dem nächtlichen
+# analyze – Stufe 2, Annahme S2-A4) warten die Ruhezeit ab
+LEISE_MELDUNGEN = ("puffer:", "lager:", "merkmale:")
 
 
 def ruhezeit(konfig, zeit: datetime | None = None) -> bool:

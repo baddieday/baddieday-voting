@@ -4,6 +4,9 @@ Zeitbasis (gemessen am 21.09.2026, Build 42.20):
   replay_start  = Ortszeit, zu der Fortnite das Replay angelegt hat
   t_ms          = Millisekunden seit replay_start
   -> Zeitpunkt eines Kills = replay_start + t_ms
+
+Stufe 2 (Spec §8.1): Je Ereignis stehen zusätzlich Waffe (GunType-Zahl), Bot-Opfer und verbleibende Spieler
+bereit – daraus rechnet merkmale.aus_replay die Replay-Merkmale. Die Kill-Regel vom 24.09. bleibt unverändert.
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -30,6 +34,10 @@ class MeinEreignis:
     zeit_utc: datetime
     art: str  # kill | knock | tod | knock_erlitten
     aktion_utc: datetime | None = None  # nur bei kill: mein Umhauen dieses Gegners (None = kein eigenes Umhauen)
+    # Stufe 2 (Spec §8.1), rein additiv – None = unbekannt (altes JSON, Rekorder, ältere Aufrufer):
+    waffe: int | None = None        # GunType-ZAHL; bei kill die Waffe MEINES Umhauens, sonst die des Erledigens
+    opfer_bot: bool | None = None   # war das Opfer ein Bot? (replay2json eliminiert_bot; null = unbekannt)
+    verbleibend: int | None = None  # Spieler noch im Match nach diesem Ereignis (spieler_gesamt − finale Eliminierungen)
 
     @property
     def aktion(self) -> datetime:
@@ -108,7 +116,35 @@ def lies_json(pfad: Path, konfig: Konfig) -> dict:
 KNOCK_GUELTIG_S = 90  # länger zurückliegendes Umhauen zählt nicht mehr (Gegner wurde vermutlich wiederbelebt)
 
 
-def _meine_ereignisse(eliminierungen: list[dict], start: datetime, meine_ids: set[str]) -> list[MeinEreignis]:
+def _waffe(eintrag: dict) -> int | None:
+    """GunType aus replay2json als Zahl (FortniteReplayReader 3.1.0 liefert nur ein Byte, keinen Namen)."""
+    wert = eintrag.get("waffe")
+    return int(wert) if isinstance(wert, (int, float)) and not isinstance(wert, bool) else None
+
+
+def _bot(eintrag: dict) -> bool | None:
+    """eliminiert_bot aus replay2json: True/False, null oder fehlend = unbekannt (None)."""
+    wert = eintrag.get("eliminiert_bot")
+    return bool(wert) if wert is not None else None
+
+
+def _verbleibend_rechner(eliminierungen: list[dict], spieler_gesamt: int | None):
+    """Funktion t_ms → verbleibende Spieler (Annahme S2-A2).
+
+    verbleibend = spieler_gesamt − Anzahl finaler Eliminierungen (knock = false, Selbst-Eliminierungen
+    eingeschlossen) mit t_ms ≤ diesem Zeitpunkt, nie unter 0. Bewusst NICHT aus dem Killfeed: der hat kein t_ms
+    und enthält auch Knocks und Wiederbelebungen. Ohne spieler_gesamt ist das Ergebnis immer None (unbekannt).
+    Beispiel: 100 Spieler, 89 finale Eliminierungen bis t_ms 95000, meine bei 100000 → bei 100000 noch 10 übrig.
+    """
+    if spieler_gesamt is None:
+        return lambda t_ms: None
+    finale = sorted(int(e["t_ms"]) for e in eliminierungen if e.get("t_ms") is not None and not e.get("knock"))
+    # bisect_right zählt auch Einträge mit genau demselben t_ms (Team-Wipe: alle sterben gleichzeitig)
+    return lambda t_ms: max(0, int(spieler_gesamt) - bisect_right(finale, t_ms))
+
+
+def _meine_ereignisse(eliminierungen: list[dict], start: datetime, meine_ids: set[str],
+                      spieler_gesamt: int | None = None) -> list[MeinEreignis]:
     """Meine Kills nach Fortnite-Regel: Der Kill gehört dem, der den Gegner UMGEHAUEN hat.
 
     Beispiele (Squad):
@@ -121,22 +157,29 @@ def _meine_ereignisse(eliminierungen: list[dict], start: datetime, meine_ids: se
     Gezählt und gruppiert wird weiter nach dem Kill-Zeitpunkt; die Aktion bestimmt nur, wo ein Clip beginnt.
     Wichtig beim Team-Wipe: Ist der letzte Gegner eines Teams umgehauen, sterben alle umgehauenen Gegner
     gleichzeitig – die Kill-Zeitpunkte fallen dann zusammen, das eigentliche Umhauen liegt Sekunden davor.
+
+    Stufe 2 (Spec §8.1), ändert an der Zählung nichts: Jedes Ereignis trägt waffe, opfer_bot und verbleibend des
+    Eintrags, aus dem es entsteht. Beim Kill ist die Waffe die MEINES Umhauens (Sniper-Knock, Teammate erledigt →
+    Sniper), ohne eigenes Umhauen die des Erledigens; verbleibend zählt bis zum Erledigen (dann ist das Opfer
+    wirklich raus). spieler_gesamt fehlt (None) → verbleibend None.
     """
     ereignisse: list[MeinEreignis] = []
-    letzter_knock: dict[str, tuple[datetime, str]] = {}  # Opfer -> (Zeitpunkt, wer umgehauen hat)
+    verbleibend = _verbleibend_rechner(eliminierungen, spieler_gesamt)
+    letzter_knock: dict[str, tuple[datetime, str, int | None]] = {}  # Opfer -> (Zeitpunkt, wer umgehauen hat, Waffe)
     for e in sorted((e for e in eliminierungen if e.get("t_ms") is not None), key=lambda e: int(e["t_ms"])):
         zeitpunkt = start + timedelta(milliseconds=int(e["t_ms"]))
         taeter = str(e.get("eliminator") or "").upper()
         opfer = str(e.get("eliminiert") or "").upper()
+        felder = {"waffe": _waffe(e), "opfer_bot": _bot(e), "verbleibend": verbleibend(int(e["t_ms"]))}
         if e.get("knock"):
-            letzter_knock[opfer] = (zeitpunkt, taeter)
+            letzter_knock[opfer] = (zeitpunkt, taeter, felder["waffe"])
             if opfer in meine_ids:
-                ereignisse.append(MeinEreignis(zeitpunkt, "knock_erlitten"))
+                ereignisse.append(MeinEreignis(zeitpunkt, "knock_erlitten", **felder))
             elif taeter in meine_ids:
-                ereignisse.append(MeinEreignis(zeitpunkt, "knock"))
+                ereignisse.append(MeinEreignis(zeitpunkt, "knock", **felder))
             continue
         if opfer in meine_ids:
-            ereignisse.append(MeinEreignis(zeitpunkt, "tod"))
+            ereignisse.append(MeinEreignis(zeitpunkt, "tod", **felder))
             continue
         knock = letzter_knock.pop(opfer, None)
         if knock and (zeitpunkt - knock[0]).total_seconds() > KNOCK_GUELTIG_S:
@@ -146,8 +189,10 @@ def _meine_ereignisse(eliminierungen: list[dict], start: datetime, meine_ids: se
         if gutgeschrieben in meine_ids and opfer and (knock or not e.get("selbst")):
             eigener_finish = taeter in meine_ids
             # knock ist hier schon mein eigenes Umhauen (gutgeschrieben) und höchstens KNOCK_GUELTIG_S alt
+            if knock:  # Waffe meines Umhauens (knock ist hier immer mein eigenes, siehe oben)
+                felder["waffe"] = knock[2]
             ereignisse.append(MeinEreignis(zeitpunkt if eigener_finish or not knock else knock[0], "kill",
-                                           aktion_utc=knock[0] if knock else None))
+                                           aktion_utc=knock[0] if knock else None, **felder))
     ereignisse.sort(key=lambda e: e.zeit_utc)
     return ereignisse
 
@@ -171,7 +216,9 @@ def match_aus_json(daten: dict, mid: str, *, zonen_name: str, start_ist_ortszeit
     if not meine_ids:
         warnungen.append("Eigener Spieler im Replay nicht gefunden – Epic-ID in config/pipeline.toml [replay] ich eintragen")
 
-    ereignisse = _meine_ereignisse(daten.get("eliminierungen") or [], start, meine_ids)
+    spieler = daten.get("spieler_gesamt")
+    ereignisse = _meine_ereignisse(daten.get("eliminierungen") or [], start, meine_ids,
+                                   int(spieler) if spieler is not None else None)
 
     kills_stats = daten.get("stats_eliminierungen")
     anzahl_kills = sum(1 for e in ereignisse if e.art == "kill")

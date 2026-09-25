@@ -6,7 +6,8 @@ import json
 from datetime import date
 from html import escape
 
-from ..lernen import Ergebnis
+from ..erwartung import anzeige
+from ..lernen import Ergebnis, anzeige_zeilen, datenbasis_text
 from ..vorbewertung import MERKMAL_NAMEN, MERKMALE, gruppiere, zahl
 from ..zeit import aus_iso, utc_zu_lokal
 
@@ -31,25 +32,45 @@ def _quelle(pfad: str) -> str:
     return QUELLEN_NAMEN.get(erkennung.quelle, "?") if erkennung else "?"
 
 
-def clip_text(clip, match, zonen_name: str) -> str:
+def clip_text(clip, match, zonen_name: str, erwartung: float | None = None) -> str:
+    """Bildunterschrift eines Clips im Clip-Bot (HTML), höchstens 1024 Zeichen (Telegram-Grenze für Videos).
+
+    erwartung: festgeschriebene Wahrscheinlichkeit (erwartung.gespeichert) oder None. Die Zeile steht unter den
+    Punkten: „Erwartung: ✅ 78 %“, „Erwartung: 🗑️ 65 %“ (Wahrscheinlichkeit 0,35) bzw. „Erwartung: noch keine“
+    (Spec §10.6, Format in erwartung.anzeige). Wird der Text zu lang – etwa mit allen 17 Merkmalen in der
+    Begründung –, wird nur die Begründung gekürzt (mit „…“); Titel, Punkte, Erwartung und Status bleiben ganz.
+    Gekürzt wird der Klartext VOR dem Maskieren, damit nie ein HTML-Zeichen wie &amp; zerschnitten wird.
+    Beispiel: Begründung mit 3000 Zeichen → Text genau bis 1024 Zeichen, Begründung endet auf „…“."""
+    caption_max = 1024  # Telegram: Bildunterschrift eines Videos höchstens 1024 Zeichen
     zeiten = [aus_iso(z) for z in json.loads(clip["kill_zeiten"])]
     serie = max(gruppiere(zeiten, 10.0), key=len)
     sekunden = max(1, round((serie[-1] - serie[0]).total_seconds()))
     kills = f"{clip['kills']} Kill" + ("s" if clip["kills"] != 1 else "")
     if len(serie) > 1:
         kills += f" · {len(serie)} in {sekunden} s"
-    zeilen = [
+    vorher = [
         f"🎬 <b>Clip #{clip['id']} · {escape(clip['titel'])}</b>",
         f"⭐ Vorbewertung: <b>{zahl(clip['punkte'])}</b> Punkte",
+        f"🔮 {anzeige(erwartung, ja='✅', nein='🗑️')}",
         f"🔫 {kills}" + (f" · Platz {match['platzierung']}" if match and match["platzierung"] else ""),
         f"🕒 {utc_zu_lokal(zeiten[0], zonen_name):%d.%m. %H:%M} · {_quelle(clip['quelle_pfad'])}",
-        f"<i>{escape(clip['begruendung'])}</i>",
     ]
+    nachher = []
     if match and match["kill_quelle"] not in (None, "replay"):
-        zeilen.append("⚠️ ohne Replay-Daten – Kills geschätzt")
+        nachher.append("⚠️ ohne Replay-Daten – Kills geschätzt")
     if zeile := STATUS_ZEILE.get(clip["status"]):
-        zeilen.append(zeile)
-    return "\n".join(zeilen)
+        nachher.append(zeile)
+    # Platz für die Begründung = Grenze minus alles andere (Zeilenumbrüche und <i></i> mitgezählt)
+    platz = caption_max - len("\n".join(vorher + ["<i></i>"] + nachher))
+    begruendung = clip["begruendung"]
+    if len(escape(begruendung)) > platz:
+        begruendung = begruendung[:platz]  # maskiert wird es höchstens länger, nie kürzer
+        while begruendung and len(escape(begruendung)) + 1 > platz:  # + 1 für „…“
+            begruendung = begruendung[:-1]
+        begruendung = escape(begruendung.rstrip()) + "…"
+    else:
+        begruendung = escape(begruendung)
+    return "\n".join(vorher + [f"<i>{begruendung}</i>"] + nachher)
 
 
 def battle_frage(battle_id: int, a, b) -> str:
@@ -84,6 +105,11 @@ def rangliste_text(zeilen: list, saison: tuple[date, date]) -> str:
 
 
 def gewichte_text(e: Ergebnis, version: int) -> str:
+    """/gewichte im Clip-Bot (Spec §8.3): Tabelle der 17 Gewichte (Start, aktuell, Δ), darunter beide
+    Sortier-Quoten (du · Publikum), die Paare je Quelle, die Clips ohne Mic-Analyse und – wenn ihr auseinander
+    liegt – „Du magst X, das Publikum Y“. Die Zeilen unter der Tabelle kommen aus lernen.anzeige_zeilen (eine
+    Stelle für Bot und CLI). Die Erwartungs-Zeile hängt bot/app.cmd_gewichte an.
+    Beispiel-Fuß: „Sortier-Quote Publikum: 64 % (Start 50 %) – 3 Paare, zählt für die Schranke erst ab 10“."""
     zeilen = [f"{'Merkmal':<15}{'Start':>7}{'Aktuell':>9}{'Δ':>7}"]
     for m in MERKMALE:
         delta = e.werte[m] - e.start[m]
@@ -93,13 +119,11 @@ def gewichte_text(e: Ergebnis, version: int) -> str:
         )
     kopf = [
         f"🧠 <b>Vorbewertung – Gewichte</b> (Version {version})",
-        f"Datenbasis: {e.datenbasis} Bewertungen ({e.freigaben} Freigaben/Verwerfungen, {e.battles} Battles)",
+        escape(datenbasis_text(e)),
         f"Status: {escape(e.grund)} · Vertrauen {round(e.vertrauen * 100)} %",
     ]
-    fuss = []
-    if e.trefferquote is not None:
-        fuss.append(f"Trefferquote: {round(e.trefferquote * 100)} % (Startgewichte: {round((e.trefferquote_start or 0) * 100)} %)")
-    return "\n".join(kopf) + "\n<pre>" + escape("\n".join(zeilen)) + "</pre>" + ("\n" + "\n".join(fuss) if fuss else "")
+    fuss = [escape(z) for z in anzeige_zeilen(e)]
+    return "\n".join(kopf) + "\n<pre>" + escape("\n".join(zeilen)) + "</pre>\n" + "\n".join(fuss)
 
 
 def status_text(anzahl: dict[str, int], speicher: str, letzte: str | None, lager: str | None = None) -> str:

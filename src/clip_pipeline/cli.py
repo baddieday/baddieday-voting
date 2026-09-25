@@ -43,7 +43,12 @@ def _cmd_schritt(args, konfig, con) -> int:
     schritt = {"prepare": verarbeitung.prepare, "analyze": verarbeitung.analyze,
                "decide": verarbeitung.decide, "render": verarbeitung.render}[args.befehl]
     log.info("%s --session %s", args.befehl, args.session)
-    _json(schritt(con, konfig, args.session))
+    ergebnis = schritt(con, konfig, args.session)
+    if args.befehl == "render" and ergebnis.get("neu", 0) > 0:
+        # Mic-Analyse (Whisper) losgelöst im Hintergrund (Spec §8.2, §12): schreibt nichts auf unser stdout/stderr,
+        # Fehler beim Start sind nur eine Log-Warnung – die JSON-Zeile und der Exit-Code bleiben gleich (n8n-Vertrag)
+        mikro.starte_im_hintergrund(konfig, args.session)
+    _json(ergebnis)
     return 0
 
 
@@ -75,7 +80,10 @@ def _cmd_process(args, konfig, con) -> int:
 
 
 def _cmd_replay(args, konfig, con) -> int:
-    """Zeigt meine Ereignisse eines Replays in Ortszeit – zum Kalibrieren und Nachsehen."""
+    """Zeigt meine Ereignisse eines Replays in Ortszeit – zum Kalibrieren und Nachsehen.
+
+    Stufe 2: je Ereignis auch Waffe (GunType-ZAHL für [merkmale.waffen]), Bot (ja/nein/? = unbekannt) und die
+    verbleibenden Spieler (? ohne spieler_gesamt). So ordnet man die Zahlen an bekannten Kills zu (docs/PUBLIKUM.md)."""
     match, roh = replay.lies(Path(args.datei), konfig)
     zone = konfig.wert("zeit.zeitzone", "Europe/Berlin")
     ich = roh.get("ich") or {}
@@ -84,12 +92,16 @@ def _cmd_replay(args, konfig, con) -> int:
     print(f"Platz {match.platzierung} · Kills laut Replay {match.kills_stats}")
     print(f"Start {utc_zu_lokal(match.start_utc, zone):%d.%m.%Y %H:%M:%S} · Ende {utc_zu_lokal(match.ende_utc, zone):%H:%M:%S}")
     namen = {"kill": "Kill", "knock": "Knock", "tod": "gestorben", "knock_erlitten": "selbst am Boden"}
+    bot_text = {True: "ja", False: "nein", None: "?"}  # None = unbekannt (replay2json liefert null)
     for e in match.ereignisse:
         zeile = f"  {utc_zu_lokal(e.zeit_utc, zone):%H:%M:%S.%f}"[:-3] + f"  {namen.get(e.art, e.art)}"
         if e.art == "kill" and e.aktion_utc is not None and e.aktion_utc != e.zeit_utc:
             # Aktion = mein Umhauen: dort beginnt der Clip (beim Team-Wipe Sekunden vor dem Kill)
             vorher = (e.zeit_utc - e.aktion_utc).total_seconds()
             zeile += f"  (umgehauen {utc_zu_lokal(e.aktion_utc, zone):%H:%M:%S}, {vorher:.1f} s vorher)"
+        waffe = "?" if e.waffe is None else e.waffe
+        uebrig = "?" if e.verbleibend is None else e.verbleibend
+        zeile += f"  [Waffe {waffe} · Bot {bot_text[e.opfer_bot]} · {uebrig} übrig]"
         print(zeile)
     for w in match.warnungen:
         print(f"  ⚠️ {w}")
@@ -113,14 +125,18 @@ def _cmd_status(args, konfig, con) -> int:
 
 
 def _cmd_gewichte(args, konfig, con) -> int:
+    """`pipeline gewichte [--neu]`: dieselben Angaben wie /gewichte im Bot, als Klartext (Spec §8.3).
+    Die Zeilen unter der Tabelle (beide Sortier-Quoten, Paare je Quelle, ohne Mic-Analyse, „Du magst …“) kommen
+    aus lernen.anzeige_zeilen – eine Stelle für Bot und CLI. --neu speichert eine neue Version, wenn sich etwas
+    geändert hat."""
     version, e = lernen.aktualisiere(con, konfig) if args.neu else (None, lernen.berechne(con, konfig))
-    print(f"Datenbasis: {e.datenbasis} Bewertungen ({e.freigaben} Freigaben/Verwerfungen, {e.battles} Battles)")
+    print(lernen.datenbasis_text(e))
     print(f"Status: {e.grund} · Vertrauen {round(e.vertrauen * 100)} %")
     print(f"{'Merkmal':<16}{'Start':>8}{'Aktuell':>9}")
     for m in MERKMALE:
         print(f"{MERKMAL_NAMEN[m]:<16}{zahl(e.start[m], 2):>8}{zahl(e.werte[m], 2):>9}")
-    if e.trefferquote is not None:
-        print(f"Trefferquote {round(e.trefferquote * 100)} % (Start: {round((e.trefferquote_start or 0) * 100)} %)")
+    for zeile in lernen.anzeige_zeilen(e):
+        print(zeile)
     if version is not None:
         print(f"Gespeichert als Version {version}")
     if text := erwartung.trefferquote_text(con, konfig):  # Spec §10.5 – leer, solange nichts zu zeigen ist
@@ -464,6 +480,10 @@ def _cmd_lernstand(args, konfig, con) -> int:
     from . import regie_lernen
 
     print(regie_lernen.lernstand_text(con, konfig), file=sys.stderr)
+    # Zusatz wie HILFE_ZUSATZ: der Regie-Lernstand bleibt unverändert, die Trefferquote der Erwartung (Spec §10.5)
+    # kommt dahinter – nur, wenn es schon geurteilte Erwartungen gibt
+    if zusatz := erwartung.trefferquote_text(con, konfig):
+        print(zusatz, file=sys.stderr)
     parameter, ziel = regie_lernen.aktuelle(con, konfig)
     _json({"parameter": parameter, "musik_ziele": ziel})
     return 0
@@ -498,7 +518,19 @@ def _cmd_publikum(args, konfig, con) -> int:
         log.error("%s", e)
         _json({"fehler": "konfig", "hinweis": str(e)})
         return 2
+    # Befund B-5: Die Meldung hängt nicht vom Lernen ab – deshalb VOR dem Lernen. Fliegt dort ein sqlite3-Fehler
+    # durch (z. B. IntegrityError, weil der Clip-Bot gleichzeitig dieselbe Gewichts-Version schrieb), ist sie schon da.
     ergebnis["meldung"] = lernbot_publikum.meldung_nach_bewerten(con, ergebnis, zeit)
+    if ergebnis["bewertet"]:
+        # Annahme S2-A12: neue Publikums-Scores sind neue Paare → gleich neu lernen (wie der Clip-Bot nach jeder
+        # Entscheidung). Nur ins Log – die JSON-Zeile bleibt, wie sie ist.
+        # Scheitert das Lernen an kaputten Daten, bleiben die Scores trotzdem gesetzt und die JSON-Zeile kommt (Vertrag
+        # mit dem Timer); sqlite3-Fehler fliegen wie überall durch.
+        try:
+            version, gelernt = lernen.aktualisiere(con, konfig)
+            log.info("Gewichte Version %s (%s)", version, gelernt.grund)
+        except (ValueError, KeyError, TypeError) as fehler:
+            log.warning("Lernen nach dem Bewerten fehlgeschlagen (%s: %s)", type(fehler).__name__, fehler)
     _json(ergebnis)
     return 1 if ergebnis["fehler"] else 0
 

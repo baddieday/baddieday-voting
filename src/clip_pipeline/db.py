@@ -50,7 +50,14 @@ def verbinde(pfad: Path | str) -> sqlite3.Connection:
             con.executescript(resources.files("clip_pipeline").joinpath(datei).read_text(encoding="utf-8"))
         for tabelle, spalte, typ in MIGRATIONEN:
             if spalte not in {z["name"] for z in con.execute(f"PRAGMA table_info({tabelle})")}:
-                con.execute(f"ALTER TABLE {tabelle} ADD COLUMN {spalte} {typ}")
+                try:
+                    con.execute(f"ALTER TABLE {tabelle} ADD COLUMN {spalte} {typ}")
+                except sqlite3.OperationalError as e:
+                    # Zwei Prozesse (z. B. beide Bots oder ein Bot und render nach einem Update) verbinden
+                    # gleichzeitig: Beide sahen die Spalte als fehlend, der andere war beim ALTER schneller.
+                    # Dann ist die Spalte da – genau das wollten wir. Jeder andere Fehler fliegt weiter.
+                    if "duplicate column name" not in str(e):
+                        raise
     except BaseException:
         con.close()  # sonst bleibt die Datei (unter Windows) gesperrt
         raise
@@ -122,6 +129,18 @@ def match(con: sqlite3.Connection, match_id: str) -> sqlite3.Row | None:
 
 def merkmale(zeile: sqlite3.Row) -> dict[str, float]:
     return {k: float(v) for k, v in json.loads(zeile["merkmale"]).items()}
+
+
+def ohne_mic_analyse(con: sqlite3.Connection) -> int:
+    """Wie viele Clips haben noch keine vollständige Mic-Analyse? (mic_stand leer, Status nicht verworfen)
+
+    Die eine Zählung für „offen“ in `pipeline stimmung --clips` (mikro.clips_nachziehen) und „ohne Mic-Analyse“ in
+    /gewichte (lernen.berechne) – so zeigen beide immer dieselbe Zahl. Verworfene zählen nicht: Die misst niemand
+    mehr nach. Fehler: sqlite3-Fehler gehen an den Aufrufer.
+    Beispiel: 3 Clips ohne mic_stand, davon 1 verworfen → 2.
+    """
+    return int(con.execute(
+        "SELECT COUNT(*) FROM clips WHERE mic_stand IS NULL AND status <> 'verworfen'").fetchone()[0])
 
 
 def anzahl_je_status(con: sqlite3.Connection) -> dict[str, int]:

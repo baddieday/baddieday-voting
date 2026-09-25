@@ -5,11 +5,13 @@ Formate:
   short            9:16, 30–45 s, unscharfer Rand, Schriftzug "clip-battle.de"
 
 Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der Konfig):
-  1. Auswahl     Punkte je Moment: Kill-Serie (1/3/6/10), Victory, Stimmung, Elo, gelernte Vorlieben
-                 (Stimmung und je Moment aus deinen 👍/👎). Abwechslung: Wer im letzten Entwurf war, verliert
-                 70 % seiner Punkte, im vorletzten 35 % usw. (zusammen höchstens 100 %) – so kommen nicht immer
-                 dieselben Momente, die stärksten aber regelmäßig wieder. Als Anteil, weil die Punkte weit
-                 streuen (Einzelkill 3, Vierfach-Kill 13): ein fester Abzug ließe die stärksten immer vorn.
+  1. Auswahl     Punkte je Moment: dieselbe Bewertung wie im Clip-Bot (Spec §8.2: vorbewertung.roh_score über
+                 merkmale.fuer_moment mit den aktuellen Gewichten – Kill-Serie, Victory, Replay- und Mic-Merkmale),
+                 dazu Elo und gelernte Vorlieben (Stimmung und je Moment aus deinen 👍/👎).
+                 Abwechslung: Wer im letzten Entwurf war, verliert 70 % seiner Punkte, im vorletzten 35 % usw.
+                 (zusammen höchstens 100 %) – so kommen nicht immer dieselben Momente, die stärksten aber
+                 regelmäßig wieder. Als Anteil, weil die Punkte weit streuen (Einzelkill 1, Vierfach-Kill 10,
+                 Victory +5): ein fester Abzug ließe die stärksten immer vorn.
                  Verworfene Clips nie; höchstens n Momente aus demselben Match.
   2. Bogen       Einstieg = zweitstärkster Moment (Hook), dann steigend, bei ~60 % eine Atempause
                  (lustig/chill), der stärkste zum Schluss. Keine gleiche Stimmung / kein gleiches Match
@@ -36,9 +38,12 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import effekte, entwurf, schema
+from . import effekte, entwurf, lernen, schema
+from .db import BEWERTET
 from .konfig import Konfig
+from .merkmale import fuer_moment
 from .musik import ZIEL
+from .vorbewertung import roh_score
 from .zeit import iso, jetzt
 
 log = logging.getLogger("pipeline")
@@ -50,8 +55,10 @@ FORMATE = {
     "short": {"min_s": 30.0, "max_s": 45.0, "seg_min_s": 2.5, "seg_max_s": 12.0, "serie_max_s": 20.0,
               "b": 1080, "h": 1920},
 }
+# Rangfolge der Stimmungen. Seit Stufe 2 (Spec §8.2) nicht mehr Teil der Momentstärke, nur noch Tiebreak bei der
+# Musikwahl (gleich lange Anteile: die "stärkere" Stimmung bestimmt die Musik). Rückfrage S2-R2
+# (docs/ENTSCHEIDUNGEN.md) ist offen: eventuell kommt sie als Stimmungs-Bonus in `punkte` zurück.
 STIMMUNG_WERT = {"episch": 3.0, "spannend": 2.0, "lustig": 1.5, "frustriert": 1.0, "chill": 0.5}
-KILL_PUNKTE = [0, 1, 3, 6, 10]
 # Übergang in einen Moment hinein, je Stimmung: (xfade-Art, Dauer in s). "schnitt" = harter Schnitt.
 UEBERGANG = {"episch": ("schnitt", 0.0), "spannend": ("schnitt", 0.0), "lustig": ("wipeleft", 0.3),
              "frustriert": ("fadeblack", 0.5), "chill": ("fade", 0.8)}
@@ -246,11 +253,29 @@ def abwechslung(frueher: list[list[str]], anteil: float) -> dict[str, tuple[floa
     return {m: (round(min(1.0, w), 3), n) for m, (w, n) in schon.items()}
 
 
-def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None = None) -> list[Kandidat]:
+def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None = None, *,
+               gewichte: dict[str, float], kill_tabelle: list[float]) -> list[Kandidat]:
+    """Alle Momente mit Stimmung als Kandidaten: Stärke, Punkte für die Auswahl, Kern und Teile für den Schnitt.
+
+    Stärke (`intensitaet`, für Bogen, Hook und Kürzen) = der Moment-Score, dieselbe Bewertung wie im Clip-Bot
+    (Spec §8.2): round(roh_score(fuer_moment(clips.merkmale, momente.merkmale, kill_tabelle), gewichte), 2).
+    Clip-Momente rechnen mit clips.merkmale (Replay-Merkmale, Länge; Bot-Opfer senken die Stärke), Datei-Momente
+    (ohne Clip) mit max_gruppe, Victory und den Mic-Werten (Annahme S2-A9). Die Stimmung zählt nicht mehr mit.
+    Punkte (Auswahl) = Stärke + Stimmungs-Bonus (gelernt) + 1 (Clip freigegeben/veröffentlicht/im Highlight)
+    + (Elo − 1500)/100 + Moment-Bonus (gelernt) − Abwechslungs-Abzug.
+
+    Parameter: con – offene Verbindung; p – Regie-Parameter (PARAMETER plus Gelerntes); frueher – Momente der
+    letzten Entwürfe, neuester zuerst (gezeigte_momente); gewichte – Merkmal → Gewicht, holt der Aufrufer einmal per
+    lernen.aktuelle (Leitplanke 7); kill_tabelle – [vorbewertung].kill_punkte (Index = Kills in der Serie).
+    Rückgabe: Kandidaten in der Reihenfolge der momente-id. Verworfene Clips und fehlende Dateien fallen weg.
+    Fehler: keine eigenen; fehlt ein Gewicht, zählt das Merkmal 0. Die Stärke kann negativ sein (Bot-Opfer, Länge).
+    Beispiel: Clip-Moment, clips.merkmale {"kill_punkte": 3, "bot_opfer": 1}, momente {"spitzen": 2}, Startgewichte
+    (kill_punkte 1, bot_opfer −2, spitzen 0,25), Status gesendet, Elo 1500 → intensitaet 1.5, punkte 1.5.
+    """
     schon = abwechslung(frueher or [], float(p.get("abwechslung", 0.0)))
     zeilen = con.execute(
-        """SELECT m.*, c.status AS clip_status, c.elo AS elo, c.punkte AS clip_punkte, c.max_gruppe AS max_gruppe,
-                  c.victory_royale AS victory_royale
+        """SELECT m.*, c.status AS clip_status, c.elo AS elo, c.merkmale AS clip_merkmale,
+                  c.max_gruppe AS max_gruppe, c.victory_royale AS victory_royale
              FROM momente m LEFT JOIN clips c ON c.id = m.clip_id
             ORDER BY m.id"""
     ).fetchall()
@@ -262,12 +287,15 @@ def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None
         # Kill-/Aktions-Sekunden zählen ab Dateibeginn (Vertrag mit stimmung.py) – nutzbar ist die Datei bis ende_s.
         # Bisher ist start_s immer 0; ein Nachschnitt mit start_s > 0 darf den Anlauf davor mitnehmen.
         dauer = float(z["ende_s"])
+        # max_gruppe/victory nur für die Effekt-Titel (Kill-Titel, VICTORY ROYALE) – wie Bot und Elo zählen
         gruppe = int(z["max_gruppe"] if z["max_gruppe"] is not None else mk.get("max_gruppe", 0) or 0)
         victory = int(z["victory_royale"] or mk.get("victory_royale", 0) or 0)
-        intensitaet = (KILL_PUNKTE[min(gruppe, 4)] + 5 * victory + STIMMUNG_WERT[z["stimmung"]]
-                       + 0.5 * min(mk.get("spitzen", 0), 4) / 4 + 0.5 * min(mk.get("jubel_laut", 0), 2))
+        # Ohne Clip (LEFT JOIN liefert NULL) ist es ein Datei-Moment: fuer_moment rechnet dann über max_gruppe
+        clip_mk = json.loads(z["clip_merkmale"]) if z["clip_merkmale"] is not None else None
+        # Die eine Formel (Leitplanke 3); auf 2 Stellen wie bisher – Bogen und Schnittliste zeigen diese Zahl
+        intensitaet = round(roh_score(fuer_moment(clip_mk, mk, kill_tabelle), gewichte), 2)
         punkte = intensitaet + float(p["stimmung_bonus"].get(z["stimmung"], 0.0))
-        if z["clip_status"] in ("freigegeben", "veroeffentlicht", "im_highlight"):
+        if z["clip_status"] in BEWERTET:  # freigegeben, veröffentlicht, im Highlight: von dir für gut befunden
             punkte += 1.0
         if z["elo"] is not None:
             punkte += (float(z["elo"]) - 1500.0) / 100.0
@@ -278,7 +306,7 @@ def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None
         kern, muss, teile, teile_muss, serie = _teile(mk, dauer, kern, muss, p)
         if len(teile) > 1:
             grund += f", {len(teile)} Teile (Jump-Cut)"
-        ergebnis.append(Kandidat(z["schluessel"], z["datei"], dauer, z["stimmung"], round(intensitaet, 2),
+        ergebnis.append(Kandidat(z["schluessel"], z["datei"], dauer, z["stimmung"], intensitaet,
                                  round(punkte - abzug, 2), z["clip_id"], z["match_id"], kern, muss, grund, mk,
                                  abzug, gezeigt, teile, teile_muss, serie, max_gruppe=gruppe, victory=bool(victory)))
     return ergebnis
@@ -570,7 +598,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
     fx, fx_hinweise = effekte.einstellungen(konfig)
     frueher = gezeigte_momente(con)
-    alle = [k for k in kandidaten(con, p, frueher) if nur_matches is None or k.match_id in nur_matches]
+    # Gewichte einmal holen und durchreichen (Leitplanke 7); die Kill-Tabelle ist dieselbe wie im Clip-Bot
+    _version, gewichte = lernen.aktuelle(con, konfig)
+    kill_tabelle = [float(x) for x in konfig.wert("vorbewertung.kill_punkte")]
+    alle = [k for k in kandidaten(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle)
+            if nur_matches is None or k.match_id in nur_matches]
     if not alle:
         raise RegieFehler("Keine Momente mit Stimmung" + (" in diesen Matches" if nur_matches else "")
                           + " – erst `pipeline stimmung`")
@@ -591,6 +623,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     anteile: dict[str, float] = {}
     for k in reihe:
         anteile[k.stimmung] = anteile.get(k.stimmung, 0.0) + k.kern_laenge
+    # STIMMUNG_WERT nur noch als Tiebreak (Spec §8.2 nimmt ihn aus der Momentstärke; Rückfrage S2-R2 in
+    # docs/ENTSCHEIDUNGEN.md ist offen)
     haupt = max(anteile, key=lambda s: (anteile[s], STIMMUNG_WERT[s]))
     track, wertung = waehle_musik(con, haupt, ziel_s, p, ziel)
 

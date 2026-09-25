@@ -20,7 +20,7 @@ import subprocess
 from datetime import timedelta
 from pathlib import Path
 
-from . import caption, db, erfassung, lernen, medien, replay, schema, schnittliste, vorbewertung, zeitleiste
+from . import caption, db, erfassung, lernen, medien, merkmale, replay, schema, schnittliste, vorbewertung, zeitleiste
 from .konfig import Konfig
 from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
 
@@ -93,6 +93,12 @@ def prepare(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
 # --- analyze --------------------------------------------------------------------
 
 def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
+    """Replay lesen → Kills → Kandidaten mit Merkmalen und Punkten → analyse.json (idempotent: überschreibt sie).
+
+    Stufe 2: Je Kandidat kommen die sieben Replay-Merkmale (merkmale.aus_replay: Platzierung, Waffen,
+    Bot-Opfer, Phase, Endgame, Clutch) vor der Bewertung dazu; neue Waffen-Nummern meldet einmal je Session
+    merkmale.melde_unbekannte_waffen. Gewichte holt analyze als äußerster Aufrufer einmal (lernen.aktuelle).
+    """
     konfig.pruefe_speicher()
     zeile = db.match(con, pruefe_id(sid))
     if zeile is None:
@@ -114,7 +120,7 @@ def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
     zl = zeitleiste.baue(match, aufnahmen, start, ende)
     warnungen += zl.warnungen
     einstellungen = konfig.abschnitt("vorbewertung")
-    _, gewichte = lernen.aktuelle(con, konfig)
+    _, gewichte = lernen.aktuelle(con, konfig)  # einmal holen, durchreichen (Stufe 2, Leitplanke 7)
     prioritaet = list(konfig.wert("auswahl.prioritaet", []))
 
     kandidaten, ohne_video = [], []
@@ -128,6 +134,7 @@ def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
         k.merkmale["laenge"] = vorbewertung.laenge_ab_kill(
             s.start_s, s.ende_s, s.aufnahme.sekunde(k.kill_zeiten[0]), float(einstellungen["puffer_vorne_s"]),
             float(einstellungen["laenge_frei_s"]))
+        k.merkmale.update(merkmale.aus_replay(match, k.kill_zeiten, konfig))  # Spec §8.1, rein (keine DB)
         k.punkte, k.begruendung = vorbewertung.bewerte(k.merkmale, gewichte, k.titel)
         kill_sekunden = [round(s.aufnahme.sekunde(z), 2) for z in k.kill_zeiten]
         aktion_sekunden = [round(s.aufnahme.sekunde(z), 2) for z in k.aktion_zeiten]  # darf < 0 sein
@@ -164,6 +171,7 @@ def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
             (iso(start), iso(ende), zl.quelle, zl.platzierung, int(zl.victory_royale), len(zl.kills),
              match.build if match else None, "\n".join(warnungen) or None, iso(jetzt()), sid),
         )
+        merkmale.melde_unbekannte_waffen(con, konfig, sid, match)  # höchstens eine Sammelmeldung je Session
     return {"session": sid, "kills": len(zl.kills), "kandidaten": len(kandidaten), "kill_quelle": zl.quelle, "warnungen": warnungen}
 
 
