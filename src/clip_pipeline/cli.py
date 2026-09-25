@@ -451,6 +451,30 @@ def _cmd_bot(args, konfig, con) -> int:
     return starte(konfig)
 
 
+def _cmd_publikum(args, konfig, con) -> int:
+    """Lernschleife „Publikum“ (Spec §6, §12): `pipeline publikum bewerten` – täglich per Timer clip-publikum.
+
+    Setzt die Publikums-Scores aller fälligen Posts (publikum.bewerte_alle: ab [publikum].alter_tage, einmal je
+    Post, nie überschrieben) und legt bei neuen Scores eine Lern-Meldung an (höchstens eine am Tag). Reine
+    Datenbank-Arbeit: keine Pipeline-Sperre (sperren=False), nicht in WECKEN – weckt pve-big nie.
+    Ein Zeitpunkt für den ganzen Lauf: Fälligkeit, bewertet_utc und das Datum der Meldung passen zusammen.
+    JSON: {"bewertet", "ohne_messung", "noch_zu_jung", "fehler", "posts": [{"id", "score"}], "meldung": bool}.
+    Exit: 0 ok (auch: nichts fällig) · 1 mindestens ein Post nicht bewertbar (steht mit #Nummer im Log; die anderen
+    sind trotzdem bewertet, die JSON-Zeile kommt trotzdem) · 2 Konfig ([publikum]-Schlüssel fehlt)."""
+    from . import lernbot_publikum, publikum  # erst hier: die anderen Befehle brauchen die Lernschleife nicht
+
+    zeit = jetzt()
+    try:
+        ergebnis = publikum.bewerte_alle(con, konfig, zeit)
+    except KonfigFehler as e:  # z. B. alter_tage in lokal.toml falsch geschrieben – dann ist nichts bewertet
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
+    ergebnis["meldung"] = lernbot_publikum.meldung_nach_bewerten(con, ergebnis, zeit)
+    _json(ergebnis)
+    return 1 if ergebnis["fehler"] else 0
+
+
 def baue_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pipeline", description="Clip-Pipeline für Fortnite-Highlights")
     p.add_argument("--konfig", help="andere Konfigurationsdatei")
@@ -612,6 +636,13 @@ def baue_parser() -> argparse.ArgumentParser:
 
     s = unter.add_parser("bot", help="Telegram-Bot starten (läuft dauerhaft)")
     s.set_defaults(fn=_cmd_bot, sperren=False)
+
+    # Lernschleife „Publikum“ (Spec §12). Unterbefehle wie bei `lager`; `holen` (TikTok-API) kommt in Stufe 4.
+    s = unter.add_parser("publikum", help="Lernschleife Publikum: bewerten (Scores nach 7 Tagen, Timer clip-publikum)")
+    publikum_befehle = s.add_subparsers(dest="aktion", required=True)
+    publikum_befehle.add_parser("bewerten", help="Publikums-Scores aller fälligen Posts setzen (einmal je Post, "
+                                                 "weckt nie) – bei neuen Scores eine Meldung im Lern-Bot")
+    s.set_defaults(fn=_cmd_publikum, sperren=False)  # reine DB-Arbeit: keine Pipeline-Sperre, nicht in WECKEN
     return p
 
 

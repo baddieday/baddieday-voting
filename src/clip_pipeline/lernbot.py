@@ -216,9 +216,12 @@ async def _sende_entwuerfe(app) -> int:
 
 
 async def sende_meldungen(app) -> int:
+    from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
+
     con, chat = app.bot_data["con"], app.bot_data["erlaubt"]
     gesendet = 0
-    for m in con.execute("SELECT id, text FROM lern_meldungen WHERE gesendet IS NULL ORDER BY id").fetchall():
+    # Meldungen der Lernschleife (publikum:…, woche:…) warten die Ruhezeit ab, alle anderen kommen sofort (Spec §12)
+    for m in lernbot_publikum.faellige_lern_meldungen(con, app.bot_data["konfig"]):
         for stueck in stuecke(m["text"]):
             await app.bot.send_message(chat, stueck)
         con.execute("UPDATE lern_meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
@@ -270,7 +273,10 @@ async def _schleife(app) -> None:
 # --- Handler ---------------------------------------------------------------------------
 
 async def cmd_hilfe(update, context) -> None:
-    await update.effective_message.reply_text(HILFE, parse_mode="HTML")
+    from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
+
+    # HILFE bleibt unverändert; der Teil zur Lernschleife „Publikum“ kommt als Zusatz dahinter
+    await update.effective_message.reply_text(HILFE + lernbot_publikum.HILFE_ZUSATZ, parse_mode="HTML")
 
 
 async def cmd_stand(update, context) -> None:
