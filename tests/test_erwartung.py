@@ -274,7 +274,7 @@ class Festschreiben(MitErwartung):
         erwartung.festschreiben(self.con, self.konfig, "clip", neu)
         grundlage = json.loads(self.zeile("clip", neu)["grundlage"])
         self.assertEqual((grundlage["median"], grundlage["mad"]), (30.0, 10.0))
-        # z = (40 − 30) / (1,4826 · 10) ≈ 0,67449 – nur mit der Basis 20/30/40 (mit 50 oder alten Clips wäre es anders)
+        # z = (40 − 30) / (1,4826 · 10) ≈ 0,67449 – nur mit der Basis 20/30/40 (mit 50 oder alten Clips anders)
         self.assertAlmostEqual(grundlage["z"], 10 / (1.4826 * 10))
         self.assertAlmostEqual(grundlage["z"], 0.67449, places=5)
 

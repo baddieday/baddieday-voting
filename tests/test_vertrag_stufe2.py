@@ -2,7 +2,8 @@
 
 Prüft, was alle Pakete gemeinsam voraussetzen: 17 Merkmale mit Namen und Startgewicht, neue Konfig-Abschnitte, die
 Migration der Tabelle gewichte, die Import-Regel (per AST, ohne etwas auszuführen) und die Verdrahtung der neuen
-Befehle (`merkmale nachtragen`, `stimmung --clips`), die ohne getrennten Betrieb sofort mit Exit 2 ablehnen.
+Befehle (`merkmale nachtragen`, `stimmung --clips`), die ohne getrennten Betrieb sofort mit Exit 2 ablehnen. Im
+Puffer-Betrieb wird die argv des Mic-Kindprozesses (von render gestartet) bis zu mikro.clips_nachziehen verfolgt.
 """
 
 from __future__ import annotations
@@ -181,7 +182,7 @@ class PublikumRobustZ(unittest.TestCase):
 
 
 class Verdrahtung(unittest.TestCase):
-    """Neue Befehle: ohne getrennten Betrieb Exit 2 VOR der Sperre, nie in WECKEN."""
+    """Neue Befehle: ohne getrennten Betrieb Exit 2 VOR der Sperre, nie in WECKEN; im Puffer-Betrieb durchgereicht."""
 
     def _cli(self, *argv: str) -> tuple[int, dict]:
         with tempfile.TemporaryDirectory() as tmp:
