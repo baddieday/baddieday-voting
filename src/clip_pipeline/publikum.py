@@ -526,18 +526,20 @@ def ist_faellig(post: sqlite3.Row | dict, konfig: Konfig, zeit: datetime | None 
     return alter_in_tagen(post["gepostet_utc"], zeit or jetzt()) >= float(einstellung(konfig, "alter_tage"))
 
 
-def robust_z(x: float, basis: list[float]) -> tuple[float, float, float]:
+def robust_z(x: float, basis: list[float], minimum: float = MAD_MINIMUM) -> tuple[float, float, float]:
     """Robuste Standardisierung (Spec §6.3): z = (x − Median) / (1,4826 · max(MAD, 0,05)), auf ±2,5 begrenzt.
     Rückgabe (z, median, mad) – mad ist der gemessene MAD (vor dem Minimum), damit score_teile ehrlich bleibt.
     Beispiel: basis [1, 2, 3, 4, 5], x = 5 → Median 3, MAD 1, z = 2/1,4826 ≈ 1,349.
     Zahlenbeispiel zum MAD-Minimum: Engagement-Werte [0,05 0,06 0,07 0,08 0,09] haben MAD 0,01 – gerechnet wird mit
     0,05, x = 0,09 ergibt z = 0,02/0,0741 ≈ 0,27 statt 1,35 (offene Rückfrage R3, docs/ENTSCHEIDUNGEN.md).
+    minimum: Mindest-Streuung (Standard MAD_MINIMUM); erwartung.py nutzt dieselbe Formel mit einem Minimum auf
+    der Punkte-Skala ([erwartung].mad_minimum).
     basis darf keine None enthalten (die filtert score_fuer); ValueError bei leerer basis."""
     if not basis:
         raise ValueError("Leere Vergleichsbasis – ohne Vergleich gibt es keinen z-Wert")
     median = statistics.median(basis)
     mad = statistics.median(abs(b - median) for b in basis)
-    z = (x - median) / (MAD_FAKTOR * max(mad, MAD_MINIMUM))
+    z = (x - median) / (MAD_FAKTOR * max(mad, minimum))
     return max(-Z_GRENZE, min(Z_GRENZE, z)), median, mad
 
 

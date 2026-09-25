@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from . import aufraeumen, bestand, big, caption, db, erfassung, highlight, lernen, material, replay, shorts, stimmung, verarbeitung
+from . import erwartung, merkmale, mikro  # Stufe 2 (Lernschleife): Merkmale, Mic-Schritt, Erwartung
 from .konfig import KonfigFehler, SpeicherOffline, lade
 from .medien import MedienFehler
 from .sperre import Gesperrt, sperre
@@ -122,6 +123,8 @@ def _cmd_gewichte(args, konfig, con) -> int:
         print(f"Trefferquote {round(e.trefferquote * 100)} % (Start: {round((e.trefferquote_start or 0) * 100)} %)")
     if version is not None:
         print(f"Gespeichert als Version {version}")
+    if text := erwartung.trefferquote_text(con, konfig):  # Spec §10.5 – leer, solange nichts zu zeigen ist
+        print(text)
     return 0
 
 
@@ -291,8 +294,27 @@ def _cmd_puffer(args, konfig, con) -> int:
 
 
 def _cmd_stimmung(args, konfig, con) -> int:
+    if args.clips:  # Mic-Schritt (Spec §8.2): nur Clips, ohne Claude; ohne getrennten Betrieb lehnt main vorab ab
+        session = verarbeitung.pruefe_id(args.session) if args.session else None
+        _json(mikro.clips_nachziehen(con, konfig, session=session, maximal=args.max))
+        return 0
+    if args.session:
+        _json({"fehler": "--session gilt nur zusammen mit --clips"})
+        return 2
     _json(stimmung.analysiere(con, konfig, dateien=args.dateien, neu=args.neu, claude=not args.ohne_claude,
                               whisper=not args.ohne_whisper, maximal=args.max))
+    return 0
+
+
+def _cmd_merkmale(args, konfig, con) -> int:
+    """`pipeline merkmale nachtragen [--session ID]` (Stufe 2): Replay- und Mic-Merkmale für vorhandene Clips aus dem
+    Puffer nachrechnen (sessions/<ID>/replay.json, momente-Zeilen). Ohne Whisper, weckt nie, idempotent.
+    Punkte ändern sich nur bei Clips im Status vorbewertet (Annahme S2-A5). Exit: 0 ok · 1 ungültige Session-ID ·
+    2 kein getrennter Betrieb (lehnt main vorab ab)."""
+    session = verarbeitung.pruefe_id(args.session) if args.session else None
+    version, gewichte = lernen.aktuelle(con, konfig)  # einmal holen, durchreichen (Import-Regel, Leitplanke 7)
+    _json({"replay": merkmale.nachtragen_replay(con, konfig, gewichte, version, session=session),
+           "mic": mikro.nachtragen(con, konfig, gewichte, version, session=session)})
     return 0
 
 
@@ -568,7 +590,18 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--ohne-claude", action="store_true")
     s.add_argument("--ohne-whisper", action="store_true")
     s.add_argument("--max", type=int, help="höchstens so viele (die besten zuerst), Rest beim nächsten Lauf")
+    s.add_argument("--clips", action="store_true",
+                   help="Mic-Schritt: Mic-Merkmale in die Clips übernehmen, fehlende per Whisper (ohne Claude, nur Puffer)")
+    s.add_argument("--session", help="mit --clips: diese Session zuerst")
     s.set_defaults(fn=_cmd_stimmung, sperren=True)
+
+    s = unter.add_parser("merkmale", help="Merkmale pflegen: nachtragen (Replay- und Mic-Merkmale für vorhandene "
+                                          "Clips, nur Puffer)")
+    merkmale_befehle = s.add_subparsers(dest="aktion", required=True)
+    a = merkmale_befehle.add_parser("nachtragen", help="fehlende Merkmale aus replay.json und momente nachrechnen "
+                                                       "(ohne Whisper, weckt nie)")
+    a.add_argument("--session", help="nur diese Session")
+    s.set_defaults(fn=_cmd_merkmale, sperren=False)  # reine DB-/Puffer-Arbeit, kurz: keine Pipeline-Sperre, nicht in WECKEN
 
     s = unter.add_parser("momente", help="Momente pflegen: nachschneiden (Multikills ab der ersten Aktion, nur Puffer)")
     momente_befehle = s.add_subparsers(dest="aktion", required=True)
@@ -661,9 +694,12 @@ def _vorab_ablehnen(args, konfig) -> int | None:
     """Befehle, die in dieser Konfig nicht laufen dürfen, sofort ablehnen (Exit 2) – vor der Pipeline-Sperre.
     Sonst wartete z. B. ein noch aktiver clip-aufraeumen-Timer bis zu [sperre].warten_s auf einen laufenden render
     und endete dann mit „gesperrt“ (Exit 4, im Timer kein Fehler) statt mit dem Hinweis, ihn auszuschalten."""
-    if args.befehl == "momente" and not konfig.getrennt:
-        # Ohne getrennten Betrieb wäre [speicher].wurzel pve-big selbst – der Nachschnitt arbeitet nur im Puffer
-        hinweis = "kein getrennter Betrieb: [lager].wurzel leer – momente nachschneiden arbeitet nur im Puffer (E19)"
+    # Ohne getrennten Betrieb wäre [speicher].wurzel pve-big selbst – diese Befehle arbeiten nur im Puffer (E19)
+    nur_puffer = {"momente": "momente nachschneiden", "merkmale": "merkmale nachtragen"}
+    if args.befehl == "stimmung" and getattr(args, "clips", False):
+        nur_puffer["stimmung"] = "stimmung --clips"
+    if args.befehl in nur_puffer and not konfig.getrennt:
+        hinweis = f"kein getrennter Betrieb: [lager].wurzel leer – {nur_puffer[args.befehl]} arbeitet nur im Puffer (E19)"
         log.error("%s", hinweis)
         _json({"fehler": "konfig", "hinweis": hinweis})
         return 2

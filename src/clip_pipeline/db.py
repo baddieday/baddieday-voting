@@ -26,6 +26,11 @@ MIGRATIONEN = [("clips", "short_pfad", "TEXT"), ("clips", "beschreibung", "TEXT"
 # Branch (Regisseur 2.0) oben ergänzen, ohne dass sich die Änderungen beim Zusammenführen in die Quere kommen.
 MIGRATIONEN += [("clips", "mic_stand", "TEXT"), ("entwuerfe", "rezept", "TEXT"), ("entwuerfe", "upload_pfad", "TEXT")]
 
+# Stufe 2 (Spec §8.3): Publikums-Quote und Paar-Zahlen je Gewichts-Version – eigene Zeile (Merge-freundlich wie oben).
+# quellen: JSON {"battle": n, "freigabe": n, "publikum": n}
+MIGRATIONEN += [("gewichte", "trefferquote_publikum", "REAL"), ("gewichte", "trefferquote_publikum_start", "REAL"),
+                ("gewichte", "quellen", "TEXT")]
+
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)

@@ -21,13 +21,29 @@ MAX_DAUER_S = 60.0  # längster Clip (auch Grenze für den Schnitt von decide)
 FREMD_NACH_S = 0.5  # ein Anlauf beginnt so viel nach dem Kill eines früheren Clips …
 FREMD_VOR_AKTION_S = 1.0  # … aber spätestens so viel vor der ersten Aktion
 
-MERKMALE = ("kill_punkte", "victory_royale", "laenge", "lautstaerke", "kommentar")
+MERKMALE = ("kill_punkte", "victory_royale", "laenge", "lautstaerke", "kommentar",
+            # Stufe 2 (Spec §8.1): sieben aus dem Replay, fünf aus Mikro und Spielton (merkmale.py rechnet sie aus)
+            "platzierung", "sniper", "nahkampf", "bot_opfer", "phase", "endgame", "clutch",
+            "mic_lachen", "mic_jubel", "mic_frust", "mic_laut", "spitzen")
+# Anzeigenamen – höchstens 15 Zeichen, sonst verrutscht die Tabelle in /gewichte (bot/texte.gewichte_text)
 MERKMAL_NAMEN = {
     "kill_punkte": "Kill-Punkte",
     "victory_royale": "Victory Royale",
     "laenge": "Länge",
     "lautstaerke": "Lautstärke",
     "kommentar": "Kommentar",
+    "platzierung": "Platzierung",
+    "sniper": "Sniper",
+    "nahkampf": "Nahkampf",
+    "bot_opfer": "Bot-Opfer",
+    "phase": "Match-Phase",
+    "endgame": "Endgame",
+    "clutch": "Clutch",
+    "mic_lachen": "Mic: Lachen",
+    "mic_jubel": "Mic: Jubel",
+    "mic_frust": "Mic: Frust",
+    "mic_laut": "Mic: laut",
+    "spitzen": "Ton-Spitzen",
 }
 
 
@@ -218,6 +234,16 @@ def kandidaten(zeitleiste: Zeitleiste, einstellungen: dict) -> list[Kandidat]:
             "kommentar": 0.0,
         }
     return liste
+
+
+def roh_score(merkmale: dict[str, float], gewichte: dict[str, float]) -> float:
+    """DIE Score-Formel (Spec §8.2): Summe über alle MERKMALE von Gewicht × Wert, ungerundet.
+
+    Ein Merkmal, das im Dict fehlt, zählt 0 („unbekannt“ wird beim Bewerten wie „nichts da“ behandelt).
+    Alle anderen (bewerte, lernen, regie, erwartung) rufen diese Funktion – die Summe steht nur hier.
+    Beispiel: {"kill_punkte": 3, "bot_opfer": 0.5}, Gewichte {"kill_punkte": 1, "bot_opfer": -2} → 3 − 1 = 2.0.
+    Paket A1."""
+    raise NotImplementedError
 
 
 def bewerte(merkmale: dict[str, float], gewichte: dict[str, float], titel: str = "Kills") -> tuple[float, str]:
