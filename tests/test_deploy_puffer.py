@@ -289,12 +289,16 @@ class Anleitung(unittest.TestCase):
 
 
 # Stubs: jeder Aufruf landet in $STUB/aufrufe. Verhalten über Umgebungsvariablen der Tests.
+# Zustand des CT: anfangs $CT_STATUS, danach, was pct shutdown/start in $STUB/ct geschrieben haben
+CT_ZUSTAND = 'ct() { cat "$STUB/ct" 2>/dev/null || echo "${CT_STATUS:-running}"; }\n'
 STUBS = {
     "id": 'case "$1" in -u) echo 0 ;; pipeline) echo "uid=1000(pipeline)" ;; *) exit 1 ;; esac',
     # pct exec antwortet mit \r wie ein echtes Terminal; pct set --mpN trägt den Einhängepunkt wie Proxmox oben
     # in den aktiven Abschnitt der CT-Konfig ein
-    "pct": r'''case "$1" in
-  status) echo "status: ${CT_STATUS:-running}" ;;
+    "pct": CT_ZUSTAND + r'''case "$1" in
+  status) echo "status: $(ct)" ;;
+  shutdown) echo stopped > "$STUB/ct" ;;
+  start) echo running > "$STUB/ct" ;;
   set) [ "$3" = --delete ] || sed -i "1i ${3#--}: $4" "$KONF" ;;
   exec) shift 3; case "$1" in
     readlink) [ -n "${LINK-/srv/big/clips}" ] || exit 1; printf '%s\r\n' "${LINK-/srv/big/clips}" ;;
@@ -305,7 +309,16 @@ STUBS = {
 esac''',
     "lvs": 'echo "$LVS"',
     "pvesm": "echo /dev/pve/vm-102-disk-1",
-    "tune2fs": 'if [ "$1" = -l ]; then echo "Reserved block count:     1258291"; fi',
+    # 96 GB in 4-KiB-Blöcken, davon 5 % für root (RESERVE_BLOECKE). Wie das echte tune2fs: Ändern (-m) scheitert,
+    # solange der CT das Volume eingehängt hat (Proxmox legt ext4 mit MMP an); -m 0 setzt die Reserve auf 0.
+    "tune2fs": CT_ZUSTAND + r'''case "$1" in
+  -l) echo "Block count:              25165824"
+      echo "Reserved block count:     $(cat "$STUB/reserve" 2>/dev/null || echo "${RESERVE_BLOECKE:-1258291}")" ;;
+  -m) if [ "$(ct)" = running ]; then
+        echo "tune2fs: MMP: device currently active while trying to open $3" >&2; exit 1
+      fi
+      [ "$2" != 0 ] || echo 0 > "$STUB/reserve" ;;
+esac''',
     "systemctl": 'case "$1" in is-enabled) exit "${TIMER_AN:-1}" ;; is-active) exit 3 ;; esac',
     "findmnt": 'exit "${FINDMNT:-0}"',
     "apt-get": "", "useradd": "", "smbpasswd": "", "pdbedit": "exit 1", "testparm": "",
@@ -413,6 +426,9 @@ class PufferEinrichten(MitStubs):
         self.assertIn("$ pct shutdown 102 --timeout 180", r.stdout)
         self.assertIn("$ pct set 102 --mp1 'local-lvm:96,mp=/srv/puffer,backup=0,mountoptions=noatime;discard'",
                       r.stdout)
+        # Reserve abschalten, solange der CT aus ist (ext4-MMP)
+        assertReihenfolge(self, r.stdout, ["$ pct shutdown 102", "$ pct set 102 --mp1",
+                                           "$ tune2fs -m 0 '<Gerät des neuen Volumes>'", "$ pct start 102"])
         self.assertIn("Mit ganz vollem Puffer (96 GB): 54.0 %", r.stdout)
         self.assertIn("/srv/clips zeigt auf: /srv/big/clips\n", r.stdout)  # ohne \r
         self.assertIn("install -d -o pipeline -g pipeline -m 755 . eingang replays sessions", r.stdout)
@@ -459,7 +475,10 @@ class PufferEinrichten(MitStubs):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("schon eingehängt: mp1 = local-lvm:vm-102-disk-1", r.stdout)
         self.assertIn("schon da – übersprungen", r.stdout)
-        self.assertIn("$ tune2fs -m 0 /dev/pve/vm-102-disk-1", r.stdout)
+        # CT läuft: tune2fs -m scheiterte an MMP -> nur der Hinweis, kein "$ tune2fs"
+        self.assertIn("Reserve noch 5 % – geht nur bei ausgeschaltetem CT (ext4-MMP)", r.stdout)
+        self.assertIn("pct shutdown 102; tune2fs -m 0 /dev/pve/vm-102-disk-1; pct start 102", r.stdout)
+        self.assertNotIn("$ tune2fs", r.stdout)
         self.assertIn("tune2fs -l /dev/pve/vm-102-disk-1", self.aufrufe())
         self.assertNichtsGeaendert()
 
@@ -467,29 +486,60 @@ class PufferEinrichten(MitStubs):
         return not any((self.t / ordner).iterdir())
 
     def test_wiederholung_nein_heisst_nein(self):
-        # Volume schon da: Dann sind die Fragen zu tune2fs, zum In-CT-Skript und zum Timer die einzigen Sperren
+        # Volume schon da: Dann sind die Fragen die einzigen Sperren – bei laufendem CT zum In-CT-Skript und zum
+        # Timer (tune2fs nur als Hinweis), bei gestopptem CT zum Start, zu tune2fs und zum Timer (Schritt 6 entfällt)
         self.konf.write_text(KONF.format(mp=PUFFER_MP), encoding="utf-8")
-        r = self.lauf(eingabe="n\nn\nn\n")
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("schon da – übersprungen", r.stdout)
-        self.assertEqual(len(re.findall(r"^übersprungen$", r.stdout, re.M)), 3, r.stdout)
-        self.assertNichtsGeaendert()
-        self.assertTrue(self.leer("sbin") and self.leer("units"))
+        for status, eingabe in (("running", "n\nn\n"), ("stopped", "n\nn\nn\n")):
+            with self.subTest(status):
+                r = self.lauf(eingabe=eingabe, CT_STATUS=status)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn("schon da – übersprungen", r.stdout)
+                self.assertEqual(len(re.findall(r"^übersprungen$", r.stdout, re.M)), 2, r.stdout)
+                self.assertNichtsGeaendert()
+                self.assertTrue(self.leer("sbin") and self.leer("units"))
 
     def test_wiederholung_ja_fuehrt_aus(self):
-        # Gegenprobe: Mit "j" laufen genau die drei Schritte – also sind es wirklich die Fragen, die sperren
+        # Gegenprobe: Mit "j" laufen die Schritte – also sind es wirklich die Fragen, die sperren. Schritt 6 braucht
+        # den laufenden CT, tune2fs -m den ausgeschalteten (MMP): also zwei Läufe.
         self.konf.write_text(KONF.format(mp=PUFFER_MP), encoding="utf-8")
-        r = self.lauf(eingabe="j\nj\nj\n")
+        r = self.lauf(eingabe="j\nj\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         aufrufe = self.aufrufe()
-        self.assertIn("tune2fs -m 0 /dev/pve/vm-102-disk-1", aufrufe)
         self.assertIn("pct exec 102 -- sh -c set -e", aufrufe)
         self.assertIn("systemctl enable --now clip-lvm-status.timer", aufrufe)
         self.assertEqual(sorted(p.name for p in (self.t / "units").iterdir()),
                          ["clip-lvm-status.service", "clip-lvm-status.timer"])
         self.assertTrue((self.t / "sbin/clip-lvm-status").exists())
+        # CT aus und bleibt aus ("n" auf die Startfrage): dann fragt Schritt 5, und "j" führt tune2fs -m 0 aus
+        r = self.lauf(eingabe="n\nj\nj\n", CT_STATUS="stopped")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        aufrufe = self.aufrufe()
+        self.assertEqual(aufrufe.count("tune2fs -m 0 /dev/pve/vm-102-disk-1"), 1)
         for nie in ("pct set", "pct shutdown", "pct start"):  # Volume und CT bleiben, wie sie sind
             self.assertNotIn(nie, aufrufe)
+
+    def test_wiederholung_bei_laufendem_ct_nur_hinweis(self):
+        # Erster echter Lauf auf pve-mini: tune2fs -m bei laufendem CT -> "MMP: device currently active", und
+        # set -e brach vor den Schritten 6 und 7 ab. Jetzt: Hinweis fürs Wartungsfenster, kein tune2fs -m, weiter.
+        self.konf.write_text(KONF.format(mp=PUFFER_MP), encoding="utf-8")
+        r = self.lauf(eingabe="j\nj\n")  # genau zwei Antworten: Schritt 6 und 7 – Schritt 5 fragt nicht
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("/dev/pve/vm-102-disk-1: Reserve noch 5 % – geht nur bei ausgeschaltetem CT (ext4-MMP)",
+                      r.stdout)
+        self.assertIn("Im nächsten Wartungsfenster:  pct shutdown 102; tune2fs -m 0 /dev/pve/vm-102-disk-1; "
+                      "pct start 102", r.stdout)
+        aufrufe = self.aufrufe()
+        self.assertNotIn("tune2fs -m", aufrufe)
+        assertReihenfolge(self, aufrufe, ["tune2fs -l /dev/pve/vm-102-disk-1", "pct exec 102 -- sh -c set -e",
+                                          "systemctl enable --now clip-lvm-status.timer"])
+        self.assertIn("== Fertig.", r.stdout)
+        for nie in ("pct set", "pct shutdown", "pct start"):  # den laufenden CT fasst das Skript nicht an
+            self.assertNotIn(nie, aufrufe)
+        # Nach dem Handgriff im Wartungsfenster: Reserve 0 -> kein Hinweis mehr
+        r = self.lauf(eingabe="n\nn\n", RESERVE_BLOECKE="0")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("/dev/pve/vm-102-disk-1: schon 0 – übersprungen", r.stdout)
+        self.assertNotIn("Wartungsfenster", r.stdout)
 
     def test_gestoppter_ct_wird_nicht_ungefragt_gestartet(self):
         # z. B. absichtlich für Wartung gestoppt, Skript nur für den Timer aus Schritt 7 wiederholt
@@ -499,20 +549,37 @@ class PufferEinrichten(MitStubs):
         self.assertIn("übersprungen – CT 102 bleibt aus", r.stdout)
         self.assertIn("übersprungen – CT 102 ist aus (Schritt 4)", r.stdout)  # Schritt 6 ohne Frage übersprungen
         self.assertNichtsGeaendert()
-        # "j" auf die Startfrage startet ihn; die übrigen Fragen bleiben Fragen
+        # "j" auf die Startfrage startet ihn; danach geht tune2fs -m nicht mehr (nur Hinweis), die übrigen Fragen
+        # bleiben Fragen
         (self.stub / "aufrufe").unlink()
-        r = self.lauf(eingabe="j\nn\nn\nn\n", CT_STATUS="stopped")
+        r = self.lauf(eingabe="j\nn\nn\n", CT_STATUS="stopped")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.aufrufe().count("pct start 102"), 1)
+        self.assertIn("Im nächsten Wartungsfenster:", r.stdout)
+        self.assertEqual(len(re.findall(r"^übersprungen$", r.stdout, re.M)), 2, r.stdout)
         self.assertNotIn("pct exec 102 -- sh", self.aufrufe())
         self.assertNotIn("tune2fs -m", self.aufrufe())
+
+    def test_neues_volume_bei_laufendem_ct_reserve_aus_solange_er_aus_ist(self):
+        # Schritt 3 fährt den CT herunter: genau dann (zwischen pct set und pct start) geht tune2fs -m trotz MMP
+        r = self.lauf(eingabe="j\nj\nj\n")  # Schritt 3, 6 und 7 – Schritt 4 und 5 fragen nicht
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        aufrufe = self.aufrufe()
+        assertReihenfolge(self, aufrufe, ["pct shutdown 102 --timeout 180", "pct set 102 --mp1",
+                                          "tune2fs -m 0 /dev/pve/vm-102-disk-1", "pct start 102",
+                                          "pct exec 102 -- sh -c set -e", "systemctl enable --now clip-lvm-status.timer"])
+        self.assertEqual(aufrufe.count("tune2fs -m"), 1)
+        self.assertEqual(aufrufe.count("pct start 102"), 1)
+        self.assertIn("/dev/pve/vm-102-disk-1: schon 0 – übersprungen", r.stdout)  # Schritt 5
+        self.assertNotIn("Wartungsfenster", r.stdout)
+        self.assertIn("== Fertig.", r.stdout)
 
     def test_neues_volume_bei_gestopptem_ct_fragt_vor_dem_start(self):
         # War der CT schon vorher aus, hat das Skript ihn nicht heruntergefahren -> nicht ungefragt starten
         r = self.lauf(eingabe="j\nn\n", CT_STATUS="stopped")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         aufrufe = self.aufrufe()
-        self.assertIn("pct set 102 --mp1", aufrufe)
+        assertReihenfolge(self, aufrufe, ["pct set 102 --mp1", "tune2fs -m 0 /dev/pve/vm-102-disk-1"])
         self.assertNotIn("pct shutdown", aufrufe)
         self.assertNotIn("pct start", aufrufe)
         self.assertIn("übersprungen – CT 102 bleibt aus", r.stdout)

@@ -2,8 +2,10 @@
 # Auf pve-mini (Host) als root:  bash puffer-einrichten.sh --probe   (zeigt nur)   ·   bash puffer-einrichten.sh
 # E19, Schritt R1 in docs/PUFFER.md: legt den PUFFER an – ein eigenes Volume im Thin-Pool des Mini, im CT 102 unter
 # /srv/puffer. Die Pipeline merkt davon noch nichts: /srv/clips zeigt weiter auf pve-big, bis du in R5 umschaltest.
-#   1 Bestand (Pool, CT) · 2 Sicherung · 3 CT aus, Volume anlegen · 4 CT an · 5 tune2fs -m 0 · 6 Ordner + Marken
-#   · 7 lvm-status-Timer
+#   1 Bestand (Pool, CT) · 2 Sicherung · 3 CT aus, Volume anlegen, Reserve für root aus (tune2fs -m 0) · 4 CT an
+#   · 5 Reserve prüfen · 6 Ordner + Marken · 7 lvm-status-Timer
+# tune2fs -m geht nur bei ausgeschaltetem CT: Proxmox legt das ext4 mit MMP (Multi-Mount-Protection) an, eingehängt
+# verweigert tune2fs ("MMP: device currently active"). Läuft der CT bei einer Wiederholung, zeigt Schritt 5 nur an.
 # Jede Änderung wird angezeigt und erst nach deinem "j" ausgeführt. Beliebig oft wiederholbar: Fertiges wird
 # übersprungen. Es wird nichts gelöscht. Sicherung der CT-Konfig: /root/puffer-original/ (erster Lauf, bleibt für
 # immer) und /root/puffer-<zeit>/. Rückweg: bash puffer-zurueck.sh (hängt den Puffer aus, löscht nichts).
@@ -118,7 +120,7 @@ fi
 # backup=0: nicht ins vzdump-Backup (die Daten sichert der Abgleich ins Lager) · noatime: Lesen schreibt nichts
 # · discard: gelöschte Blöcke gehen an den Thin-Pool zurück
 WERT="$SPEICHER:$GROESSE_GB,mp=$ZIEL,backup=0,mountoptions=noatime;discard"
-sag "3/7 Volume anlegen: $GROESSE_GB GB auf $SPEICHER, im CT unter $ZIEL"
+sag "3/7 Volume anlegen: $GROESSE_GB GB auf $SPEICHER, im CT unter $ZIEL; Reserve für root abschalten (tune2fs -m 0)"
 WAERE_AUS=0
 if [ -n "$VORHANDEN" ]; then
   echo "schon da – übersprungen"
@@ -139,7 +141,14 @@ else
     tu pct shutdown "$CT" --timeout 180
   fi
   tu pct set "$CT" "--$MP" "$WERT"
-  if [ "$PROBE" = 0 ]; then aktiv | grep "^$MP:"; fi
+  # Jetzt, solange der CT aus ist (ext4-MMP, siehe oben) – das deckt die Frage aus Schritt 3 ab
+  if [ "$PROBE" = 1 ]; then
+    GERAET="<Gerät des neuen Volumes>"
+  else
+    aktiv | grep "^$MP:"
+    GERAET="$(pvesm path "$(puffer_mp | awk '{print $2}')")"
+  fi
+  tu tune2fs -m 0 "$GERAET" || echo "tune2fs ging nicht – Schritt 5 sagt, was zu tun ist."
 fi
 
 sag "4/7 CT $CT starten"
@@ -154,16 +163,22 @@ else
   CT_AN=0; echo "übersprungen – CT $CT bleibt aus"
 fi
 
-sag "5/7 Reserve für root abschalten (tune2fs -m 0): sonst wären 5 % des Puffers nur für root nutzbar"
+sag "5/7 Reserve für root prüfen (tune2fs -m 0): sonst wären 5 % des Puffers nur für root nutzbar"
 VOL="$(puffer_mp | awk '{print $2}')"
 if [ -z "$VOL" ]; then
-  echo "   (Probe: das Volume gibt es noch nicht – danach: tune2fs -m 0 <Gerät des Volumes>)"
+  echo "   (Probe: das Volume gibt es noch nicht – die Reserve schaltet Schritt 3 gleich nach dem Anlegen ab)"
 else
   GERAET="$(pvesm path "$VOL")"
-  RESERVE="$(tune2fs -l "$GERAET" 2>/dev/null | awk -F: '/^Reserved block count/ {gsub(/[ \t]/, "", $2); print $2}' || true)"
+  # Nur lesen (-l) geht auch eingehängt. Ergebnis: reservierte Blöcke und ihr Anteil in % (leer: ging nicht)
+  read -r RESERVE ANTEIL <<< "$(tune2fs -l "$GERAET" 2>/dev/null | awk -F: '{gsub(/[ \t]/, "", $2)}
+    $1 == "Block count" {b = $2} $1 == "Reserved block count" {r = $2}
+    END {if (r != "") print r, (b > 0 ? int(r * 100 / b + 0.5) : "?")}' || true)"
   if [ "$RESERVE" = 0 ]; then echo "$GERAET: schon 0 – übersprungen"
   elif [ -z "$RESERVE" ]; then echo "$GERAET: tune2fs -l ging nicht (kein ext4?) – übersprungen, bitte melden"
-  elif frage "tune2fs -m 0 $GERAET?"; then tu tune2fs -m 0 "$GERAET"
+  elif [ "$CT_AN" = 1 ] || ct_laeuft; then     # CT_AN: im Probe-Modus läuft er ab Schritt 4 nur gedacht
+    echo "$GERAET: Reserve noch $ANTEIL % – geht nur bei ausgeschaltetem CT (ext4-MMP), jetzt übersprungen."
+    echo "   Im nächsten Wartungsfenster:  pct shutdown $CT; tune2fs -m 0 $GERAET; pct start $CT"
+  elif frage "tune2fs -m 0 $GERAET?"; then tu tune2fs -m 0 "$GERAET" || echo "tune2fs ging nicht – bitte melden"
   else echo "übersprungen"; fi
 fi
 

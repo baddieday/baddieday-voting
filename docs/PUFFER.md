@@ -125,6 +125,13 @@ Löschen zeigt es nur an. Es verweigert, solange `/srv/clips` auf den Puffer zei
 - `backup=0`: Das vzdump-Backup des CT bleibt klein – die Clips sichert der Abgleich ins Lager.
   `noatime`: Lesen schreibt nichts. `discard`: Gelöschtes geht an den Pool zurück.
 - `tune2fs -m 0`: ext4 hält sonst 5 % (ca. 4,8 GB) für root zurück – auf einer reinen Datenplatte verschenkt.
+  Das geht nur bei **ausgeschaltetem CT**: Proxmox legt das ext4 mit *MMP* (Multi-Mount-Protection) an. Solange es
+  eingehängt ist, schreibt der Kernel regelmäßig ein Lebenszeichen in einen MMP-Block, und tune2fs verweigert
+  („MMP: device currently active“). Zu Recht: Der Kernel hält den Superblock im Speicher und schreibt ihn selbst
+  zurück – wer gleichzeitig am Kernel vorbei aufs Gerät schreibt, riskiert ein kaputtes Dateisystem. Deshalb schaltet
+  das Skript die Reserve in Schritt 3 ab, solange der CT ohnehin aus ist. Bei einer Wiederholung mit laufendem CT
+  zeigt es nur den Befehl fürs nächste Wartungsfenster (`pct shutdown 102; tune2fs -m 0 …; pct start 102`).
+  Nur lesen (`tune2fs -l`) geht auch eingehängt.
 - *Unprivilegierter CT:* pipeline (UID 1000) ist draußen UID 101000. Deshalb legt das Skript die Ordner **im** CT an
   (`pct exec`), nicht vom Host aus.
 - `/mnt/big` ist ein lokaler Ordner des Hosts (im CT `/srv/big`); nur `/mnt/big/clips` darunter ist das NFS von
