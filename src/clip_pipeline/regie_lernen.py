@@ -4,7 +4,8 @@ Wie beim Lernen der Vorbewertung wird alles bei jedem Aufruf komplett aus den ge
 berechnet (deterministisch, jederzeit nachvollziehbar). Jede Regel verschiebt einen Parameter um einen kleinen,
 begrenzten Schritt:
 
-  zu hektisch         Segmente länger (+15 %), Übergänge länger (+10 %); ab +30 % nur jeden 2., ab +70 % jeden 4. Beat
+  zu hektisch         Segmente länger (+15 %), Übergänge länger (+10 %); ab +30 % nur jeden 2., ab +70 % jeden 4. Beat;
+                      effekt_hektik ×0,9 (0,3 … 1,3): Beat-Akzente schwächer
   zu lang             Ziel-Dauer −10 % (höchstens bis 60 %)
   abgeschnitten       mehr Vorlauf (+0,5 s) und Nachlauf (+0,3 s) um die Kills
   Musik passt nicht   dieser Titel bekommt einen Abzug (−1 je Nennung)
@@ -14,6 +15,8 @@ begrenzten Schritt:
   Clips langweilig    jeder Moment dieses Entwurfs −1
   je Moment           👍: +0,5 für jeden Moment im Entwurf; 👎 ohne Grund: −0,5 (bei 👎 mit Grund lag es an
                       Musik/Tempo/Länge/Schnitt, nicht an den Clips); begrenzt auf ±3
+  zu viele Effekte    Effekt-Stärke der Hauptstimmung ×0,85 (0,1 … 1,5); zusammen mit "mehr Action": nichts
+  mehr Action         Effekt-Stärke der Hauptstimmung ×1,15; eine Vorgabe 0 (Effekte aus) bleibt 0
 """
 
 from __future__ import annotations
@@ -22,10 +25,12 @@ import copy
 import json
 import sqlite3
 
+from . import effekte
 from .konfig import Konfig
 from .musik import ZIEL
 from .regie import PARAMETER
 
+# Neue Gründe immer hinten anhängen: gespeicherte Bewertungen nennen die Schlüssel
 GRUENDE = {
     "musik": "🎵 Musik passt nicht",
     "hektisch": "😵 zu hektisch",
@@ -33,6 +38,8 @@ GRUENDE = {
     "lang": "⏳ zu lang",
     "abgeschnitten": "✂️ abgeschnitten",
     "langweilig": "🥱 Clips langweilig",
+    "effekte_viel": "🎆 zu viele Effekte",
+    "action": "💥 mehr Action",
 }
 
 
@@ -63,7 +70,10 @@ VORGABE_GRENZEN = {
     "puffer_vor_s": (1.0, 6.0), "puffer_nach_s": (0.5, 4.0), "seg_min_faktor": (0.5, 2.0),
     "dauer_faktor": (0.6, 1.0), "uebergang_faktor": (0.5, 2.0), "musik_pegel": (0.0, 1.0),
     "max_je_match": (1, 10), "beats_pro_schnitt": (1, 4), "abwechslung": (0.0, 1.0),
+    "effekt_hektik": (0.3, 1.3),
 }
+EFFEKT_STAERKE_GRENZEN = (0.0, 1.5)    # Vorgabe je Stimmung; 0 = diese Stimmung ohne Effekte
+EFFEKT_STAERKE_GELERNT = (0.1, 1.5)    # durch Bewertungen
 
 
 def vorgaben(konfig: Konfig) -> tuple[dict, dict, list[str]]:
@@ -75,6 +85,8 @@ def vorgaben(konfig: Konfig) -> tuple[dict, dict, list[str]]:
         dauer_faktor = 0.8            # kürzer (Short: 45 s × 0,8 ≈ 36 s)
         [regie.vorgaben.stimmung_bonus]
         lustig = 1.0                  # lustige Momente bevorzugen
+        [regie.vorgaben.effekt_staerke]
+        chill = 0.5                   # chillige Momente mit halb so starken Effekten (0 = ohne)
         [regie.musik_ziele.episch]
         bpm = 150                     # für episch schnellere Musik
     Von hier aus lernt der Regisseur mit deinen Bewertungen weiter."""
@@ -86,6 +98,12 @@ def vorgaben(konfig: Konfig) -> tuple[dict, dict, list[str]]:
                     p["stimmung_bonus"][stimmung] = _grenze(float(bonus), -2.0, 2.0)
                 else:
                     hinweise.append(f"regie.vorgaben.stimmung_bonus.{stimmung} ignoriert")
+        elif name == "effekt_staerke" and isinstance(wert, dict):
+            for stimmung, faktor in wert.items():
+                if stimmung in ZIEL and isinstance(faktor, (int, float)) and not isinstance(faktor, bool):
+                    p["effekt_staerke"][stimmung] = _grenze(float(faktor), *EFFEKT_STAERKE_GRENZEN)
+                else:
+                    hinweise.append(f"regie.vorgaben.effekt_staerke.{stimmung} ignoriert")
         elif name in VORGABE_GRENZEN and isinstance(wert, (int, float)) and not isinstance(wert, bool):
             unten, oben = VORGABE_GRENZEN[name]
             p[name] = int(_grenze(wert, unten, oben)) if isinstance(PARAMETER[name], int) else _grenze(float(wert), unten, oben)
@@ -121,6 +139,14 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig) -> tuple[dict, dict]:
         if "hektisch" in gruende:
             p["seg_min_faktor"] = _grenze(p["seg_min_faktor"] * 1.15, 0.5, 2.0)
             p["uebergang_faktor"] = _grenze(p["uebergang_faktor"] * 1.10, 0.5, 2.0)
+            p["effekt_hektik"] = _grenze(p["effekt_hektik"] * 0.9, *VORGABE_GRENZEN["effekt_hektik"])
+        # Effekt-Stärke der Hauptstimmung: beide Gründe zugleich heben sich auf
+        weniger, mehr = "effekte_viel" in gruende, "action" in gruende
+        if haupt in ZIEL and weniger != mehr:
+            alt = p["effekt_staerke"].get(haupt, 1.0)
+            unten, oben = EFFEKT_STAERKE_GELERNT
+            if alt > 0:  # eine Vorgabe 0 (diese Stimmung ohne Effekte) bleibt 0; eine unter 0,1 steigt nicht durch 🎆
+                p["effekt_staerke"][haupt] = _grenze(alt * (0.85 if weniger else 1.15), min(unten, alt), oben)
         if "lang" in gruende:
             p["dauer_faktor"] = _grenze(p["dauer_faktor"] * 0.9, 0.6, 1.0)
         if "abgeschnitten" in gruende:
@@ -197,4 +223,18 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     geaendert = [s for s in ziel if ziel[s] != ZIEL[s]]  # durch Vorgabe oder "Stimmung getroffen"
     for s in geaendert:
         teile.append(f"Musik für {s}: Energie-Rang {ziel[s]['energie']}, {ziel[s]['bpm']} BPM")
+    teile.append(_effekte_zeile(p, start, bool(effekte.einstellungen(konfig)[0]["an"])))
     return "\n".join(teile)
+
+
+def _effekte_zeile(p: dict, start: dict, an: bool) -> str:
+    """„Effekte: episch 0.85 · … · Hektik 0.9“ – Start ist 1.0 (fehlt eine Stimmung, gilt 1.0); Vorgaben
+    gekennzeichnet: „chill 0.5 (deine Vorgabe)“ bzw. gelernt „chill 0.575 (Vorgabe 0.5)“."""
+    def wert(name: str, jetzt_: float, s0: float) -> str:
+        if s0 == 1.0:
+            return f"{name} {jetzt_}"
+        return f"{name} {jetzt_} " + ("(deine Vorgabe)" if jetzt_ == s0 else f"(Vorgabe {s0})")
+
+    werte = [wert(s, p["effekt_staerke"].get(s, 1.0), start["effekt_staerke"].get(s, 1.0)) for s in ZIEL]
+    werte.append(wert("Hektik", p["effekt_hektik"], start["effekt_hektik"]))
+    return "Effekte: " + " · ".join(werte) + ("" if an else " – ausgeschaltet ([regie.effekte] an = false)")

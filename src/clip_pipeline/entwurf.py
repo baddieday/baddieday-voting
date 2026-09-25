@@ -1,15 +1,20 @@
-"""Rendern einer Regie-Schnittliste (`pipeline render-entwurf <id> [--final]`).
+"""Rendern einer Regie-Schnittliste (`pipeline render-entwurf <id> [--final | --messen]`).
 
 Entwurf (auf dem Mini): klein genug für Telegram (< 48 MB), 720p bzw. 720×1280, VA-API wenn vorhanden, sonst CPU.
 Final (auf pve-big, NVENC): volle Auflösung. Der Mini legt dafür einen Auftrag an, pve-big rendert ihn per
 `clip-big-steuer final <name>` und fährt danach herunter (siehe big.py, deploy/big/).
 
 Aufbau des FFmpeg-Filtergraphen:
-  1. je Segment: Ausschnitt mit Übergangs-Griffen, Bild auf Zielgröße (16:9 mit Rand bzw. 9:16 mit unscharfem
-     Hintergrund), feste Bildrate; Ton: alle Spuren (Spiel + Mikro) zu Stereo gemischt
+  1. je Segment: Ausschnitt mit Übergangs-Griffen, zuerst feste Bildrate, dann Bild auf Zielgröße (16:9 mit Rand
+     bzw. 9:16 mit unscharfem Hintergrund); Ton: alle Spuren (Spiel + Mikro) zu Stereo gemischt
   2. Verketten mit xfade/acrossfade – die Mitte jedes Übergangs liegt genau auf der Segmentgrenze (dem Beat)
-  3. Musik ab ihrem Versatz, geduckt unter dem Spielton (sidechaincompress), ein- und ausgeblendet
-  4. Short: Schriftzug "clip-battle.de"
+  3. Effekte (Regisseur 2.0, nur mit liste["effekte"].an): Zoom je Segment nur auf dem Spielbild, Look (Short je
+     Segment, 16:9 danach auf das ganze Bild), nach den Übergängen Blenden-Filter und Kill-Titel/Zähler
+     (effekt_filter.py) – der Plan steht in der Schnittliste
+  4. Musik ab ihrem Versatz, geduckt unter dem Spielton (sidechaincompress), ein- und ausgeblendet; die Klänge des
+     Plans (sfx.py) kommen danach dazu
+  5. Short: Schriftzug "clip-battle.de"
+Ohne Effekte (an = false oder version 3) ist der Graph zeichengleich mit dem von vorher.
 """
 
 from __future__ import annotations
@@ -19,15 +24,19 @@ import math
 import shutil
 import sqlite3
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
-from . import musik, shorts
+from . import effekt_filter, effekte, musik, sfx, shorts
 from .konfig import Konfig, KonfigFehler
 from .medien import MedienFehler, fuehre_aus, probe
 
 ENTWURF_KURZE_SEITE = 720
 UEBERHANG_S = 0.2
 ENTWURF_KBIT = 4000
+# Der Filtergraph ist EIN Argument auf der Befehlszeile – Linux erlaubt je Argument höchstens 128 KB
+MAX_GRAPH = 64_000
 
 
 def schnitt_dauer(fps: int) -> float:
@@ -51,14 +60,27 @@ def _griffe(segmente: list[dict], fps: int) -> list[tuple[float, float]]:
     return ergebnis
 
 
-def _bild(i: int, b: int, h: int, fps: int, hochformat: bool) -> str:
+def _gerade(x: float) -> int:
+    return int(round(x / 2) * 2)
+
+
+def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", look: str = "") -> str:
+    """fps zuerst: Alle weiteren Filter sehen nur noch die Bilder, die ins Ergebnis kommen (60 fps -> halb so viele).
+    zoom: Kette aus effekt_filter.zoom – sitzt auf dem Spielbild allein (Short: vor dem Einsetzen in den unscharfen
+    Hintergrund, 16:9: vor dem Rand), der Hintergrund zoomt also nie mit.
+    look (nur Short): Farblook auf Spielbild und kleinem Hintergrund, bevor beide zusammengesetzt werden."""
+    z = f",{zoom}" if zoom else ""
+    lk = f",{look}" if look else ""
     if hochformat:  # wie shorts.py "unschaerfe": ganzes Spielbild, unscharfer Hintergrund füllt den Rand
-        return (f"[{i}:v]split=2[hg{i}][vg{i}];"
-                f"[hg{i}]scale={b}:{h}:force_original_aspect_ratio=increase,crop={b}:{h},boxblur=20:2,eq=brightness=-0.08[hgb{i}];"
-                f"[vg{i}]scale={b}:-2[vgs{i}];[hgb{i}][vgs{i}]overlay=(W-w)/2:(H-h)/2,"
-                f"fps={fps},format=yuv420p,setsar=1,settb=AVTB[v{i}]")
-    return (f"[{i}:v]scale={b}:{h}:force_original_aspect_ratio=decrease,pad={b}:{h}:(ow-iw)/2:(oh-ih)/2,"
-            f"fps={fps},format=yuv420p,setsar=1,settb=AVTB[v{i}]")
+        # Hintergrund auf b/4 × h/4 weichzeichnen (1/16 der Pixel; Radius 5 statt 20 = gleich unscharf), dann hoch
+        b4, h4 = _gerade(b / 4), _gerade(h / 4)
+        return (f"[{i}:v]fps={fps},split=2[hg{i}][vg{i}];"
+                f"[hg{i}]scale={b4}:{h4}:force_original_aspect_ratio=increase,crop={b4}:{h4},boxblur=5:2{lk},"
+                f"scale={b}:{h},eq=brightness=-0.08[hgb{i}];"
+                f"[vg{i}]scale={b}:-2{z}{lk}[vgs{i}];[hgb{i}][vgs{i}]overlay=(W-w)/2:(H-h)/2,"
+                f"format=yuv420p,setsar=1,settb=AVTB[v{i}]")
+    return (f"[{i}:v]fps={fps},scale={b}:{h}:force_original_aspect_ratio=decrease{z},pad={b}:{h}:(ow-iw)/2:(oh-ih)/2,"
+            f"format=yuv420p,setsar=1,settb=AVTB[v{i}]")
 
 
 def _ton(i: int, spuren: int, dauer: float) -> str:
@@ -72,23 +94,32 @@ def _ton(i: int, spuren: int, dauer: float) -> str:
 
 
 def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang: int | None,
-                schrift: Path | None) -> tuple[str, float]:
+                schrift: Path | None, sfx_pegel: float = sfx.SFX_PEGEL,
+                zeichenbreite: float = effekte.STANDARD["titel_zeichenbreite"],
+                spiel_h: int | None = None) -> tuple[str, float]:
+    """(Graph, Länge). Eingänge: 0 … n−1 die Segmente, dann die Musik (musik_eingang), dann die Klänge des Plans in
+    der Reihenfolge von sfx.mischung. schrift: für clip-battle.de und die Kill-Titel (ohne: keine Texte).
+    spiel_h: Höhe des höchsten Spielbilds im Short (effekt_filter.spiel_hoehe) – die Texte bleiben darüber und
+    darunter; ohne Angabe 16:9."""
     segmente = liste["segmente"]
     fps = int(liste["fps"])
     hoch = liste["format"] == "short"
     griffe = _griffe(segmente, fps)
+    ereignisse = effekte.zeitleiste(liste)  # leer ohne Effekte (an = false oder version 3)
+    zooms = effekt_filter.zooms_je_segment(liste, ereignisse, griffe)
+    look = effekt_filter.look_der_liste(liste) if hoch else ""  # 16:9: einmal global (effekt_filter.global_kette)
     teile, laengen = [], []
     for i, (s, (vorne, hinten)) in enumerate(zip(segmente, griffe)):
         laenge = (s["zeit_ende"] - s["zeit_start"]) + vorne + hinten
         laengen.append(laenge)
-        teile.append(_bild(i, b, h, fps, hoch))
+        teile.append(_bild(i, b, h, fps, hoch, effekt_filter.zoom(i, zooms[i]) if i in zooms else "", look))
         teile.append(_ton(i, spuren[i], laenge))
     # Verketten: offset_i = bisherige Länge − Übergangsdauer (siehe Herleitung in docs/ENTSCHEIDUNGEN.md E8)
     v, a, gesamt = "[v0]", "[a0]", laengen[0]
     for i in range(1, len(segmente)):
         u = segmente[i]["uebergang"]
         d = u["dauer_s"] if u["art"] != "schnitt" else 0.0
-        art = u["art"] if u["art"] != "schnitt" else "fade"
+        art = effekt_filter.xfade_art(u["art"])
         d_x = d if d > 0 else schnitt_dauer(fps)
         teile.append(f"{v}[v{i}]xfade=transition={art}:duration={d_x:.4f}:offset={gesamt - d_x:.4f}[vx{i}]")
         # Ton gleich lang überblenden wie das Bild – sonst laufen Bild und Ton pro Schnitt auseinander
@@ -96,12 +127,19 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
         gesamt += laengen[i] - d_x
         v, a = f"[vx{i}]", f"[ax{i}]"
     kette = v
+    if fx := effekt_filter.global_kette(liste, ereignisse, b, h, schrift, zeichenbreite, spiel_h):
+        teile.append(f"{kette}{fx}[vfx]")
+        kette = "[vfx]"
     if hoch and liste.get("overlay") and schrift is not None:
         teile.append(f"{kette}drawtext=fontfile={shorts._filterpfad(schrift)}:text={shorts._text(liste['overlay'])}:"
                      f"fontsize={int(h * 0.03)}:fontcolor=white@0.9:borderw=4:bordercolor=black@0.6:"
                      f"x=(w-text_w)/2:y=h*0.12[vtext]")
         kette = "[vtext]"
     teile.append(f"{kette}null[vout]")
+    # Klänge des Plans: Eingänge hinter Segmenten und Musik, Ausgang [sfx]; sie kommen NACH dem Ducking dazu
+    _klaenge, sfx_teil = sfx.mischung(ereignisse, len(segmente) + (musik_eingang is not None), sfx_pegel)
+    if sfx_teil:
+        teile.append(sfx_teil)
     if musik_eingang is not None:
         m = liste["musik"]
         teile += [
@@ -109,10 +147,10 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
             f"[{musik_eingang}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
             f"volume={m['pegel']},atrim=0:{gesamt:.3f},afade=t=in:d=0.5,afade=t=out:st={max(0.0, gesamt - 2):.3f}:d=2[mus]",
             "[mus][schluessel]sidechaincompress=threshold=0.05:ratio=6:attack=20:release=400[leiser]",
-            "[spiel][leiser]amix=inputs=2:normalize=0,alimiter=limit=0.95,apad[aout]",
+            sfx.abmischung(["[spiel]", "[leiser]"], bool(sfx_teil)),
         ]
     else:
-        teile.append(f"{a}apad[aout]")
+        teile.append(sfx.abmischung([a], bool(sfx_teil)))
     # apad + "-t gesamt" am Ausgang: Der Ton ist immer genau so lang wie das Bild. Die Mischkette (amix,
     # sidechaincompress, alimiter) verlor im Test gelegentlich bis zu 0,1 s am Ende, nicht reproduzierbar.
     return ";".join(teile), gesamt
@@ -152,16 +190,18 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
     b, h = liste["aufloesung"]
     if not final and not volle_aufloesung:  # Entwurf: kurze Seite 720 (Upload-Fassung: volle Größe)
         faktor = ENTWURF_KURZE_SEITE / min(b, h)
-        b, h = int(round(b * faktor / 2) * 2), int(round(h * faktor / 2) * 2)
+        b, h = _gerade(b * faktor), _gerade(h * faktor)
     griffe = _griffe(segmente, int(liste["fps"]))
     befehl = ["ffmpeg", "-hide_banner", "-nostdin", "-y"]
-    spuren = []
+    spuren, spiel_h = [], 0
     for s, (vorne, hinten) in zip(segmente, griffe):
         datei = Path(s["datei"])
         if not datei.is_file():
             raise MedienFehler(f"Moment-Datei fehlt: {datei}")
         info = probe(datei)
         spuren.append(len(info.tonspuren))
+        if info.breite and info.hoehe:  # Short: Texte über/unter dem höchsten Spielbild (4:3-Aufnahme ist höher)
+            spiel_h = max(spiel_h, effekt_filter.spiel_hoehe(b, info.breite, info.hoehe))
         start = s["quelle_start_s"] - vorne
         dauer = (s["quelle_ende_s"] - s["quelle_start_s"]) + vorne + hinten
         # Überhang: xfade braucht Bilder bis GANZ ans Ende des Übergangs, sonst bricht die Ausgabe still ab.
@@ -175,10 +215,16 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
             raise MedienFehler(f"Musik fehlt: {datei}")
         musik_eingang = len(segmente)
         befehl += ["-stream_loop", "-1", "-ss", f"{m['start_s']:.3f}", "-i", str(datei)]
-    schrift = None
-    if liste["format"] == "short" and liste.get("overlay"):
-        schrift = shorts.schrift(konfig)
-    graph, gesamt = filtergraph(liste, spuren, b=b, h=h, musik_eingang=musik_eingang, schrift=schrift)
+    # Klänge des Effekt-Plans: je Klang eine WAV (wird beim ersten Mal erzeugt), Reihenfolge wie in filtergraph
+    ereignisse = effekte.zeitleiste(liste)
+    klaenge, _ = sfx.mischung(ereignisse, len(segmente) + (musik_eingang is not None), sfx.pegel(konfig))
+    befehl += sfx.eingaenge(konfig, klaenge)
+    graph, gesamt = filtergraph(liste, spuren, b=b, h=h, musik_eingang=musik_eingang, schrift=_schrift(liste, konfig),
+                                sfx_pegel=sfx.pegel(konfig), zeichenbreite=_zeichenbreite(konfig),
+                                spiel_h=spiel_h or None)
+    if len(graph.encode()) >= MAX_GRAPH:
+        raise MedienFehler(f"Entwurf {liste['name']}: Filtergraph {len(graph.encode()) // 1000} KB – höchstens "
+                           f"{MAX_GRAPH // 1000} KB")
     eingang, video, name = encoder(konfig, final)
     if encoder_name == "libx264":
         eingang, video, name = [], ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"], "libx264"
@@ -212,19 +258,71 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
             "aufloesung": [b, h]}
 
 
-def entwurf(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> dict:
-    """Rendert den Entwurf eines compose-Laufs (idempotent) und merkt ihn in der Datenbank."""
+def _schrift(liste: dict, konfig: Konfig) -> Path | None:
+    """Schrift für clip-battle.de (Short) und für Kill-Titel/Zähler – nur wenn etwas zu schreiben ist."""
+    texte = any(e.art in ("titel", "zaehler") for e in effekte.zeitleiste(liste))
+    if texte or (liste["format"] == "short" and liste.get("overlay")):
+        return shorts.schrift(konfig)
+    return None
+
+
+def _zeichenbreite(konfig: Konfig) -> float:
+    return float(effekte.einstellungen(konfig)[0]["titel_zeichenbreite"])
+
+
+def graph_fehler(liste: dict, konfig: Konfig) -> list[str]:
+    """Schon beim Planen (regie.erstelle): Passt der Filtergraph der Liste auf die Befehlszeile? Gerechnet mit dem
+    größten Fall – volle Auflösung, zwei Tonspuren je Segment, Schrift und Musik wie beim Rendern."""
+    b, h = liste["aufloesung"]
+    try:
+        schrift = _schrift(liste, konfig)
+    except MedienFehler:  # keine Schrift gefunden: die Länge zählt, nicht die Datei
+        schrift = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+    n = len(liste["segmente"])
+    graph, _ = filtergraph(liste, [2] * n, b=b, h=h, musik_eingang=n if liste.get("musik") else None, schrift=schrift,
+                           sfx_pegel=sfx.pegel(konfig), zeichenbreite=_zeichenbreite(konfig))
+    groesse = len(graph.encode())
+    if groesse >= MAX_GRAPH:
+        return [f"Filtergraph {groesse // 1000} KB – höchstens {MAX_GRAPH // 1000} KB (zu viele Effekte)"]
+    return []
+
+
+def _zeile(con: sqlite3.Connection, entwurf_id: int) -> sqlite3.Row:
     zeile = con.execute("SELECT * FROM entwuerfe WHERE id = ?", (entwurf_id,)).fetchone()
     if zeile is None:
         raise MedienFehler(f"Entwurf {entwurf_id} unbekannt")
+    return zeile
+
+
+def _max_bytes(konfig: Konfig) -> int:
+    return int(float(konfig.wert("vorschau.max_mb", 48)) * 1_000_000)
+
+
+def entwurf(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> dict:
+    """Rendert den Entwurf eines compose-Laufs (idempotent) und merkt ihn in der Datenbank."""
+    zeile = _zeile(con, entwurf_id)
     if zeile["datei"] and Path(zeile["datei"]).is_file():
         return {"entwurf": entwurf_id, "datei": zeile["datei"], "uebersprungen": True}
     liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
     ziel = Path(zeile["schnittliste"]).with_suffix(".mp4")
-    ergebnis = rendere(liste, ziel, konfig, max_bytes=int(float(konfig.wert("vorschau.max_mb", 48)) * 1_000_000))
+    ergebnis = rendere(liste, ziel, konfig, max_bytes=_max_bytes(konfig))
     con.execute("UPDATE entwuerfe SET datei = ?, status = CASE WHEN status = 'neu' THEN 'gerendert' ELSE status END "
                 "WHERE id = ?", (str(ziel), entwurf_id))
     return {"entwurf": entwurf_id, **ergebnis}
+
+
+def messen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> dict:
+    """`render-entwurf <id> --messen`: rendert wie entwurf(), aber immer neu und in einen eigenen Temp-Ordner neben
+    der Schnittliste (gleiche Platte wie der echte Entwurf), der danach wieder weg ist. Die Datenbank bleibt
+    unverändert – so lässt sich die Renderzeit vor und nach einer Änderung vergleichen."""
+    zeile = _zeile(con, entwurf_id)
+    liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory(prefix=".messen-", dir=Path(zeile["schnittliste"]).parent) as ordner:
+        start = time.monotonic()
+        ergebnis = rendere(liste, Path(ordner) / "messung.mp4", konfig, max_bytes=_max_bytes(konfig))
+        sekunden = time.monotonic() - start
+    return {"entwurf": entwurf_id, "sekunden": round(sekunden, 1), "encoder": ergebnis["encoder"],
+            "dauer_s": ergebnis["dauer_s"], "aufloesung": ergebnis["aufloesung"], "mb": ergebnis["mb"]}
 
 
 # --- Final auf pve-big ---------------------------------------------------------------
@@ -234,9 +332,7 @@ def final_auftrag(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> P
 
     Moment-Dateien liegen auf dem Mini evtl. als Material-Kopie -> für pve-big auf den Originalpfad im Speicher
     umschreiben. Die Musik wird in den Speicher kopiert (klein)."""
-    zeile = con.execute("SELECT * FROM entwuerfe WHERE id = ?", (entwurf_id,)).fetchone()
-    if zeile is None:
-        raise MedienFehler(f"Entwurf {entwurf_id} unbekannt")
+    zeile = _zeile(con, entwurf_id)
     liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
     material_wurzel = Path(str(konfig.wert("material.ordner", "/var/lib/clip-pipeline/material")))
     for s in liste["segmente"]:

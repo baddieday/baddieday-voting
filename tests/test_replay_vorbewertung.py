@@ -9,7 +9,7 @@ from clip_pipeline.vorbewertung import (MAX_DAUER_S, anlauf_start, bewerte, grup
 from clip_pipeline.zeit import UTC, lokal_zu_utc, spielabend
 from clip_pipeline.zeitleiste import Zeitleiste, aus_replay, aus_rekordern
 
-ICH = "956D01EA3E7B43A0AD41096BAA0B6B9E"
+ICH = "0123456789ABCDEF0123456789ABCDEF"  # künstliche Epic-ID (Test)
 EINSTELLUNGEN = {"multikill_fenster_s": 10.0, "puffer_vorne_s": 8.0, "puffer_hinten_s": 5.0,
                  "laenge_frei_s": 30.0, "kill_punkte": [0, 1, 3, 6, 10]}
 GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.0, "kommentar": 1.0}

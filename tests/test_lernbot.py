@@ -229,6 +229,40 @@ class EntwurfText(unittest.TestCase):
         text = lernbot.entwurf_text({"id": 7}, liste)
         self.assertIn("· 2 Momente", text)
         self.assertIn("🆕 2 neue · 0 schon gezeigt · Auswahl aus 12 Momenten", text)
+        self.assertNotIn("✨", text)                                     # version 3 / ohne Effekte
+
+    def test_effekte_zeile(self):
+        segmente = [{"moment": "clip:1", "teil": 1, "effekte": [{"art": "punch"}, {"art": "sfx"}]},
+                    {"moment": "clip:1", "teil": 2, "lupe": {"ab_s": 1.0, "bis_s": 1.5, "faktor": 0.5}},
+                    {"moment": "datei:4", "effekte": [{"art": "titel"}]}, {"moment": "clip:1", "rolle": "hook"}]
+        liste = {"format": "short", "dauer_s": 32.0, "stimmung": "episch", "segmente": segmente, "bogen": [9.0, 4.0],
+                 "musik": None, "hinweise": ["x" * 400] * 5,
+                 "effekte": {"an": True, "look": "cinematic", "look_staerke": 0.8, "hook": True, "loop": False}}
+        text = lernbot.entwurf_text({"id": 7}, liste)
+        self.assertIn("· 2 Momente", text)                               # Hook und Teile zählen nicht extra
+        self.assertIn("✨ Look cinematic · 3 Impacts · Hook ✓ · Zeitlupe ✓", text)
+        self.assertLessEqual(len(text), 1000)                            # Bildunterschrift
+        segmente[1].pop("lupe")
+        liste["effekte"].update(hook=False, look="neutral")
+        self.assertIn("✨ Look neutral · 3 Impacts\n", lernbot.entwurf_text({"id": 7}, liste))
+        liste["effekte"] = {"an": False}
+        self.assertNotIn("✨", lernbot.entwurf_text({"id": 7}, liste))
+
+    def test_knoepfe_gruende_vier_reihen(self):
+        eid = 10 ** 12
+        reihen = lernbot.knoepfe_gruende(eid, ["action"])
+        self.assertEqual([len(r) for r in reihen], [2, 2, 2, 2, 1])       # 8 Gründe, dann ✅
+        self.assertEqual(reihen[-1], [("✅ fertig", f"x:{eid}:")])
+        self.assertEqual(reihen[3], [("🎆 zu viele Effekte", f"g:{eid}:effekte_viel"),
+                                     ("☑️ 💥 mehr Action", f"g:{eid}:action")])
+        gesehen = []
+        for text, daten in (k for reihe in reihen for k in reihe):
+            self.assertLessEqual(len(daten.encode()), 64)                 # Telegram: callback_data ≤ 64 Byte
+            aktion, zurueck, extra = lernbot.parse(daten)
+            self.assertEqual(zurueck, eid)
+            if aktion == "g":
+                gesehen.append(extra)
+        self.assertEqual(gesehen, list(regie_lernen.GRUENDE))
 
 
 if __name__ == "__main__":

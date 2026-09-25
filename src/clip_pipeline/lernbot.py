@@ -4,7 +4,8 @@ Was er tut:
   - nimmt Audiodateien als Musik an: Bildunterschrift = Quellenangabe (Pflicht), "#episch" o. ä. = Stimmung;
     misst Tempo und Energie und antwortet mit dem Ergebnis
   - schickt Entwürfe (Short/Zusammenschnitt) mit 👍/👎; danach Gründe zum An-/Abwählen:
-    Musik passt nicht · zu hektisch · Stimmung getroffen · zu lang · abgeschnitten · Clips langweilig
+    Musik passt nicht · zu hektisch · Stimmung getroffen · zu lang · abgeschnitten · Clips langweilig ·
+    zu viele Effekte · mehr Action (4 Reihen zu je 2 Knöpfen)
   - speichert die Bewertungen (entwurf_bewertungen) – der nächste `compose` lernt daraus (regie_lernen.py)
   - analysiert vor jedem Entwurf ein paar weitere Clips (Stimmung), damit die Auswahl wächst
   - schickt Meldungen aus lern_meldungen (Alarme, abends ein Satz zum Stand, Abschlussbericht)
@@ -83,6 +84,11 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         teile.append(f"🆕 {a['neu']} neue · {a['schon_gezeigt']} schon gezeigt · Auswahl aus {a['kandidaten']} Momenten")
     if m:
         teile.append(f"🎵 {escape(m['titel'])} – {escape(m.get('kuenstler') or '?')} ({m.get('bpm') or 0:.0f} BPM)")
+    if (fx := liste.get("effekte") or {}).get("an"):  # Regisseur 2.0: Impacts = Ereignisse im Effekt-Plan
+        impacts = sum(len(s.get("effekte") or []) for s in liste["segmente"])
+        teile.append(f"✨ Look {escape(str(fx.get('look', 'neutral')))} · {impacts} Impacts"
+                     + (" · Hook ✓" if fx.get("hook") else "")
+                     + (" · Zeitlupe ✓" if any(s.get("lupe") for s in liste["segmente"]) else ""))
     for h in liste.get("hinweise", [])[:3]:
         teile.append(f"⚠️ {escape(h)}")
     if bewertung is not None:

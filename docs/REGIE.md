@@ -33,6 +33,7 @@ Musik (NCS / Lern-Bot) ─► pipeline musik ─► Tempo, Beats, Energie ─┤
 | `pipeline musik analysieren <datei>` · `pipeline musik liste` | Tempo/Energie ansehen |
 | `pipeline compose --format short\|zusammenschnitt` | Schnittliste erzeugen |
 | `pipeline render-entwurf <id>` | Entwurf rendern (VA-API, sonst CPU) |
+| `pipeline render-entwurf <id> --messen` | nur Renderzeit messen: rendert in eine Temp-Datei, löscht nur diese, DB bleibt gleich; letzte Zeile `{"sekunden", "encoder", "dauer_s", "aufloesung", …}` – zum Vorher/Nachher-Vergleich |
 | `pipeline render-entwurf <id> --final` | volle Qualität auf pve-big (NVENC), danach sofort aus – nicht im Puffer-Betrieb (Exit 2, weckt nicht; `docs/PUFFER.md` R5) |
 | `pipeline entwurf-neu --format short` | compose + Entwurf in einem Schritt |
 | `pipeline sitzungen` | „Session vorbei“ vom Gaming-PC: Short des Abends (Timer) |
@@ -50,7 +51,10 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
   👍/👎 → Gründe an-/abwählen → ✅ fertig. Danach baut der Bot sofort den nächsten (Lernschleife,
   `[lernbot].naechster_nach_bewertung`) und analysiert dabei 10 weitere Clips (`stimmung_je_entwurf`).
   Schläft pve-big, weckt der Bot ihn – aber nur, wenn er danach sicher wieder ausgeht (clip-leerlauf scharf).
-- Unter jedem Entwurf steht „🆕 3 neue · 2 schon gezeigt · Auswahl aus 40 Momenten“.
+- Unter jedem Entwurf steht „🆕 3 neue · 2 schon gezeigt · Auswahl aus 40 Momenten“ und mit Effekten
+  „✨ Look cinematic · 23 Impacts“ (Impacts = Ereignisse im Effekt-Plan: Zooms, Titel, Zähler, Klänge;
+  später dazu „Hook ✓ · Zeitlupe ✓“). „n Momente“ zählt Momente, nicht Segmente.
+- Gründe: 8 Knöpfe in 4 Reihen zu je 2, darunter ✅ fertig.
 - `/lernstand` zeigt, was der Regisseur gelernt hat, `/musik` die Titel, `/stand` einen Satz zum Stand.
 - Abends um 21:00 kommt ein Satz zum Stand (`[lernbot].abend_uhrzeit`).
 - **Publikum (TikTok-Zahlen, Lernschleife):** nach 👍 auf einen Short „📦 Upload-Paket“, nach dem Posten
@@ -64,18 +68,22 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
   `[regie.musik_ziele.<stimmung>]` für Tempo und Energie der Musik. Das sind **Startwerte**: Deine Bewertungen
   verschieben von dort aus weiter. Unbekannte oder unsinnige Werte werden gemeldet und auf Grenzen gestutzt.
 - **Bewerten ohne Telegram:** `pipeline bewerte <entwurf> --gut|--schlecht [--grund hektisch --grund lang]`
-  (Gründe: `musik`, `hektisch`, `getroffen`, `lang`, `abgeschnitten`) – dieselbe Wirkung wie die Knöpfe.
+  (Gründe: `musik`, `hektisch`, `getroffen`, `lang`, `abgeschnitten`, `langweilig`, `effekte_viel`, `action`;
+  sie stehen nur einmal im Code, in `regie_lernen.GRUENDE`) – dieselbe Wirkung wie die Knöpfe.
 - **Nachsehen:** `pipeline lernstand` (bzw. `/lernstand` im Bot) zeigt Vorgaben und Gelerntes.
 
 ## Was die Gründe bewirken
 | Grund | Wirkung beim nächsten compose |
 |---|---|
 | 🎵 Musik passt nicht | dieser Titel bekommt −1 (je Nennung) |
-| 😵 zu hektisch | Segmente +15 % länger, Übergänge +10 %; ab +30 % nur jeder 2., ab +70 % jeder 4. Beat |
+| 😵 zu hektisch | Segmente +15 % länger, Übergänge +10 %; ab +30 % nur jeder 2., ab +70 % jeder 4. Beat; dazu Hektik ×0,9 (Beat-Akzente schwächer, 0,3 … 1,3) |
 | 🎯 Stimmung getroffen | Hauptstimmung +0,5; Musikziel dieser Stimmung rückt 20 % zum benutzten Titel |
 | ⏳ zu lang | Ziel-Dauer −10 % (bis 60 %) |
 | ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills |
 | 🥱 Clips langweilig | jeder Moment dieses Entwurfs −1 Punkt (kommt seltener) |
+| 🎆 zu viele Effekte | Effekt-Stärke der Hauptstimmung ×0,85 (bis 0,1) – alle Effekte dieser Stimmung schwächer, schwache fallen unter die Schwelle weg |
+| 💥 mehr Action | Effekt-Stärke der Hauptstimmung ×1,15 (bis 1,5) |
+| 🎆 + 💥 zugleich | nichts (heben sich auf) |
 | 👍 | jeder Moment dieses Entwurfs +0,5 (kommt öfter wieder) |
 | 👎 ohne Grund | jeder Moment dieses Entwurfs −0,5 (bei 👎 *mit* Grund lag es nicht an den Clips) |
 | 👍/👎 ohne Grund | Hauptstimmung ±0,25 (ab 3 Bewertungen) |
@@ -141,7 +149,107 @@ Umhauen 8,0   Umhauen 11,8           ……… 17 s nichts ………           W
 | chill | keine Kills, wenig los, leise | weiche Überblendung 0,8 s |
 
 Die Mitte jedes Übergangs liegt genau auf dem Beat; kein Kill wird angeschnitten (fachliche Prüfung der
-Schnittliste vor dem Speichern).
+Schnittliste vor dem Speichern). Mit Effekten (unten) wechseln die Übergänge je Stimmung nach einer festen Rotation.
+
+## Effekte (Regisseur 2.0) – der Plan
+Der Regisseur schreibt für jeden Entwurf einen **Effekt-Plan** in die Schnittliste (`version 4`): welcher Effekt
+wann (Quellzeit `t_s`) und wie stark (0 … 1). Der Renderer setzt den Plan nur um – so lässt sich alles ohne Video
+prüfen (`tests/test_effekte_plan.py`). Code: `src/clip_pipeline/effekte.py`, Werte je Stimmung in `effekte.PROFIL`.
+
+Deine Vorgaben vom 25.09. (gehen der ursprünglichen Planung vor):
+1. **Spielbild clean:** im Spielbild nur Übergänge, **Zoom** (Punch, Beat-Akzent, Meme), später die Zeitlupe und
+   der **Farblook** – kein Blitz, kein Wackeln, kein Glitch-Stoß (Glitch nur als Übergangsart). Der Zoom wirkt nur
+   auf das Spielbild: im Short nie auf den unscharfen Hintergrund, nie auf Texte. Tod (frustriert): nur Punch +
+   Einschlag.
+2. **Texte nur außerhalb des Spielbilds, animiert** (Pop-in über die Größe, Ein-/Ausblenden, leichtes
+   Hineingleiten). Short (1080×1920, Spielbild mittig bei y 34–66 %): Zähler oben unter „clip-battle.de“ (bleibt
+   dauerhaft bei y ≈ 0,12·h), Kill-Titel unten – beide auch während eines Zooms und beim Pop nie im Spielbild.
+   Die Übergangsart „zoom“ (xfade zoomin) vergrößert das ganze Bild – Titel und Zähler enden darum spätestens am
+   Anfang einer solchen Blende. Ist die Aufnahme höher als 16:9 (z. B. 4:3), rücken die Texte mit; lässt das
+   Spielbild keinen Platz, fällt der Text weg.
+   16:9-Zusammenschnitt: **kein Zähler**; ein Kill-Titel nur **während der Blende** direkt nach dem Moment mit
+   der Serie (nach seinem letzten Teil – Jump-Cuts liegen innerhalb der Serie) – bei hartem Schnitt dort (oder am
+   Ende) keiner.
+3. **Schrift:** DejaVu Sans Bold wie bisher (`[shorts].schriften`), keine neue Schriftdatei;
+   `[regie.effekte] titel_zeichenbreite = 0.75`.
+
+| Regel | Was passiert |
+|---|---|
+| Anker | die sichtbare Aktion: **mein Umhauen** (`aktion_sekunden`), sonst der Kill; nur ≥ 0,1 s weg vom Schnitt bzw. außerhalb der Blende (steht als `kill_s` im Segment) |
+| Kette | Kills mit ≤ 10 s Abstand (`[vorbewertung].multikill_fenster_s`, gezählt wie Bot und Elo) |
+| Finisher (letzte Aktion der Kette) | Zoom-Punch + Bass-Hit; die Kills davor: Mini-Punch (halb so stark) + Tick |
+| Kill-Titel | **einmal je Serie am Ende**: DOUBLE / TRIPLE / QUAD / PENTA KILL, ab 6 MULTI KILL – nie DOUBLE und TRIPLE nacheinander. Die längste Serie heißt wie `max_gruppe` des Moments |
+| VICTORY ROYALE | ab letztem Kill + 0,4 s bis Segmentende (mindestens 1 s), ersetzt einen überlappenden Kill-Titel |
+| Zähler „KILLS n“ | nur Short, bei jedem sichtbaren Kill, zählt über das ganze Video |
+| Tod (frustriert) | Punch + dumpfer Einschlag, kein Titel |
+| Jubel (lustig) | Meme-Zoom + Pop auf der ersten Jubel-Spitze |
+| Riser | endet auf dem ersten Kill des Höhepunkts |
+| Whoosh | auf jedem weichen Übergang (nicht bei Schnitt, Jump-Cut und Abblende über Schwarz) |
+| Budget | Zooms ≥ 0,4 s auseinander (Finisher vor Meme vor Punch vor Akzent), kein Zoom-Start in einer Blende, höchstens 1 Glitch-Übergang |
+| Beat-Akzent | kleiner Zoom auf einem Musik-Beat, wenn 2,5 s (lustig 3 s) weder Schnitt noch Zoom war |
+
+| Stimmung | Look | Übergänge (Rotation) | Besonderes |
+|---|---|---|---|
+| episch | cinematic 0,8 | Schnitt, Whip 0,25, Schnitt, Zoom 0,3 | Punch 0,7; in den Höhepunkt immer harter Schnitt |
+| spannend | kalt 0,6 | Whip 0,25, Schnitt, Glitch 0,2, Schnitt | Punch 0,5; in den Höhepunkt harter Schnitt |
+| lustig | warm 0,5 | Wischen, Squeeze, Schieben (je 0,3) | Meme-Zoom, kein Bass-Hit |
+| frustriert | entsättigt 0,7 | Abblende 0,5, Glitch 0,2 | kein Titel, keine Akzente |
+| chill | soft 0,3 | Blende 0,8, Dissolve 0,6 | kein Punch, kein Zähler |
+
+Der Look richtet sich nach der Hauptstimmung des Videos. Stärke = Profilwert × gelernte Effekt-Stärke; unter
+`schwelle` (0,15) fällt ein Effekt weg. **Ausschalten:** `[regie.effekte] an = false` – dann sind Schnitt und
+Übergänge wie vorher und die Schnittliste enthält `"effekte": {"an": false}`. Der Filtergraph ist dann
+zeichengleich mit dem derselben Liste ohne Effekt-Plan (Test). Stufe 0 (feste Bildrate zuerst, Unschärfe des
+Short-Hintergrunds in Viertelgröße) gilt immer, auch mit `an = false`; wer genau den Stand davor will, nimmt deren
+eigenen Commit zurück (`git revert`). Einzelne Werte je Stimmung
+überschreiben: `[regie.effekte.<stimmung>]` in `config/lokal.toml` (Beispiele in `config/lokal.beispiel.toml`);
+Unbekanntes steht als Hinweis im Entwurf.
+
+**Offen – deine Entscheidung (16:9-Titel am Höhepunkt):** Der Titel steht im Zusammenschnitt nur in der Blende
+*nach* dem Moment. Der Höhepunkt ist aber immer der letzte Moment – danach kommt keine Blende, und in einen
+epischen/spannenden Höhepunkt führt ein harter Schnitt. Darum bekommen der größte Multikill und VICTORY ROYALE im
+16:9 bisher **nie** einen Titel (nachgestellt mit einem Victory-Triple als Höhepunkt). Möglich wäre eine Ausnahme
+nur für den letzten Moment, z. B. der Titel kurz vor dem Ende. Bis du entscheidest, bleibt es beim Wortlaut
+von Ü2.
+
+### Effekte lernen – „🎆 zu viele Effekte“ / „💥 mehr Action“
+Zwei gelernte Parameter (in `regie.PARAMETER`, gerechnet in `regie_lernen.aktuelle`, chronologisch aus allen
+Bewertungen – wie die anderen Regeln):
+
+| Parameter | Start | wirkt auf | lernt aus |
+|---|---|---|---|
+| `effekt_staerke[stimmung]` | 1,0 je Stimmung | **alle** Effekte von Segmenten dieser Stimmung (Zoom, Titel, Zähler, Klänge) und den Look, wenn sie die Hauptstimmung ist | 🎆 ×0,85 · 💥 ×1,15 für die **Hauptstimmung** des Entwurfs, Grenzen 0,1 … 1,5; beide zugleich: nichts; 👍/👎 ohne Grund: nichts |
+| `effekt_hektik` | 1,0 | nur die Beat-Akzente – Blitz und Wackeln gibt es nicht mehr | 😵 zu hektisch ×0,9, Grenzen 0,3 … 1,3 |
+
+Stärke eines Effekts = Profilwert × `effekt_staerke[stimmung]` (× `effekt_hektik` bei Beat-Akzenten), höchstens 1;
+unter `schwelle` (0,15) fällt er weg. Übergänge, auch der Glitch-Übergang, haben immer volle Stärke (Spezifikation §4).
+**Vorgaben:** `[regie.vorgaben] effekt_hektik = 0.8` und `[regie.vorgaben.effekt_staerke] chill = 0.5` (0 … 1,5;
+**0 = diese Stimmung ohne Effekte**, das bleibt auch nach „💥 mehr Action“ so). `/lernstand` zeigt die Zeile
+„Effekte: episch 0.85 · spannend 1.0 · … · Hektik 0.9“, Vorgaben mit „(deine Vorgabe)“ bzw. „(Vorgabe 0.5)“.
+
+### Wie der Plan ins Bild kommt (Renderer)
+`src/clip_pipeline/effekt_filter.py` baut aus dem Plan ffmpeg-Filter, `entwurf.py` hängt sie in den Graphen. Er
+liest nur `liste["effekte"]` und `segmente[].effekte`, nie die gelernten Parameter.
+
+| Effekt | ffmpeg | Wo im Graphen |
+|---|---|---|
+| Zoom (Punch 1 + 0,25·s, Akzent 1 + 0,06·s, Meme 1 + 0,2·s) | `scale` mit `eval=frame`, mittig per `overlay` auf das unveränderte Bild (`overlay` rechnet nur während eines Zooms) | je Segment **nur auf dem Spielbild**: im Short vor dem Einsetzen in den unscharfen Hintergrund, im 16:9 vor dem Rand |
+| Übergänge Whip, Zoom, Glitch, Squeeze, Dissolve | `xfade` slideleft, zoomin, pixelize, squeezeh, dissolve | wie die alten Übergänge |
+| Whip / Glitch zusätzlich | waagrechte Unschärfe (`avgblur`) bzw. Farbversatz + Rauschen (`chromashift`, `noise`) | nur während der Blende (`enable`) |
+| Look | `eq` (Kontrast, Sättigung, Helligkeit) + `colorcorrect` (Farbstich in Schatten und Lichtern) | Short: je Segment auf Spielbild und kleinem Hintergrund (vor dem Hochskalieren); 16:9: einmal nach den Übergängen |
+| Kill-Titel, Zähler | `drawtext`, DejaVu Sans Bold (`[shorts].schriften`): wächst kurz über seine Größe (Pop-in), blendet ein und aus, gleitet leicht herein | nach dem Look (Schrift bleibt reinweiß); Short: Zähler zwischen clip-battle.de und Spielbild, Titel darunter (über den unteren 25 % für die App-Knöpfe) – auch beim Pop nie im Spielbild; die Höhe des Spielbilds misst `rendere` an den Quellen (4:3-Aufnahmen sind höher). 16:9: Titel mittig, nur in der Blende |
+| Klänge | selbst erzeugte WAVs (`sfx.py`), samplegenau verschoben | nach dem Ducking dazugemischt (die Musik weicht nur dem Spielton aus) |
+
+Warum `colorcorrect` und `chromashift` statt `curves` und `rgbashift`: beide rechnen direkt in YUV. Ein RGB-Filter
+lässt ffmpeg **jedes** Bild zweimal umrechnen, auch außerhalb der Blende – lokal gemessen bei 720×1280: `rgbashift`
+9 ms je Bild (für 0,2 s Glitch), `curves` 8 ms, `colorcorrect` 2 ms. Im Short rechnet der Look zudem nur auf dem
+Spielbild (ein Drittel des Bildes) und dem Hintergrund in Viertelgröße. Gemessen (CPU-Zeit des Filtergraphen,
+45-s-Short aus 1080p60, ohne Encoder): ohne Effekte 46,6 s, mit Zoom, Look, Texten, Blenden-Filtern und Klängen
+50,3 s (+8 %).
+
+Der Filtergraph ist ein einziges Argument auf der Befehlszeile (Linux: höchstens 128 KB). `compose` prüft ihn
+darum schon beim Planen und bricht über 64 KB ab (`Schnittliste zu groß`); 40 Segmente mit 400 Ereignissen
+ergeben rund 57 KB.
 
 ## pve-big schaltet sich selbst ab (clip-leerlauf)
 `deploy/big/clip-leerlauf` läuft auf pve-big jede Minute und fährt ihn nach 20 min ohne echten Zugriff auf den

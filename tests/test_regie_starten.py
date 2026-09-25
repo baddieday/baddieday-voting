@@ -23,7 +23,7 @@ class RegieStarten(unittest.TestCase):
 echo "pct $*" >> "$STUB/aufrufe"
 case "$1" in
   status) echo "status: running" ;;
-  exec) shift 3; case "$1" in awk) echo "40:61:86:2e:9a:ff" ;; test|python3) exit 1 ;;
+  exec) shift 3; case "$1" in awk) echo "aa:bb:cc:dd:ee:01" ;; test|python3) exit 1 ;;
         sh) case "$*" in *sha256sum*) printf 'aaaa  clip-leerlauf\r\nbbbb  einrichten.sh\r\n' ;; esac ;; esac ;;
   pull) [ -n "$NEUE_VERSION" ] && printf '#!/usr/bin/env bash\necho "NEU $REGIE_NEU $*"\n' > "$4" ;;
 esac''',
@@ -51,7 +51,7 @@ n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo $n > "$STUB/n"; [ $n -
         r = subprocess.run(["bash", str(SKRIPT)], capture_output=True, text=True, env=env, timeout=60)
         empfang.close()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(paket["daten"], b"\xff" * 6 + bytes.fromhex("4061862e9aff") * 16)  # echtes WoL-Paket
+        self.assertEqual(paket["daten"], b"\xff" * 6 + bytes.fromhex("aabbccddee01") * 16)  # echtes WoL-Paket
         aufrufe = (self.t / "stub/aufrufe").read_text()
         reihenfolge = ["fetch -q origin +refs/heads/sprint-regisseur:refs/remotes/origin/sprint-regisseur",
                        "worktree add", "einrichten.sh /srv/clips/.einrichtung/",
