@@ -1,0 +1,13 @@
+{
+  "$comment": "Antwort von claude -p auf einen TikTok-Statistik-Screenshot (Spec §7.1, §15: tolerant). Jedes Feld ist optional und darf null sein (nicht auf dem Bild). Zusätzliche Felder sind erlaubt (screenshot.normalisiere ignoriert sie). Zähler als number, damit 1240.0 nicht am Schema scheitert – screenshot.normalisiere macht Ganzzahlen daraus und lehnt 12.5 Views ab; NaN und Unendlich fallen schon hier durch (schema.pruefe: number = endliche Zahl, seit Regisseur 2.0). Zeiten in Sekunden. Hier nur Typ und 'nicht negativ'; ob die Zahlen stimmen können (voll_prozent über 100, sinkende Zähler, Wiedergabe zu lang) prüft allein publikum.pruefe_plausibel – mit Rückfrage an dich statt Ablehnung.",
+  "type": "object",
+  "properties": {
+    "views": {"type": ["number", "null"], "minimum": 0},
+    "likes": {"type": ["number", "null"], "minimum": 0},
+    "kommentare": {"type": ["number", "null"], "minimum": 0},
+    "shares": {"type": ["number", "null"], "minimum": 0},
+    "saves": {"type": ["number", "null"], "minimum": 0},
+    "wiedergabe_s": {"type": ["number", "null"], "minimum": 0},
+    "voll_prozent": {"type": ["number", "null"], "minimum": 0}
+  }
+}

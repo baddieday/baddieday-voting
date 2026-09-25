@@ -7,6 +7,28 @@
 host = "192.168.178.51"
 wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 
+# --- Lernschleife „Publikum“ (optional, docs/PUBLIKUM.md) ---------------------------------------
+# Steht absichtlich hier oben: Regisseur 2.0 hängt seine Beispiele unten an – so kommen sich beide nicht in die Quere.
+# Kein claude-Login für den Benutzer pipeline auf diesem Rechner? Dann Zahlen von Hand statt per Screenshot:
+# [lernbot]
+# screenshot_claude = false
+# Findet der Dienst claude nicht (systemd kennt ~/.local/bin nicht), den vollen Pfad eintragen – NUR wenn claude
+# unter /home liegt. Den Pfad ermitteln mit `sudo -iu pipeline command -v claude` (unten nur ein Beispiel); liegt er
+# in /usr/local/bin oder /usr/bin, nichts eintragen. Achtung: gilt auch für `decide` aus n8n und `stimmung` – ein
+# falscher Pfad schaltet Claude dort still ab (Regel-Schnittliste).
+# [decide]
+# programm = "/home/pipeline/.local/bin/claude"
+# Zum Ausprobieren (Abnahme Stufe 1) schon nach 3 statt 7 Tagen bewerten – danach wieder entfernen.
+# Erwartet: bewertet mit Score 0 und Vermerk „Basis zu klein“ (unter 5 bewerteten Posts). Scores werden nie
+# überschrieben: Posts, die in dieser Zeit bewertet werden, behalten ihre Tag-3-Messung.
+# [publikum]
+# alter_tage = 3
+# Scores reagieren dir zu stark oder zu schwach auf einen Teil? Kleinste Streuung je Teil (Standard und Begründung in
+# config/pipeline.toml, [publikum.mad_minimum]: wiedergabe 0.05, engagement 0.005, reichweite 0.1). Nur eintragen,
+# was du ändern willst; gilt nur für Scores, die danach gesetzt werden. Beispiel: Engagement-Ausreißer dämpfen:
+# [publikum.mad_minimum]
+# engagement = 0.01
+
 # --- Regisseur steuern (optional) ---------------------------------------------------------
 # Startwerte, von denen aus der Regisseur mit deinen Bewertungen weiterlernt. Nur eintragen, was du ändern willst.
 # Ansehen, was gerade gilt:  pipeline lernstand

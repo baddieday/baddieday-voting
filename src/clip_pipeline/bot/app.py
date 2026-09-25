@@ -18,7 +18,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
 
-from .. import caption, db, highlight, lernen, shorts
+from .. import caption, db, highlight, lernen, publikum, shorts
 from ..konfig import Konfig, SpeicherOffline
 from ..medien import MedienFehler
 from ..zeit import aus_iso, iso, jetzt
@@ -40,6 +40,21 @@ def _daten(context: ContextTypes.DEFAULT_TYPE):
 def _clip_text(con, konfig: Konfig, clip_id: int) -> str:
     clip = db.clip(con, clip_id)
     return texte.clip_text(clip, db.match(con, clip["match_id"]), konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+
+
+def _upload_text(con, clip_id: int, stand: dict[str, bool]) -> str:
+    """Upload-Checkliste (texte.upload_text) und darunter je Post der Lernschleife eine Zeile mit seiner Nummer.
+    Die Nummer brauchst du für die Zahlen: Screenshot aus der TikTok-Statistik an den Lern-Bot, Bildunterschrift
+    „#17“ (Spec §7.1). Ohne Post (z. B. nur clip-battle.de abgehakt) keine Zeile. Nur Datenbank, kein Dateizugriff."""
+    text = texte.upload_text(db.clip(con, clip_id), stand)
+    zeilen = [
+        f"📈 Post #{post['id']} ({aktionen.PLATTFORM_NAMEN[plattform]}) – für die Zahlen: Screenshot an den Lern-Bot, "
+        f"Bildunterschrift #{post['id']}"
+        # alle Post-Plattformen: auch ein Post von früher zählt, wenn die Plattform nicht mehr in [publikum] steht
+        for plattform in publikum.PLATTFORMEN
+        if (post := publikum.post_zu(con, "clip", clip_id, plattform)) is not None
+    ]
+    return "\n\n".join([text, "\n".join(zeilen)]) if zeilen else text
 
 
 # --- Outbox: neue Clips verschicken -------------------------------------------
@@ -280,7 +295,8 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     clip_id = int(context.args[0])
     antwort, stand = aktionen.link_speichern(con, clip_id, context.args[1], konfig)
-    text = antwort.hinweis if stand is None else texte.upload_text(db.clip(con, clip_id), stand)
+    # escape: der Hinweis kann einen Fehlergrund mit „<“ enthalten – als HTML würde Telegram die Antwort ablehnen
+    text = escape(antwort.hinweis) if stand is None else _upload_text(con, clip_id, stand)
     await update.effective_message.reply_text(
         text, parse_mode=ParseMode.HTML, reply_markup=_markup(antwort.knoepfe) if stand is not None else None
     )
@@ -327,10 +343,11 @@ async def bei_klick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if aktion in aktionen.PLATTFORM_KUERZEL:
         antwort, stand = aktionen.plattform_erledigt(con, nummer, aktionen.PLATTFORM_KUERZEL[aktion], konfig)
         await query.answer(antwort.hinweis)
-        clip = db.clip(con, nummer)
+        if stand is None:  # nicht abgehakt (Grund steht in der Antwort) – die Checkliste bleibt, wie sie war
+            return
         with contextlib.suppress(BadRequest):
             await query.edit_message_text(
-                texte.upload_text(clip, stand), parse_mode=ParseMode.HTML, reply_markup=_markup(antwort.knoepfe)
+                _upload_text(con, nummer, stand), parse_mode=ParseMode.HTML, reply_markup=_markup(antwort.knoepfe)
             )
         return
 

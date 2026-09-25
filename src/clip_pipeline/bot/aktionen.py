@@ -5,6 +5,10 @@ Callback-Daten (Telegram erlaubt max. 64 Byte):
   b:<battle>:a|b|s  Battle entscheiden                     n:0       nächstes Battle
   p:<clip>   Upload-Paket     y:/t:/c:<clip>  YouTube / TikTok / clip-battle.de erledigt
   hf:<highlight> / hv:<highlight>  Highlight-Video freigeben / verwerfen
+
+Lernschleife „Publikum“ (Spec §10.4, letzter Punkt): Das Häkchen (y:/t:) und /link legen zusätzlich den Post an
+(Tabelle posts, publikum.post_anlegen) – für die Plattformen aus [publikum].plattformen, nie für clip-battle.de.
+Häkchen, Link und Post landen in EINER Transaktion: entweder alles oder nichts (siehe plattform_erledigt).
 """
 
 from __future__ import annotations
@@ -14,7 +18,8 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from .. import db, elo
+from .. import db, elo, publikum
+from ..konfig import KonfigFehler
 from ..zeit import aus_iso, im_zeitfenster, iso, jetzt, spielabend
 
 log = logging.getLogger("clip-bot")
@@ -230,21 +235,89 @@ def knoepfe_upload(clip_id: int, stand: dict[str, bool]) -> Knoepfe:
     return [[k] for k in offen]
 
 
-def plattform_erledigt(con: sqlite3.Connection, clip_id: int, plattform: str, konfig) -> tuple[Antwort, dict[str, bool]]:
-    """Hakt eine Plattform ab. Sind alle Pflicht-Plattformen erledigt, gilt der Clip als veröffentlicht."""
-    with db.transaktion(con):
-        upload_stand(con, clip_id, konfig)
-        con.execute(
-            "UPDATE veroeffentlichungen SET erledigt = COALESCE(erledigt, ?) WHERE clip_id = ? AND plattform = ?",
-            (iso(jetzt()), clip_id, plattform),
-        )
-        stand = upload_stand(con, clip_id, konfig)
-        pflicht, _ = plattformen(konfig)
-        fertig = all(stand[p] for p in pflicht)
-        if fertig:
-            db.status_wechsel(con, clip_id, ("freigegeben",), "veroeffentlicht")
+# Telegram zeigt die Antwort auf einen Knopf (answerCallbackQuery) nur mit höchstens 200 Zeichen an
+HINWEIS_MAX = 200
+# So viel vom Fehlergrund kommt in die Meldung an dich – lässt neben „⚠️ YouTube Shorts nicht abgehakt …“ (rund
+# 65 Zeichen) sicher Platz unter HINWEIS_MAX; den ganzen Grund samt Traceback gibt es im Log
+GRUND_MAX = 100
+# Fehler, mit denen die Lernschleife einen Post ablehnt (publikum.clip_post_daten, post_anlegen, link_nachtragen):
+# kaputtes JSON in clips.merkmale oder Dauer ≤ 0 (ValueError), Clip oder Post fehlt (KeyError, ValueError),
+# [publikum] unvollständig (KonfigFehler). Sie werden zu einer Meldung an dich. Datenbankfehler (sqlite3.Error)
+# gehören absichtlich nicht dazu – die fliegen wie bisher weiter (bot.app.bei_fehler loggt sie).
+POST_FEHLER = (ValueError, KeyError, KonfigFehler)
+
+
+def plattform_erledigt(con: sqlite3.Connection, clip_id: int, plattform: str, konfig, *,
+                       zeit: datetime | None = None) -> tuple[Antwort, dict[str, bool] | None]:
+    """Hakt eine Plattform ab. Sind alle Pflicht-Plattformen erledigt, gilt der Clip als veröffentlicht.
+    Für Plattformen aus [publikum].plattformen entsteht dabei auch der Post der Lernschleife (_post_anlegen).
+
+    zeit: Zeitpunkt des Häkchens (None = jetzt; Tests setzen feste Zeiten). Rückgabe (Antwort, {plattform:
+    erledigt?}), z. B. (Antwort("TikTok ✅"), {"youtube": False, "tiktok": True, "clipbattle": False}).
+
+    Alles in EINER Transaktion: Lässt sich der Post nicht anlegen (POST_FEHLER), gibt es auch kein Häkchen – lieber
+    ein sichtbarer Fehler als ein TikTok-Post, der still in der Lernschleife fehlt. Rückgabe dann (Antwort
+    „⚠️ TikTok nicht abgehakt – …: <Grund>“, None); ist der Grund behoben, geht derselbe Knopf nochmal.
+    Datenbankfehler fliegen weiter, auch dann ist nichts halb gespeichert."""
+    try:
+        with db.transaktion(con):
+            antwort, stand = _abhaken(con, clip_id, plattform, konfig, zeit or jetzt())
+    except POST_FEHLER as fehler:
+        return _nicht_abgehakt(clip_id, plattform, fehler), None
+    return antwort, stand
+
+
+def _abhaken(con: sqlite3.Connection, clip_id: int, plattform: str, konfig,
+             zeit: datetime) -> tuple[Antwort, dict[str, bool]]:
+    """Rumpf von plattform_erledigt – OHNE eigene Transaktion, weil db.transaktion (BEGIN IMMEDIATE) sich nicht
+    verschachteln lässt. So legen plattform_erledigt und link_speichern je EINE Transaktion darum.
+
+    Schritte: Plattform-Einträge anlegen, Häkchen setzen (ein Doppelklick behält den ersten Zeitpunkt), Post für die
+    Lernschleife anlegen, und sind alle Pflicht-Plattformen erledigt: Status „veröffentlicht“."""
+    upload_stand(con, clip_id, konfig)
+    con.execute(
+        "UPDATE veroeffentlichungen SET erledigt = COALESCE(erledigt, ?) WHERE clip_id = ? AND plattform = ?",
+        (iso(zeit), clip_id, plattform),
+    )
+    _post_anlegen(con, clip_id, plattform, konfig, zeit)
+    stand = upload_stand(con, clip_id, konfig)
+    pflicht, _ = plattformen(konfig)
+    fertig = all(stand[p] for p in pflicht)
+    if fertig:
+        db.status_wechsel(con, clip_id, ("freigegeben",), "veroeffentlicht")
     hinweis = f"{PLATTFORM_NAMEN.get(plattform, plattform)} ✅" + (" – veröffentlicht!" if fertig else "")
     return Antwort(hinweis, None, knoepfe_upload(clip_id, stand)), stand
+
+
+def _post_anlegen(con: sqlite3.Connection, clip_id: int, plattform: str, konfig, zeit: datetime) -> None:
+    """Legt den Post der Lernschleife an (Spec §10.4): art "clip", Dauer, Rezept und Merkmale nur aus der Datenbank
+    (publikum.clip_post_daten – kein Dateizugriff, der Bot bleibt nie an einem hängenden NFS oder schlafenden
+    pve-big stehen). Nur für Plattformen aus [publikum].plattformen (Standard ["tiktok"]); clip-battle.de ist nie
+    eine (dort wird eingereicht, nicht geschaut). Gibt es den Post schon (Doppelklick, /link nach dem Häkchen),
+    bleibt er, wie er ist (publikum.post_anlegen). Läuft in der Transaktion des Aufrufers.
+
+    gepostet_utc = Zeitpunkt des ERSTEN Häkchens dieser Plattform (veroeffentlichungen.erledigt), nicht „jetzt“:
+    War ein Clip schon vor der Lernschleife abgehakt, legt ein späteres /link den Post sonst mit falschem Alter an –
+    und am Alter hängt, welche Messung der Score nimmt. Beispiel: TikTok am 15.09. abgehakt, /link am 25.09. →
+    gepostet_utc 15.09. Hat die Plattform keine Checklisten-Zeile (nicht in [veroeffentlichung].pflicht/zusatz),
+    gilt zeit, der Zeitpunkt dieses Häkchens bzw. /link."""
+    if plattform not in publikum.post_plattformen(konfig):
+        return
+    zeile = con.execute("SELECT erledigt FROM veroeffentlichungen WHERE clip_id = ? AND plattform = ?",
+                        (clip_id, plattform)).fetchone()
+    publikum.post_anlegen(con, art="clip", ziel_id=clip_id, plattform=plattform,
+                          daten=publikum.clip_post_daten(con, konfig, clip_id),
+                          zeit=aus_iso(zeile["erledigt"]) if zeile else zeit)
+
+
+def _nicht_abgehakt(clip_id: int, plattform: str, fehler: Exception) -> Antwort:
+    """Antwort, wenn Häkchen und Post zurückgenommen wurden: kurz genug für eine Knopf-Antwort (HINWEIS_MAX),
+    Einzelheiten samt Traceback ins Log (dort stehen nur Datenbank-Inhalte, keine Secrets)."""
+    log.error("Clip #%s: Post für %s nicht angelegt – Häkchen zurückgenommen", clip_id, plattform, exc_info=fehler)
+    # args[0] statt str(): str(KeyError("x")) wäre "'x'" mit Anführungszeichen
+    grund = str(fehler.args[0]) if fehler.args else type(fehler).__name__
+    hinweis = f"⚠️ {PLATTFORM_NAMEN.get(plattform, plattform)} nicht abgehakt – Post fürs Lernen ging nicht: "
+    return Antwort((hinweis + grund[:GRUND_MAX])[:HINWEIS_MAX])
 
 
 PLATTFORM_DOMAINS = {
@@ -263,16 +336,32 @@ def plattform_aus_url(url: str) -> str | None:
     return next((p for p, domains in PLATTFORM_DOMAINS.items() if (teile.hostname or "").lower() in domains), None)
 
 
-def link_speichern(con: sqlite3.Connection, clip_id: int, url: str, konfig) -> tuple[Antwort, dict[str, bool] | None]:
-    """/link <clip> <url>: Plattform am Link erkennen, abhaken und den Link merken (für clip-battle.de)."""
+def link_speichern(con: sqlite3.Connection, clip_id: int, url: str, konfig, *,
+                   zeit: datetime | None = None) -> tuple[Antwort, dict[str, bool] | None]:
+    """/link <clip> <url>: Plattform am Link erkennen, abhaken und den Link merken (für clip-battle.de).
+
+    Hat die Plattform einen Post (TikTok, siehe _post_anlegen), bekommt er url und video_id (publikum.link_nachtragen);
+    gab es noch kein Häkchen, entsteht der Post hier. Ein zweiter /link ersetzt einen falschen Link – in der
+    Checkliste und im Post. zeit: Zeitpunkt (None = jetzt), gilt nur, wenn die Plattform noch nicht abgehakt war.
+
+    Häkchen, Link und Post in EINER Transaktion, Fehler wie bei plattform_erledigt → („⚠️ … nicht abgehakt …“, None),
+    nichts gespeichert. Unbekannter Link oder nicht freigegebener Clip → (Hinweis, None) wie bisher."""
     plattform = plattform_aus_url(url)
     if plattform is None:
         return Antwort("Unbekannter Link – erwartet https://… von YouTube, TikTok oder clip-battle.de"), None
     zeile = db.clip(con, clip_id)
     if zeile is None or zeile["status"] not in db.BEWERTET:
         return Antwort(f"Clip #{clip_id} ist nicht freigegeben"), None
-    antwort, stand = plattform_erledigt(con, clip_id, plattform, konfig)
-    con.execute("UPDATE veroeffentlichungen SET url = ? WHERE clip_id = ? AND plattform = ?", (url.strip(), clip_id, plattform))
+    try:
+        with db.transaktion(con):
+            antwort, stand = _abhaken(con, clip_id, plattform, konfig, zeit or jetzt())
+            con.execute("UPDATE veroeffentlichungen SET url = ? WHERE clip_id = ? AND plattform = ?",
+                        (url.strip(), clip_id, plattform))
+            # post_zu statt eigenem SQL: die eine Stelle, an der beide Bots nach einem Post sehen
+            if (post := publikum.post_zu(con, "clip", clip_id, plattform)) is not None:
+                publikum.link_nachtragen(con, post["id"], url)
+    except POST_FEHLER as fehler:
+        return _nicht_abgehakt(clip_id, plattform, fehler), None
     return antwort, stand
 
 

@@ -222,9 +222,12 @@ async def _sende_entwuerfe(app) -> int:
 
 
 async def sende_meldungen(app) -> int:
+    from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
+
     con, chat = app.bot_data["con"], app.bot_data["erlaubt"]
     gesendet = 0
-    for m in con.execute("SELECT id, text FROM lern_meldungen WHERE gesendet IS NULL ORDER BY id").fetchall():
+    # Meldungen der Lernschleife (publikum:…, woche:…) warten die Ruhezeit ab, alle anderen kommen sofort (Spec §12)
+    for m in lernbot_publikum.faellige_lern_meldungen(con, app.bot_data["konfig"]):
         for stueck in stuecke(m["text"]):
             await app.bot.send_message(chat, stueck)
         con.execute("UPDATE lern_meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
@@ -254,10 +257,13 @@ def blick_auf_leerlauf(app) -> None:
 
 
 async def _schleife(app) -> None:
+    from . import lernbot_zahlen  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
+
     konfig = app.bot_data["konfig"]
     while True:
         blick_auf_leerlauf(app)
-        for aufgabe in (sende_meldungen, sende_entwuerfe):
+        # lernbot_zahlen.aufraeumen: wartende Screenshots nach 10 min verwerfen (Lernschleife, Spec §7.1)
+        for aufgabe in (sende_meldungen, sende_entwuerfe, lernbot_zahlen.aufraeumen):
             try:
                 await aufgabe(app)
             except Exception:
@@ -273,7 +279,10 @@ async def _schleife(app) -> None:
 # --- Handler ---------------------------------------------------------------------------
 
 async def cmd_hilfe(update, context) -> None:
-    await update.effective_message.reply_text(HILFE, parse_mode="HTML")
+    from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
+
+    # HILFE bleibt unverändert; der Teil zur Lernschleife „Publikum“ kommt als Zusatz dahinter
+    await update.effective_message.reply_text(HILFE + lernbot_publikum.HILFE_ZUSATZ, parse_mode="HTML")
 
 
 async def cmd_stand(update, context) -> None:
@@ -383,7 +392,9 @@ async def bei_klick(update, context) -> None:
         weiter = bool(context.bot_data["konfig"].wert("lernbot.naechster_nach_bewertung", True))
         await query.answer("Gespeichert – der nächste Entwurf kommt gleich." if weiter
                            else "Gespeichert – fließt in den nächsten Entwurf ein.")
-        knoepfe = None
+        from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
+
+        knoepfe = lernbot_paket.knoepfe_nach_fertig(eid, bewertung, zeile["format"])  # 👍-Short: „📦 Upload-Paket“
         if weiter:  # Lernschleife: sofort der nächste Entwurf, schon mit dieser Bewertung eingerechnet
             context.application.create_task(neuer_entwurf(context.application, zeile["format"]))
     with contextlib.suppress(Exception):  # "message is not modified" bei Doppelklick
@@ -420,6 +431,13 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
                            ("lernstand", cmd_lernstand), ("musik", cmd_musik), ("entwurf", cmd_entwurf)):
         app.add_handler(CommandHandler(name, funktion, filters=nur_ich))
     app.add_handler(MessageHandler(nur_ich & (filters.AUDIO | filters.Document.AUDIO), bei_audio))
+    # Lernschleife „Publikum“ (Spec §7.1, §10.4, §14 Stufe 1): Screenshots/Hand-Eingabe, Upload-Paket und /link,
+    # /publikum – eigene Module, hier nur eingehängt. VOR dem allgemeinen Klick-Handler: der liest jeden Knopf als
+    # Entwurfs-Knopf; die Module melden ihre Knöpfe (pl/pm, pk/pt) mit eigenem Muster an.
+    from . import lernbot_paket, lernbot_publikum, lernbot_zahlen
+
+    for modul in (lernbot_zahlen, lernbot_paket, lernbot_publikum):
+        modul.registriere(app, nur_ich)
     app.add_handler(CallbackQueryHandler(bei_klick))
     app.add_error_handler(bei_fehler)
     return app
