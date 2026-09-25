@@ -142,4 +142,4 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - 2026-09-25 (L4, Spec E24): **Zahlen zuerst per Screenshot** (claude -p, Leserecht), Display API im Sandbox-Modus als zweite Stufe; Wiedergabezeit nur aus der App.
 - 2026-09-25 (L5, Spec E25): Der **Wochen-Analyst schlägt nur vor** (Schema-geprüft), entscheidet nie; jede Hypothese wird per Knopf getestet.
 - 2026-09-25 (L6, Spec E26): **Clip-Bot minimal angefasst** (`posts` aus `/link`, Erwartungs-Zeile, Battle-Paarung nach Unsicherheit); n8n-Vertrag und Session-Schnittliste unverändert.
-  L1–L6 sind Arbeitstitel (E21 ist vergeben) und bekommen beim Merge mit Regisseur 2.0 fortlaufende E-Nummern. Die offenen Annahmen des Sprints (A1–A40) und Rückfragen R1–R5: `docs/ENTSCHEIDUNGEN.md`, „Annahmen im Sprint Lernschleife“.
+  L1–L6 sind die Nummern dieser Entscheidungen (E21 war schon vergeben); sie bleiben so (Florian 25.09.: „L1–L6 ok“). Die offenen Annahmen des Sprints (A1–A40) und Rückfragen R1–R5: `docs/ENTSCHEIDUNGEN.md`, „Annahmen im Sprint Lernschleife“.

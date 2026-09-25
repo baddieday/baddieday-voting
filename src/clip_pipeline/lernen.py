@@ -11,13 +11,19 @@ Paare entstehen aus
 Sicherungen: Mindestmenge, langsam wachsendes Vertrauen, Leine um die Startgewichte
 und ein Vergleich mit den Startgewichten (nie schlechter werden).
 Alles wird jedes Mal komplett neu aus der Historie berechnet -> reproduzierbar.
+
+Stufe 2 (Spec §8.3): dritte Paar-Quelle Publikum (publikum_paare), jedes Paar trägt ein Gewicht, und es gibt zwei
+Trefferquoten (du: Battles + Freigaben · Publikum).
+
+Import-Regel (Plan Stufe 2, Leitplanke 7; tests/test_vertrag_stufe2.py prüft sie):
+    lernen → db, vorbewertung, zeit, merkmale (ab Paket D)      nie: mikro, stimmung, verarbeitung
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import islice, product
 
 from .db import BEWERTET, merkmale
@@ -27,9 +33,10 @@ from .zeit import aus_iso, iso, jetzt, spielabend
 
 @dataclass
 class Paar:
-    besser: dict[str, float]
+    besser: dict[str, float]      # NICHT mit 0 auffüllen: fehlt = unbekannt (Annahme S2-A17)
     schlechter: dict[str, float]
-    art: str  # battle | freigabe
+    art: str  # battle | freigabe | publikum  (= Quelle, Spec §8.3)
+    gewicht: float = 1.0          # battle 1,0 · freigabe [lernen].gewicht_freigabe · publikum 1,0 (Paket D)
 
 
 @dataclass
@@ -44,6 +51,12 @@ class Ergebnis:
     trefferquote_start: float | None
     aktiv: bool
     grund: str
+    # Stufe 2 (Paket D) – Standardwerte, damit bisherige Aufrufer unverändert laufen. trefferquote oben = deine Quote.
+    trefferquote_publikum: float | None = None          # ab dem 1. Publikums-Paar; None nur bei 0 Paaren
+    trefferquote_publikum_start: float | None = None
+    paare_je_quelle: dict[str, int] = field(default_factory=dict)   # {"battle": n, "freigabe": n, "publikum": n}
+    ohne_mic: int = 0                                   # Clips ohne Mic-Analyse (mic_stand NULL, nicht verworfen)
+    auseinander: str | None = None                      # „Du magst X, das Publikum Y“ (ab 10 Publikums-Paaren)
 
 
 def score(gewichte: dict[str, float], merkmal_werte: dict[str, float]) -> float:
@@ -105,6 +118,13 @@ def sammle_paare(con: sqlite3.Connection, *, zonen_name: str, wechsel_stunde: in
         for gut, schlecht in islice(product(gruppe["gut"], gruppe["schlecht"]), max_pro_abend):
             paare.append(Paar(gut, schlecht, "freigabe"))
     return paare, len(entschieden), len(battles)
+
+
+def publikum_paare(con: sqlite3.Connection, konfig) -> list[Paar]:
+    """Paare aus dem Publikum (Spec §8.3): je zwei bewertete Posts derselben Plattform und Art mit
+    |score_A − score_B| ≥ [publikum].paar_abstand, ohne „Basis zu klein“, nicht derselbe Moment; Clip → Clip-Merkmale,
+    Entwurf → Hook-Moment. Höchstens [publikum].max_paare jüngste. Paket D."""
+    raise NotImplementedError
 
 
 def berechne(con: sqlite3.Connection, konfig) -> Ergebnis:

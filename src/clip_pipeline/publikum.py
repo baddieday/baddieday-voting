@@ -549,13 +549,14 @@ def ist_faellig(post: sqlite3.Row | dict, konfig: Konfig, zeit: datetime | None 
     return alter_in_tagen(post["gepostet_utc"], zeit or jetzt()) >= float(einstellung(konfig, "alter_tage"))
 
 
-def robust_z(x: float, basis: list[float], mad_minimum: float) -> tuple[float, float, float]:
-    """Robuste Standardisierung (Spec §6.3): z = (x − Median) / (1,4826 · max(MAD, mad_minimum)), auf ±2,5 begrenzt.
+def robust_z(x: float, basis: list[float], minimum: float) -> tuple[float, float, float]:
+    """Robuste Standardisierung (Spec §6.3): z = (x − Median) / (1,4826 · max(MAD, minimum)), auf ±2,5 begrenzt.
     Die einzige Stelle, an der diese Formel steht.
 
-    mad_minimum: kleinste Streuung DIESES Score-Teils aus [publikum.mad_minimum] (score_fuer gibt je Teil den
+    minimum: kleinste Streuung DIESES Score-Teils aus [publikum.mad_minimum] (score_fuer gibt je Teil den
     passenden Wert mit, siehe _mad_minima). Rückgabe (z, median, mad) – mad ist der gemessene MAD (vor dem
     Minimum), damit score_teile ehrlich bleibt.
+    erwartung.py (Stufe 2) nutzt dieselbe Formel mit einem Minimum auf der Punkte-Skala ([erwartung].mad_minimum).
     Beispiel: basis [1, 2, 3, 4, 5], x = 5, Minimum 0,1 → Median 3, MAD 1, z = 2/1,4826 ≈ 1,349.
     Zahlenbeispiel, warum das Minimum je Teil verschieden ist (Begründung in config/pipeline.toml): Engagement-Werte
     [0,05 0,06 0,07 0,08 0,09] haben MAD 0,01. Mit dem Engagement-Minimum 0,005 zählt der echte MAD: x = 0,09 ergibt
@@ -566,7 +567,7 @@ def robust_z(x: float, basis: list[float], mad_minimum: float) -> tuple[float, f
         raise ValueError("Leere Vergleichsbasis – ohne Vergleich gibt es keinen z-Wert")
     median = statistics.median(basis)
     mad = statistics.median(abs(b - median) for b in basis)
-    z = (x - median) / (MAD_FAKTOR * max(mad, mad_minimum))
+    z = (x - median) / (MAD_FAKTOR * max(mad, minimum))
     return max(-Z_GRENZE, min(Z_GRENZE, z)), median, mad
 
 

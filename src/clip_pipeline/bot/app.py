@@ -18,7 +18,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
 
-from .. import caption, db, highlight, lernen, publikum, shorts
+from .. import caption, db, erwartung, highlight, lernen, publikum, shorts
 from ..konfig import Konfig, SpeicherOffline
 from ..medien import MedienFehler
 from ..zeit import aus_iso, iso, jetzt
@@ -236,7 +236,10 @@ async def cmd_rangliste(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def cmd_gewichte(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     con, konfig, _ = _daten(context)
     version, ergebnis = lernen.aktualisiere(con, konfig)
-    await update.effective_message.reply_text(texte.gewichte_text(ergebnis, version), parse_mode=ParseMode.HTML)
+    text = texte.gewichte_text(ergebnis, version)
+    if zusatz := erwartung.trefferquote_text(con, konfig):  # Spec §10.5 – leer, solange nichts zu zeigen ist
+        text += "\n" + escape(zusatz)
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 async def sende_paket(context: ContextTypes.DEFAULT_TYPE, clip_id: int) -> None:

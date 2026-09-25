@@ -283,6 +283,35 @@ victory_royale = 5.0
 laenge = -0.5
 lautstaerke = 1.0
 kommentar = 1.0
+# Stufe 2 (Spec §8.1): Florians Vorgaben, nicht gelernt. Leine wie oben – bei Startwert 0 also ±0,5.
+platzierung = 2.0      # 1/Platz: Sieg 1,0 → +2, Platz 10 → +0,2
+sniper = 1.0           # Anteil Sniper-Kills
+nahkampf = 0.0         # Anteil Shotgun/SMG/Spitzhacke – neutral, das Lernen entscheidet
+bot_opfer = -2.0       # Anteil Bot-Opfer: ein reiner Bot-Clip verliert 2 Punkte
+phase = 0.5            # 0 = Match-Start … 1 = Ende: späte Momente leicht bevorzugt
+endgame = 1.0          # beim Kill höchstens [merkmale].endgame_spieler übrig
+clutch = 2.0           # selbst am Boden gewesen und trotzdem den Kill geholt
+mic_lachen = 1.0       # Wortzähler aus dem Transkript, je auf 3 gedeckelt
+mic_jubel = 1.0
+mic_frust = 0.5
+mic_laut = 0.5         # laute Mikro-Spitzen, auf 3 gedeckelt
+spitzen = 0.25         # Spielton-Spitzen, auf 4 gedeckelt
+
+[merkmale]
+# Neue Merkmale aus Replay und Mikro (Spec §8.1, src/clip_pipeline/merkmale.py)
+endgame_spieler = 10   # Endgame: beim Kill höchstens so viele Spieler übrig
+clutch_vor_s = 30.0    # Clutch: selbst umgehauen höchstens so lange vor dem Kill …
+clutch_nach_s = 10.0   # … und danach so lange nicht gestorben
+mic = true             # Mic-Analyse im Hintergrund nach render (Whisper, nice 15); false = aus
+mic_je_lauf = 3        # höchstens so viele Clips je Hintergrundlauf (Whisper ~30–60 s je Clip, hält die Sperre)
+
+[merkmale.waffen]
+# GunType-ZAHLEN aus replay2json (kein Name – FortniteReplayReader 3.1.0 liest nur ein Byte und kennt keine Namen).
+# Kalibrieren mit `pipeline replay <datei>` an bekannten Kills (docs/PUBLIKUM.md). Nicht eingetragene Zahlen zählen
+# als sonstige und kommen einmal als Sammelmeldung je Match (Annahme S2-A4).
+sniper = []
+nahkampf = []          # Shotgun, SMG, Spitzhacke
+sonstige = []          # bekannte andere Waffen (schaltet die Meldung für diese Zahl ab)
 
 [lernen]
 # Erst ab so vielen Bewertungen (Freigaben/Verwerfungen + Battles) wird gelernt
@@ -295,6 +324,23 @@ durchlaeufe = 5
 leine_anteil = 0.5
 leine_minimum = 0.5
 max_paare_pro_abend = 20
+# Stufe 2 (Spec §8.3): Freigabe-Paare zählen halb – eine Freigabe ist nur ein indirekter Vergleich, ein Battle direkt
+gewicht_freigabe = 0.5
+# Erst ab so vielen Publikums-Paaren prüft die Schranke „nie schlechter als der Start“ auch die Publikums-Quote
+# (angezeigt wird sie ab dem ersten Paar; Annahme S2-A10)
+mindest_publikum_paare = 10
+
+[erwartung]
+# Wie wahrscheinlich gibst du frei? (Spec §10.5, src/clip_pipeline/erwartung.py)
+mindest_urteile = 10   # darunter keine Erwartung („noch keine“)
+referenz = 50          # z gegen die letzten so vielen gesendeten derselben Art
+schritte = 50          # Gradientenabstieg je Schätzung
+lernrate = 0.1         # Schrittweite des Gradientenabstiegs (Spec nennt keine; Annahme)
+l2 = 0.1               # Strafe auf a und b (nicht c), damit wenige Urteile nichts Extremes lernen
+start_a = 1.0
+start_b = 0.5
+start_c = 0.0
+mad_minimum = 0.25     # Mindest-Streuung der Moment-Scores (Punkte-Skala, nicht Publikums-Skala; Annahme)
 
 [elo]
 # Variante A aus clips_voter (src/community_clip_os.py)

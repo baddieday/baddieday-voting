@@ -21,13 +21,29 @@ MAX_DAUER_S = 60.0  # längster Clip (auch Grenze für den Schnitt von decide)
 FREMD_NACH_S = 0.5  # ein Anlauf beginnt so viel nach dem Kill eines früheren Clips …
 FREMD_VOR_AKTION_S = 1.0  # … aber spätestens so viel vor der ersten Aktion
 
-MERKMALE = ("kill_punkte", "victory_royale", "laenge", "lautstaerke", "kommentar")
+MERKMALE = ("kill_punkte", "victory_royale", "laenge", "lautstaerke", "kommentar",
+            # Stufe 2 (Spec §8.1): sieben aus dem Replay, fünf aus Mikro und Spielton (merkmale.py rechnet sie aus)
+            "platzierung", "sniper", "nahkampf", "bot_opfer", "phase", "endgame", "clutch",
+            "mic_lachen", "mic_jubel", "mic_frust", "mic_laut", "spitzen")
+# Anzeigenamen – höchstens 15 Zeichen, sonst verrutscht die Tabelle in /gewichte (bot/texte.gewichte_text)
 MERKMAL_NAMEN = {
     "kill_punkte": "Kill-Punkte",
     "victory_royale": "Victory Royale",
     "laenge": "Länge",
     "lautstaerke": "Lautstärke",
     "kommentar": "Kommentar",
+    "platzierung": "Platzierung",
+    "sniper": "Sniper",
+    "nahkampf": "Nahkampf",
+    "bot_opfer": "Bot-Opfer",
+    "phase": "Match-Phase",
+    "endgame": "Endgame",
+    "clutch": "Clutch",
+    "mic_lachen": "Mic: Lachen",
+    "mic_jubel": "Mic: Jubel",
+    "mic_frust": "Mic: Frust",
+    "mic_laut": "Mic: laut",
+    "spitzen": "Ton-Spitzen",
 }
 
 
@@ -220,15 +236,44 @@ def kandidaten(zeitleiste: Zeitleiste, einstellungen: dict) -> list[Kandidat]:
     return liste
 
 
-def bewerte(merkmale: dict[str, float], gewichte: dict[str, float], titel: str = "Kills") -> tuple[float, str]:
-    """Rechnet den Score aus und schreibt jeden Summanden nachvollziehbar auf."""
+def roh_score(merkmale: dict[str, float], gewichte: dict[str, float]) -> float:
+    """DIE Score-Formel (Spec §8.2): Summe über alle MERKMALE von Gewicht × Wert, ungerundet.
+
+    Ein Merkmal, das im Dict fehlt, zählt 0 („unbekannt“ wird beim Bewerten wie „nichts da“ behandelt).
+    Alle anderen (bewerte, lernen, regie, erwartung) rufen diese Funktion – die Summe steht nur hier.
+    Beispiel: {"kill_punkte": 3, "bot_opfer": 0.5}, Gewichte {"kill_punkte": 1, "bot_opfer": -2} → 3 − 1 = 2.0.
+    Paket A1.
+
+    Parameter: merkmale – Merkmal → Wert (z. B. clips.merkmale); Schlüssel außerhalb von MERKMALE (etwa „kills“
+    aus momente) werden übergangen. gewichte – Merkmal → Gewicht; fehlt ein Gewicht, zählt das Merkmal 0.
+    Rückgabe: die Summe als float, NICHT gerundet – gerundet wird nur für die Anzeige (bewerte), damit Lernen und
+    Rangliste mit dem genauen Wert rechnen. Fehler: Ein Wert, der keine Zahl ist, löst ValueError/TypeError aus
+    (float()); clips.merkmale ist laut Leitplanke 4 immer ein flaches Zahlen-Dict.
+    """
+    # Bewusst eine Schleife mit += in der Reihenfolge von MERKMALE, nicht sum(): Gleitkomma-Summen hängen von
+    # Reihenfolge und Verfahren ab, und sum() rechnet seit Python 3.12 kompensiert (sum([0.1] * 10) ist 1.0, die
+    # Schleife 0.9999999999999999). So bleibt bewerte byte-gleich mit dem Stand vor Stufe 2.
     summe = 0.0
+    for merkmal in MERKMALE:
+        summe += float(merkmale.get(merkmal, 0.0)) * float(gewichte.get(merkmal, 0.0))
+    return summe
+
+
+def bewerte(merkmale: dict[str, float], gewichte: dict[str, float], titel: str = "Kills") -> tuple[float, str]:
+    """Rechnet den Score aus und schreibt jeden Summanden nachvollziehbar auf.
+
+    Parameter: merkmale und gewichte wie bei roh_score; titel ersetzt den Namen „Kill-Punkte“ in der Begründung
+    (z. B. „Triple Kill“). Rückgabe: (roh_score auf 2 Stellen gerundet, Begründung). Merkmale mit Wert 0 fehlen im
+    Text; ohne jeden Summanden heißt er „keine Merkmale“. Gewicht 1 wird nicht ausgeschrieben.
+    Fehler: wie roh_score (ein Wert ohne Zahl → ValueError/TypeError).
+    Beispiel: {"kill_punkte": 6, "lautstaerke": 0.8, "laenge": 1.5}, Startgewichte, "Triple Kill"
+    → (6.05, "Triple Kill 6,0 · Länge 1,50 × −0,50 = −0,8 · Lautstärke 0,8").
+    """
     teile: list[str] = []
     for merkmal in MERKMALE:
         wert = float(merkmale.get(merkmal, 0.0))
         gewicht = float(gewichte.get(merkmal, 0.0))
-        beitrag = wert * gewicht
-        summe += beitrag
+        beitrag = wert * gewicht  # nur für den Text – die Summe rechnet roh_score (eine Formel)
         if wert == 0:
             continue
         name = titel if merkmal == "kill_punkte" else MERKMAL_NAMEN[merkmal]
@@ -236,4 +281,4 @@ def bewerte(merkmale: dict[str, float], gewichte: dict[str, float], titel: str =
             teile.append(f"{name} {zahl(beitrag)}")
         else:
             teile.append(f"{name} {zahl(wert, 2)} × {zahl(gewicht, 2)} = {zahl(beitrag)}")
-    return round(summe, 2), " · ".join(teile) or "keine Merkmale"
+    return round(roh_score(merkmale, gewichte), 2), " · ".join(teile) or "keine Merkmale"
