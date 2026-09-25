@@ -146,6 +146,36 @@ naechster_nach_bewertung = true
 # Vor jedem Entwurf so viele weitere Clips analysieren (Stimmung, Whisper) – die Auswahl wächst mit; 0 = aus
 stimmung_je_entwurf = 10
 intervall_s = 30
+# Lernschleife „Publikum“ (Spec §7.1): Screenshots der TikTok-Statistik per `claude -p` lesen (1 Aufruf je Bild,
+# zählt gegen dein Abo). false = der Bot fragt die Zahlen gleich von Hand ab (views likes wiedergabe voll%).
+# Braucht einen claude-Login für den Benutzer pipeline, den der Dienst sehen darf (docs/PUBLIKUM.md, Installation).
+screenshot_claude = true
+screenshot_prompt = "templates/screenshot-prompt.txt"
+screenshot_timeout_s = 120
+
+[publikum]
+# Lernschleife „Publikum“ (Spec §5, §6, docs/PUBLIKUM.md). Uhrzeit des täglichen Laufs `pipeline publikum bewerten`:
+# nur in deploy/systemd/clip-publikum.timer (wie bei clip-lager – eine Wahrheit).
+# Für diese Plattformen entstehen Posts (Clip-Bot: Häkchen/Link; Lern-Bot: Häkchen/Link). clip-battle.de nie.
+plattformen = ["tiktok"]
+# Der Score nimmt die Messung, die diesem Post-Alter (Tage) am nächsten liegt, und wird erst ab diesem Alter gesetzt
+alter_tage = 7
+# Messungen jünger als das zählen nicht (die ersten Tage verteilt TikTok noch)
+mindest_alter_tage = 3
+# Vergleichsbasis: so viele zuletzt bewertete Posts derselben Plattform
+fenster = 20
+# Publikums-Paare fürs Lernen (Stufe 2): Mindestabstand der Scores und höchstens so viele jüngste Paare
+paar_abstand = 0.5
+max_paare = 200
+# Upload-Fassungen der Entwürfe (1080×1920) – relativ zu [speicher].wurzel, im Puffer-Betrieb also /srv/puffer/export
+upload_ordner = "export"
+
+[publikum.gewichte]
+# Score = 0,5·Wiedergabe + 0,3·Engagement + 0,2·Reichweite (je als z-Wert gegen deine letzten Posts).
+# Ohne Wiedergabe werden Engagement und Reichweite auf 1 hochgerechnet (0,6/0,4).
+wiedergabe = 0.5
+engagement = 0.3
+reichweite = 0.2
 
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.

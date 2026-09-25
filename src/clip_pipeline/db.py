@@ -21,6 +21,11 @@ BEWERTET = ("freigegeben", "veroeffentlicht", "im_highlight")  # gilt als "gut"
 # Spalten, die nach der ersten Version dazugekommen sind: (Tabelle, Spalte, Typ)
 MIGRATIONEN = [("clips", "short_pfad", "TEXT"), ("clips", "beschreibung", "TEXT"), ("clips", "highlight_id", "TEXT")]
 
+# Lernschleife „Publikum“ (Spec §5): Zeitpunkt der Mic-Analyse (NULL = unbekannt), benutztes Rezept (JSON) und Pfad
+# der Upload-Fassung 1080×1920 eines Entwurfs. Eigene Zeile statt die obere zu verlängern: So kann ein anderer
+# Branch (Regisseur 2.0) oben ergänzen, ohne dass sich die Änderungen beim Zusammenführen in die Quere kommen.
+MIGRATIONEN += [("clips", "mic_stand", "TEXT"), ("entwuerfe", "rezept", "TEXT"), ("entwuerfe", "upload_pfad", "TEXT")]
+
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)
@@ -35,7 +40,8 @@ def verbinde(pfad: Path | str) -> sqlite3.Connection:
         if str(pfad) != ":memory:":
             con.execute("PRAGMA journal_mode = WAL")
         # regie.sql: Tabellen des Regisseurs (Sprint 09/2026) · lager.sql: Abgleich Puffer → Lager (E19)
-        for datei in ("schema.sql", "regie.sql", "lager.sql"):
+        # publikum.sql: Lernschleife „Publikum“ (posts, Messungen, …; Spec §5)
+        for datei in ("schema.sql", "regie.sql", "lager.sql", "publikum.sql"):
             con.executescript(resources.files("clip_pipeline").joinpath(datei).read_text(encoding="utf-8"))
         for tabelle, spalte, typ in MIGRATIONEN:
             if spalte not in {z["name"] for z in con.execute(f"PRAGMA table_info({tabelle})")}:

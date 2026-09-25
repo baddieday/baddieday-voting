@@ -19,6 +19,20 @@ B, H = 1080, 1920
 UEBERBLENDUNG = 0.5
 
 
+def endcard_s(konfig: Konfig) -> float:
+    """Länge der Endcard in Sekunden: [shorts].endcard_s (2,5), bei [shorts].endcard = false 0."""
+    s = konfig.abschnitt("shorts")
+    return float(s.get("endcard_s", 2.5)) if s.get("endcard", True) else 0.0
+
+
+def gesamtdauer(dauer_s: float, konfig: Konfig) -> float:
+    """Wie lang der fertige Short wird – die einzige Stelle dieser Rechnung (filtergraph und die Lernschleife,
+    publikum.clip_post_daten, nutzen sie). Mit Endcard: Clip + Endcard − Überblendung, weil sich beide 0,5 s
+    überlappen; ohne Endcard: genau der Clip. Beispiel: 20 s Clip, Endcard 2,5 s → 22,0 s; endcard = false → 20,0 s."""
+    endcard = endcard_s(konfig)
+    return dauer_s + endcard - UEBERBLENDUNG if endcard > 0 else dauer_s
+
+
 def schrift(konfig: Konfig) -> Path:
     for kandidat in konfig.wert("shorts.schriften", []):
         if Path(kandidat).is_file():
@@ -81,7 +95,8 @@ def filtergraph(*, dauer: float, fps: int, tonspuren: int, layout: str, konfig: 
         kette = "[mitlogo]"
     teile.append(f"{kette}fps={fps},format=yuv420p,settb=AVTB[haupt]")
 
-    endcard = float(s.get("endcard_s", 2.5)) if s.get("endcard", True) else 0.0
+    endcard = endcard_s(konfig)
+    gesamt = gesamtdauer(dauer, konfig)
     if endcard > 0:
         zeilen = [("Wer gewinnt das Battle?", 64, 0.40), ("Stimm ab auf", 64, 0.47), ("clip-battle.de", 120, 0.53)]
         karte = ",".join(
@@ -90,10 +105,8 @@ def filtergraph(*, dauer: float, fps: int, tonspuren: int, layout: str, konfig: 
         )
         teile.append(f"color=c=0x0f0f1a:s={B}x{H}:r={fps}:d={endcard},{karte},format=yuv420p,settb=AVTB[karte]")
         teile.append(f"[haupt][karte]xfade=transition=fade:duration={UEBERBLENDUNG}:offset={max(0.0, dauer - UEBERBLENDUNG):.3f}[v]")
-        gesamt = dauer + endcard - UEBERBLENDUNG
     else:
         teile.append("[haupt]null[v]")
-        gesamt = dauer
 
     if tonspuren:
         eingaenge = "".join(f"[0:a:{i}]" for i in range(tonspuren))

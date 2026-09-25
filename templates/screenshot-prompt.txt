@@ -1,0 +1,22 @@
+Lies mit dem Read-Tool die Bilddatei {bild} im aktuellen Ordner. Sie zeigt die Statistik EINES Videos in
+der TikTok-App (Analyse/Insights). Lies nur Zahlen ab, die auf dem Bild stehen. Rate nichts und rechne nichts
+hoch; was nicht zu sehen ist, ist null.
+
+Felder:
+- views: Aufrufe (Videoaufrufe / Views)
+- likes: Likes (Herzen)
+- kommentare: Kommentare
+- shares: Geteilt / Shares
+- saves: Gespeichert / Favoriten
+- wiedergabe_s: durchschnittliche Wiedergabezeit in Sekunden
+- voll_prozent: „Vollständig angesehen“ / „Watched full video“ in Prozent (0 bis 100)
+
+Umrechnen:
+- Abkürzungen ausschreiben: „1,2K“ oder „1.2K“ = 1200, „3,4 Tsd.“ = 3400, „1,1M“ oder „1,1 Mio.“ = 1100000.
+- Tausenderpunkte und -leerzeichen weglassen: „12.345“ = 12345.
+- Zeiten in Sekunden: „0:07“ = 7, „1:05“ = 65, „7,3 s“ = 7.3, „7.3s“ = 7.3.
+- Prozent ohne Zeichen: „34,5 %“ = 34.5.
+- Zähler (views, likes, kommentare, shares, saves) als ganze Zahl ohne Nachkommastellen.
+
+Antworte ausschließlich mit genau einem JSON-Objekt in dieser Form, ohne weiteren Text:
+{"views": 1240, "likes": 61, "kommentare": 3, "shares": 5, "saves": 2, "wiedergabe_s": 6.8, "voll_prozent": 34.0}

@@ -248,10 +248,13 @@ def blick_auf_leerlauf(app) -> None:
 
 
 async def _schleife(app) -> None:
+    from . import lernbot_zahlen  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
+
     konfig = app.bot_data["konfig"]
     while True:
         blick_auf_leerlauf(app)
-        for aufgabe in (sende_meldungen, sende_entwuerfe):
+        # lernbot_zahlen.aufraeumen: wartende Screenshots nach 10 min verwerfen (Lernschleife, Spec §7.1)
+        for aufgabe in (sende_meldungen, sende_entwuerfe, lernbot_zahlen.aufraeumen):
             try:
                 await aufgabe(app)
             except Exception:
@@ -377,7 +380,9 @@ async def bei_klick(update, context) -> None:
         weiter = bool(context.bot_data["konfig"].wert("lernbot.naechster_nach_bewertung", True))
         await query.answer("Gespeichert – der nächste Entwurf kommt gleich." if weiter
                            else "Gespeichert – fließt in den nächsten Entwurf ein.")
-        knoepfe = None
+        from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
+
+        knoepfe = lernbot_paket.knoepfe_nach_fertig(eid, bewertung, zeile["format"])  # 👍-Short: „📦 Upload-Paket“
         if weiter:  # Lernschleife: sofort der nächste Entwurf, schon mit dieser Bewertung eingerechnet
             context.application.create_task(neuer_entwurf(context.application, zeile["format"]))
     with contextlib.suppress(Exception):  # "message is not modified" bei Doppelklick
@@ -414,6 +419,13 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
                            ("lernstand", cmd_lernstand), ("musik", cmd_musik), ("entwurf", cmd_entwurf)):
         app.add_handler(CommandHandler(name, funktion, filters=nur_ich))
     app.add_handler(MessageHandler(nur_ich & (filters.AUDIO | filters.Document.AUDIO), bei_audio))
+    # Lernschleife „Publikum“ (Spec §7.1, §10.4, §14 Stufe 1): Screenshots/Hand-Eingabe, Upload-Paket und /link,
+    # /publikum – eigene Module, hier nur eingehängt. VOR dem allgemeinen Klick-Handler: der liest jeden Knopf als
+    # Entwurfs-Knopf; die Module melden ihre Knöpfe (pl/pm, pk/pt) mit eigenem Muster an.
+    from . import lernbot_paket, lernbot_publikum, lernbot_zahlen
+
+    for modul in (lernbot_zahlen, lernbot_paket, lernbot_publikum):
+        modul.registriere(app, nur_ich)
     app.add_handler(CallbackQueryHandler(bei_klick))
     app.add_error_handler(bei_fehler)
     return app

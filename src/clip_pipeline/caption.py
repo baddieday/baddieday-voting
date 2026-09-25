@@ -111,3 +111,22 @@ def baue(clip: sqlite3.Row | dict, match: sqlite3.Row | dict | None, konfig) -> 
     vorlage = konfig.projektpfad(konfig.wert("caption.vorlage")).read_text(encoding="utf-8")
     killtyp = "victoryroyale" if f["victory_royale"] else KILLTYP_TAG.get(f["typ"], "fortnite")
     return fuelle(vorlage, {"beschreibung": beschreibung, "killtyp": killtyp}).strip()
+
+
+# --- Caption für Regisseur-Entwürfe (Lernschleife „Publikum“, Spec §10.4) ---------------------
+
+def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig) -> str:
+    """Caption eines Entwurfs für das Upload-Paket: dieselbe Vorlage wie bei Clips ([caption].vorlage), gefüllt nur
+    aus Fakten – nichts erfinden (CLAUDE.md). Die Schnittliste allein reicht dafür nicht (ihre Segmente tragen
+    punkte/grund, aber keine Kill-Gruppe und kein Victory Royale); deshalb liest die Funktion die Datenbank:
+      - Anzahl Momente = verschiedene segmente[].moment
+      - größte Kill-Gruppe und Victory Royale aus clips (max_gruppe, typ, victory_royale) über segmente[].clip_id;
+        Momente ohne Clip zählen mit, liefern aber keine Gruppe
+      - {killtyp} wie bei Clips: "victoryroyale", sonst KILLTYP_TAG des Clips mit der größten Gruppe, ohne Clip
+        "fortnite"
+    Dazu PFLICHT die Musik-Quellenangabe (liste["musik"]["quelle"] = tracks.quelle, Spec §10.4) als eigene Zeile
+    am Ende; ohne Musik keine Quellenzeile. Nicht auf Felder künftiger Schnittlisten (Regisseur 2.0, v4) verlassen.
+    Beispiel: 5 Momente, größte Gruppe Triple, Musik „NCS – Titel“ → Beschreibung mit „Triple Kill“, #triplekill,
+    letzte Zeile „🎵 Song: … / Music provided by NoCopyrightSounds“.
+    CaptionFehler, wenn die Vorlage einen unbekannten Platzhalter hat. Nur lesend, keine Transaktion nötig."""
+    raise NotImplementedError

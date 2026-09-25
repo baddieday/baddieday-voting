@@ -7,6 +7,20 @@
 host = "192.168.178.51"
 wol_mac = "40:61:86:2e:9a:ff"
 
+# --- Lernschleife „Publikum“ (optional, docs/PUBLIKUM.md) ---------------------------------------
+# Steht absichtlich hier oben: Regisseur 2.0 hängt seine Beispiele unten an – so kommen sich beide nicht in die Quere.
+# Kein claude-Login für den Benutzer pipeline auf diesem Rechner? Dann Zahlen von Hand statt per Screenshot:
+# [lernbot]
+# screenshot_claude = false
+# Findet der Dienst claude nicht (systemd kennt ~/.local/bin nicht), den vollen Pfad eintragen:
+# [decide]
+# programm = "/home/pipeline/.local/bin/claude"
+# Zum Ausprobieren (Abnahme Stufe 1) schon nach 3 statt 7 Tagen bewerten – danach wieder entfernen.
+# Erwartet: bewertet mit Score 0 und Vermerk „Basis zu klein“ (unter 5 bewerteten Posts). Scores werden nie
+# überschrieben: Posts, die in dieser Zeit bewertet werden, behalten ihre Tag-3-Messung.
+# [publikum]
+# alter_tage = 3
+
 # --- Regisseur steuern (optional) ---------------------------------------------------------
 # Startwerte, von denen aus der Regisseur mit deinen Bewertungen weiterlernt. Nur eintragen, was du ändern willst.
 # Ansehen, was gerade gilt:  pipeline lernstand
