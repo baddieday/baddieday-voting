@@ -128,5 +128,47 @@ def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig) -> str:
     am Ende; ohne Musik keine Quellenzeile. Nicht auf Felder künftiger Schnittlisten (Regisseur 2.0, v4) verlassen.
     Beispiel: 5 Momente, größte Gruppe Triple, Musik „NCS – Titel“ → Beschreibung mit „Triple Kill“, #triplekill,
     letzte Zeile „🎵 Song: … / Music provided by NoCopyrightSounds“.
-    CaptionFehler, wenn die Vorlage einen unbekannten Platzhalter hat. Nur lesend, keine Transaktion nötig."""
-    raise NotImplementedError
+    CaptionFehler, wenn die Vorlage einen unbekannten Platzhalter hat. Nur lesend, keine Transaktion nötig.
+
+    So sieht die Beschreibung aus (nur Zahlen, die in den Daten stehen): „Fortnite-Highlights: Victory Royale 👑 ·
+    Triple Kill · 5 Momente“. CaptionFehler auch, wenn Musik drin ist, aber ihre Quellenangabe fehlt – ohne
+    Lizenzhinweis darf der Short nicht raus."""
+    # Hier statt oben importiert: caption.py ändert sich in dieser Stufe nur am Dateiende (Merge mit Regisseur 2.0)
+    from . import db
+    from .vorbewertung import typ, typ_name
+
+    segmente = liste.get("segmente", [])
+    # Ein Moment mit Jump-Cut hat mehrere Segmente – gezählt wird er einmal
+    momente = {s["moment"] for s in segmente}
+    clip_ids = sorted({int(s["clip_id"]) for s in segmente if s.get("clip_id") is not None})
+    clips = [c for c in (db.clip(con, cid) for cid in clip_ids) if c is not None]  # gelöschte Clips zählen nicht
+    victory = any(c["victory_royale"] for c in clips)
+    # Der Clip mit der größten Kill-Gruppe bestimmt Name und Hashtag – beide aus max_gruppe, damit „Triple Kill“ und
+    # #triplekill nie auseinanderlaufen; bei Gleichstand der ältere Clip (kleinere id)
+    groesste = min(clips, key=lambda c: (-int(c["max_gruppe"]), int(c["id"])), default=None)
+
+    teile = []
+    if victory:
+        teile.append("Victory Royale 👑")
+    if groesste is not None:
+        teile.append(typ_name(int(groesste["max_gruppe"])))
+    teile.append("1 Moment" if len(momente) == 1 else f"{len(momente)} Momente")
+    beschreibung = "Fortnite-Highlights: " + " · ".join(teile)
+    # {killtyp} wie in baue(): Victory Royale schlägt die Kill-Gruppe; ohne Clip bleibt nur „fortnite“
+    if victory:
+        killtyp = "victoryroyale"
+    elif groesste is not None:
+        killtyp = KILLTYP_TAG[typ(int(groesste["max_gruppe"]))]
+    else:
+        killtyp = "fortnite"
+    vorlage = konfig.projektpfad(konfig.wert("caption.vorlage")).read_text(encoding="utf-8")
+    text = fuelle(vorlage, {"beschreibung": beschreibung, "killtyp": killtyp}).strip()
+
+    # Pflicht (Spec §10.4, Lizenz): mit Musik steht ihre Quellenangabe als eigener Block am Ende – unverändert,
+    # auch wenn sie mehrere Zeilen hat (NCS verlangt „Song: …“ und „Music provided by …“)
+    if m := liste.get("musik"):
+        quelle = str(m.get("quelle") or "").strip()
+        if not quelle:
+            raise CaptionFehler(f"Musik „{m.get('titel', '?')}“ ohne Quellenangabe – ohne Lizenzhinweis kein Upload")
+        text += "\n\n🎵 " + quelle
+    return text

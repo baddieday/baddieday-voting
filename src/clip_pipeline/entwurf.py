@@ -337,8 +337,18 @@ def upload_ziel(konfig: Konfig, entwurf: sqlite3.Row) -> Path:
     """Wo die Upload-Fassung liegt: <speicher.wurzel>/<[publikum].upload_ordner>/<name>/<UPLOAD_DATEI>, z. B.
     /srv/clips/export/short-20260925-201500/short-20260925-201500_upload.mp4 (im Puffer-Betrieb ist /srv/clips der
     Puffer /srv/puffer). Derselbe Ordner, in den Regisseur 2.0 (Stufe 3) seinen Export legt (CLAUDE.md
-    „Export“, Annahme A4) – so gibt es genau ein Fertig-Video je Entwurf. Rechnet nur, legt nichts an."""
-    raise NotImplementedError
+    „Export“, Annahme A4) – so gibt es genau ein Fertig-Video je Entwurf. Rechnet nur, legt nichts an.
+
+    KonfigFehler, wenn [publikum].upload_ordner fehlt, leer ist oder aus der Wurzel hinauszeigt (absoluter Pfad
+    oder „..“) – die Upload-Fassung gehört in den Puffer, nie ins Lager auf pve-big."""
+    ordner = str(konfig.wert("publikum.upload_ordner") or "").strip()
+    # Fachliche Prüfung der Konfig: ein absoluter Pfad würde die Wurzel beim Zusammensetzen ersetzen
+    # (Path("/srv/clips") / "/srv/big" == Path("/srv/big")), „..“ führte aus ihr heraus
+    if not ordner or Path(ordner).is_absolute() or ".." in Path(ordner).parts:
+        raise KonfigFehler(f"[publikum].upload_ordner muss ein Ordner relativ zu [speicher].wurzel sein "
+                           f"(z. B. \"export\"), nicht {ordner!r}")
+    name = entwurf["name"]
+    return konfig.wurzel / ordner / name / UPLOAD_DATEI.format(name=name)
 
 
 def upload_fassung(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> dict:
@@ -367,5 +377,52 @@ def upload_fassung(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> 
     Idempotent über entwuerfe.upload_pfad (absoluter Pfad wie entwuerfe.datei): liegt die Datei schon da, wird
     nicht neu gerendert. Die Pipeline-Sperre holt der Aufrufer (Lern-Bot bzw. CLI). Rückgabe wie rendere() plus
     "entwurf" und "uebersprungen", z. B. {"entwurf": 41, "datei": "…_upload.mp4", "mb": 31.2, "dauer_s": 38.5,
-    "encoder": "h264_vaapi", "aufloesung": [1080, 1920], "versuche": 1, "uebersprungen": False}."""
-    raise NotImplementedError
+    "encoder": "h264_vaapi", "aufloesung": [1080, 1920], "versuche": 1, "uebersprungen": False}.
+    Übersprungen: nur {"entwurf", "datei", "uebersprungen": True} (wie entwurf())."""
+    zeile = con.execute("SELECT * FROM entwuerfe WHERE id = ?", (entwurf_id,)).fetchone()
+    if zeile is None:
+        raise MedienFehler(f"Entwurf {entwurf_id} unbekannt")
+
+    # Regel 1: nur Shorts – ein Zusammenschnitt bekäme im 48-MB-Budget eine unbrauchbare Bildrate
+    if zeile["format"] != "short":
+        raise MedienFehler(f"Upload-Paket gibt es nur für Shorts – Entwurf #{entwurf_id} ist ein {zeile['format']}")
+    # Regel 2: nur im getrennten Betrieb (E19). Sonst wäre [speicher].wurzel das Lager auf pve-big: der Lern-Bot
+    # schriebe über NFS dorthin (oder hinge am schlafenden Mount). pruefe_getrennt(mit_lager=False) sieht zusätzlich
+    # nach, ob die Wurzel wirklich der Puffer ist (Marke .clip-puffer) – nur stat(), das Lager bleibt unberührt.
+    if not konfig.getrennt:
+        raise KonfigFehler("Upload-Fassung nur im getrennten Betrieb ([lager].wurzel gesetzt, E19): sonst läge "
+                           "[speicher].wurzel auf pve-big, und dort schreibt der Lern-Bot nicht. Nichts geweckt.")
+    konfig.pruefe_getrennt(mit_lager=False)
+
+    ziel = upload_ziel(konfig, zeile)
+    # Idempotent: schon gerendert und die Datei ist noch da → nichts tun
+    if zeile["upload_pfad"] and Path(zeile["upload_pfad"]).is_file():
+        return {"entwurf": entwurf_id, "datei": zeile["upload_pfad"], "uebersprungen": True}
+
+    liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
+    # Regel 3: alles Material da, bevor ffmpeg startet – sonst bräche ffmpeg erst nach Minuten mit einer
+    # schwer lesbaren Meldung ab. Momente im Puffer verschwinden nach [puffer].rohdaten_tage (14) ins Lager.
+    tage = konfig.wert("puffer.rohdaten_tage", 14)
+    for s in liste["segmente"]:
+        if not Path(s["datei"]).is_file():
+            raise MedienFehler(f"Moment-Datei fehlt: {s['datei']} (Moment {s['moment']}) – der Puffer hält "
+                               f"Rohvideos {tage} Tage, ältere Momente liegen nur noch im Lager")
+    if m := liste.get("musik"):
+        if not (musik.ordner(konfig) / m["datei"]).is_file():
+            raise MedienFehler(f"Musik fehlt: {musik.ordner(konfig) / m['datei']}")
+
+    max_bytes = int(float(konfig.wert("vorschau.max_mb", 48)) * 1_000_000)  # wie entwurf() (Telegram-Grenze)
+    kbit_max = int(konfig.wert("shorts.max_kbit", 12000))  # erster Versuch: das Budget begrenzt, nicht dieser Deckel
+    for versuch in range(1, UPLOAD_VERSUCHE + 1):
+        try:
+            ergebnis = rendere(liste, ziel, konfig, max_bytes=max_bytes, volle_aufloesung=True, crf=UPLOAD_CRF,
+                               kbit_max=kbit_max)
+        except ZuGross as fehler:
+            # 0,75: nächster Versuch mit drei Vierteln der zuletzt BENUTZTEN Rate (wie shorts.rendere) – die
+            # Grenze max_bytes bleibt, nur die Rate sinkt
+            kbit_max = int(0.75 * fehler.kbit)
+            continue
+        con.execute("UPDATE entwuerfe SET upload_pfad = ? WHERE id = ?", (str(ziel), entwurf_id))
+        return {"entwurf": entwurf_id, **ergebnis, "versuche": versuch, "uebersprungen": False}
+    raise MedienFehler(f"Upload-Fassung von Entwurf #{entwurf_id} bleibt nach {UPLOAD_VERSUCHE} Versuchen über "
+                       f"{max_bytes // 1_000_000} MB")
