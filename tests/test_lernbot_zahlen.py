@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -37,7 +38,8 @@ FAKE_URL = f"https://api.telegram.org/file/bot{FAKE_TOKEN}/photos/file_7.jpg"
 
 
 class Bot(FakeBot):
-    """FakeBot aus test_lernbot, der zusätzlich die Knöpfe jeder Nachricht festhält."""
+    """FakeBot aus test_lernbot, der zusätzlich die Knöpfe jeder Nachricht festhält. send_message gibt wie Telegram
+    die gesendete Nachricht zurück; ihre message_id ist die laufende Nummer (1, 2, …) in `nachrichten`."""
 
     def __init__(self):
         super().__init__()
@@ -49,14 +51,17 @@ class Bot(FakeBot):
         knoepfe = ([[(b.text, b.callback_data) for b in reihe] for reihe in markup.inline_keyboard]
                    if markup is not None else None)
         self.nachrichten.append((text, knoepfe))
+        return SimpleNamespace(message_id=len(self.nachrichten))
 
 
 class Klick(FakeQuery):
-    """FakeQuery aus test_lernbot plus „Knöpfe unter der Nachricht entfernen“."""
+    """FakeQuery aus test_lernbot plus „Knöpfe unter der Nachricht entfernen“ und die Nachricht, unter der der
+    angeklickte Knopf hing (query.message.message_id)."""
 
-    def __init__(self, daten, von=42):
+    def __init__(self, daten, von=42, nachricht_id=None):
         super().__init__(daten, von)
         self.knoepfe_entfernt = 0
+        self.message = SimpleNamespace(message_id=nachricht_id)
 
     async def edit_message_reply_markup(self, reply_markup=None, **kw):
         self.knoepfe_entfernt += 1
@@ -130,8 +135,12 @@ class MitLernBot(MitClaudeKonfig):
         asyncio.run(lernbot_zahlen.bei_text(SimpleNamespace(effective_message=nachricht, callback_query=None),
                                             self.context))
 
-    def klick(self, daten: str, von: int = 42) -> Klick:
-        q = Klick(daten, von)
+    def klick(self, daten: str, von: int = 42, nachricht_id: int | None = None) -> Klick:
+        """Klick auf einen Knopf. Ohne nachricht_id wie am Handy: unter der jüngsten Nachricht mit Knöpfen."""
+        if nachricht_id is None:
+            nachricht_id = max((nr for nr, (_, knoepfe) in enumerate(self.bot.nachrichten, 1) if knoepfe),
+                               default=None)
+        q = Klick(daten, von, nachricht_id)
         asyncio.run(lernbot_zahlen.bei_klick(SimpleNamespace(callback_query=q, effective_message=None),
                                              self.context))
         return q
@@ -207,11 +216,21 @@ class Hilfen(unittest.TestCase):
                 lernbot_zahlen.parse(falsch)
 
     def test_werte_text(self):
-        self.assertEqual(lernbot_zahlen.werte_text(GUELTIG), "👁 1 240 · ❤️ 61 · 💬 3 · ↗️ 5 · 🔖 2 · ⏱ 6,8 s · ✅ 34 %")
+        # Zahlen wie in jeder Anzeige (publikum.anzahl_text/dezimal_text, Tausender = \u202f); 🏁 = ganz angesehen
+        self.assertEqual(lernbot_zahlen.werte_text(GUELTIG),
+                         "👁 1\u202f240 · ❤️ 61 · 💬 3 · ↗️ 5 · 🔖 2 · ⏱ 6,8 s · 🏁 34 %")
         leer = {feld: None for feld in publikum.FELDER}
-        self.assertEqual(lernbot_zahlen.werte_text(leer), "👁 – · ❤️ – · 💬 – · ↗️ – · 🔖 – · ⏱ – · ✅ –")
+        self.assertEqual(lernbot_zahlen.werte_text(leer), "👁 – · ❤️ – · 💬 – · ↗️ – · 🔖 – · ⏱ – · 🏁 –")
         self.assertEqual(lernbot_zahlen.werte_text({**leer, "views": 1234567, "voll_prozent": 34.5}),
-                         "👁 1 234 567 · ❤️ – · 💬 – · ↗️ – · 🔖 – · ⏱ – · ✅ 34,5 %")
+                         "👁 1\u202f234\u202f567 · ❤️ – · 💬 – · ↗️ – · 🔖 – · ⏱ – · 🏁 34,5 %")
+        # ✅ ist im Bot der Knopf „Stimmt“ – in der Zahlenzeile darf es nicht auch noch „ganz angesehen“ heißen
+        self.assertNotIn("✅", lernbot_zahlen.werte_text(GUELTIG))
+
+    def test_hand_bitte_nennt_die_einheiten(self):
+        bitte = lernbot_zahlen.HAND_BITTE.format(nr=17)
+        self.assertIn("#17", bitte)
+        self.assertIn("Sekunden", bitte)
+        self.assertIn(publikum.HAND_FORM, bitte)  # dieselbe Form wie im Fehlertext von lies_hand_eingabe
 
     def test_endung_fuer(self):
         self.assertEqual(lernbot_zahlen.endung_fuer("image/png", "x.png"), ".png")
@@ -230,7 +249,8 @@ class Hilfen(unittest.TestCase):
 class Screenshot(MitLernBot):
     def test_foto_mit_nummer_wird_gelesen_und_gespeichert(self):
         pid = self.post()
-        fake = FakeClaude()
+        faeden = []
+        fake = FakeClaude(waehrend=lambda: faeden.append(threading.current_thread()))
         with fake.aktiv():
             self.foto(f"Stand Tag 3 #{pid}")
         (m,) = self.messungen(pid)
@@ -238,11 +258,15 @@ class Screenshot(MitLernBot):
                          ("screenshot", 1240, 61, 6.8, 34.0))
         self.assertEqual(m["roh"], json.dumps(GUELTIG))  # die Claude-Antwort für Nachprüfungen
         self.assertEqual(m["gemessen_utc"], iso(T))
-        self.assertIn(f"💾 #{pid} gespeichert (Screenshot): 👁 1 240 · ❤️ 61", self.letzte())
+        self.assertIn(f"💾 #{pid} gespeichert (Screenshot): 👁 1\u202f240 · ❤️ 61", self.letzte())
         self.assertEqual(fake.aufrufe[0]["dateien"], ["screenshot.jpg"])  # das größte Foto, als JPEG
         self.assertEqual(self.temp_reste(), [])   # Bild nach der Auswertung gelöscht
         self.assertIsNone(self.vorgang())
         self.assertEqual(self.claude_zaehler(), ["screenshot: ok"])
+        # Spec §7.1 „Auswertung in einem Thread“: asyncio.run läuft hier – wie run_polling im Betrieb – im
+        # Haupt-Faden. Liefe claude dort, stünde der ganze Bot bis zu screenshot_timeout_s (keine Knöpfe, keine
+        # Meldungen, kein aufraeumen).
+        self.assertIsNot(faeden[0], threading.main_thread())
 
     def test_ohne_nummer_knoepfe_dann_klick(self):
         gemessen = self.post(gepostet=T - timedelta(days=4))
@@ -291,8 +315,8 @@ class Screenshot(MitLernBot):
             self.foto(f"#{pid}")
         self.assertEqual(len(self.messungen(pid)), 1)  # nichts ungeprüft gespeichert
         text, knoepfe = self.bot.nachrichten[-1]
-        self.assertIn("👁 1 240", text)
-        self.assertIn("Views gesunken: 2000 → 1240", text)
+        self.assertIn("👁 1\u202f240", text)
+        self.assertIn("Views gesunken: 2\u202f000 → 1\u202f240", text)
         self.assertIn("Stimmt das?", text)
         self.assertEqual(knoepfe, lernbot_zahlen.knoepfe_rueckfrage(pid))
         self.assertEqual(self.temp_reste(), [])  # das Bild ist schon weg, die Zahlen warten
@@ -347,6 +371,16 @@ class Screenshot(MitLernBot):
         self.assertIn("claude Exit 1", self.letzte())
         self.assertEqual(self.temp_reste(), [])
         self.assertEqual(self.vorgang()["art"], "hand")
+
+    def test_ohne_claude_programm_zaehlt_kein_aufruf(self):
+        # Spec §12: „Claude diese Woche“ zählt Aufrufe gegen das Abo – ohne claude im PATH lief keiner
+        pid = self.post()
+        with FakeClaude().aktiv(programm=None) as (lauf, _):
+            self.foto(f"#{pid}")
+        lauf.assert_not_called()
+        self.assertEqual(self.claude_zaehler(), [])
+        self.assertIn("claude nicht gefunden", self.letzte())
+        self.assertIn(f"Bitte die Zahlen für #{pid} von Hand", self.letzte())
 
     def test_screenshot_claude_aus_fragt_nie(self):
         self.konfig.daten["lernbot"]["screenshot_claude"] = False
@@ -427,7 +461,7 @@ class HandEingabe(MitLernBot):
         self.alte_messung(pid, views=2000)
         self.text(f"#{pid} 1500 70 6,8 34")
         self.assertEqual(len(self.messungen(pid)), 1)
-        self.assertIn("Views gesunken: 2000 → 1500", self.letzte())
+        self.assertIn("Views gesunken: 2\u202f000 → 1\u202f500", self.letzte())
         self.assertEqual(self.bot.nachrichten[-1][1], lernbot_zahlen.knoepfe_rueckfrage(pid))
         self.klick(f"pm:{pid}:ok")
         neu = self.messungen(pid)[-1]
@@ -474,6 +508,82 @@ class HandEingabe(MitLernBot):
         self.assertEqual(len(self.messungen(pid)), 1)
 
 
+# --- Ein offener Vorgang wird ersetzt: nie still verlieren, nie das falsche Bild ------------------------------------
+
+class Ersetzen(MitLernBot):
+    def rueckfrage(self, pid: int) -> int:
+        """Offene Rückfrage zu pid (Views „gesunken“ 5 000 → 1 240); Rückgabe: message_id der Rückfrage."""
+        self.alte_messung(pid, views=5000)
+        self.text(f"#{pid} 1240 61 6,8 34")
+        self.assertIn("Stimmt das?", self.letzte())
+        return len(self.bot.nachrichten)
+
+    def test_neuer_text_verwirft_rueckfrage_mit_hinweis(self):
+        eins, zwei = self.post(), self.post()
+        frage = self.rueckfrage(eins)
+        self.text(f"#{zwei} 1240 61 6,8 34")
+        self.assertIn(f"🗑 Rückfrage zu #{eins} verworfen – diese Zahlen sind NICHT gespeichert", self.alle_texte())
+        self.assertIn(f"💾 #{zwei} gespeichert", self.letzte())
+        # ein später Klick in der alten Rückfrage speichert nichts (der Hinweis steht schon im Chat)
+        self.assertEqual(self.klick(f"pm:{eins}:ok", nachricht_id=frage).antworten, ["Schon erledigt."])
+        self.assertEqual(len(self.messungen(eins)), 1)
+
+    def test_neues_foto_verwirft_rueckfrage_mit_hinweis(self):
+        eins, zwei = self.post(), self.post()
+        frage = self.rueckfrage(eins)
+        with FakeClaude().aktiv():
+            self.foto(f"#{zwei}")
+        self.assertIn(f"🗑 Rückfrage zu #{eins} verworfen – diese Zahlen sind NICHT gespeichert", self.alle_texte())
+        self.assertEqual(self.klick(f"pm:{eins}:ok", nachricht_id=frage).antworten, ["Schon erledigt."])
+        self.assertEqual(len(self.messungen(eins)), 1)
+        self.assertEqual(len(self.messungen(zwei)), 1)
+
+    def test_korrektur_desselben_posts_ohne_hinweis(self):
+        pid = self.post()
+        self.rueckfrage(pid)
+        self.text(f"#{pid} 5240 61 6,8 34")  # dieselbe Nummer mit richtigen Zahlen: eine Korrektur, kein Verlust
+        self.assertNotIn("🗑", self.alle_texte())
+        self.assertEqual([m["views"] for m in self.messungen(pid)], [5000, 5240])
+
+    def test_neues_foto_bricht_hand_eingabe_ab(self):
+        pid = self.post()
+        with FakeClaude("kein JSON").aktiv():
+            self.foto(f"#{pid}")
+        self.assertEqual(self.vorgang()["art"], "hand")
+        self.foto(None)
+        self.assertIn(f"🗑 Hand-Eingabe für #{pid} abgebrochen – nichts gespeichert", self.alle_texte())
+        self.assertEqual(self.vorgang()["art"], "bild")
+
+    def test_knopf_aus_der_nachricht_eines_verworfenen_bildes(self):
+        # pl:<post_id>: sagt nicht, zu welchem Bild der Knopf gehört – zwei Nachrichten haben byte-gleiche Knöpfe
+        eins, _ = self.post(), self.post()
+        self.foto(None)
+        erste = len(self.bot.nachrichten)
+        self.foto(None)
+        zweite = len(self.bot.nachrichten)
+        self.assertEqual(self.bot.nachrichten[erste - 1][1], self.bot.nachrichten[zweite - 1][1])
+        fake = FakeClaude()
+        with fake.aktiv():
+            q = self.klick(f"pl:{eins}:", nachricht_id=erste)
+        self.assertEqual(q.antworten, ["Schon erledigt."])        # das erste Bild ist weg – nichts zuordnen
+        self.assertEqual((fake.aufrufe, self.messungen(eins)), ([], []))
+        self.assertEqual(self.vorgang()["art"], "bild")            # das zweite Bild wartet weiter
+        with fake.aktiv():
+            q = self.klick(f"pl:{eins}:", nachricht_id=zweite)
+        self.assertEqual(q.antworten, ["Ich lese die Zahlen …"])
+        self.assertEqual(len(self.messungen(eins)), 1)
+
+    def test_alter_ok_knopf_gilt_nicht_fuer_eine_neue_rueckfrage(self):
+        pid = self.post()
+        a = self.rueckfrage(pid)
+        self.text(f"#{pid} 1500 61 6,8 34")  # korrigiert, aber weiter „gesunken“ → neue Rückfrage B
+        b = len(self.bot.nachrichten)
+        self.assertEqual(self.klick(f"pm:{pid}:ok", nachricht_id=a).antworten, ["Schon erledigt."])
+        self.assertEqual(len(self.messungen(pid)), 1)
+        self.assertEqual(self.klick(f"pm:{pid}:ok", nachricht_id=b).antworten, ["Gespeichert."])
+        self.assertEqual(self.messungen(pid)[-1]["views"], 1500)
+
+
 # --- Aufräumen, Secrets, nie wecken, Handler-Reihenfolge ---------------------------------------------------------
 
 class Aufraeumen(MitLernBot):
@@ -502,6 +612,22 @@ class Aufraeumen(MitLernBot):
         self.post()
         self.foto(None)
         self.assertEqual(asyncio.run(lernbot_zahlen.aufraeumen(self.app)), 0)  # jetzt() = T, nichts ist alt
+
+    def test_schleife_ruft_aufraeumen(self):
+        """Spec §7.1: Die 10-min-Regel greift nur, wenn lernbot._schleife aufraeumen regelmäßig aufruft."""
+        konfig = SimpleNamespace(wert=lambda schluessel, vorgabe=None: vorgabe)
+        app = SimpleNamespace(bot_data={"konfig": konfig, "con": None})
+        # asyncio.sleep am Ende des ersten Durchlaufs bricht die Endlosschleife ab. blick_auf_leerlauf und
+        # abendstand ersetzt: sonst startete ein Faden mit big.merke_leerlauf bzw. bräuchte es eine Datenbank.
+        with mock.patch.object(lernbot, "blick_auf_leerlauf"), \
+                mock.patch.object(lernbot, "abendstand"), \
+                mock.patch.object(lernbot, "sende_meldungen", new=mock.AsyncMock()), \
+                mock.patch.object(lernbot, "sende_entwuerfe", new=mock.AsyncMock()), \
+                mock.patch.object(lernbot_zahlen, "aufraeumen", new=mock.AsyncMock()) as aufraeumen, \
+                mock.patch.object(lernbot.asyncio, "sleep", new=mock.AsyncMock(side_effect=asyncio.CancelledError)):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(lernbot._schleife(app))
+        aufraeumen.assert_awaited_once_with(app)
 
 
 class Secrets(MitLernBot):

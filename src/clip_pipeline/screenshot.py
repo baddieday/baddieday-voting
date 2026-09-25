@@ -48,15 +48,18 @@ class Lesung:
     werte: dict | None   # {views, likes, kommentare, shares, saves, wiedergabe_s, voll_prozent} – je Feld Zahl oder None
     hinweis: str | None  # warum es keine Werte gibt (claude fehlt, kaputtes JSON, Schema …), sonst None
     roh: str | None      # Claude-JSON als Text – wird mit der Messung gespeichert (publikum_messungen.roh)
-    # Die Antwort von claude, wenn claude gefragt wurde – zum Mitzählen (claude_aufruf.protokolliere); None = kein
-    # Aufruf (Format unlesbar, nicht eingerichtet). Scheitert erst normalisiere, steht der Grund auch hier.
+    # Die Antwort von claude_aufruf, wenn gefragt wurde – zum Mitzählen (claude_aufruf.protokolliere, zählt nur mit
+    # claude.gestartet); None = gar nicht gefragt (Format unlesbar, nicht eingerichtet, Bild fehlt). Scheitert erst
+    # normalisiere, steht der Grund auch hier.
     claude: ClaudeAntwort | None = None
 
 
 def einstellung(konfig: Konfig, name: str):
     """Ein Wert aus [lernbot] (screenshot_claude, screenshot_prompt, screenshot_timeout_s). Die Standardwerte stehen
     nur in config/pipeline.toml; fehlt der Schlüssel, ist die Konfiguration kaputt → KonfigFehler mit dem Namen.
-    Beispiel: einstellung(konfig, "screenshot_timeout_s") == 120."""
+    Beispiel: einstellung(konfig, "screenshot_timeout_s") == 120. Dieselbe Regel wie publikum.einstellung: Pflicht
+    nur für die Schlüssel, die mit der Lernschleife neu sind; ältere Schlüssel liest der Code mit
+    konfig.wert(…, Standard) wie überall im Repo."""
     abschnitt = konfig.abschnitt("lernbot")
     if name not in abschnitt:
         raise KonfigFehler(f"[lernbot].{name} fehlt in der Konfiguration (Standard steht in config/pipeline.toml)")

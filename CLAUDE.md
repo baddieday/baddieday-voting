@@ -136,3 +136,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - 2026-09-25: **Export** nur auf Knopfdruck (📦 im Lern-Bot oder `pipeline export`) nach `/srv/puffer/export/<name>/`, nie
   automatisch gelöscht und täglich ins Lager gesichert. Kein CapCut-Paket; die nummerierten Einzelclips im Export taugen
   auch für CapCut. DaVinci-Timeline (FCPXML) als letzte Stufe.
+- 2026-09-25 (L1, Spec E21): **Publikum ist das Hauptsignal**; zwei Schleifen (dein Urteil täglich, Publikum wöchentlich) speisen dieselben Lerner.
+- 2026-09-25 (L2, Spec E22): **Eine Moment-Bewertung** für Clip-Bot und Regisseur; neue Merkmale aus dem Replay-JSON; Lernen bleibt linear, paarweise, gedeckelt.
+- 2026-09-25 (L3, Spec E23): **Rezepte** als Stellschrauben mit Stufen; jeder dritte Post ein Experiment nach Unsicherheit; du gibst jeden Post frei.
+- 2026-09-25 (L4, Spec E24): **Zahlen zuerst per Screenshot** (claude -p, Leserecht), Display API im Sandbox-Modus als zweite Stufe; Wiedergabezeit nur aus der App.
+- 2026-09-25 (L5, Spec E25): Der **Wochen-Analyst schlägt nur vor** (Schema-geprüft), entscheidet nie; jede Hypothese wird per Knopf getestet.
+- 2026-09-25 (L6, Spec E26): **Clip-Bot minimal angefasst** (`posts` aus `/link`, Erwartungs-Zeile, Battle-Paarung nach Unsicherheit); n8n-Vertrag und Session-Schnittliste unverändert.
+  L1–L6 sind Arbeitstitel (E21 ist vergeben) und bekommen beim Merge mit Regisseur 2.0 fortlaufende E-Nummern. Die offenen Annahmen des Sprints (A1–A40) und Rückfragen R1–R5: `docs/ENTSCHEIDUNGEN.md`, „Annahmen im Sprint Lernschleife“.

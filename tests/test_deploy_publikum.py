@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import unittest
 
-from clip_pipeline import cli
+from clip_pipeline import claude_aufruf, cli
 
 from tests.test_deploy_puffer import DEPLOY, KONFIG, PROJEKT, assertReihenfolge, lies_unit
 
@@ -21,6 +21,9 @@ TIMER = SYSTEMD / "clip-publikum.timer"
 DROP_IN = SYSTEMD / "clip-lernbot.service.d" / "claude.conf"
 ANLEITUNG = PROJEKT / "docs" / "PUBLIKUM.md"
 PIPELINE = "/opt/clip-pipeline/.venv/bin/pipeline"
+HAUPT_UNIT = SYSTEMD / "clip-lernbot.service"
+# Hier hält claude im Lern-Bot-Dienst Anmeldung und Einstellungen – nicht im Home (siehe Drop-in)
+CLAUDE_ORDNER = "/var/lib/clip-pipeline/claude"
 
 
 def abschnitt(text: str, ueberschrift: str) -> str:
@@ -66,17 +69,23 @@ class Units(unittest.TestCase):
         self.assertNotIn(args.befehl, cli.WECKEN)
 
     def test_drop_in_fuer_claude_im_lern_bot(self):
-        self.assertTrue((SYSTEMD / "clip-lernbot.service").is_file())  # das Drop-in gehört zu diesem Dienst
+        self.assertTrue(HAUPT_UNIT.is_file())  # das Drop-in gehört zu diesem Dienst
         d = lies_unit(DROP_IN)
-        self.assertIn("[Service]", DROP_IN.read_text(encoding="utf-8"))
-        self.assertEqual(d["ProtectHome"], ["read-only"])
-        # "-": fehlt /home/pipeline, startet der Bot trotzdem. Genau EIN Eintrag, kein leeres „ReadWritePaths=“ –
-        # ein leerer Eintrag setzte die Liste zurück, dann wäre auch /var/lib/clip-pipeline (Datenbank) nur lesbar.
-        self.assertEqual(d["ReadWritePaths"], ["-/home/pipeline"])
+        text = DROP_IN.read_text(encoding="utf-8")
+        self.assertIn("[Service]", text)
+        self.assertEqual(d["ProtectHome"], ["read-only"])  # /home lesbar (claude liegt evtl. dort), nie beschreibbar
+        # Kein beschreibbares Home: dort liegen authorized_keys mit der Sperre des n8n-Schlüssels und die claude-Datei,
+        # die `decide` ohne Schutz startet. Die Anmeldung liegt stattdessen in CLAUDE_CONFIG_DIR …
+        self.assertNotIn("ReadWritePaths", d)
+        self.assertIn(f"CLAUDE_CONFIG_DIR={CLAUDE_ORDNER}", d["Environment"])
         self.assertIn("DISABLE_AUTOUPDATER=1", d["Environment"])
+        self.assertIn("authorized_keys", text)  # das Warum steht im Kommentar
+        # … und die ist schon beschreibbar, weil die Haupt-Unit /var/lib/clip-pipeline freigibt
+        haupt = lies_unit(HAUPT_UNIT)
+        self.assertIn("/var/lib/clip-pipeline", haupt["ReadWritePaths"][0].split())
         self.assertNotIn("ProtectSystem", d)  # bleibt strict aus der Haupt-Unit
         # die Haupt-Unit bleibt, wie sie ist (dort steht weiter ProtectHome=true)
-        self.assertEqual(lies_unit(SYSTEMD / "clip-lernbot.service")["ProtectHome"], ["true"])
+        self.assertEqual(haupt["ProtectHome"], ["true"])
 
 
 class Anleitung(unittest.TestCase):
@@ -104,27 +113,65 @@ class Anleitung(unittest.TestCase):
         assertReihenfolge(self, installation, [
             "sqlite3 /var/lib/clip-pipeline/pipeline.db \".backup",  # zuerst sichern
             "git pull --ff-only",
-            "systemctl restart clip-bot",
-            "claude --help | grep no-session-persistence",
-            "sudo systemd-run --uid=pipeline -p ProtectHome=read-only -p ReadWritePaths=/home/pipeline --pty "
-            "/home/pipeline/.local/bin/claude -p --no-session-persistence \"sag ok\"",
+            "systemctl restart clip-bot clip-lernbot",               # beide Bots gleich auf den neuen Stand
+            "sudo -iu pipeline command -v claude",                   # wo liegt claude wirklich? (nicht raten)
+            "\"$CLAUDE\" --help | grep no-session-persistence",
+            f"install -d -m 700 {CLAUDE_ORDNER}",                   # eigener Ordner für die Anmeldung des Dienstes
+            "sudo systemd-run --uid=pipeline",                       # Probe mit den Regeln des Dienstes
             "clip-lernbot.service.d",
             "systemctl daemon-reload",
             "systemctl restart clip-lernbot",
+            "systemctl show clip-lernbot -p ProtectHome",            # die wirksamen Werte, egal wie viele Drop-ins
             "clip-publikum.service",
             f"sudo -u pipeline {PIPELINE} publikum bewerten",
             "systemctl enable --now clip-publikum.timer",
             "systemctl list-timers",
         ])
+        self.assertNotIn("tail -4", installation)  # zeigte bei zwei Drop-ins das falsche
+        self.assertNotIn("ReadWritePaths=/home", installation)  # das Home bleibt schreibgeschützt
+        # [decide].programm gilt auch für decide aus n8n – ein falscher Pfad schaltet Claude dort still ab
+        self.assertIn("Regel-Schnittliste", installation)
+        p2 = installation[installation.index("### P2"):installation.index("### P3")]
+        self.assertIn("screenshot_claude = false", p2)  # P2 aufschieben oder ablehnen geht (ohne Drop-in)
         for pflicht in ("**Was:**", "**Warum:**", "**Freigabe nötig?**", "**Rückweg:**", "**Was du lernst:**", "🏠"):
             with self.subTest(pflicht):
                 self.assertIn(pflicht, installation)
 
+    def test_probe_wie_der_dienst(self):
+        """Die systemd-run-Probe in P2 nutzt dieselben Schutzregeln wie der Dienst (Haupt-Unit + Drop-in) und
+        dieselben Schalter wie der Bot – sonst kann sie „ok“ sagen, während der Dienst scheitert."""
+        installation = abschnitt(self.text, "Installation")
+        start = installation.index("sudo systemd-run --uid=pipeline")
+        zeilen = []
+        for zeile in installation[start:].splitlines():
+            zeilen.append(zeile.rstrip("\\").strip())
+            if not zeile.rstrip().endswith("\\"):
+                break
+        probe = " ".join(zeilen)
+        haupt, d = lies_unit(HAUPT_UNIT), lies_unit(DROP_IN)
+        erwartet = [f"-p {k}={haupt[k][0]}" for k in ("ProtectSystem", "PrivateTmp", "NoNewPrivileges")]
+        erwartet += [f"-p ProtectHome={d['ProtectHome'][0]}", "-p ReadWritePaths=/var/lib/clip-pipeline",
+                     "-p WorkingDirectory=/tmp"]
+        erwartet += [f"-p Environment={e}" for e in d["Environment"]]
+        erwartet.append(" ".join(claude_aufruf.SCHALTER) + " \"sag ok\"")
+        for teil in erwartet:
+            with self.subTest(teil):
+                self.assertIn(teil, probe)
+
     def test_abnahme_nennt_das_erwartete_ergebnis(self):
         abnahme = abschnitt(self.text, "Abnahme")
-        for teil in ("alter_tage = 3", "Score 0", "Basis zu klein", "wieder entfernen"):
+        # den Score setzt der Timer aus /opt/clip-pipeline – dessen lokal.toml zählt; von Hand mit vollem Pfad
+        for teil in ("alter_tage = 3", "Score 0", "Basis zu klein", "wieder entfernen",
+                     "/opt/clip-pipeline/config/lokal.toml", f"sudo -u pipeline {PIPELINE} publikum bewerten",
+                     "grep -n alter_tage", "ab 3 Tagen"):
             with self.subTest(teil):
                 self.assertIn(teil, abnahme)
+
+    def test_was_tun_nennt_den_notausgang_im_clip_bot(self):
+        was_tun = abschnitt(self.text, "Was tun, wenn")
+        for teil in ("nicht abgehakt", "journalctl -u clip-bot", "plattformen = []", "vertippter"):
+            with self.subTest(teil):
+                self.assertIn(teil, was_tun)
 
     def test_alle_dateien_sind_genannt(self):
         for datei in ("deploy/systemd/clip-publikum.service", "deploy/systemd/clip-publikum.timer",

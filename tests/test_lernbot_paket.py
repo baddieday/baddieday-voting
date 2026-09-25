@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -98,7 +99,8 @@ class MitLernPaket(MitSpeicher):
     def falsches_rendere(self, liste, ziel, k, **kw):
         # merken, ob die Pipeline-Sperre gerade gehalten wird (sie gehört ums Rendern, Leitplanke 2)
         gehalten = str(self.konfig.datenbank.with_suffix(".lock").resolve()) in sperre_modul.GEHALTEN
-        self.renders.append({**kw, "sperre_gehalten": gehalten})
+        # und in welchem Faden gerendert wird (im Haupt-Faden stünde der ganze Bot, Leitplanke 2)
+        self.renders.append({**kw, "sperre_gehalten": gehalten, "faden": threading.current_thread()})
         ziel.parent.mkdir(parents=True, exist_ok=True)
         ziel.write_bytes(b"upload-fassung")
         return {"datei": str(ziel), "mb": 0.0, "dauer_s": liste["dauer_s"], "encoder": "libx264",
@@ -248,6 +250,9 @@ class Paket(MitLernPaket):
         self.assertEqual(len(self.renders), 1)
         self.assertEqual(self.renders[0]["crf"], entwurf.UPLOAD_CRF)
         self.assertTrue(self.renders[0]["sperre_gehalten"])        # gerendert wird nur unter der Sperre
+        # Leitplanke 2: im Thread (asyncio.to_thread). asyncio.run läuft hier wie run_polling im Betrieb im
+        # Haupt-Faden – sonst blockierte ein 📦-Klick den Bot, solange er auf die Sperre wartet und rendert.
+        self.assertIsNot(self.renders[0]["faden"], threading.main_thread())
         zeile = self.con.execute("SELECT upload_pfad FROM entwuerfe WHERE id = ?", (eid,)).fetchone()
         self.assertTrue(zeile["upload_pfad"].endswith("_upload.mp4"))
         self.assertEqual(self.posts(), [])                          # das Paket allein ist noch kein Post
@@ -341,6 +346,16 @@ class Haekchen(MitLernPaket):
             q = self.klick(f"pt:{eid}:t")
             self.assertNotIn("Post #", q.antworten[0])
             self.assertEqual(q.texte, [])
+        self.assertEqual(self.posts(), [])
+
+    def test_fehlende_schnittliste(self):
+        # Startauftrag §5 „fehlende Dateien“: das Häkchen sagt es kurz, Details im Log, kein halber Post
+        eid = self.entwurf_anlegen()
+        (self.tmp / "regie" / "short-test-1.json").unlink()
+        with self.assertLogs("lern-bot", "WARNING"):
+            q = self.klick(f"pt:{eid}:t")
+        self.assertEqual(q.antworten, ["⚠️ Kein Post angelegt – Details im Log."])
+        self.assertEqual(q.texte, [])          # die Checkliste bleibt unverändert
         self.assertEqual(self.posts(), [])
 
     def test_youtube_nur_wenn_eingestellt(self):

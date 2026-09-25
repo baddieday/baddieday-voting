@@ -12,7 +12,10 @@ wol_mac = "40:61:86:2e:9a:ff"
 # Kein claude-Login für den Benutzer pipeline auf diesem Rechner? Dann Zahlen von Hand statt per Screenshot:
 # [lernbot]
 # screenshot_claude = false
-# Findet der Dienst claude nicht (systemd kennt ~/.local/bin nicht), den vollen Pfad eintragen:
+# Findet der Dienst claude nicht (systemd kennt ~/.local/bin nicht), den vollen Pfad eintragen – NUR wenn claude
+# unter /home liegt. Den Pfad ermitteln mit `sudo -iu pipeline command -v claude` (unten nur ein Beispiel); liegt er
+# in /usr/local/bin oder /usr/bin, nichts eintragen. Achtung: gilt auch für `decide` aus n8n und `stimmung` – ein
+# falscher Pfad schaltet Claude dort still ab (Regel-Schnittliste).
 # [decide]
 # programm = "/home/pipeline/.local/bin/claude"
 # Zum Ausprobieren (Abnahme Stufe 1) schon nach 3 statt 7 Tagen bewerten – danach wieder entfernen.

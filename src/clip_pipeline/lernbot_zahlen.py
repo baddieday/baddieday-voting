@@ -10,7 +10,8 @@ So läuft es für dich:
      sie gespeichert und der Bot bestätigt sie. Sonst zeigt er die gelesenen Zahlen, nennt den Verstoß und fragt
      „Stimmt das? ✅ / ✏️ von Hand“ (`pm:<post_id>:ok` / `pm:<post_id>:hand`).
   3. Hand-Eingabe (wenn [lernbot].screenshot_claude = false, Claude nichts lesen konnte oder du ✏️ tippst): du
-     antwortest mit `views likes wiedergabe voll%`, z. B. `1240 61 6.8 34` („–“ für unbekannt). Ganz ohne Bild
+     antwortest mit `views likes wiedergabe voll%` (Wiedergabe in Sekunden, publikum.HAND_FORM), z. B.
+     `1240 61 6.8 34` („–“ für unbekannt). Ganz ohne Bild
      geht es auch: `#17 1240 61 6.8 34` als Text. Auch Hand-Zahlen prüft der Bot gegen die letzte Messung (ein
      Tippfehler lässt sonst die Views „sinken“) und fragt bei einem Verstoß mit denselben Knöpfen nach.
      Wartet der Bot auf eine Antwort zu gelesenen Zahlen, darfst du statt ✏️ auch gleich die richtigen Zahlen
@@ -29,10 +30,16 @@ Zustand: bot_data["publikum"] hält höchstens EINEN offenen Vorgang (du bist de
   bild     Pfad des Bildes in diesem Ordner
   werte    gelesene bzw. eingegebene Zahlen (bei "rueckfrage"), quelle, roh
   seit     Zeitpunkt (für aufraeumen) – jeder Schritt (Post gewählt, ✏️) startet die 10 min neu
-Ein neues Foto oder ein neuer „#17 …“-Text ersetzt einen offenen Vorgang: dessen Bild wird sofort gelöscht, und
-der Bot sagt „vorheriges Bild verworfen“. Ein Klick, der nicht zum offenen Vorgang passt (alte Nachricht,
-Doppelklick), bekommt „Schon erledigt.“ und ändert nichts. Kommt Claudes Ergebnis erst, nachdem der Vorgang
-verworfen wurde (aufraeumen), wird es nicht mehr gespeichert – gezählt wird der Aufruf trotzdem.
+  knopf_nachricht  message_id der Nachricht mit den Knöpfen dieses Vorgangs (pl: bei "bild", pm: bei
+           "rueckfrage") – nur Klicks aus genau dieser Nachricht gelten
+Ein neues Foto oder ein neuer „#17 …“-Text ersetzt einen offenen Vorgang (_alten_vorgang_ersetzen) und sagt dir,
+was dabei verloren geht: ein wartendes Bild („🗑 Vorheriges Bild verworfen.“, das Bild wird sofort gelöscht), eine
+offene Rückfrage („🗑 Rückfrage zu #17 verworfen – diese Zahlen sind NICHT gespeichert …“) oder eine offene
+Hand-Eingabe („🗑 Hand-Eingabe für #17 abgebrochen …“). Betrifft das Neue denselben Post, ist es eine Korrektur –
+dann kein Hinweis. Ein Klick, der nicht zum offenen Vorgang passt (alte Nachricht, Doppelklick), bekommt „Schon
+erledigt.“ und ändert nichts – das heißt „dieser Knopf ist vorbei“, nicht „gespeichert“ (den Verlust hat der
+Hinweis beim Ersetzen schon genannt). Kommt Claudes Ergebnis erst, nachdem der Vorgang verworfen wurde
+(aufraeumen), wird es nicht mehr gespeichert – gezählt wird der Aufruf trotzdem.
 
 Secrets: Nach get_file() steht in File.file_path die Download-URL MIT dem Bot-Token
 (https://api.telegram.org/file/bot<TOKEN>/…). file_path und URLs deshalb nie loggen, nie an dich schicken, nie in
@@ -86,12 +93,9 @@ DATEI_ENDUNGEN = {".jpg": ".jpg", ".jpeg": ".jpg", ".png": ".png", ".webp": ".we
 # So heißt das empfangene Bild im wartenden Temp-Ordner (Claude sieht später nur eine Kopie, screenshot.BILD_STAMM)
 EINGANG_STAMM = "eingang"
 
-# Anzeige in Knöpfen und Meldungen
-ART_NAMEN = {"clip": "Clip", "entwurf": "Entwurf"}
+# Anzeige in Knöpfen und Meldungen (Art-Namen, Symbole und Zahlformat kommen aus publikum – eine Stelle)
 QUELLEN_NAMEN = {"screenshot": "Screenshot", "hand": "von Hand"}
-# werte_text: Symbol je Zähler (so knapp, dass alle sieben Werte in eine Handy-Zeile passen)
-ZAEHLER_SYMBOLE = (("views", "👁"), ("likes", "❤️"), ("kommentare", "💬"), ("shares", "↗️"), ("saves", "🔖"))
-HAND_BITTE = ("✏️ Bitte die Zahlen für #{nr} von Hand: views likes wiedergabe voll% – z. B. „1240 61 6,8 34“, "
+HAND_BITTE = ("✏️ Bitte die Zahlen für #{nr} von Hand: " + publikum.HAND_FORM + " – z. B. „1240 61 6,8 34“, "
               "„–“ für unbekannt.")
 UNVERSTANDEN = ("🤔 Das verstehe ich nicht. Zahlen für einen Post: Screenshot mit #Nummer in der Bildunterschrift "
                 "oder Text „#17 1240 61 6,8 34“. Mehr unter /hilfe.")
@@ -123,7 +127,7 @@ def knoepfe_posts(posts: list, *, zeitzone: str = "UTC") -> Knoepfe:
     for p in posts:
         ziel_id = p["clip_id"] if p["art"] == "clip" else p["entwurf_id"]
         tag = utc_zu_lokal(aus_iso(p["gepostet_utc"]), zeitzone)
-        text = (f"#{p['id']} · {ART_NAMEN[p['art']]} {ziel_id} · "
+        text = (f"#{p['id']} · {publikum.ART_NAMEN[p['art']]} {ziel_id} · "
                 f"{PLATTFORM_NAMEN.get(p['plattform'], p['plattform'])} · {tag:%d.%m.}")
         knoepfe.append([(text, f"pl:{p['id']}:")])
     return knoepfe
@@ -148,24 +152,21 @@ def parse(daten: str | None) -> tuple[str, int, str]:
     return aktion, int(nummer), antwort
 
 
-def _ganzzahl(wert) -> str:
-    """1240 → „1 240“ (Leerzeichen als Tausendertrenner – eindeutig, anders als Punkt oder Komma)."""
-    return f"{int(wert):,}".replace(",", " ")
-
-
-def _dezimal(wert) -> str:
-    """6.8 → „6,8“, 34.0 → „34“: eine Nachkommastelle mit Komma, „,0“ fällt weg."""
-    text = f"{float(wert):.1f}"
-    return (text[:-2] if text.endswith(".0") else text).replace(".", ",")
-
-
 def werte_text(werte: dict) -> str:
-    """Gelesene Zahlen lesbar, z. B. „👁 1 240 · ❤️ 61 · 💬 3 · ↗️ 5 · 🔖 2 · ⏱ 6,8 s · ✅ 34 %“; None = „–“."""
-    teile = [f"{symbol} {'–' if werte.get(feld) is None else _ganzzahl(werte[feld])}"
-             for feld, symbol in ZAEHLER_SYMBOLE]
-    wiedergabe, voll = werte.get("wiedergabe_s"), werte.get("voll_prozent")
-    teile.append("⏱ –" if wiedergabe is None else f"⏱ {_dezimal(wiedergabe)} s")
-    teile.append("✅ –" if voll is None else f"✅ {_dezimal(voll)} %")
+    """Alle sieben Werte einer Messung, z. B. „👁 1 240 · ❤️ 61 · 💬 3 · ↗️ 5 · 🔖 2 · ⏱ 6,8 s · 🏁 34 %“; None = „–“.
+    Symbole und Zahlformat aus publikum (SYMBOLE, anzahl_text, dezimal_text) – dieselbe Schreibweise wie in den
+    Verstößen der Rückfrage und in /publikum. Anders als /publikum zeigt die Bestätigung jedes Feld, auch „–“:
+    so siehst du, was Claude NICHT gelesen hat."""
+    teile = []
+    for feld in publikum.FELDER:
+        wert = werte.get(feld)
+        if wert is None:
+            zahl = "–"
+        elif feld in publikum.ZAEHLER:
+            zahl = publikum.anzahl_text(wert)
+        else:
+            zahl = publikum.dezimal_text(wert) + (" s" if feld == "wiedergabe_s" else " %")
+        teile.append(f"{publikum.SYMBOLE[feld]} {zahl}")
     return " · ".join(teile)
 
 
@@ -183,11 +184,12 @@ def endung_fuer(mime_type: str | None, dateiname: str | None) -> str | None:
 
 # --- Vorgang und Versand ----------------------------------------------------------------------------------------
 
-async def _sag(app, text: str, knoepfe: Knoepfe | None = None) -> None:
+async def _sag(app, text: str, knoepfe: Knoepfe | None = None):
     """Nachricht an dich (bot_data["erlaubt"] – der Lern-Bot hat genau einen Empfänger). Knöpfe über
-    lernbot._markup, dieselbe Umwandlung wie für die Entwurfs-Knöpfe. Reiner Text, kein HTML."""
-    await app.bot.send_message(app.bot_data["erlaubt"], text,
-                               reply_markup=lernbot._markup(knoepfe) if knoepfe else None)
+    lernbot._markup, dieselbe Umwandlung wie für die Entwurfs-Knöpfe. Reiner Text, kein HTML. Rückgabe: die
+    gesendete Nachricht (telegram.Message) – ihre message_id merkt sich ein Vorgang mit Knöpfen."""
+    return await app.bot.send_message(app.bot_data["erlaubt"], text,
+                                      reply_markup=lernbot._markup(knoepfe) if knoepfe else None)
 
 
 def _bild_weg(vorgang: dict) -> None:
@@ -205,6 +207,28 @@ def _verwerfen(bot_data: dict) -> bool:
         return False
     _bild_weg(alt)
     return True
+
+
+async def _alten_vorgang_ersetzen(app, neuer_post: int | None) -> None:
+    """Vor einem neuen Foto bzw. „#17 …“-Text: den offenen Vorgang beenden und dir sagen, was dabei verloren geht –
+    ein wartendes Bild, eine Rückfrage (die gelesenen Zahlen sind NICHT gespeichert) oder eine Hand-Eingabe.
+    neuer_post: der Post, um den es jetzt geht (None = noch unbekannt, Foto ohne #Nummer). Geht es um denselben
+    Post wie der offene Vorgang, ist das Neue eine Korrektur – dann kein Hinweis (nichts geht verloren, was du
+    nicht gerade ersetzt). Beispiel: Rückfrage zu #17 offen, Text „#18 …“ → „🗑 Rückfrage zu #17 verworfen …“."""
+    alt = app.bot_data.get(ZUSTAND)
+    if alt is None:
+        return
+    if _verwerfen(app.bot_data):
+        await _sag(app, "🗑 Vorheriges Bild verworfen.")
+        return
+    nr = alt["post_id"]
+    if nr is None or nr == neuer_post:
+        return
+    if alt["art"] == "rueckfrage":
+        await _sag(app, f"🗑 Rückfrage zu #{nr} verworfen – diese Zahlen sind NICHT gespeichert, bitte nochmal "
+                        "schicken.")
+    elif alt["art"] == "hand":
+        await _sag(app, f"🗑 Hand-Eingabe für #{nr} abgebrochen – nichts gespeichert.")
 
 
 async def _knoepfe_weg(query) -> None:
@@ -236,11 +260,15 @@ async def _pruefen_und_speichern(app, post_id: int, werte: dict, quelle: str, ro
     if not verstoesse:
         await _speichern(app, post_id, werte, quelle, roh)
         return
-    app.bot_data[ZUSTAND] = {"art": "rueckfrage", "post_id": post_id, "ordner": None, "bild": None, "werte": werte,
-                             "quelle": quelle, "roh": roh, "seit": jetzt()}
+    vorgang = {"art": "rueckfrage", "post_id": post_id, "ordner": None, "bild": None, "werte": werte,
+               "quelle": quelle, "roh": roh, "seit": jetzt()}
+    app.bot_data[ZUSTAND] = vorgang
     log.info("Zahlen für Post #%s: Rückfrage (%s Regel(n) verletzt)", post_id, len(verstoesse))
     zeilen = [f"🤔 Zahlen für #{post_id}: {werte_text(werte)}", *(f"⚠️ {v}" for v in verstoesse), "Stimmt das?"]
-    await _sag(app, "\n".join(zeilen), knoepfe_rueckfrage(post_id))
+    frage = await _sag(app, "\n".join(zeilen), knoepfe_rueckfrage(post_id))
+    # pm:<post_id>: sagt nicht, zu WELCHER Rückfrage der Knopf gehört (zwei Rückfragen zum selben Post haben
+    # dieselben Knöpfe) – die Nachricht mit den Knöpfen sagt es
+    vorgang["knopf_nachricht"] = frage.message_id
 
 
 async def _auswerten(app, vorgang: dict) -> None:
@@ -275,8 +303,9 @@ async def _auswerten(app, vorgang: dict) -> None:
 
 async def bei_foto(update, context) -> None:
     """Screenshot angekommen (Foto → .jpg, oder Bild als Datei → endung_fuer). Mit #Nummer: sofort auswerten;
-    ohne: Post-Knöpfe. Ersetzt einen offenen Vorgang (altes Bild sofort löschen, Hinweis). Download-Fehler: nur
-    den Ausnahmetyp loggen (file_path enthält den Bot-Token), dir „Download fehlgeschlagen“ sagen."""
+    ohne: Post-Knöpfe. Ersetzt einen offenen Vorgang mit Hinweis (_alten_vorgang_ersetzen; ein altes Bild wird
+    sofort gelöscht). Download-Fehler: nur den Ausnahmetyp loggen (file_path enthält den Bot-Token), dir
+    „Download fehlgeschlagen“ sagen."""
     app, nachricht = context.application, update.effective_message
     con, konfig = app.bot_data["con"], app.bot_data["konfig"]
     if nachricht.photo:
@@ -300,13 +329,12 @@ async def bei_foto(update, context) -> None:
         await _sag(app, "⚠️ Download fehlgeschlagen – bitte das Bild nochmal schicken.")
         return
 
-    if _verwerfen(app.bot_data):
-        await _sag(app, "🗑 Vorheriges Bild verworfen.")
+    nummer = post_nummer_aus_text(nachricht.caption)
+    await _alten_vorgang_ersetzen(app, nummer)
     vorgang = {"art": "bild", "post_id": None, "ordner": ordner, "bild": bild, "werte": None, "quelle": None,
                "roh": None, "seit": jetzt()}
     app.bot_data[ZUSTAND] = vorgang
 
-    nummer = post_nummer_aus_text(nachricht.caption)
     if nummer is None:  # welcher Post? – die jüngsten ohne Messung in den letzten 24 h zur Wahl (Annahme A12)
         posts = publikum.posts_ohne_messung(con, zeit=jetzt())
         if not posts:
@@ -314,8 +342,11 @@ async def bei_foto(update, context) -> None:
             await _sag(app, "🤷 Ich finde keinen Post ohne Messung aus den letzten 24 h. Schick den Screenshot bitte "
                             "mit #Nummer in der Bildunterschrift (/publikum zeigt die Nummern).")
             return
-        await _sag(app, f"📊 Zu welchem Post gehört der Screenshot? (Das Bild wartet {WARTEN_MIN} min.)",
-                   knoepfe_posts(posts, zeitzone=konfig.wert("zeit.zeitzone", "Europe/Berlin")))
+        frage = await _sag(app, f"📊 Zu welchem Post gehört der Screenshot? (Das Bild wartet {WARTEN_MIN} min.)",
+                           knoepfe_posts(posts, zeitzone=konfig.wert("zeit.zeitzone", "Europe/Berlin")))
+        # pl:<post_id>: sagt nicht, zu welchem Bild der Knopf gehört (zwei Bilder ohne Nummer bekommen byte-gleiche
+        # Knöpfe) – die Nachricht mit den Knöpfen sagt es
+        vorgang["knopf_nachricht"] = frage.message_id
         return
     if publikum.post(con, nummer) is None:
         _verwerfen(app.bot_data)
@@ -329,7 +360,8 @@ async def bei_text(update, context) -> None:
     """Freier Text: offene Hand-Eingabe (`1240 61 6.8 34`) oder ein ganzer Messungs-Text (`#17 1240 61 6.8 34`,
     lies_text_eingabe). Beides wird mit pruefe_plausibel geprüft; bei einem Verstoß Rückfrage mit pm:-Knöpfen.
     Sonst ein kurzer Hinweis auf /hilfe. Kaputte Zahlen → der Fehlertext aus lies_hand_eingabe, Vorgang bleibt offen.
-    Wartet eine Rückfrage, gelten geschickte Zahlen als Korrektur von Hand (wie ✏️ und dann die Zahlen)."""
+    Wartet eine Rückfrage, gelten geschickte Zahlen als Korrektur von Hand (wie ✏️ und dann die Zahlen). Ein
+    „#17 …“-Text ersetzt einen offenen Vorgang zu einem anderen Post mit Hinweis (_alten_vorgang_ersetzen)."""
     app = context.application
     con = app.bot_data["con"]
     text = (update.effective_message.text or "").strip()
@@ -344,8 +376,7 @@ async def bei_text(update, context) -> None:
         if publikum.post(con, post_id) is None:
             await _sag(app, f"❓ Post #{post_id} kenne ich nicht – /publikum zeigt die Nummern.")
             return
-        if _verwerfen(app.bot_data):
-            await _sag(app, "🗑 Vorheriges Bild verworfen.")
+        await _alten_vorgang_ersetzen(app, post_id)
         await _pruefen_und_speichern(app, post_id, werte, "hand", None)
         return
 
@@ -364,8 +395,8 @@ async def bei_text(update, context) -> None:
 async def bei_klick(update, context) -> None:
     """Knöpfe pl: und pm:. Prüft selbst, ob der Klick von dir kommt (CallbackQueryHandler kennt keinen Filter) –
     sonst „Nicht erlaubt.“. Passt der Klick nicht zum offenen Vorgang (andere post_id, schon gespeichert,
-    Doppelklick) → „Schon erledigt.“, nichts passiert. pm:<post_id>:ok speichert die gezeigten Zahlen,
-    pm:<post_id>:hand öffnet die Hand-Eingabe für diesen Post."""
+    Doppelklick, Knopf aus einer älteren Nachricht) → „Schon erledigt.“, nichts passiert. pm:<post_id>:ok
+    speichert die gezeigten Zahlen, pm:<post_id>:hand öffnet die Hand-Eingabe für diesen Post."""
     query, app = update.callback_query, context.application
     if query.from_user is None or query.from_user.id != app.bot_data["erlaubt"]:
         await query.answer("Nicht erlaubt.")
@@ -376,10 +407,14 @@ async def bei_klick(update, context) -> None:
         await query.answer("Unbekannter Knopf.")
         return
     vorgang = app.bot_data.get(ZUSTAND)
+    # Aus welcher Nachricht kam der Klick? (None, wenn Telegram die Nachricht nicht mehr mitschickt – dann passt er nie)
+    aus_nachricht = getattr(query.message, "message_id", None)
 
     if aktion == "pl":
-        # Regel: pl: passt nur zu einem Bild, das noch auf die Wahl seines Posts wartet
-        if vorgang is None or vorgang["art"] != "bild" or vorgang["post_id"] is not None:
+        # Regel: pl: passt nur zu einem Bild, das noch auf die Wahl seines Posts wartet – und nur aus der Nachricht,
+        # die für genau dieses Bild gefragt hat (sonst ordnete ein alter Knopf das NEUE Bild einem Post zu)
+        if (vorgang is None or vorgang["art"] != "bild" or vorgang["post_id"] is not None
+                or aus_nachricht != vorgang.get("knopf_nachricht")):
             await query.answer("Schon erledigt.")
             return
         if publikum.post(app.bot_data["con"], post_id) is None:
@@ -391,8 +426,9 @@ async def bei_klick(update, context) -> None:
         await _auswerten(app, vorgang)
         return
 
-    # Regel: pm: passt nur zur offenen Rückfrage genau dieses Posts
-    if vorgang is None or vorgang["art"] != "rueckfrage" or vorgang["post_id"] != post_id:
+    # Regel: pm: passt nur zur offenen Rückfrage genau dieses Posts, und nur aus der Nachricht dieser Rückfrage
+    if (vorgang is None or vorgang["art"] != "rueckfrage" or vorgang["post_id"] != post_id
+            or aus_nachricht != vorgang.get("knopf_nachricht")):
         await query.answer("Schon erledigt.")
         return
     await _knoepfe_weg(query)

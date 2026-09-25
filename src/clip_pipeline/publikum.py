@@ -47,6 +47,8 @@ log = logging.getLogger("pipeline")
 PLATTFORMEN = ("tiktok", "youtube")
 # Was ein Post sein kann (Spec §5, CHECK in publikum.sql): ein Einzelclip-Short oder ein Regisseur-Entwurf
 ARTEN = ("clip", "entwurf")
+# So heißen die Arten in Bot-Texten („Entwurf 41“, „Clip 88“) – eine Stelle für beide Lern-Bot-Module
+ART_NAMEN = {"clip": "Clip", "entwurf": "Entwurf"}
 # Woher eine Messung kommt (CHECK in publikum.sql)
 QUELLEN = ("api", "screenshot", "hand")
 
@@ -59,6 +61,9 @@ ZAEHLER_NAMEN = {"views": "Views", "likes": "Likes", "kommentare": "Kommentare",
                  "saves": "Saves"}
 # Reihenfolge der Hand-Eingabe „views likes wiedergabe voll%“ (Spec §7.1) – die übrigen Felder bleiben None
 HAND_FELDER = ("views", "likes", "wiedergabe_s", "voll_prozent")
+# Die Hand-Eingabe in Worten, mit Einheiten – genau so in der Bitte des Lern-Bots und in jeder Fehlermeldung. Die
+# Einheit steht dabei, weil die TikTok-App die Wiedergabe als „0:07“ zeigt, gebraucht werden aber Sekunden.
+HAND_FORM = "Views Likes Ø-Wiedergabe-in-Sekunden Ganz-angesehen-in-%"
 # Diese Zeichen bedeuten in der Hand-Eingabe „weiß ich nicht“ (Halbgeviertstrich, Bindestrich, Geviertstrich –
 # das Handy macht aus „-“ gern automatisch „–“)
 UNBEKANNT = ("–", "-", "—")
@@ -67,7 +72,12 @@ UNBEKANNT = ("–", "-", "—")
 MAD_FAKTOR = 1.4826      # macht den MAD bei normalverteilten Daten zur Standardabweichung (Spec §6.3)
 MAD_MINIMUM = 0.05       # kleiner als das wird die Streuung nicht – sonst explodiert z bei fast gleichen Posts
 Z_GRENZE = 2.5           # z wird auf ±2,5 begrenzt: ein Viral-Ausreißer soll nicht alles andere überstimmen
-MINDEST_BASIS = 5        # unter 5 Vergleichswerten je Komponente: z = 0 (kein Lernen aus dem Nichts)
+# Unter 5 Posts in der Basis: alle z = 0, Score 0 („Basis zu klein“, kein Lernen aus dem Nichts). Genug Posts,
+# aber unter 5 r-Werten: r fällt weg, e/v werden auf 0,6/0,4 hochgerechnet („Basis ohne Wiedergabe“, Annahme A11).
+MINDEST_BASIS = 5
+# Vermerk in score_teile, wenn der Score wegen zu kleiner Basis 0 ist – lernbot_publikum erkennt ihn an genau
+# dieser Konstante (erklärt die 0 in der Meldung und in /publikum), kein zweites Literal
+VERMERK_BASIS_ZU_KLEIN = "Basis zu klein"
 R_MAX = 1.2              # Wiedergabe/Dauer über 120 % (mehrfach angesehen) zählt nicht noch höher
 WIEDERGABE_MAX_FAKTOR = 1.5  # Plausibilität: Ø Wiedergabe über 150 % der Dauer ist ein Lesefehler (Spec §7.1)
 VOLL_MAX_PROZENT = 100.0     # Plausibilität: mehr als alle Zuschauer können ein Video nicht vollständig sehen
@@ -75,22 +85,60 @@ SCORE_STELLEN = 4        # Score auf 4 Nachkommastellen: genug für Paare mit Ab
 SEKUNDEN_JE_TAG = 86400  # 24 · 60 · 60 – Alter von Posts und Messungen rechnen wir in Tagen
 
 # Längen-Stufen des Rezepts (Spec §9.1: kurz ≤ 20 s, mittel 25–32 s, lang 40–45 s). Die Spec lässt Lücken; ein
-# Post fällt in die NÄCHSTE Stufe, die Grenzen liegen deshalb in der Mitte der Lücken (Annahme A7 im Plan).
+# Post fällt in die NÄCHSTE Stufe, die Grenzen liegen deshalb in der Mitte der Lücken (Annahme A7,
+# docs/ENTSCHEIDUNGEN.md „Annahmen im Sprint Lernschleife“).
 LAENGE_GRENZEN = ((22.5, "kurz"), (36.0, "mittel"))  # darüber: "lang"
 
 # Pfad eines TikTok-Videolinks: /@name/video/<Ziffern>. Kurzlinks (vm.tiktok.com/ZM…) haben keine ID im Pfad.
 TIKTOK_VIDEO_PFAD = re.compile(r"^/@[^/]+/video/(\d+)/?$")
 
+# --- Anzeige: so stehen Zahlen in Bot-Texten (Rückfrage, Bestätigung, /publikum, Meldungen) – je Format EINE Stelle
+# Tausender-Trenner („1 240“): schmales, geschütztes Leerzeichen (U+202F). Eindeutig, anders als Punkt oder Komma
+# (1.240 ist im Englischen 1,24), und Telegram bricht die Zahl nicht mitten durch um.
+TAUSENDER = "\u202f"
+# Symbol je Feld einer Messung (so knapp, dass alle sieben Werte in eine Handy-Zeile passen). Für „vollständig
+# angesehen“ 🏁 statt ✅ – ✅ ist im Bot schon der Knopf „Stimmt“ bzw. „erledigt“.
+SYMBOLE = {"views": "👁", "likes": "❤️", "kommentare": "💬", "shares": "↗️", "saves": "🔖", "wiedergabe_s": "⏱",
+           "voll_prozent": "🏁"}
 
-# --- Kleine Helfer ------------------------------------------------------------------------
 
-def _einstellung(konfig: Konfig, name: str):
+# --- Kleine Helfer, öffentlich (auch lernbot_publikum und lernbot_zahlen rechnen und zeigen damit) ----------
+
+def einstellung(konfig: Konfig, name: str):
     """Ein Wert aus [publikum]. Die Standardwerte stehen nur in config/pipeline.toml (eine Wahrheit);
-    fehlt ein Schlüssel, ist die Konfiguration kaputt → KonfigFehler mit dem Namen."""
+    fehlt ein Schlüssel, ist die Konfiguration kaputt → KonfigFehler mit dem Namen.
+    Beispiel: einstellung(konfig, "fenster") == 20.
+
+    Diese Regel gilt für die Schlüssel, die mit der Lernschleife neu sind ([publikum], [lernbot].screenshot_…).
+    Schlüssel, die es vorher gab ([sperre].warten_s, [vorschau].max_mb, [shorts].max_kbit, [puffer].rohdaten_tage,
+    [zeit].zeitzone), lesen wir wie der übrige Code mit konfig.wert(…, Standard) und mit demselben Standard wie
+    dort – sonst verhielte sich derselbe Schlüssel je nach Modul verschieden."""
     abschnitt = konfig.abschnitt("publikum")
     if name not in abschnitt:
         raise KonfigFehler(f"[publikum].{name} fehlt in der Konfiguration (Standard steht in config/pipeline.toml)")
     return abschnitt[name]
+
+
+def alter_in_tagen(von_iso: str, bis: datetime | str) -> float:
+    """Tage zwischen zwei Zeitpunkten, z. B. gepostet → gemessen. Die eine Stelle für „wie alt ist das?“.
+    Beispiel: gepostet 18.09. 10:00 UTC, bis 25.09. 12:00 UTC → 7,08 (7 Tage und 2 Stunden)."""
+    bis_zeit = aus_iso(bis) if isinstance(bis, str) else bis
+    return (bis_zeit - aus_iso(von_iso)).total_seconds() / SEKUNDEN_JE_TAG
+
+
+def anzahl_text(n: int | float) -> str:
+    """Ganze Zahl für Bot-Texte, mit Tausender-Trenner TAUSENDER: 1240 → „1 240“, 5 → „5“."""
+    return f"{int(n):,}".replace(",", TAUSENDER)
+
+
+def dezimal_text(x: float) -> str:
+    """Zahl mit höchstens einer Nachkommastelle und Komma für Bot-Texte (Sekunden, Prozent, Tage): erst auf eine
+    Stelle runden, dann fällt „,0“ weg. Beispiele: 6.8 → „6,8“, 6.96 → „7“, 7.0 → „7“, 34.5 → „34,5“."""
+    text = f"{float(x):.1f}"
+    return (text[:-2] if text.endswith(".0") else text).replace(".", ",")
+
+
+# --- Kleine Helfer, nur hier ------------------------------------------------------------
 
 
 def _feld(zeile: sqlite3.Row | dict | None, name: str):
@@ -104,18 +152,6 @@ def _feld(zeile: sqlite3.Row | dict | None, name: str):
         return None
 
 
-def _alter_tage(von_iso: str, bis: datetime | str) -> float:
-    """Tage zwischen zwei Zeitpunkten, z. B. gepostet → gemessen. Die eine Stelle für „wie alt ist das?“."""
-    bis_zeit = aus_iso(bis) if isinstance(bis, str) else bis
-    return (bis_zeit - aus_iso(von_iso)).total_seconds() / SEKUNDEN_JE_TAG
-
-
-def _zahl(x: float) -> str:
-    """Zahl für Meldungen an dich: ganze Zahlen ohne Nachkommastellen, sonst eine Stelle mit Komma (6,8)."""
-    x = float(x)
-    return str(int(x)) if x.is_integer() else f"{x:.1f}".replace(".", ",")
-
-
 # --- Konfiguration --------------------------------------------------------------------
 
 def post_plattformen(konfig: Konfig) -> list[str]:
@@ -126,7 +162,7 @@ def post_plattformen(konfig: Konfig) -> list[str]:
     "clipbattle") werden ignoriert und ins Log geschrieben (Warnung). Beispiel: ["tiktok", "youtube"] → beide;
     [] → keine Posts (Lernschleife aus)."""
     ergebnis: list[str] = []
-    for eintrag in _einstellung(konfig, "plattformen"):
+    for eintrag in einstellung(konfig, "plattformen"):
         if eintrag not in PLATTFORMEN:
             log.warning("[publikum].plattformen: %r ist keine Post-Plattform (erlaubt: %s) – ignoriert",
                         eintrag, ", ".join(PLATTFORMEN))
@@ -330,12 +366,17 @@ def posts_ohne_messung(con: sqlite3.Connection, *, stunden: float = 24, grenze: 
 # --- Messungen --------------------------------------------------------------------------
 
 def _hand_wert(text: str, feld: str) -> int | float | None:
-    """Ein Wert der Hand-Eingabe: „–“ → None, sonst eine nicht negative, endliche Zahl; Zähler ganzzahlig."""
+    """Ein Wert der Hand-Eingabe: „–“ → None, sonst eine nicht negative, endliche Zahl; Zähler ganzzahlig.
+    Beim Anteil „ganz angesehen“ darf ein „%“ dahinter stehen (die Form nennt „in %“, „34%“ meint 34)."""
     if text in UNBEKANNT:
         return None
+    if feld == "voll_prozent":
+        text = text.removesuffix("%")
     try:
         wert = float(text.replace(",", "."))
     except ValueError:
+        if feld == "wiedergabe_s":  # die TikTok-App zeigt „0:07“ – gebraucht werden Sekunden, das sagen wir auch
+            raise ValueError(f"Ø Wiedergabe bitte in Sekunden, z. B. 7 oder 6,8 – nicht „{text}“.") from None
         raise ValueError(f"„{text}“ ist keine Zahl.") from None
     if not math.isfinite(wert):  # float() liest auch „nan“ und „inf“ – das sind keine Zahlen von TikTok
         raise ValueError(f"„{text}“ ist keine gültige Zahl.")
@@ -350,17 +391,17 @@ def _hand_wert(text: str, feld: str) -> int | float | None:
 
 
 def lies_hand_eingabe(text: str) -> dict:
-    """Hand-Eingabe `views likes wiedergabe voll%` (Spec §7.1), Leerzeichen-getrennt, „–“ oder „-“ = unbekannt,
-    Komma als Dezimaltrenner erlaubt. Beispiel: "1240 61 6,8 34" →
+    """Hand-Eingabe `views likes wiedergabe voll%` (Spec §7.1, in Worten HAND_FORM), Leerzeichen-getrennt, „–“
+    oder „-“ = unbekannt, Komma als Dezimaltrenner erlaubt, „34%“ geht auch. Beispiel: "1240 61 6,8 34" →
     {"views": 1240, "likes": 61, "wiedergabe_s": 6.8, "voll_prozent": 34.0, übrige Felder None}.
-    Nur die vier Felder – kommentare/shares/saves bleiben None (zählen im Engagement als 0, A10; Rückfrage an
-    Florian im Plan). ValueError mit verständlichem Text bei falscher Anzahl, keiner Zahl oder negativen Werten.
+    Nur die vier Felder – kommentare/shares/saves bleiben None (zählen im Engagement als 0, A10; offene
+    Rückfrage R4, docs/ENTSCHEIDUNGEN.md). ValueError mit verständlichem Text bei falscher Anzahl, keiner Zahl
+    (bei der Wiedergabe mit dem Hinweis „in Sekunden“) oder negativen Werten.
     Geprüft wird danach wie beim Screenshot mit pruefe_plausibel (der Lern-Bot fragt bei einem Verstoß nach).
     Views und Likes müssen ganze Zahlen sein – so fällt „1.240“ (Tausenderpunkt) auf, statt als 1,24 zu gelten."""
     teile = text.split()
     if len(teile) != len(HAND_FELDER):
-        raise ValueError("Bitte genau vier Werte: views likes wiedergabe voll% – z. B. „1240 61 6,8 34“, "
-                         "„–“ für unbekannt.")
+        raise ValueError(f"Bitte genau vier Werte: {HAND_FORM} – z. B. „1240 61 6,8 34“, „–“ für unbekannt.")
     werte: dict = {feld: None for feld in FELDER}
     for feld, teil in zip(HAND_FELDER, teile):
         werte[feld] = _hand_wert(teil, feld)
@@ -379,22 +420,24 @@ def pruefe_plausibel(werte: dict, letzte: sqlite3.Row | dict | None, dauer_s: fl
       - kein Zähler (views, likes, kommentare, shares, saves) kleiner als in der letzten Messung
       - wiedergabe_s ≤ 1,5 · dauer_s
       - voll_prozent ≤ 100
-    Fehlende Werte (None) werden nicht geprüft. Beispiel: views 900 nach zuvor 1240 → ["Views gesunken: 1240 → 900"]."""
+    Fehlende Werte (None) werden nicht geprüft. Beispiel: views 900 nach zuvor 1240 → ["Views gesunken: 1 240 → 900"].
+    Die Zahlen stehen wie in jeder Anzeige (anzahl_text, dezimal_text) – die Rückfrage zeigt sie neben den
+    gelesenen Werten, dort soll dieselbe Zahl nicht in zwei Schreibweisen stehen."""
     verstoesse: list[str] = []
     # Regel 1: Zähler wachsen nur – eine gesunkene Zahl ist fast immer ein Lesefehler (falsche Zeile im Bild)
     for feld in ZAEHLER:
         neu, alt = werte.get(feld), _feld(letzte, feld)
         if neu is not None and alt is not None and neu < alt:
-            verstoesse.append(f"{ZAEHLER_NAMEN[feld]} gesunken: {_zahl(alt)} → {_zahl(neu)}")
+            verstoesse.append(f"{ZAEHLER_NAMEN[feld]} gesunken: {anzahl_text(alt)} → {anzahl_text(neu)}")
     # Regel 2: Ø Wiedergabe höchstens 1,5 × Videolänge (wer mehrfach schaut, kommt selten weit darüber)
     wiedergabe = werte.get("wiedergabe_s")
     if wiedergabe is not None and wiedergabe > WIEDERGABE_MAX_FAKTOR * dauer_s:
-        verstoesse.append(f"Ø Wiedergabe {_zahl(wiedergabe)} s ist länger als 1,5 × Videolänge "
-                          f"({_zahl(dauer_s)} s)")
+        verstoesse.append(f"Ø Wiedergabe {dezimal_text(wiedergabe)} s ist länger als 1,5 × Videolänge "
+                          f"({dezimal_text(dauer_s)} s)")
     # Regel 3: „vollständig angesehen“ ist ein Anteil der Zuschauer – höchstens 100 %
     voll = werte.get("voll_prozent")
     if voll is not None and voll > VOLL_MAX_PROZENT:
-        verstoesse.append(f"Vollständig angesehen {_zahl(voll)} % – mehr als 100 % geht nicht")
+        verstoesse.append(f"Vollständig angesehen {dezimal_text(voll)} % – mehr als 100 % geht nicht")
     return verstoesse
 
 
@@ -462,11 +505,11 @@ def waehle_messung(post: sqlite3.Row | dict, messungen: list, konfig: Konfig) ->
     """Die Messung, deren Alter (gemessen − gepostet) [publikum].alter_tage (7) am nächsten liegt – nur Messungen,
     die mindestens mindest_alter_tage (3) alt sind und views haben. Gleichstand: die spätere. Keine → None.
     Beispiel: Messungen an Tag 3,5 / 6 / 9 → Tag 6 (1 Tag Abstand); an Tag 6 und 8 → Tag 8."""
-    ziel_tage = float(_einstellung(konfig, "alter_tage"))
-    mindest_tage = float(_einstellung(konfig, "mindest_alter_tage"))
+    ziel_tage = float(einstellung(konfig, "alter_tage"))
+    mindest_tage = float(einstellung(konfig, "mindest_alter_tage"))
     kandidaten = []
     for messung in messungen:
-        alter = _alter_tage(post["gepostet_utc"], messung["gemessen_utc"])
+        alter = alter_in_tagen(post["gepostet_utc"], messung["gemessen_utc"])
         if _feld(messung, "views") is None or alter < mindest_tage:
             continue
         # Sortierschlüssel: Abstand zum Ziel, bei Gleichstand die spätere (größeres Alter, dann größere id)
@@ -480,7 +523,7 @@ def ist_faellig(post: sqlite3.Row | dict, konfig: Konfig, zeit: datetime | None 
     (Tag 7) für immer verdrängen (Annahme A1)."""
     if _feld(post, "bewertet_utc") is not None:
         return False
-    return _alter_tage(post["gepostet_utc"], zeit or jetzt()) >= float(_einstellung(konfig, "alter_tage"))
+    return alter_in_tagen(post["gepostet_utc"], zeit or jetzt()) >= float(einstellung(konfig, "alter_tage"))
 
 
 def robust_z(x: float, basis: list[float]) -> tuple[float, float, float]:
@@ -488,7 +531,7 @@ def robust_z(x: float, basis: list[float]) -> tuple[float, float, float]:
     Rückgabe (z, median, mad) – mad ist der gemessene MAD (vor dem Minimum), damit score_teile ehrlich bleibt.
     Beispiel: basis [1, 2, 3, 4, 5], x = 5 → Median 3, MAD 1, z = 2/1,4826 ≈ 1,349.
     Zahlenbeispiel zum MAD-Minimum: Engagement-Werte [0,05 0,06 0,07 0,08 0,09] haben MAD 0,01 – gerechnet wird mit
-    0,05, x = 0,09 ergibt z = 0,02/0,0741 ≈ 0,27 statt 1,35 (Rückfrage an Florian im Plan).
+    0,05, x = 0,09 ergibt z = 0,02/0,0741 ≈ 0,27 statt 1,35 (offene Rückfrage R3, docs/ENTSCHEIDUNGEN.md).
     basis darf keine None enthalten (die filtert score_fuer); ValueError bei leerer basis."""
     if not basis:
         raise ValueError("Leere Vergleichsbasis – ohne Vergleich gibt es keinen z-Wert")
@@ -520,7 +563,7 @@ def vergleichsbasis(con: sqlite3.Connection, post: sqlite3.Row | dict, konfig: K
             WHERE plattform = ? AND bewertet_utc IS NOT NULL AND gepostet_utc < ? AND id != ?
             ORDER BY gepostet_utc DESC, id DESC
             LIMIT ?""",
-        (post["plattform"], post["gepostet_utc"], post["id"], int(_einstellung(konfig, "fenster"))),
+        (post["plattform"], post["gepostet_utc"], post["id"], int(einstellung(konfig, "fenster"))),
     ).fetchall()
     basis = []
     for zeile in zeilen:
@@ -540,7 +583,7 @@ def vergleichsbasis(con: sqlite3.Connection, post: sqlite3.Row | dict, konfig: K
 def _gewichte(konfig: Konfig, mit_r: bool) -> dict[str, float]:
     """Gewichte der Komponenten aus [publikum.gewichte]. Ohne r werden e und v auf 1 hochgerechnet (Spec §6.4):
     0,3 / (0,3 + 0,2) = 0,6 und 0,2 / 0,5 = 0,4 – so bleibt der Score auf derselben Skala."""
-    g = _einstellung(konfig, "gewichte")
+    g = einstellung(konfig, "gewichte")
     w = {"r": float(g["wiedergabe"]), "e": float(g["engagement"]), "v": float(g["reichweite"])}
     if mit_r:
         return w
@@ -560,7 +603,8 @@ def score_fuer(post: sqlite3.Row | dict, messungen: list, basis: list[dict],
 
     Median und MAD je Komponente nur über die Werte der Basis, die es gibt (r fehlt bei Posts ohne Wiedergabe;
     e und v hat jeder bewertete Post, weil Messungen ohne views nicht zählen):
-      - Basis unter MINDEST_BASIS Posts: alle z = 0, Score 0, Vermerk „Basis zu klein“ (Spec §6.3).
+      - Basis unter MINDEST_BASIS Posts: alle z = 0, Score 0, Vermerk „Basis zu klein“ (Spec §6.3); ohne eigenes r
+        zusätzlich „ohne Wiedergabe“ (die gespeicherten Gewichte sind dann 0,6/0,4).
       - Basis groß genug, aber unter MINDEST_BASIS r-Werten: gerechnet wie „ohne Wiedergabe“ (0,6/0,4), Vermerk
         „Basis ohne Wiedergabe“ – so bleibt der Score auf derselben Skala, statt dass z_r = 0 ihn halbiert.
     Beispiel: 20 Posts in der Basis, nur 2 davon mit r → score = 0,6·z_e + 0,4·z_v.
@@ -578,13 +622,15 @@ def score_fuer(post: sqlite3.Row | dict, messungen: list, basis: list[dict],
                    "median_r": None, "mad_r": None, "median_e": None, "mad_e": None, "median_v": None, "mad_v": None,
                    "messung_id": _feld(messung, "id"),
                    # auf zwei Stellen: „7,1 Tage“ reicht zum Nachvollziehen, mehr ist Rauschen der Uhrzeit
-                   "messung_alter_tage": round(_alter_tage(post["gepostet_utc"], messung["gemessen_utc"]), 2),
+                   "messung_alter_tage": round(alter_in_tagen(post["gepostet_utc"], messung["gemessen_utc"]), 2),
                    "basis_n": len(basis), "basis_n_r": len(basis_r), "vermerke": list(k["vermerke"])}
 
     # Fachliche Regel 1 (Spec §6.3): Unter 5 Vergleichsposts wird nichts gelernt – alle z = 0, Score 0.
     if len(basis) < MINDEST_BASIS:
         teile.update(z_r=0.0 if k["r"] is not None else None, z_e=0.0, z_v=0.0)
-        teile["vermerke"].append("Basis zu klein")
+        teile["vermerke"].append(VERMERK_BASIS_ZU_KLEIN)
+        if k["r"] is None:  # Spec §6.4: der Vermerk gilt auch, wenn der Score wegen zu kleiner Basis 0 ist
+            teile["vermerke"].append("ohne Wiedergabe")
         teile["gewichte"] = _gewichte(konfig, mit_r=k["r"] is not None)
         return 0.0, teile
 

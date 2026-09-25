@@ -369,9 +369,11 @@ CLAUDE.md „Export“ (25.09.) plant für R2.0 Stufe 3 einen 📦 im Lern-Bot u
 - **A15 Ruhezeit im Lern-Bot:** eigener Filter `LEISE_LERN_MELDUNGEN = ("publikum:", "woche:")`;
   Publikums-Meldungen gehen über `lern_meldungen`/Lern-Bot.
 - **A16 Uhrzeit** nur im Timer (kein `[publikum].uhrzeit` – eine Wahrheit, wie clip-lager).
-- **A17 Claude im Lern-Bot-Dienst:** Drop-in `ProtectHome=read-only` + `ReadWritePaths=-/home/pipeline` +
-  `DISABLE_AUTOUPDATER=1`; claude mit vollem Pfad (`[decide].programm`) oder PATH im Drop-in (🏠, hier nicht
-  testbar); Rückfall `screenshot_claude = false`. (Rückfrage 2.)
+- **A17 Claude im Lern-Bot-Dienst:** ~~Drop-in `ProtectHome=read-only` + `ReadWritePaths=-/home/pipeline`~~ – nach dem
+  Panel (Home beschreibbar = Sperre des n8n-Schlüssels angreifbar): Drop-in `ProtectHome=read-only` +
+  `CLAUDE_CONFIG_DIR=/var/lib/clip-pipeline/claude` + `DISABLE_AUTOUPDATER=1`, eigene Anmeldung des Dienstes; voller
+  Pfad in `[decide].programm` nur, wenn claude unter /home liegt (🏠); Rückfall `screenshot_claude = false`.
+  Stand und Begründung: docs/ENTSCHEIDUNGEN.md, „Annahmen im Sprint Lernschleife“. (Rückfrage 2.)
 - **A18 claude_aufruf** ist die gemeinsame Hilfe für neue Aufrufe; `decide`/`stimmung` bleiben vorerst (n8n-Vertrag),
   die Wochenzahl zählt deshalb nur neue Aufrufe.
 - **A19 /publikum** nur im Lern-Bot.
@@ -390,8 +392,10 @@ CLAUDE.md „Export“ (25.09.) plant für R2.0 Stufe 3 einen 📦 im Lern-Bot u
 - **A27 Entwurfs-Checkliste** nur für Post-Plattformen, ohne clip-battle.de (Rückfrage 5).
 - **A28 Hand-Eingabe** wird wie ein Screenshot gegen die letzte Messung geprüft (Rückfrage mit denselben
   pm:-Knöpfen); `#17 1240 61 6.8 34` als Text geht auch ohne Bild.
-- **A29 Ein offener Vorgang** im Lern-Bot (ein Nutzer): ein neues Bild ersetzt das wartende, das alte wird sofort
-  gelöscht; Klicks, die nicht passen → „Schon erledigt.“.
+- **A29 Ein offener Vorgang** im Lern-Bot (ein Nutzer): ein neues Bild bzw. ein neuer „#17 …“-Text ersetzt den
+  offenen Vorgang, ein altes Bild wird sofort gelöscht, und der Bot sagt, was verworfen wurde (Bild, Rückfrage – „NICHT
+  gespeichert“ – oder Hand-Eingabe; kein Hinweis bei einer Korrektur desselben Posts). Klicks, die nicht passen (auch
+  Knöpfe aus einer älteren Nachricht) → „Schon erledigt.“.
 - **A30 Bildformate:** Foto (JPEG) sowie JPG/PNG/WebP als Datei, abgelegt mit passender Endung; HEIC u. a. →
   „Bitte als Foto schicken“.
 - **A31 Upload-Fassung nur im getrennten Betrieb** (E19) – sonst KonfigFehler, weil die Wurzel dann das Lager auf
@@ -409,8 +413,10 @@ CLAUDE.md „Export“ (25.09.) plant für R2.0 Stufe 3 einen 📦 im Lern-Bot u
    sauber). Aber öffentlich stehen deine Epic-ID (config/pipeline.toml:196), MAC und Heimnetz-IPs
    (config/lokal.beispiel.toml, docs/PUFFER.md u. a., 28 Stellen). Durch Platzhalter ersetzen (Epic-ID dann in
    lokal.toml)? Die Historie bleibt davon unberührt; sie umzuschreiben ginge nur mit deinem ausdrücklichen OK.
-2. **Lern-Bot-Dienst und claude:** Damit claude im Dienst läuft, darf der Lern-Bot in `/home/pipeline` schreiben
-   (A17). Ok – oder lieber ein eigenes `CLAUDE_CONFIG_DIR` unter /var/lib/clip-pipeline (dann einmal neu anmelden)?
+2. **Lern-Bot-Dienst und claude:** ~~Damit claude im Dienst läuft, darf der Lern-Bot in `/home/pipeline` schreiben
+   (A17). Ok – oder lieber ein eigenes `CLAUDE_CONFIG_DIR` unter /var/lib/clip-pipeline (dann einmal neu anmelden)?~~
+   Nach dem Panel ist `CLAUDE_CONFIG_DIR` Standard (das Home bleibt schreibgeschützt); offen bleibt nur: eine zweite
+   claude-Anmeldung für den Dienst – ok? (docs/ENTSCHEIDUNGEN.md, R2)
 3. **MAD-Minimum 0,05** gilt für alle Komponenten gleich und dämpft das Engagement (typischer MAD 0,01–0,02) um
    Faktor 2,5–5 – die 0,3 Gewicht wirken kaum. Ein Minimum je Komponente in `[publikum]` (z. B. e 0,005)?
 4. **Hand-Eingabe** kennt nur Views/Likes/Wiedergabe/voll%; Kommentare, Shares, Saves zählen dann 0 und Hand-Posts

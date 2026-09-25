@@ -22,9 +22,9 @@ Hilfe: HILFE_ZUSATZ wird von lernbot.cmd_hilfe an lernbot.HILFE angehängt (HILF
 Regisseur 2.0 dort ändern könnte – so kommen sich beide beim Zusammenführen nicht in die Quere).
 
 Alles hier liest nur die Datenbank (und schreibt höchstens eine Lern-Meldung) – kein Netz außer Telegram, kein
-Rendern, kein Wecken von pve-big. Rechnungen (Alter eines Posts, Fälligkeit, Zahlformat) kommen aus publikum.py,
-auch dessen kleine Helfer (_alter_tage, _zahl, _einstellung) – lieber einen „privaten“ Namen benutzen als die
-Rechnung ein zweites Mal hinschreiben (Startauftrag §4). Hier wird nur angezeigt.
+Rendern, kein Wecken von pve-big. Rechnungen (Alter eines Posts, Fälligkeit, Einstellungen) und die Anzeige von
+Zahlen (publikum.anzahl_text, dezimal_text, SYMBOLE) kommen aus publikum.py, Plattform-Namen aus bot.aktionen, die
+Art der Claude-Ereignisse aus claude_aufruf – hier wird nur angezeigt.
 
 Zeit: `jetzt` ist auf Modulebene importiert – Tests ersetzen `lernbot_publikum.jetzt` (mock.patch.object).
 """
@@ -37,7 +37,7 @@ import math
 import sqlite3
 from datetime import datetime, timedelta
 
-from . import db, publikum
+from . import claude_aufruf, db, publikum
 from .bot import aktionen
 from .konfig import Konfig
 from .zeit import iso, jetzt, utc_zu_lokal  # jetzt im Modul importiert, damit Tests `lernbot_publikum.jetzt` ersetzen
@@ -54,16 +54,10 @@ PUBLIKUM_MAX = 30
 # Scores in Meldungen mit einer Nachkommastelle: Scores liegen zwischen −2,5 und +2,5, eine Stelle reicht zum
 # Vergleichen (gespeichert ist er genauer, siehe publikum.SCORE_STELLEN)
 ANZEIGE_STELLEN = 1
-# Tausender-Trenner in Zahlen („1 240“): schmales, geschütztes Leerzeichen – Telegram bricht die Zahl nicht um
-TAUSENDER = " "
-# So nennen die Meldungen die drei Score-Teile (wie im Wochenbericht, Spec §11.1)
-TEIL_NAMEN = {"r": "Wiedergabe", "e": "Likes je View", "v": "Views"}
-PLATTFORM_NAMEN = {"tiktok": "TikTok", "youtube": "YouTube"}
-ART_NAMEN = {"clip": "Clip", "entwurf": "Entwurf"}
-# ereignisse.art, unter der claude_aufruf.protokolliere jeden neuen Claude-Aufruf zählt (Spec §12)
-CLAUDE_EREIGNIS = "claude"
-# Vermerk aus publikum.score_fuer, wenn weniger als publikum.MINDEST_BASIS Posts zum Vergleich da sind (Score 0)
-BASIS_ZU_KLEIN = "Basis zu klein"
+# So nennen die Meldungen die drei Score-Teile. e = (Likes + 2·Shares + Saves + Kommentare) / Views
+# (publikum.komponenten, Spec §6.2). Spec §11.1 sagt vereinfacht „Likes je View“; hier steht „Reaktionen“, weil die
+# /publikum-Zeile ❤️ und 👁 daneben zeigt und der Name sonst den eigenen Zahlen widerspräche (Annahme A36).
+TEIL_NAMEN = {"r": "Wiedergabe", "e": "Reaktionen je View", "v": "Views"}
 
 # Anhang an lernbot.HILFE (HTML wie dort)
 HILFE_ZUSATZ = """
@@ -72,7 +66,8 @@ HILFE_ZUSATZ = """
 🔗 /link <code>41 https://www.tiktok.com/@…/video/…</code> – Post zu Entwurf 41 anlegen, der Bot nennt die Post-Nummer.
 📸 Screenshot der TikTok-Statistik mit Bildunterschrift <code>#17</code> (Post-Nummer) – Claude liest die Zahlen.
 ✏️ Von Hand: <code>#17 1240 61 6.8 34</code> = Views, Likes, Ø Wiedergabe (s), ganz angesehen (%), „–“ = unbekannt.
-/publikum – letzte Posts mit Zahlen und Score (nach 7 Tagen)"""
+/publikum – letzte Posts mit Zahlen und Score (sobald der Post alt genug ist – /publikum zeigt, ab wann).
+Zeichen: 👁 Views · ❤️ Likes · ⏱ Ø Wiedergabe · 🏁 ganz angesehen"""
 
 
 # --- Ruhezeit ----------------------------------------------------------------------------
@@ -89,7 +84,7 @@ def faellige_lern_meldungen(con: sqlite3.Connection, konfig: Konfig, zeit: datet
     return [z for z in zeilen if not z["schluessel"].startswith(LEISE_LERN_MELDUNGEN)]
 
 
-# --- Kleine Anzeige-Helfer (je Format genau eine Stelle) ----------------------------------
+# --- Anzeige-Helfer nur für diese Meldungen (Zahlen: publikum.anzahl_text/dezimal_text) ------------------
 
 def score_text(score: float) -> str:
     """Ein Score für Meldungen: Vorzeichen, eine Nachkommastelle, Komma; was auf 0 rundet → „0“.
@@ -99,11 +94,6 @@ def score_text(score: float) -> str:
         return "0"
     vorzeichen = "+" if gerundet > 0 else "−"
     return f"{vorzeichen}{abs(gerundet):.{ANZEIGE_STELLEN}f}".replace(".", ",")
-
-
-def _anzahl(n: int) -> str:
-    """Ganze Zahl mit Tausender-Trenner: 1240 → „1 240“ (schmales Leerzeichen)."""
-    return f"{n:,}".replace(",", TAUSENDER)
 
 
 def _tage(tage: float) -> str:
@@ -128,13 +118,14 @@ def score_worte(teile: dict) -> str:
     """Die Teile eines Scores in Worten – warum er so ausfällt. Leer, wenn es nichts zu sagen gibt.
 
     Beispiele:
-      z_r 1,1 · z_e −0,4 · z_v 0,9 → „Wiedergabe über, Likes je View unter, Views über deinem Median“
+      z_r 1,1 · z_e −0,4 · z_v 0,9 → „Wiedergabe über, Reaktionen je View unter, Views über deinem Median“
       Vermerk „Basis zu klein“ → „Basis zu klein“ (dann sind alle z = 0 – ein Vergleich wäre nichtssagend)
-      ohne r → „Likes je View unter, Views gleich deinem Median · ohne Wiedergabe“
+      ohne r → „Reaktionen je View unter, Views gleich deinem Median · ohne Wiedergabe“
     Weitere Vermerke aus publikum.score_fuer (z. B. „Engagement unvollständig“) stehen hinten, mit „·“ getrennt."""
     vermerke = [str(v) for v in teile.get("vermerke") or []]
-    if BASIS_ZU_KLEIN in vermerke:
-        return " · ".join([BASIS_ZU_KLEIN] + [v for v in vermerke if v != BASIS_ZU_KLEIN])
+    basis_zu_klein = publikum.VERMERK_BASIS_ZU_KLEIN
+    if basis_zu_klein in vermerke:
+        return " · ".join([basis_zu_klein] + [v for v in vermerke if v != basis_zu_klein])
     vergleich = []
     for teil, name in TEIL_NAMEN.items():
         z = teile.get(f"z_{teil}")
@@ -162,7 +153,8 @@ def meldung_nach_bewerten(con: sqlite3.Connection, ergebnis: dict, zeit: datetim
     liste = " · ".join(f"#{p['id']} {score_text(p['score'])}" for p in posts)
     text = f"📊 {len(posts)} {wort} bewertet: {liste} – /publikum"
     zeilen = [publikum.post(con, p["id"]) for p in posts]
-    if any(z is not None and BASIS_ZU_KLEIN in (_score_teile(z).get("vermerke") or []) for z in zeilen):
+    if any(z is not None and publikum.VERMERK_BASIS_ZU_KLEIN in (_score_teile(z).get("vermerke") or [])
+           for z in zeilen):
         text += (f"\nℹ️ Score 0 = noch zu wenige bewertete Posts zum Vergleich – echte Scores ab "
                  f"{publikum.MINDEST_BASIS} bewerteten Posts.")
     return db.lern_meldung(con, f"publikum:bewertet:{(zeit or jetzt()):%Y-%m-%d}", text)
@@ -173,31 +165,32 @@ def meldung_nach_bewerten(con: sqlite3.Connection, ergebnis: dict, zeit: datetim
 def claude_aufrufe_woche(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None) -> int:
     """Claude-Aufrufe seit Montag 00:00 Ortszeit ([zeit].zeitzone): Zeilen in `ereignisse` mit art 'claude'
     (geschrieben von claude_aufruf.protokolliere – je Screenshot einer). Beispiel: Mittwoch, 3 Screenshots seit
-    Montag → 3. Die alten Aufrufe von `decide`/`stimmung` schreiben kein solches Ereignis und zählen nicht (A18).
-    Die eine Stelle für „Claude diese Woche“ – /lernstand (Stufe 3) und der Wochenbericht (Stufe 5) nutzen sie."""
+    Montag → 3. Die alten Aufrufe von `decide`/`stimmung` schreiben kein solches Ereignis und zählen nicht (A18),
+    ebenso wenig Fehlschläge, bei denen claude gar nicht lief (claude_aufruf.protokolliere).
+    Die eine Stelle für „Claude diese Woche“ – /publikum nutzt sie jetzt, /lernstand (Stufe 3) und der
+    Wochenbericht (Stufe 5) später."""
     lokal = utc_zu_lokal(zeit or jetzt(), konfig.wert("zeit.zeitzone", "Europe/Berlin"))
     # Montag dieser Woche, 00:00 Ortszeit (weekday(): Montag = 0); iso() rechnet danach nach UTC um – auch über
     # eine Zeitumstellung hinweg richtig, weil die Zone die Uhrzeit des Montags kennt
     montag = (lokal - timedelta(days=lokal.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     return con.execute("SELECT COUNT(*) FROM ereignisse WHERE art = ? AND zeit >= ?",
-                       (CLAUDE_EREIGNIS, iso(montag))).fetchone()[0]
+                       (claude_aufruf.EREIGNIS_ART, iso(montag))).fetchone()[0]
 
 
 def _zahlen_text(zeile: sqlite3.Row, messung: sqlite3.Row | None) -> str:
-    """Die letzte Messung kurz: „👁 1 240 ❤️ 61 ⏱ 6,8 s (Tag 4)“; ohne Messung ein Hinweis, was zu tun ist."""
+    """Die letzte Messung kurz: „👁 1 240 ❤️ 61 ⏱ 6,8 s 🏁 34 % (Tag 4)“ – nur bekannte Werte, kompakt (anders als
+    die Bestätigung nach dem Speichern, die jedes Feld zeigt); ohne Messung ein Hinweis, was zu tun ist."""
     if messung is None:
         return f"noch keine Zahlen – Screenshot mit #{zeile['id']} schicken"
     teile = []
-    if messung["views"] is not None:
-        teile.append(f"👁 {_anzahl(messung['views'])}")
-    if messung["likes"] is not None:
-        teile.append(f"❤️ {_anzahl(messung['likes'])}")
-    if messung["wiedergabe_s"] is not None:
-        teile.append(f"⏱ {publikum._zahl(messung['wiedergabe_s'])} s")
-    if messung["voll_prozent"] is not None:
-        teile.append(f"✅ {publikum._zahl(messung['voll_prozent'])} %")
+    for feld in ("views", "likes"):
+        if messung[feld] is not None:
+            teile.append(f"{publikum.SYMBOLE[feld]} {publikum.anzahl_text(messung[feld])}")
+    for feld, einheit in (("wiedergabe_s", "s"), ("voll_prozent", "%")):
+        if messung[feld] is not None:
+            teile.append(f"{publikum.SYMBOLE[feld]} {publikum.dezimal_text(messung[feld])} {einheit}")
     # Tag der Messung (Alter des Posts beim Messen) – daran siehst du, ob sie schon für den Score zählt (ab Tag 3)
-    tag = math.floor(publikum._alter_tage(zeile["gepostet_utc"], messung["gemessen_utc"]))
+    tag = math.floor(publikum.alter_in_tagen(zeile["gepostet_utc"], messung["gemessen_utc"]))
     return " ".join(teile or ["Zahlen unbekannt"]) + f" (Tag {tag})"
 
 
@@ -211,12 +204,12 @@ def _score_zustand(con: sqlite3.Connection, zeile: sqlite3.Row, konfig: Konfig, 
         worte = score_worte(_score_teile(zeile))
         return f"Score {score_text(zeile['score'])}" + (f" ({worte})" if worte else "")
     if not publikum.ist_faellig(zeile, konfig, zeit):
-        return f"Score noch offen (ab {publikum._zahl(publikum._einstellung(konfig, 'alter_tage'))} Tagen)"
+        return f"Score noch offen (ab {publikum.dezimal_text(publikum.einstellung(konfig, 'alter_tage'))} Tagen)"
     messungen = con.execute("SELECT * FROM publikum_messungen WHERE post_id = ? ORDER BY gemessen_utc, id",
                             (zeile["id"],)).fetchall()
     if publikum.waehle_messung(zeile, messungen, konfig) is not None:
         return "Score kommt beim nächsten Lauf"
-    mindest = publikum._zahl(publikum._einstellung(konfig, "mindest_alter_tage"))
+    mindest = publikum.dezimal_text(publikum.einstellung(konfig, "mindest_alter_tage"))
     return f"Score offen (braucht eine Messung ab Tag {mindest} mit Views)"
 
 
@@ -224,7 +217,7 @@ def publikum_text(con: sqlite3.Connection, konfig: Konfig, grenze: int = PUBLIKU
                   zeit: datetime | None = None) -> str:
     """Text für /publikum: die letzten `grenze` Posts, neueste zuerst, je Zeile z. B.
     „#17 TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s (Tag 4) · Score noch offen (ab 7 Tagen)“ bzw.
-    „#12 TikTok · Clip 88 · 9 Tage · … · Score +0,8 (Wiedergabe über, Likes je View unter deinem Median)“ bzw.
+    „#12 TikTok · Clip 88 · 9 Tage · … · Score +0,8 (Wiedergabe über, Reaktionen je View unter deinem Median)“ bzw.
     „… · Score 0 (Basis zu klein)“. Erste Zeile: „📊 Publikum · 12 Posts, 5 mit Score (die letzten 10, neueste
     zuerst)“. Letzte Zeile: „🤖 Claude diese Woche: 3 Aufrufe“ (claude_aufrufe_woche). Ohne Posts: kurzer Satz,
     wie ein Post entsteht (📦 → /link). Nur lesen – der Text ändert nichts in der Datenbank.
@@ -243,9 +236,9 @@ def publikum_text(con: sqlite3.Connection, konfig: Konfig, grenze: int = PUBLIKU
     for zeile in con.execute("SELECT * FROM posts ORDER BY gepostet_utc DESC, id DESC LIMIT ?", (grenze,)).fetchall():
         ziel_id = zeile["clip_id"] if zeile["art"] == "clip" else zeile["entwurf_id"]
         zeilen.append(" · ".join([
-            f"#{zeile['id']} {PLATTFORM_NAMEN.get(zeile['plattform'], zeile['plattform'])}",
-            f"{ART_NAMEN[zeile['art']]} {ziel_id}",
-            _tage(publikum._alter_tage(zeile["gepostet_utc"], zeitpunkt)),
+            f"#{zeile['id']} {aktionen.PLATTFORM_NAMEN.get(zeile['plattform'], zeile['plattform'])}",
+            f"{publikum.ART_NAMEN[zeile['art']]} {ziel_id}",
+            _tage(publikum.alter_in_tagen(zeile["gepostet_utc"], zeitpunkt)),
             _zahlen_text(zeile, publikum.letzte_messung(con, zeile["id"])),
             _score_zustand(con, zeile, konfig, zeitpunkt),
         ]))

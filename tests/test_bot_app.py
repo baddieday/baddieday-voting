@@ -478,7 +478,7 @@ class PostsAusDemClipBot(MitSpeicher):
         self.assertEqual(self.posts()[0]["gepostet_utc"], iso(HAKEN + timedelta(minutes=5)))
 
     def test_nie_wecken_kein_netz_kein_dateizugriff(self):
-        """Häkchen und /link arbeiten nur mit der Datenbank (Plan A8): kein Wecken von pve-big, kein Netz, keine
+        """Häkchen und /link arbeiten nur mit der Datenbank (Annahme A8): kein Wecken von pve-big, kein Netz, keine
         Datei – der Clip-Bot darf nicht an einem schlafenden Host oder hängenden NFS stehen bleiben."""
         self.konfig.daten["speicher"].update(host="pve-gross", wol_mac="aa:bb:cc:dd:ee:ff")
         with mock.patch.object(konfig_modul.Konfig, "_host_erreichbar", return_value=False), \

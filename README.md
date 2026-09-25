@@ -40,9 +40,9 @@ Stand und Host-Änderungen: `docs/ABSCHLUSSBERICHT.md`.
 ## Lernschleife „Publikum“ (Sprint 09/2026, Stufe 1)
 
 Jeder gepostete Short wird ein **Post**; die TikTok-Zahlen kommen per Screenshot an den Lern-Bot (Claude liest sie,
-nur Leserecht) oder von Hand, und nach 7 Tagen setzt `pipeline publikum bewerten` (Timer `clip-publikum`, 10:00)
-einen **Publikums-Score** – verglichen mit deinen eigenen letzten Posts. `/publikum` im Lern-Bot zeigt Zahlen und
-Score. Weckt nie pve-big. Bedienung, Konfig und Installation: `docs/PUBLIKUM.md` · Spec:
+nur Leserecht) oder von Hand, und nach 7 Tagen (`[publikum].alter_tage`) setzt `pipeline publikum bewerten` (Timer
+`clip-publikum`, 10:00) einen **Publikums-Score** – verglichen mit deinen eigenen letzten Posts. `/publikum` im
+Lern-Bot zeigt Zahlen und Score. Weckt nie pve-big. Bedienung, Konfig und Installation: `docs/PUBLIKUM.md` · Spec:
 `docs/superpowers/specs/2026-09-25-lernschleife-publikum-design.md`.
 
 ## Befehle
@@ -58,7 +58,7 @@ Score. Weckt nie pve-big. Bedienung, Konfig und Installation: `docs/PUBLIKUM.md`
 | `pipeline aufraeumen [--liste] [--ausfuehren]` | Probelauf bzw. wirklich aufräumen |
 | `pipeline momente nachschneiden [--tage 14] [--probe]` | Multikill-Momente ab dem ersten Umhauen neu schneiden (nur Puffer, neue Dateien, weckt nie; erst `--probe`) |
 | `pipeline bot` | Telegram-Bot (läuft als Dienst) |
-| `pipeline publikum bewerten` | Publikums-Scores aller Posts setzen, die 7 Tage alt sind (Timer, weckt nie) |
+| `pipeline publikum bewerten` | Publikums-Scores aller Posts setzen, die `[publikum].alter_tage` (Standard 7) Tage alt sind (Timer, weckt nie) |
 
 Telegram: `/battle` `/rangliste` `/gewichte` `/uploads` `/paket <nr>` `/link <nr> <url>` `/offen` `/status` `/hilfe`
 Lern-Bot: `/entwurf` `/musik` `/lernstand` `/stand` `/publikum` `/link <entwurf> <url>` `/hilfe` · Screenshot mit `#<post>`

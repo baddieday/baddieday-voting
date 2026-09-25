@@ -20,7 +20,8 @@ Jeder Fehler (kein claude, Timeout, Exit ≠ 0, Limit erreicht, kein JSON, Schem
 Ausnahme, sondern in (None, Hinweis, roh) – der Aufrufer entscheidet über den Rückfall (Hand-Eingabe, Regeln).
 
 Die Funktion fasst keine Datenbank an (sie läuft in einem Thread). Mitzählen (Tabelle `ereignisse`,
-art = 'claude', Spec §12) macht der Aufrufer im Haupt-Thread mit `protokolliere`.
+art = 'claude', Spec §12) macht der Aufrufer im Haupt-Thread mit `protokolliere` – gezählt wird nur, was gegen
+das Abo lief (`ClaudeAntwort.gestartet`): kein claude gefunden oder Programm startet nicht → kein Aufruf.
 
 Logs: nur Hinweis und Dauer – nie `result`, nie stdout/stderr von claude (dort stehen die gelesenen Zahlen bzw.
 Inhalte des Arbeitsordners); die Rohantwort gehört nur in publikum_messungen.roh.
@@ -58,6 +59,9 @@ class ClaudeAntwort:
     daten: dict | None   # geprüfte Antwort oder None
     hinweis: str | None  # warum es nichts gab (für Log und Bot-Text), sonst None
     roh: str | None      # vollständiger Text aus `result` (nicht gekürzt) – für publikum_messungen.roh
+    # True, sobald claude lief (auch bis zum Timeout) – nur das zählt gegen das Abo (protokolliere). Standard False:
+    # vergisst eine neue Rückgabe das Feld, zählt sie nicht, statt die Wochenzahl zu hoch zu treiben.
+    gestartet: bool = False
 
 
 def frage_json(konfig: Konfig, auftrag: str, arbeitsordner: Path, *, schema_name: str,
@@ -100,36 +104,43 @@ def _frage(konfig: Konfig, auftrag: str, arbeitsordner: Path, schema_name: str, 
         lauf = subprocess.run([programm, *SCHALTER, auftrag], cwd=arbeitsordner, stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s,
                               check=False)
-    except (OSError, subprocess.TimeoutExpired) as e:  # startet nicht bzw. hängt – run bricht claude dann ab
+    except OSError as e:  # startet gar nicht (PermissionError, FileNotFoundError) – kein Aufruf gegen das Abo
         return ClaudeAntwort(None, f"claude nicht nutzbar ({type(e).__name__})", None)
+    except subprocess.TimeoutExpired as e:  # hing – run bricht claude ab; bis dahin lief es, das zählt
+        return ClaudeAntwort(None, f"claude nicht nutzbar ({type(e).__name__})", None, gestartet=True)
+    # Ab hier ist claude gelaufen: jede weitere Rückgabe zählt als Aufruf (gestartet=True)
     if lauf.returncode != 0:
-        return ClaudeAntwort(None, f"claude Exit {lauf.returncode}", None)
+        return ClaudeAntwort(None, f"claude Exit {lauf.returncode}", None, gestartet=True)
 
     # Die Hülle von --output-format json: {"is_error": …, "result": "<Text der Antwort>", …}
     try:
         huelle = json.loads(lauf.stdout)
     except json.JSONDecodeError:
-        return ClaudeAntwort(None, "claude-Ausgabe kein JSON", None)
+        return ClaudeAntwort(None, "claude-Ausgabe kein JSON", None, gestartet=True)
     if not isinstance(huelle, dict):
-        return ClaudeAntwort(None, "claude-Ausgabe kein JSON", None)
+        return ClaudeAntwort(None, "claude-Ausgabe kein JSON", None, gestartet=True)
     if huelle.get("is_error"):  # z. B. Abo-Limit erreicht – result ist dann eine Fehlermeldung, keine Antwort
-        return ClaudeAntwort(None, "claude meldet Fehler (Limit?)", None)
+        return ClaudeAntwort(None, "claude meldet Fehler (Limit?)", None, gestartet=True)
 
     # Die Antwort selbst: das erste {…} im Text, geprüft gegen das Schema. roh bleibt vollständig erhalten.
     roh = str(huelle.get("result", ""))
     daten = _json_aus_text(roh)
     if daten is None:
-        return ClaudeAntwort(None, "claude-Antwort ohne JSON", roh)
+        return ClaudeAntwort(None, "claude-Antwort ohne JSON", roh, gestartet=True)
     if fehler := schema.pruefe(daten, muster):
-        return ClaudeAntwort(None, f"Antwort passt nicht zum Schema: {fehler[0]}", roh)
-    return ClaudeAntwort(daten, None, roh)
+        return ClaudeAntwort(None, f"Antwort passt nicht zum Schema: {fehler[0]}", roh, gestartet=True)
+    return ClaudeAntwort(daten, None, roh, gestartet=True)
 
 
 def protokolliere(con: sqlite3.Connection, zweck: str, antwort: ClaudeAntwort) -> None:
     """Zählt einen Aufruf in `ereignisse` (art = 'claude', text = "<zweck>: ok" bzw. "<zweck>: <hinweis>").
     Beispiel: protokolliere(con, "screenshot", antwort) → Zeile „screenshot: ok“. Grundlage für „Claude-Aufrufe
-    der Woche“ (angezeigt ab Stufe 3 in /lernstand bzw. Stufe 5 im Wochenbericht, Spec §11.1, §12). Nur der
-    Hinweis, nie roh. Läuft im Event-Loop mit der Bot-Verbindung, in eigener kleiner Transaktion – deshalb nicht
-    innerhalb einer anderen db.transaktion aufrufen (BEGIN lässt sich nicht verschachteln)."""
+    der Woche“ (angezeigt jetzt als letzte Zeile von /publikum (A34), ab Stufe 3 in /lernstand, ab Stufe 5 im
+    Wochenbericht, Spec §11.1, §12). Zählt nur Aufrufe, bei denen claude wirklich lief (antwort.gestartet) –
+    Fehlschläge vor dem Start (kein claude, Programm startet nicht) belasten das Abo nicht und stehen nur im Log.
+    Nur der Hinweis, nie roh. Läuft im Event-Loop mit der Bot-Verbindung, in eigener kleiner Transaktion – deshalb
+    nicht innerhalb einer anderen db.transaktion aufrufen (BEGIN lässt sich nicht verschachteln)."""
+    if not antwort.gestartet:  # die Regel „was zählt“ steht hier, an genau einer Stelle (auch für Stufe 5)
+        return
     with db.transaktion(con):
         db.protokoll(con, EREIGNIS_ART, f"{zweck}: {antwort.hinweis or 'ok'}")

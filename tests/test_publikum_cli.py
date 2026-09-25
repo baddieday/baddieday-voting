@@ -338,8 +338,24 @@ class PublikumText(MitBewertung):
         self.assertEqual(zeilen[2], f"#{ohne_zahlen} TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Screenshot mit "
                                     f"#{ohne_zahlen} schicken · Score offen (braucht eine Messung ab Tag 3 mit Views)")
         self.assertEqual(zeilen[3], f"#{alt} TikTok · Clip 88 · 9 Tage · 👁 5 000 ❤️ 300 ⏱ 12 s (Tag 7) · "
-                                    "Score +0,8 (Wiedergabe über, Likes je View unter, Views über deinem Median)")
+                                    "Score +0,8 (Wiedergabe über, Reaktionen je View unter, Views über deinem Median)")
         self.assertEqual(zeilen[-1], "🤖 Claude diese Woche: 0 Aufrufe")
+
+    def test_youtube_heisst_wie_im_knopf_und_in_der_checkliste(self):
+        # eine Stelle für Plattform-Namen: bot.aktionen.PLATTFORM_NAMEN („YouTube Shorts“), wie pl:-Knopf und Checkliste
+        from clip_pipeline.bot import aktionen
+
+        daten = {"dauer_s": 22.0, "rezept": publikum.rezept_fuer_clip(22.0), "merkmale": {}}
+        publikum.post_anlegen(self.con, art="entwurf", ziel_id=41, plattform="youtube", daten=daten,
+                              zeit=self.JETZT - timedelta(days=1))
+        self.assertTrue(self.text()[1].endswith(f"{aktionen.PLATTFORM_NAMEN['youtube']} · Entwurf 41 · 1 Tag · "
+                                                "noch keine Zahlen – Screenshot mit #1 schicken · "
+                                                "Score noch offen (ab 7 Tagen)"), self.text()[1])
+
+    def test_ganz_angesehen_mit_eigenem_zeichen(self):
+        post_id = self.clip_post(88, self.JETZT - timedelta(days=4))
+        self.messung(post_id, self.JETZT - timedelta(hours=1), views=100, voll_prozent=34.0)
+        self.assertIn("👁 100 🏁 34 % (Tag 3)", self.text()[1])  # ✅ ist im Bot der Knopf „erledigt“
 
     def test_score_null_basis_zu_klein(self):
         post_id = self.clip_post(88, self.JETZT - timedelta(days=8))
@@ -355,7 +371,7 @@ class PublikumText(MitBewertung):
         self.setze_score(post_id, -0.3, r=None, e=0.02, v=6.8, z_r=None, z_e=-0.5, z_v=0.0,
                          vermerke=["ohne Wiedergabe"])
         self.assertTrue(self.text()[1].endswith(
-            "· Score −0,3 (Likes je View unter, Views gleich deinem Median · ohne Wiedergabe)"), self.text()[1])
+            "· Score −0,3 (Reaktionen je View unter, Views gleich deinem Median · ohne Wiedergabe)"), self.text()[1])
 
     def test_faellig_mit_messung_kommt_beim_naechsten_lauf(self):
         post_id = self.clip_post(88, self.JETZT - timedelta(days=8))
@@ -468,6 +484,9 @@ class Befehle(MitBewertung):
     def test_hilfe_mit_publikum_zusatz(self):
         ((text, kw),) = self.befehl(lernbot.cmd_hilfe)
         self.assertEqual(text, lernbot.HILFE + lernbot_publikum.HILFE_ZUSATZ)
+        # Das Alter kommt aus [publikum].alter_tage (Abnahme: 3) – /publikum nennt es, die Hilfe keine feste Zahl
+        self.assertNotRegex(lernbot_publikum.HILFE_ZUSATZ, r"\d+ Tag")
+        self.assertIn("⏱ Ø Wiedergabe · 🏁 ganz angesehen", lernbot_publikum.HILFE_ZUSATZ)  # die Zeichen erklärt
         self.assertEqual(kw, {"parse_mode": "HTML"})
         self.assertLessEqual(len(text), 4096)  # Telegram: höchstens 4096 Zeichen je Nachricht
         self.assertIn("/publikum", text)

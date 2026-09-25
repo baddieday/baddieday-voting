@@ -32,7 +32,8 @@ Eine Uhr für alle: Jedes beteiligte Modul hat `jetzt` auf Modulebene importiert
 ersetzt sie alle durch dieselbe Uhr `self.uhr` und stellt sie Schritt für Schritt vor – so hängt nichts vom
 heutigen Datum ab, auch nicht die Zählung der Claude-Aufrufe (db.protokoll nimmt db.jetzt).
 
-Eigene Datei statt tests/test_ende_zu_ende.py erweitern: Annahme A33 im Plan (paralleles Arbeiten, Regisseur 2.0).
+Eigene Datei statt tests/test_ende_zu_ende.py erweitern: Annahme A33 (docs/ENTSCHEIDUNGEN.md; paralleles Arbeiten,
+Regisseur 2.0).
 Nicht Teil dieser Stufe (kommt mit Stufe 2): Paar → neue Gewichte → geänderte Erwartung. Auch nicht hier: das
 📦 Upload-Paket (rendert mit ffmpeg; geprüft in tests/test_upload_paket.py und tests/test_lernbot_paket.py).
 """
@@ -394,8 +395,8 @@ class EndeZuEndePublikum(MitSpeicher):
         """Tag 3: „#<nr> views likes wiedergabe voll%“ als Text an den Lern-Bot → Messung mit Quelle hand."""
         self.uhr = HAKEN + TAG_3
         self.assertEqual(self.lern_bot_text(f"#{clip_post} 1240 61 6,8 34"),
-                         f"💾 #{clip_post} gespeichert (von Hand): 👁 1 240 · ❤️ 61 · 💬 – · ↗️ – · 🔖 – · ⏱ 6,8 s · "
-                         "✅ 34 %")
+                         f"💾 #{clip_post} gespeichert (von Hand): 👁 1\u202f240 · ❤️ 61 · 💬 – · ↗️ – · 🔖 – · "
+                         "⏱ 6,8 s · 🏁 34 %")
         self.uhr = LINK + TAG_3
         self.assertTrue(self.lern_bot_text(f"#{entwurf_post} 800 40 9,5 30").startswith(
             f"💾 #{entwurf_post} gespeichert (von Hand)"))
@@ -408,8 +409,9 @@ class EndeZuEndePublikum(MitSpeicher):
         """Tag 7: Screenshot mit „#<nr>“ → Claude liest (gefälscht), die Zahlen passen zu Tag 3 → gespeichert.
         Claude sieht nur das eine Bild, und danach liegt kein Bild mehr herum (kein Bildarchiv, Spec §7.1)."""
         for post_id, gepostet, gelesen, antwort in (
-                (clip_post, HAKEN, SCREENSHOT_CLIP, "👁 5 000 · ❤️ 300 · 💬 10 · ↗️ 20 · 🔖 30 · ⏱ 11 s · ✅ 40 %"),
-                (entwurf_post, LINK, SCREENSHOT_ENTWURF, "👁 2 000 · ❤️ 100 · 💬 4 · ↗️ 8 · 🔖 12 · ⏱ 15,5 s · ✅ 35 %")):
+                (clip_post, HAKEN, SCREENSHOT_CLIP, "👁 5\u202f000 · ❤️ 300 · 💬 10 · ↗️ 20 · 🔖 30 · ⏱ 11 s · 🏁 40 %"),
+                (entwurf_post, LINK, SCREENSHOT_ENTWURF,
+                 "👁 2\u202f000 · ❤️ 100 · 💬 4 · ↗️ 8 · 🔖 12 · ⏱ 15,5 s · 🏁 35 %")):
             self.uhr = gepostet + TAG_7
             antworten, fake = self.lern_bot_screenshot(f"Stand Tag 7 #{post_id}", gelesen)
             self.assertEqual(antworten, [f"🔎 Lese die Zahlen für #{post_id} …",
@@ -479,12 +481,12 @@ class EndeZuEndePublikum(MitSpeicher):
         unten die Claude-Aufrufe dieser Woche (die zwei Screenshots vom Montag)."""
         self.uhr = ANZEIGE
         (antwort,) = self.lern_bot_befehl(lernbot_publikum.cmd_publikum)
-        t = lernbot_publikum.TAUSENDER  # schmales geschütztes Leerzeichen in „2 000“
+        t = publikum.TAUSENDER  # schmales geschütztes Leerzeichen in „2 000“
         self.assertEqual(antwort.splitlines(), [
             "📊 Publikum · 2 Posts, 2 mit Score (neueste zuerst)",
-            f"#{entwurf_post} TikTok · Entwurf {ENTWURF} · 8 Tage · 👁 2{t}000 ❤️ 100 ⏱ 15,5 s ✅ 35 % (Tag 7) · "
+            f"#{entwurf_post} TikTok · Entwurf {ENTWURF} · 8 Tage · 👁 2{t}000 ❤️ 100 ⏱ 15,5 s 🏁 35 % (Tag 7) · "
             "Score 0 (Basis zu klein)",
-            f"#{clip_post} TikTok · Clip 1 · 8 Tage · 👁 5{t}000 ❤️ 300 ⏱ 11 s ✅ 40 % (Tag 7) · Score 0 (Basis zu klein)",
+            f"#{clip_post} TikTok · Clip 1 · 8 Tage · 👁 5{t}000 ❤️ 300 ⏱ 11 s 🏁 40 % (Tag 7) · Score 0 (Basis zu klein)",
             "🤖 Claude diese Woche: 2 Aufrufe",
         ])
 

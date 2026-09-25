@@ -150,7 +150,11 @@ intervall_s = 30
 # zählt gegen dein Abo). false = der Bot fragt die Zahlen gleich von Hand ab (views likes wiedergabe voll%).
 # Braucht einen claude-Login für den Benutzer pipeline, den der Dienst sehen darf (docs/PUBLIKUM.md, Installation).
 screenshot_claude = true
+# Fester Auftrag an claude (Platzhalter {bild} = Bildname). Relativ zum Projektordner (/opt/clip-pipeline), nicht zu
+# [speicher].wurzel
 screenshot_prompt = "templates/screenshot-prompt.txt"
+# Nach so vielen Sekunden wird claude abgebrochen → der Bot bittet um die Zahlen von Hand (der Aufruf wird trotzdem
+# gezählt – claude lief ja bis dahin)
 screenshot_timeout_s = 120
 
 [publikum]

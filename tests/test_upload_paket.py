@@ -7,7 +7,8 @@ Telegram-Grenze. Geprüft wird hier:
   - die fachlichen Prüfungen VOR dem Rendern (nur Shorts, nur getrennter Betrieb, alle Dateien da – ffmpeg startet
     dann gar nicht),
   - die Wiederholung bei zu großer Datei (rendere gepatcht: 75 % der benutzten Rate, max_bytes bleibt),
-  - der Rückfall VA-API → CPU (ohne GPU: ffmpeg gepatcht),
+  - der Rückfall VA-API → CPU mit derselben Rate (ohne GPU: ffmpeg gepatcht),
+  - die Rate selbst: das Budget der Upload-Fassung, nicht der 4000k-Deckel des Entwurfs (bei 45 s genau 7349k),
   - nie wecken, nie Netz,
   - die Caption nur aus Fakten der Datenbank, mit Pflicht-Quellenangabe der Musik.
 """
@@ -127,7 +128,9 @@ class UploadFassungEcht(MitUpload):
         self.assertEqual(video, entwurf.upload_ziel(self.konfig, self.zeile(eid)))
         (befehl,) = befehle
         self.assertEqual(befehl[befehl.index("-crf") + 1], "20")        # Spec §10.4: crf 20
-        self.assertIn("-maxrate", befehl)                                 # plus Deckel aus dem Budget
+        self.assertIn("-maxrate", befehl)                                 # plus Deckel aus dem Budget …
+        # … und zwar das Budget der Upload-Fassung, nicht der Deckel des Entwurfs (Spec §10.4)
+        self.assertGreater(int(befehl[befehl.index("-maxrate") + 1].rstrip("k")), entwurf.ENTWURF_KBIT)
         self.assertNotIn("nvenc", " ".join(befehl))                      # nie NVENC (das wäre pve-big)
         self.assertEqual(self.zeile(eid)["upload_pfad"], str(video))     # gemerkt …
         self.assertIsNone(self.zeile(eid)["datei"])                      # … der Entwurf selbst bleibt unberührt
@@ -271,6 +274,36 @@ class UploadFassungVaApi(MitUpload):
         self.assertNotIn("-vaapi_device", cpu)
         self.assertFalse(any("nvenc" in " ".join(b) for b in befehle))
         self.assertEqual((r["encoder"], r["aufloesung"]), ("libx264", [1080, 1920]))
+        maxrate = cpu[cpu.index("-maxrate") + 1]
+        self.assertEqual(vaapi[vaapi.index("-b:v") + 1], maxrate)          # der Rückfall reicht kbit_max weiter
+        self.assertGreater(int(maxrate.rstrip("k")), entwurf.ENTWURF_KBIT)  # Budget der Upload-Fassung, nicht 4000k
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class UploadFassungRate(MitUpload):
+    def test_45_sekunden_ergeben_7349k(self):
+        """Spec §10.4 „bei 45 s ≈ 8,5 Mbit/s“ (gesamt): 48 MB · 8 · 0,88 / 45 s = 7509 kbit/s, minus 160 kbit/s Ton
+        = 7349 kbit/s fürs Bild – die Zahl aus dem Docstring von upload_fassung. Hält Reserve (0,88) und Tonabzug
+        (160) fest. Billig: der echte Filtergraph, nur seine Länge auf 45 s gesetzt, ffmpeg ersetzt."""
+        eid = self.short_entwurf(echte_videos=True)  # rendere misst die Moment-Dateien mit ffprobe
+        echt = entwurf.filtergraph
+
+        def graph_45_s(*args, **kw):
+            graph, _gesamt = echt(*args, **kw)
+            return graph, 45.0
+
+        befehle = []
+
+        def lauf(befehl, was, timeout=None):
+            befehle.append(befehl)
+            Path(befehl[-1]).write_bytes(b"x" * 1000)  # die .tmp-Ausgabe, klein genug
+            return ""
+
+        with mock.patch.object(entwurf, "filtergraph", side_effect=graph_45_s), \
+                mock.patch.object(entwurf, "fuehre_aus", side_effect=lauf):
+            entwurf.upload_fassung(self.con, self.konfig, eid)
+        (befehl,) = befehle
+        self.assertEqual(befehl[befehl.index("-maxrate") + 1], "7349k")
 
 
 # --- nie wecken --------------------------------------------------------------------------------------------

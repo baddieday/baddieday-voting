@@ -337,3 +337,158 @@ wie bei render.
 **Reihenfolge im Betrieb (nur mit deinem OK):** Code auf den Mini, zuerst `pipeline momente nachschneiden --probe`
 (zeigt Anzahl, Anlauf, fehlende Quellen), dann echt, am besten außerhalb der Spielzeit (Neu-Kodierung, rund 37
 Momente). Die neuen Dateien (grob 1–2 GB) sichert der tägliche Abgleich mit `sessions/` ins Lager.
+
+## L1–L6 · Lernschleife „Publikum“ (Spec §16 E21–E26, freigegeben im Startauftrag, 25.09.)
+Arbeitstitel L1–L6 statt E21–E26: E21 ist schon „Multikills am Stück“, und Regisseur 2.0 vergibt eigene Nummern.
+Beim Zusammenführen mit R2.0 bekommen L1–L6 fortlaufende E-Nummern hinter denen von R2.0 (Annahme A2).
+Spec: `docs/superpowers/specs/2026-09-25-lernschleife-publikum-design.md`, Bedienung: `docs/PUBLIKUM.md`.
+- **L1** (Spec E21) Publikum ist das Hauptsignal; zwei Schleifen (dein Urteil täglich, Publikum wöchentlich) speisen
+  dieselben Lerner.
+- **L2** (Spec E22) Eine Moment-Bewertung für Clip-Bot und Regisseur; neue Merkmale aus dem vorhandenen Replay-JSON;
+  Lernen bleibt linear, paarweise, gedeckelt.
+- **L3** (Spec E23) Rezepte als Stellschrauben mit Stufen; jeder dritte Post ein Experiment nach Unsicherheit; du gibst
+  jeden Post frei.
+- **L4** (Spec E24) Zahlen zuerst per Screenshot (claude -p, Leserecht), Display API im Sandbox-Modus als zweite
+  Stufe; Wiedergabezeit gibt es nur aus der App.
+- **L5** (Spec E25) Der Wochen-Analyst schlägt nur vor (Schema-geprüft), entscheidet nie; jede Hypothese wird per
+  Knopf getestet.
+- **L6** (Spec E26) Der Clip-Bot wird minimal angefasst: `posts` aus `/link`, Erwartungs-Zeile, Battle-Paarung nach
+  Unsicherheit. n8n-Vertrag und Session-Schnittliste unverändert.
+
+## Export-Vertrag mit Regisseur 2.0 (Lernschleife Stufe 1, 25.09.)
+CLAUDE.md „Export“ plant für R2.0 Stufe 3 einen 📦 im Lern-Bot und `pipeline export` nach `/srv/puffer/export/<name>/`.
+Damit daraus nicht zwei Knöpfe, zwei Callback-Präfixe und zwei Dateien werden:
+- Genau **ein** 📦 = `pk:<eid>:` aus `lernbot_paket` (eingehängt im x-Zweig von `lernbot.bei_klick` über
+  `knoepfe_nach_fertig`).
+- Ordner `<wurzel>/<[publikum].upload_ordner = "export">/<name>/`, Datei `entwurf.UPLOAD_DATEI` = `<name>_upload.mp4`,
+  Pfad in `entwuerfe.upload_pfad` (das „Fertig-Video“).
+- R2.0 Stufe 3 **erweitert** `lernbot_paket.baue_paket` und `entwurf.upload_fassung` (nummerierte Einzelclips daneben,
+  tägliche Sicherung von `export/` ins Lager) und baut keinen zweiten Weg.
+
+## Annahmen im Sprint Lernschleife
+Startauftrag §6 Regel 6: Wo eine Frage den Bau blockiert hätte, steht hier die getroffene Annahme. **Alle sind offen –
+Florian löst sie auf.** Die Nummern sind dieselben wie im Plan Stufe 1 (`docs/superpowers/plans/…-stufe-1.md`) und im
+Code („Annahme A11“ usw.); Stand nach der Nachbesserung durch das Prüfer-Panel (`docs/SPRINT-LOG-LERNSCHLEIFE.md`).
+
+### Stufe 1 – Plan (A1–A34) und Panel (A35–A40)
+- **A1 Score-Zeitpunkt:** `bewerten` setzt den Score erst, wenn der Post ≥ `alter_tage` (7) alt ist, mit der Messung am
+  nächsten an Tag 7 (nur Messungen ≥ 3 Tage) – sonst fröre ein täglicher Lauf den Score an Tag 3 ein (Spec §5 vs.
+  §6.1/§14). Abnahme mit `alter_tage = 3`: Score 0 („Basis zu klein“), diese Posts behalten ihre Tag-3-Messung.
+- **A2 Entscheidungsnummern:** Arbeitstitel L1–L6 (= Spec E21–E26), fortlaufende E-Nummern beim Merge mit R2.0.
+- **A3 /link im Lern-Bot** nimmt `41` und `e41`.
+- **A4 Ein 📦-Knopf** (Export-Vertrag oben); die Sicherung von `export/` ins Lager kommt mit R2.0 Stufe 3.
+- **A5 Nur 👍-Entwürfe** bekommen Paket, Häkchen und Post („kein Short ohne deine Freigabe“).
+- **A6 Übergangs-Rezept für Entwürfe (bis Stufe 3):** hook `aufbau`, laenge nach Dauer, tempo `beat1` bei
+  beats_pro_schnitt 1, sonst `beat2`, machart `regie`, experiment false. Clip-Posts wie Spec (`tempo none`).
+- **A7 Längen-Stufen:** Grenzen in der Mitte der Spec-Lücken: ≤ 22,5 s kurz, ≤ 36 s mittel, sonst lang.
+- **A8 Dauer eines Clip-Posts** aus der DB über `shorts.gesamtdauer(Clip-Länge)` – ohne Dateizugriff im Bot.
+- **A9 Plattformen:** Posts nur für `[publikum].plattformen = ["tiktok"]` (Spec §3); YouTube per Konfig zuschaltbar;
+  clip-battle.de nie.
+- **A10 Fehlende Zähler** zählen im Engagement als 0 (Vermerk „Engagement unvollständig“); Messungen ohne Views zählen
+  nicht für den Score (Folge für Hand-Posts: R4).
+- **A11 Basis** = die jüngsten 20 bewerteten Posts derselben Plattform, die **vor** dem Post gepostet wurden; unter 5
+  Posts Score 0 („Basis zu klein“), genug Posts, aber unter 5 r-Werten → wie „ohne Wiedergabe“ (0,6/0,4, „Basis ohne
+  Wiedergabe“).
+- **A12 Knöpfe ohne #Nummer:** die 5 jüngsten Posts ohne Messung in den letzten 24 h.
+- **A13 Zusätzliche Callback-Daten:** `pt:<eid>:t|y` (Häkchen Entwurf), `pm:<post_id>:ok|hand` (Rückfrage).
+- **A14 Upload-Fassung** über `rendere(volle_aufloesung=True, crf=20, kbit_max=…)`; VA-API ohne crf mit `-b:v`;
+  bis 3 Versuche mit 0,75 · benutzter Rate.
+- **A15 Ruhezeit im Lern-Bot:** eigener Filter `LEISE_LERN_MELDUNGEN = ("publikum:", "woche:")`.
+- **A16 Uhrzeit** des täglichen Laufs nur im Timer (kein `[publikum].uhrzeit`, Spec §12).
+- **A17 Claude im Lern-Bot-Dienst (nach dem Panel geändert):** Drop-in `ProtectHome=read-only` +
+  `CLAUDE_CONFIG_DIR=/var/lib/clip-pipeline/claude` + `DISABLE_AUTOUPDATER=1`; eigene claude-Anmeldung des Dienstes.
+  Das Home bleibt schreibgeschützt (dort liegen `authorized_keys` mit der Sperre des n8n-Schlüssels und die
+  claude-Datei, die `decide` ohne Schutz startet). Voller Pfad in `[decide].programm` nur, wenn claude unter /home
+  liegt (ermittelt mit `sudo -iu pipeline command -v claude`, nicht angenommen). Annahme dabei: claude schreibt mit
+  `CLAUDE_CONFIG_DIR` nichts ins Home (geprüft mit claude 2.1.281 im Container, 🏠 am Mini). Rückfall
+  `screenshot_claude = false`. (R2.)
+- **A18 claude_aufruf** ist die gemeinsame Hilfe für neue Aufrufe; `decide`/`stimmung` bleiben vorerst, die
+  Wochenzahl zählt deshalb nur neue Aufrufe.
+- **A19 /publikum** nur im Lern-Bot.
+- **A20 Neue Lern-Bot-Tests** in eigenen Dateien (Spec §13 sagt „test_lernbot.py erweitert“) – wegen paralleler Pakete
+  und R2.0.
+- **A21 Wartende Bilder** in `tempfile.mkdtemp` (im Dienst PrivateTmp), nie im Puffer; gelöscht nach Auswertung bzw.
+  nach 10 min („Nie löschen“ gilt für Rohdaten/Clips).
+- **A22 Stolperdraht** vom R2.0-Branch byte-gleich per `git show 0f91d98:<pfad>`.
+- **A23 Keine neuen Secrets** in Stufe 1; `.env.example` unverändert.
+- **A24 Migration** über `db.MIGRATIONEN` in `db.verbinde` (Spec nennt `db.migriere`, das es nicht gibt).
+- **A25 Schema-Ort** `src/clip_pipeline/schemas/publikum.schema.json`, tolerant (Zusatzfelder erlaubt); die
+  100-%-Regel steht nur in `pruefe_plausibel` (Rückfrage statt Ablehnung).
+- **A26 Nur Shorts** bekommen Paket, Häkchen und Post (ein Zusammenschnitt hätte ≈ 1 Mbit/s, kein Publikumssignal).
+- **A27 Entwurfs-Checkliste** nur für Post-Plattformen, ohne clip-battle.de (R5).
+- **A28 Hand-Eingabe** wird wie ein Screenshot gegen die letzte Messung geprüft; `#17 1240 61 6.8 34` geht ohne Bild.
+- **A29 Ein offener Vorgang** im Lern-Bot (nach dem Panel präzisiert): Ein neues Foto bzw. ein neuer „#17 …“-Text
+  ersetzt ihn, ein altes Bild wird sofort gelöscht, und der Bot sagt, was verworfen wurde (Bild, Rückfrage – „NICHT
+  gespeichert“ – oder Hand-Eingabe); kein Hinweis bei einer Korrektur desselben Posts. Klicks, die nicht passen →
+  „Schon erledigt.“ (bleibt auch für den Doppelklick nach ✅ richtig).
+- **A30 Bildformate:** Foto (JPEG) sowie JPG/PNG/WebP als Datei; HEIC → „Bitte als Foto schicken“.
+- **A31 Upload-Fassung nur im getrennten Betrieb** (E19), sonst KonfigFehler.
+- **A32 Kein Sitzungsverlauf:** `claude -p --no-session-persistence` (sonst ein Bildarchiv unter ~/.claude/projects).
+- **A33 Ende-zu-Ende** in eigener Datei `tests/test_ende_zu_ende_publikum.py` (wie A20).
+- **A34 Claude-Wochenzahl** bis Stufe 3 als letzte Zeile von `/publikum` (Spec §12 nennt `/lernstand`).
+- **A35 Clip-Bot: Häkchen, Link und Post in EINER Transaktion.** Scheitert der Post aus fachlichem Grund (POST_FEHLER),
+  bleibt auch das Häkchen weg; der Bot nennt den Grund, derselbe Knopf geht nach der Behebung nochmal („lieber ein
+  sichtbarer Fehler als ein Post, der still fehlt“). Die Checkliste nennt je Post die Post-Nummer (für „#17“ am
+  Screenshot). Beim Altbestand zählt das erste Häkchen als `gepostet_utc`. Spec §10.4/E26 sagen nur „zusätzlich“ –
+  niedrig priorisierte Frage an Florian: ist „kein Häkchen ohne Post“ so gewollt? Notausgang: `docs/PUBLIKUM.md`.
+- **A36 „Reaktionen je View“** statt „Likes je View“ (Spec §11.1) für die Komponente e in Bot, Doku und später im
+  Wochenbericht – e enthält Likes, 2 · Shares, Saves und Kommentare; der Name widerspräche sonst den eigenen Zahlen.
+- **A37 Zahlen in Bot-Texten** an einer Stelle (`publikum.anzahl_text`, `dezimal_text`, `SYMBOLE`): Tausender mit
+  schmalem geschütztem Leerzeichen (U+202F), auch in den Verstößen der Rückfrage („Views gesunken: 2 000 → 1 240“);
+  „ganz angesehen“ mit 🏁 statt ✅ (✅ ist der Knopf „Stimmt“/„erledigt“).
+- **A38 Knöpfe gehören zu ihrer Nachricht:** `pl:`/`pm:` gelten nur aus der Nachricht, die für genau diesen Vorgang
+  gefragt hat (message_id im Vorgang). Die Callback-Daten bleiben wie in Spec §7.1; eine Vorgangsnummer darin wäre
+  nach einem Neustart des Bots nicht sicher. Annahme: Updates laufen nacheinander (kein `concurrent_updates`).
+- **A39 Claude-Zählung:** Gezählt wird nur, was gegen das Abo lief (`ClaudeAntwort.gestartet`). Kein claude gefunden,
+  Programm startet nicht (OSError), Schema/Programm nicht eingestellt → zählt nicht; ein Timeout zählt (claude lief).
+- **A40 Hand-Eingabe mit Einheiten:** Bitte und Fehlertexte nennen `Views Likes Ø-Wiedergabe-in-Sekunden
+  Ganz-angesehen-in-%` (`publikum.HAND_FORM`); „0:07“ oder „7s“ → „bitte in Sekunden“; „34%“ wird als 34 gelesen.
+
+### Stufe 1 – Annahmen der Bauer (Pakete a–g, kurz)
+- **a1** Merkmale eines Entwurf-Moments: mit clip_id aus `clips.merkmale`, sonst aus `momente.merkmale`, sonst {}; ein
+  Moment mit Jump-Cut steht nur einmal in der Liste. **a2** Fehlt `beats_pro_schnitt`, gilt 1 (`regie` wird nicht
+  importiert, kein Import-Kreis). **a3** Views/Likes der Hand-Eingabe ganzzahlig („1.240“ → Fehler), nan/inf abgelehnt.
+  **a4** Basis < 5: z_r = 0 nur mit gemessenem r, sonst None; Vermerk „Basis zu klein“ – nach dem Panel ohne r
+  zusätzlich „ohne Wiedergabe“ (Spec §6.4). **a5** In `bewerte_alle` sind nur ValueError/KeyError/TypeError Fehler
+  eines Posts; sqlite3.Error und KonfigFehler brechen den Lauf ab. **a6** `posts_ohne_messung` listet auch bewertete
+  Posts (Spec wörtlich).
+- **b1** Wartet eine Rückfrage, gelten frei geschickte Zahlen als Korrektur von Hand. **b2** 10 min gelten für alle
+  drei Vorgangsarten, jeder Schritt startet die Frist neu. **b3** Kommt Claudes Ergebnis erst nach dem Verwerfen, wird
+  es nicht gespeichert, der Aufruf zählt trotzdem. **b4** Unbekannte #Nummer oder kein Post ohne Messung → Bild sofort
+  verworfen, mit Hinweis. **b5** Bei Dateien zählt der mime_type vor dem Dateinamen. **b6** ~~Rückfrage/Hand-Eingabe
+  werden still ersetzt~~ – nach dem Panel mit Hinweis (A29). **b7** Hinweise aus claude_aufruf/lies_zahlen gehen an
+  dich (ohne Rohantwort und Zahlen; bei fehlender Prompt-Vorlage mit deren Pfad). **b8** Fehlt `[decide].programm`:
+  Hinweis statt verstecktem Standard; übrige `[lernbot]`-Schlüssel sind Pflicht (KonfigFehler → Hinweis).
+- **c1** Upload-Fassung prüft zusätzlich `pruefe_getrennt(mit_lager=False)` (Marke `.clip-puffer`). **c2** Bestehende
+  Schlüssel mit demselben Standard wie der übrige Code; `[publikum].upload_ordner` ist Pflicht. **c3** Caption eines
+  Entwurfs nur aus Fakten (Momente, Kill-Typ aus `max_gruppe`, Quellenangabe aus der Schnittliste). **c4** Caption vor
+  dem Rendern; die Sperre umfasst auch „schon gerendert“. **c5** Ein zweites 📦 nach fertigem Paket schickt es nochmal
+  ohne Render. **c6** Bekannte Fehler gehen mit Text (≤ 300 Zeichen) an dich, lokale Pfade gelten als unkritisch,
+  unerwartete nur mit Typ. **c7** `/link` prüft erst den Link, dann `paket_erlaubt`.
+- **d1** Das Häkchen legt den Post unabhängig vom Clip-Status an; `/link` lehnt nicht freigegebene Clips weiter ab.
+  **d2** `gepostet_utc` = erstes Häkchen dieser Plattform (A35). **d3** Nur ValueError/KeyError/KonfigFehler werden zur
+  Meldung „nicht abgehakt“. **d4** Post-Nummer als eigene Zeile unter der Checkliste. **d5** Der /link-Hinweis wird
+  HTML-maskiert.
+- **e1** Tests für `lernbot_publikum` in `tests/test_publikum_cli.py`. **e2** Datum im Meldungs-Schlüssel = UTC-Datum
+  des Laufs. **e3** Zweite Zeile in der Meldung bei „Basis zu klein“. **e4** `/publikum` über 30 wird still gekürzt.
+  **e5** KonfigFehler in `publikum bewerten` → Exit 2. **e6** Lern-Bot läuft laut Sprint-Log aus `/opt/clip-regie`,
+  PUBLIKUM.md nennt beide Checkouts. **e7** `pip install -e '.[whisper]'` wie PUFFER.md R3, keine neuen Pakete.
+- **f1** Der Stolperdraht prüft alles, was `git add -A` committen würde. **f2** `lokal.toml`/`uebertragung.psd1` am
+  Dateinamen erkannt. **f3** `.env.<irgendwas>` gilt als geheim (außer `.env.example`). **f4** SSH-Schlüsselnamen
+  inkl. FIDO-Varianten und `n8n_pipeline`, `pve-big`. **f5** In `.env.example` ist jede aktive Zeile ohne `NAME=`
+  ein Befund.
+- **g1** Ende-zu-Ende durch die echten Telegram-Handler. **g2** Je Beteiligtem eine eigene DB-Verbindung. **g3**
+  Getrennter Betrieb wie auf dem Mini, Wecken/Netz gepatcht. **g4** Eine feste Uhr für alle Module (auch `db.jetzt`).
+  **g5** Alter DB-Stand aus `schema.sql`, `regie.sql`, `lager.sql`. **g6** Zweiter Lauf = Timer am nächsten Tag.
+
+### Offene Rückfragen an Florian (Stufe 1, nach Wichtigkeit – ohne darauf zu warten)
+- **R1 Öffentliches Repo – persönliche Daten:** Epic-ID, MAC, Heimnetz-IPs durch Platzhalter ersetzen? (R2.0 hat
+  Epic-ID und MAC inzwischen als Variable – beim Merge prüfen.) Historie umschreiben nur mit ausdrücklichem OK.
+- **R2 Zweite claude-Anmeldung für den Lern-Bot-Dienst** in `/var/lib/clip-pipeline/claude` (A17) – ok? Die frühere
+  Variante „Dienst darf ins Home schreiben“ ist nach dem Panel verworfen.
+- **R3 MAD-Minimum 0,05** gilt für alle Komponenten gleich und dämpft das Engagement (typischer MAD 0,01–0,02) um
+  Faktor 2,5–5. Ein Minimum je Komponente in `[publikum]`?
+- **R4 Hand-Eingabe** kennt nur Views/Likes/Wiedergabe/voll%; Kommentare, Shares, Saves zählen dann 0 (A10). Optional
+  hinten anhängen – oder e ohne diese Zähler rechnen?
+- **R5 clip-battle.de für Entwürfe** als Merker in der Checkliste (ohne Post)? Bis dahin nur TikTok (A27).
+- Niedrig: **A35** „kein Häkchen ohne Post“ im Clip-Bot so gewollt?

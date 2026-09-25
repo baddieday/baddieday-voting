@@ -96,7 +96,7 @@ class FrageJson(MitClaudeKonfig):
     def test_gueltige_antwort(self):
         roh = "Hier die Zahlen: " + json.dumps(GUELTIG)
         antwort, lauf = self.frage(FakeClaude(roh))
-        self.assertEqual(antwort, ClaudeAntwort(GUELTIG, None, roh))
+        self.assertEqual(antwort, ClaudeAntwort(GUELTIG, None, roh, gestartet=True))
         # Aufruf: nur Leserecht, JSON-Hülle, kein Sitzungsverlauf (sonst Bildarchiv unter ~/.claude/projects)
         befehl = lauf.call_args.args[0]
         self.assertEqual(befehl[0], "/opt/fake/claude")
@@ -109,13 +109,14 @@ class FrageJson(MitClaudeKonfig):
 
     def test_claude_meldet_fehler(self):
         antwort, _ = self.frage(FakeClaude("Usage limit reached", is_error=True))
-        self.assertEqual(antwort, ClaudeAntwort(None, "claude meldet Fehler (Limit?)", None))
+        self.assertEqual(antwort, ClaudeAntwort(None, "claude meldet Fehler (Limit?)", None, gestartet=True))
 
     def test_antwort_ohne_json(self):
         antwort, _ = self.frage(FakeClaude("Ich sehe leider keine Zahlen."))
         self.assertIsNone(antwort.daten)
         self.assertEqual(antwort.hinweis, "claude-Antwort ohne JSON")
         self.assertEqual(antwort.roh, "Ich sehe leider keine Zahlen.")
+        self.assertTrue(antwort.gestartet)  # claude lief – das zählt gegen das Abo
 
     def test_kaputtes_json(self):
         antwort, _ = self.frage(FakeClaude('{"views": 1240, "likes": }'))
@@ -127,6 +128,7 @@ class FrageJson(MitClaudeKonfig):
         self.assertEqual(antwort.hinweis,
                          "Antwort passt nicht zum Schema: $.views: erwartet number/null, bekommen str")
         self.assertEqual(antwort.roh, '{"views": "viel"}')
+        self.assertTrue(antwort.gestartet)
 
     def test_negative_zahl_verletzt_schema(self):
         antwort, _ = self.frage(FakeClaude('{"likes": -3}'))
@@ -135,30 +137,34 @@ class FrageJson(MitClaudeKonfig):
 
     def test_exit_ungleich_null(self):
         antwort, _ = self.frage(FakeClaude(returncode=1))
-        self.assertEqual(antwort, ClaudeAntwort(None, "claude Exit 1", None))
+        self.assertEqual(antwort, ClaudeAntwort(None, "claude Exit 1", None, gestartet=True))
 
     def test_huelle_kein_json(self):
         antwort, _ = self.frage(FakeClaude(stdout="Fehler: nicht angemeldet"))
-        self.assertEqual(antwort, ClaudeAntwort(None, "claude-Ausgabe kein JSON", None))
+        self.assertEqual(antwort, ClaudeAntwort(None, "claude-Ausgabe kein JSON", None, gestartet=True))
 
     def test_zeitueberschreitung(self):
         antwort, _ = self.frage(FakeClaude(fehler=subprocess.TimeoutExpired(["claude"], 5)))
-        self.assertEqual(antwort, ClaudeAntwort(None, "claude nicht nutzbar (TimeoutExpired)", None))
+        # claude lief bis zum Abbruch – das hat das Abo sehr wahrscheinlich belastet, also zählt es
+        self.assertEqual(antwort, ClaudeAntwort(None, "claude nicht nutzbar (TimeoutExpired)", None, gestartet=True))
 
     def test_programm_startet_nicht(self):
         antwort, _ = self.frage(FakeClaude(fehler=PermissionError("keine Rechte")))
         self.assertEqual(antwort, ClaudeAntwort(None, "claude nicht nutzbar (PermissionError)", None))
+        self.assertFalse(antwort.gestartet)  # der Prozess startete gar nicht – zählt nicht
 
     def test_kein_claude_im_pfad(self):
         fake = FakeClaude()
         antwort, lauf = self.frage(fake, programm=None)
         self.assertEqual(antwort, ClaudeAntwort(None, "claude nicht gefunden", None))
+        self.assertFalse(antwort.gestartet)
         lauf.assert_not_called()
 
     def test_programm_nicht_eingestellt(self):
         del self.konfig.daten["decide"]["programm"]
         antwort, lauf = self.frage(FakeClaude())
         self.assertEqual(antwort, ClaudeAntwort(None, "[decide].programm fehlt in der Konfiguration", None))
+        self.assertFalse(antwort.gestartet)
         lauf.assert_not_called()
 
     def test_unbekanntes_schema_fragt_gar_nicht(self):
@@ -168,6 +174,7 @@ class FrageJson(MitClaudeKonfig):
                                                timeout_s=5)
         self.assertIsNone(antwort.daten)
         self.assertIn("Schema gibt-es-nicht", antwort.hinweis)
+        self.assertFalse(antwort.gestartet)
         lauf.assert_not_called()
 
     def test_log_nennt_hinweis_aber_nie_die_antwort(self):
@@ -186,12 +193,20 @@ class FrageJson(MitClaudeKonfig):
 
 class Protokolliere(MitClaudeKonfig):
     def test_zaehlt_ok_und_hinweis_ohne_rohantwort(self):
-        claude_aufruf.protokolliere(self.con, "screenshot", ClaudeAntwort(GUELTIG, None, ROH_MARKE))
-        claude_aufruf.protokolliere(self.con, "screenshot", ClaudeAntwort(None, "claude Exit 1", ROH_MARKE))
+        claude_aufruf.protokolliere(self.con, "screenshot", ClaudeAntwort(GUELTIG, None, ROH_MARKE, gestartet=True))
+        claude_aufruf.protokolliere(self.con, "screenshot",
+                                    ClaudeAntwort(None, "claude Exit 1", ROH_MARKE, gestartet=True))
         zeilen = self.con.execute("SELECT art, text FROM ereignisse ORDER BY id").fetchall()
         self.assertEqual([tuple(z) for z in zeilen],
                          [("claude", "screenshot: ok"), ("claude", "screenshot: claude Exit 1")])
         self.assertFalse(self.con.in_transaction)  # eigene kleine Transaktion, abgeschlossen
+
+    def test_nie_gestartet_zaehlt_nicht(self):
+        # Spec §12: gezählt wird der Verbrauch am Abo – ohne gestartetes claude gab es keinen (steht nur im Log)
+        for hinweis in ("claude nicht gefunden", "[decide].programm fehlt in der Konfiguration",
+                        "claude nicht nutzbar (PermissionError)"):
+            claude_aufruf.protokolliere(self.con, "screenshot", ClaudeAntwort(None, hinweis, None))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM ereignisse").fetchone()[0], 0)
 
 
 # --- screenshot.prompt / normalisiere ------------------------------------------------------------------------
@@ -267,7 +282,7 @@ class LiesZahlen(MitClaudeKonfig):
         self.assertEqual(lesung.werte, GUELTIG)
         self.assertIsNone(lesung.hinweis)
         self.assertEqual(lesung.roh, json.dumps(GUELTIG))
-        self.assertEqual(lesung.claude, ClaudeAntwort(GUELTIG, None, json.dumps(GUELTIG)))
+        self.assertEqual(lesung.claude, ClaudeAntwort(GUELTIG, None, json.dumps(GUELTIG), gestartet=True))
         # Claude sah nur die Kopie „screenshot.jpg“ in einem eigenen Ordner, der danach weg ist
         aufruf = fake.aufrufe[0]
         self.assertEqual(aufruf["dateien"], ["screenshot.jpg"])
@@ -276,6 +291,15 @@ class LiesZahlen(MitClaudeKonfig):
         self.assertFalse(aufruf["ordner"].exists())
         self.assertEqual(self.temp_reste(), [])
         self.assertTrue(bild.exists())  # das Original löscht der Aufrufer
+
+    def test_bild_fehlt_ist_hinweis_ohne_aufruf(self):
+        # Startauftrag §5 „fehlende Dateien“: lies_zahlen wirft nie – auch nicht, wenn das Bild weg ist
+        with FakeClaude().aktiv() as (lauf, _):
+            lesung = screenshot.lies_zahlen(self.konfig, self.tmp / "weg.jpg")
+        self.assertEqual((lesung.werte, lesung.claude), (None, None))
+        self.assertEqual(lesung.hinweis, "Bild nicht lesbar (FileNotFoundError)")
+        lauf.assert_not_called()
+        self.assertEqual(self.temp_reste(), [])   # auch der Temp-Ordner ist weg
 
     def test_png_bleibt_png(self):
         fake = FakeClaude()

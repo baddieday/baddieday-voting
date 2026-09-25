@@ -11,11 +11,11 @@ So läuft es für dich:
      die brauchst du für die Screenshots („#17“). Ein Häkchen ohne Link legt den Post ebenfalls an (Link später
      per /link; ein zweiter /link ersetzt einen falschen).
 
-Regeln (Annahmen A5, A26, A27 im Plan):
+Regeln (Annahmen A5, A26, A27 – docs/ENTSCHEIDUNGEN.md, „Annahmen im Sprint Lernschleife“):
   - Nur 👍-Entwürfe im Format "short" bekommen Paket, Häkchen und Post („kein Short ohne deine Freigabe“; ein
     Zusammenschnitt 16:9 liefert kein Publikumssignal, Spec §9.1). Andere → kurzer Hinweis, kein Post.
   - Die Checkliste nennt nur die Post-Plattformen ([publikum].plattformen); clip-battle.de bekommt für Entwürfe
-    (noch) keinen Punkt – Rückfrage an Florian.
+    (noch) keinen Punkt (offene Rückfrage R5, docs/ENTSCHEIDUNGEN.md).
   - Der Stand je Plattform liegt in `posts` (veroeffentlichungen bleibt Clip-Sache), nachgesehen mit
     publikum.post_zu – kein eigenes SQL gegen posts.
   - Links erkennt bot.aktionen.plattform_aus_url (nur https, bekannte Domains) – dieselbe Regel wie im Clip-Bot.
@@ -23,7 +23,7 @@ Regeln (Annahmen A5, A26, A27 im Plan):
     getrennten Betrieb, sagt der Bot das klar – anders als das alte Clip-Bot-/paket weckt dieser Weg pve-big nie
     (Spec §12).
 
-Export-Vertrag mit Regisseur 2.0 (Plan Stufe 1): Es gibt genau EINEN 📦-Knopf im Lern-Bot, `pk:<eid>:` aus diesem
+Export-Vertrag mit Regisseur 2.0 (docs/ENTSCHEIDUNGEN.md): Es gibt genau EINEN 📦-Knopf im Lern-Bot, `pk:<eid>:` aus diesem
 Modul. Die Upload-Fassung liegt in <wurzel>/<[publikum].upload_ordner>/<name>/ (entwurf.upload_ziel), der Pfad in
 entwuerfe.upload_pfad. Regisseur 2.0 Stufe 3 erweitert baue_paket und entwurf.upload_fassung (Einzelclips,
 Sicherung ins Lager) und baut keinen zweiten Weg daneben.
@@ -72,7 +72,6 @@ NUR_FORMAT = "short"  # Paket, Häkchen und Post nur für Shorts (Annahme A26)
 # andere Schriften zu („٤١“).
 LINK_NUMMER = re.compile(r"[eE]?([0-9]+)")
 LINK_AUFRUF = "Aufruf: /link 41 https://www.tiktok.com/@…/video/… (41 = Nummer des Entwurfs, auch e41)"
-ANTWORT_MAX = 200  # Telegram zeigt am Knopf (answerCallbackQuery) höchstens 200 Zeichen
 FEHLER_MAX = 300   # so viel Fehlertext geht an dich – genug für den Grund; ffmpeg-Ausgaben wären sonst seitenlang
 
 Knoepfe = list[list[tuple[str, str]]]
@@ -303,7 +302,7 @@ async def bei_klick(update, context) -> None:
 
     if aktion == "pk":
         if grund := paket_erlaubt(con, eid):
-            await query.answer(grund[:ANTWORT_MAX])
+            await query.answer(grund[:aktionen.HINWEIS_MAX])  # Telegram zeigt am Knopf höchstens 200 Zeichen
             return
         if context.bot_data.get("paket_arbeitet"):
             await query.answer("⏳ Paket wird schon gebaut – gleich kommt es.")
@@ -323,7 +322,7 @@ async def bei_klick(update, context) -> None:
         log.warning("Häkchen Entwurf #%s: kein Post (%s: %s)", eid, type(fehler).__name__, fehler)
         await query.answer("⚠️ Kein Post angelegt – Details im Log.")
         return
-    await query.answer(text[:ANTWORT_MAX])
+    await query.answer(text[:aktionen.HINWEIS_MAX])
     if post_id is None:
         return
     stand = checkliste_stand(con, konfig, eid)

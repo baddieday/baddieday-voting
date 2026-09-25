@@ -466,7 +466,10 @@ def _cmd_publikum(args, konfig, con) -> int:
     zeit = jetzt()
     try:
         ergebnis = publikum.bewerte_alle(con, konfig, zeit)
-    except KonfigFehler as e:  # z. B. alter_tage in lokal.toml falsch geschrieben – fällt meist beim ersten Post auf
+    # KonfigFehler: ein [publikum]-Schlüssel fehlt ganz (auch in pipeline.toml). Ein Tippfehler in lokal.toml
+    # (z. B. „alter_tag“) landet NICHT hier – dann gilt still der Standard; ein Wert, der keine Zahl ist
+    # (alter_tage = "drei"), endet als ValueError in main („Unerwarteter Fehler“, Exit 1).
+    except KonfigFehler as e:
         log.error("%s", e)
         _json({"fehler": "konfig", "hinweis": str(e)})
         return 2
@@ -638,7 +641,8 @@ def baue_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=_cmd_bot, sperren=False)
 
     # Lernschleife „Publikum“ (Spec §12). Unterbefehle wie bei `lager`; `holen` (TikTok-API) kommt in Stufe 4.
-    s = unter.add_parser("publikum", help="Lernschleife Publikum: bewerten (Scores nach 7 Tagen, Timer clip-publikum)")
+    s = unter.add_parser("publikum", help="Lernschleife Publikum: bewerten (Scores ab [publikum].alter_tage, "
+                                               "Standard 7 – Timer clip-publikum)")
     publikum_befehle = s.add_subparsers(dest="aktion", required=True)
     publikum_befehle.add_parser("bewerten", help="Publikums-Scores aller fälligen Posts setzen (einmal je Post, "
                                                  "weckt nie) – bei neuen Scores eine Meldung im Lern-Bot")

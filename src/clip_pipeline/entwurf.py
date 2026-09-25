@@ -132,6 +132,22 @@ def encoder(konfig: Konfig, final: bool) -> tuple[list[str], list[str], str]:
 def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max_bytes: int = 48_000_000,
             encoder_name: str | None = None, volle_aufloesung: bool = False, crf: int = 23,
             kbit_max: int = ENTWURF_KBIT) -> dict:
+    """Rendert eine Schnittliste nach `ziel` (erst `<name>.tmp.mp4`, dann umbenannt – nie eine halbe Datei).
+    Rückgabe {"datei", "mb", "dauer_s", "encoder", "aufloesung"}, z. B. {…, "encoder": "libx264",
+    "aufloesung": [720, 1280]}.
+
+    volle_aufloesung: keine Verkleinerung auf die kurze Seite 720 (für die Upload-Fassung, 1080×1920).
+    crf: gilt nur für libx264. VA-API kennt kein crf und bekommt die Rate als -b:v.
+    kbit_max: Deckel der Videorate. Das Budget aus max_bytes gilt immer zusätzlich:
+      kbit = min(max_bytes · 8 · 0,88 / dauer / 1000 − 160, kbit_max), mindestens 400.
+      Beispiel: 48 MB, 45 s → min(7349, kbit_max); der Entwurf deckelt mit ENTWURF_KBIT (4000), die
+      Upload-Fassung setzt kbit_max höher (upload_fassung).
+    encoder_name="libx264": CPU erzwingen – so ruft sich der Rückfall selbst auf.
+    final (NVENC, pve-big): crf, kbit_max und max_bytes wirken nicht, es gibt keine Größenprüfung.
+
+    Fehler: MedienFehler, wenn eine Moment-Datei oder die Musik fehlt (vor ffmpeg) oder ffmpeg scheitert – VA-API
+    fällt vorher einmal auf CPU zurück (mit denselben Werten). ZuGross(kbit) mit der benutzten Rate, wenn die Datei
+    ohne final über max_bytes liegt; bei ZuGross gibt es keinen Rückfall auf CPU (entscheidet der Aufrufer)."""
     segmente = liste["segmente"]
     b, h = liste["aufloesung"]
     if not final and not volle_aufloesung:  # Entwurf: kurze Seite 720 (Upload-Fassung: volle Größe)
@@ -400,8 +416,10 @@ def upload_fassung(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> 
         return {"entwurf": entwurf_id, "datei": zeile["upload_pfad"], "uebersprungen": True}
 
     liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
-    # Regel 3: alles Material da, bevor ffmpeg startet – sonst bräche ffmpeg erst nach Minuten mit einer
-    # schwer lesbaren Meldung ab. Momente im Puffer verschwinden nach [puffer].rohdaten_tage (14) ins Lager.
+    # Regel 3: alles Material da? rendere() prüft das auch, und zwar vor ffmpeg, aber Datei für Datei (für die
+    # vorderen Segmente laufen vorher schon ffprobe-Aufrufe) und nur mit dem Pfad. Hier prüfen wir vorab alle Dateien,
+    # ohne ein einziges ffprobe, und die Meldung nennt den Moment und den Grund: Der Puffer hält Rohvideos
+    # [puffer].rohdaten_tage (14) Tage, ältere Momente liegen nur noch im Lager.
     tage = konfig.wert("puffer.rohdaten_tage", 14)
     for s in liste["segmente"]:
         if not Path(s["datei"]).is_file():

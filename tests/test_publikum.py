@@ -274,6 +274,23 @@ class Score(MitPublikum):
         self.assertEqual(teile["basis_n"], 4)
         self.assertAlmostEqual(teile["r"], 0.5)  # Komponenten stehen trotzdem drin (für spätere Vergleiche)
 
+    def test_basis_zu_klein_vermerk_aus_der_konstante(self):
+        # lernbot_publikum erkennt „Basis zu klein“ an genau dieser Konstante – kein zweites Literal
+        _, teile = self.score(self.basis(0), views=1000, likes=50, wiedergabe_s=10.0)
+        self.assertEqual(teile["vermerke"][-1], publikum.VERMERK_BASIS_ZU_KLEIN)
+        self.assertEqual(publikum.VERMERK_BASIS_ZU_KLEIN, "Basis zu klein")
+
+    def test_basis_zu_klein_ohne_wiedergabe(self):
+        """Spec §6.4: Der Vermerk „ohne Wiedergabe“ gilt auch, wenn der Score wegen zu kleiner Basis 0 ist –
+        die gespeicherten Gewichte 0,6/0,4 brauchen den Vermerk, der sie erklärt."""
+        score, teile = self.score(self.basis(4), views=1240, likes=61)
+        self.assertEqual(score, 0.0)
+        self.assertEqual((teile["z_r"], teile["z_e"], teile["z_v"]), (None, 0.0, 0.0))
+        self.assertIn("Basis zu klein", teile["vermerke"])
+        self.assertIn("ohne Wiedergabe", teile["vermerke"])
+        for teil, gewicht in (("r", 0.0), ("e", 0.6), ("v", 0.4)):
+            self.assertAlmostEqual(teile["gewichte"][teil], gewicht)
+
     def test_normaler_score_zahlenbeispiel(self):
         # Basis r 0,1…0,5 (Median 0,3, MAD 0,1), e 0,01…0,05 (Median 0,03, MAD 0,01 → Minimum 0,05), v 1…5
         score, teile = self.score(self.basis(5), views=math.e ** 5 - 1, likes=0.05 * (math.e ** 5 - 1),
@@ -546,7 +563,24 @@ class Plausibel(MitPublikum):
 
     def test_sinkende_zaehler(self):
         fehler = publikum.pruefe_plausibel({"views": 900, "likes": 60}, self.LETZTE, 20.0)
-        self.assertEqual(fehler, ["Views gesunken: 1240 → 900", "Likes gesunken: 61 → 60"])
+        # \u202f: schmales geschütztes Leerzeichen als Tausendertrenner (publikum.TAUSENDER) – wie in jeder Anzeige
+        self.assertEqual(fehler, ["Views gesunken: 1\u202f240 → 900", "Likes gesunken: 61 → 60"])
+
+    def test_jeder_zaehler_darf_nicht_sinken(self):
+        """Spec §7.1: keiner der fünf Zähler darf gegenüber der letzten Messung sinken. Die Felder stehen hier
+        ausgeschrieben (nicht über publikum.ZAEHLER) – sonst schrumpfte der Test still mit, wenn jemand die Liste
+        kürzt."""
+        for feld, name in (("views", "Views"), ("likes", "Likes"), ("kommentare", "Kommentare"),
+                           ("shares", "Shares"), ("saves", "Saves")):
+            with self.subTest(feld=feld):
+                self.assertEqual(publikum.pruefe_plausibel({feld: 2}, {feld: 3}, 20.0),
+                                 [f"{name} gesunken: 3 → 2"])
+
+    def test_zahlen_in_derselben_schreibweise_wie_die_anzeige(self):
+        # Die Rückfrage zeigt Zahlen und Verstöße in EINER Nachricht – beide mit anzahl_text/dezimal_text
+        fehler = publikum.pruefe_plausibel({"views": 1240, "wiedergabe_s": 6.96}, {"views": 1500}, 4.0)
+        self.assertEqual(fehler, ["Views gesunken: 1\u202f500 → 1\u202f240",
+                                  "Ø Wiedergabe 7 s ist länger als 1,5 × Videolänge (4 s)"])
 
     def test_wiedergabe_zu_lang(self):
         fehler = publikum.pruefe_plausibel({"wiedergabe_s": 30.5}, None, 20.0)
@@ -568,7 +602,8 @@ class Plausibel(MitPublikum):
         p = self.post()
         self.messung(p, tag(3), views=1240, likes=61)
         letzte = publikum.letzte_messung(self.con, p)
-        self.assertEqual(publikum.pruefe_plausibel({"views": 900}, letzte, 20.0), ["Views gesunken: 1240 → 900"])
+        self.assertEqual(publikum.pruefe_plausibel({"views": 900}, letzte, 20.0),
+                         ["Views gesunken: 1\u202f240 → 900"])
 
 
 class Messungen(MitPublikum):
@@ -615,6 +650,62 @@ class HandEingabe(MitPublikum):
                 with self.assertRaises(ValueError) as fehler:
                     publikum.lies_hand_eingabe(text)
                 self.assertIn(stichwort, str(fehler.exception).lower())
+
+    def test_wiedergabe_als_uhrzeit_nennt_die_einheit(self):
+        # Die TikTok-App zeigt „0:07“ – die Hand-Eingabe braucht Sekunden und sagt das auch
+        for text in ("1240 61 0:07 34", "1240 61 7s 34"):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, "in Sekunden"):
+                publikum.lies_hand_eingabe(text)
+
+    def test_prozentzeichen_ist_erlaubt(self):
+        # Die Form nennt „in %“ – wer „34%“ tippt, meint 34
+        self.assertEqual(publikum.lies_hand_eingabe("1240 61 6,8 34%")["voll_prozent"], 34.0)
+
+    def test_falsche_anzahl_nennt_die_form_mit_einheiten(self):
+        with self.assertRaises(ValueError) as fehler:
+            publikum.lies_hand_eingabe("1240 61")
+        self.assertIn(publikum.HAND_FORM, str(fehler.exception))
+        self.assertIn("Sekunden", publikum.HAND_FORM)
+
+
+class Anzeige(MitPublikum):
+    """Zahlen in Bot-Texten: eine Schreibweise für alle Meldungen (Rückfrage, Bestätigung, /publikum)."""
+
+    def test_anzahl_text(self):
+        self.assertEqual(publikum.anzahl_text(1240), "1\u202f240")
+        self.assertEqual(publikum.anzahl_text(1234567), "1\u202f234\u202f567")
+        self.assertEqual(publikum.anzahl_text(5), "5")
+        self.assertEqual(publikum.TAUSENDER, "\u202f")
+
+    def test_dezimal_text_rundet_erst_dann_faellt_komma_null_weg(self):
+        for wert, text in ((6.96, "7"), (7.0, "7"), (6.8, "6,8"), (34.5, "34,5"), (0.04, "0"), (20, "20")):
+            with self.subTest(wert=wert):
+                self.assertEqual(publikum.dezimal_text(wert), text)
+
+    def test_symbole_fuer_jedes_feld_und_kein_knopf_zeichen(self):
+        self.assertEqual(set(publikum.SYMBOLE), set(publikum.FELDER))
+        self.assertNotIn("✅", publikum.SYMBOLE.values())  # ✅ ist im Bot der Knopf „Stimmt“ bzw. „erledigt“
+
+    def test_art_namen(self):
+        self.assertEqual(publikum.ART_NAMEN, {"clip": "Clip", "entwurf": "Entwurf"})
+        self.assertEqual(set(publikum.ART_NAMEN), set(publikum.ARTEN))
+
+
+class Einstellung(MitPublikum):
+    def test_fehlender_schluessel_ist_konfigfehler(self):
+        from clip_pipeline.konfig import KonfigFehler
+
+        self.assertEqual(publikum.einstellung(self.konfig, "fenster"), 20)
+        del self.konfig.daten["publikum"]["fenster"]
+        with self.assertRaisesRegex(KonfigFehler, r"\[publikum\]\.fenster"):
+            publikum.einstellung(self.konfig, "fenster")
+
+    def test_alter_in_tagen(self):
+        gepostet = iso(datetime(2026, 9, 18, 10, 0, tzinfo=UTC))
+        self.assertAlmostEqual(publikum.alter_in_tagen(gepostet, datetime(2026, 9, 25, 12, 0, tzinfo=UTC)),
+                               7 + 2 / 24)
+        self.assertAlmostEqual(publikum.alter_in_tagen(gepostet, iso(datetime(2026, 9, 19, 10, 0, tzinfo=UTC))),
+                               1.0)
 
 
 # --- Rezept und Post-Daten -----------------------------------------------------------------------------
