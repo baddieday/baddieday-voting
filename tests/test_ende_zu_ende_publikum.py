@@ -134,7 +134,8 @@ class EndeZuEndePublikum(MitSpeicher):
         k["decide"]["programm"] = KEIN_CLAUDE  # Sicherheitsnetz: ein vergessener Fake findet kein echtes claude
         k.setdefault("regie", {})["ordner"] = str(self.tmp / "regie")
         # Getrennter Betrieb wie auf dem Mini (E19): Puffer mit Marke; das Lager (pve-big) ist gesetzt, existiert
-        # hier aber nicht – wer es anfasst, legt den Ordner an, und das prüft der Test am Ende
+        # hier aber nicht. Am Ende prüft der Test, dass dort nichts angelegt wurde (Schreiben ins Lager);
+        # Weckversuche fängt nie_wecken_und_eine_uhr ab
         (self.konfig.wurzel / ".clip-puffer").touch()
         self.lager = self.tmp / "lager-auf-pve-big"
         k["lager"]["wurzel"] = str(self.lager)
@@ -142,7 +143,8 @@ class EndeZuEndePublikum(MitSpeicher):
     def nie_wecken_und_eine_uhr(self) -> None:
         """Wecken wäre sichtbar (Muster tests/test_speicher_wecken.py), Netz ist verboten, alle Uhren sind eine.
         Screenshots landen in einem eigenen Temp-Ordner – so lässt sich zählen, ob ein Bild liegen bleibt."""
-        self.konfig.daten["speicher"].update(host="pve-gross", wol_mac="aa:bb:cc:dd:ee:ff", wecken_warten_s=60)
+        # wecken_warten_s = 0: ein versehentlicher Weckversuch scheitert sofort (und steht im Mock), statt zu warten
+        self.konfig.daten["speicher"].update(host="pve-gross", wol_mac="aa:bb:cc:dd:ee:ff", wecken_warten_s=0)
         self.konfig.daten["big"]["host"] = "pve-gross"
         self.temp = self.tmp / "temp"
         self.temp.mkdir()
