@@ -8,8 +8,9 @@ YouTube Shorts **und** TikTok → alle 2 Wochen ein Highlight-Video. Die Vorbewe
 
 1. Du spielst. **Nvidia Highlights** und **SteelSeries Moments** speichern Clips automatisch,
    Fortnite schreibt ein **Replay**.
-2. Alle 2 Minuten kopiert `windows/Uebertragung.ps1` neue Dateien auf den großen Proxmox-Host (weckt ihn per
-   Wake-on-LAN) und meldet jedes fertige Match an n8n: `POST /webhook/match-vorbei {"session": "<ID>"}`.
+2. Alle 2 Minuten kopiert `windows/Uebertragung.ps1` neue Dateien per SMB in den **Puffer** auf dem Mini (weckt
+   nie) und meldet jedes fertige Match an n8n: `POST /webhook/match-vorbei {"session": "<ID>"}`. Ins **Lager** auf
+   pve-big kommt alles einmal am Tag um 10:00 (`pipeline lager abgleich`, nie nachts – `docs/PUFFER.md`).
 3. n8n ruft per SSH nacheinander auf (Vertrag in `CLAUDE.md`):
    - `prepare` – Replay finden, Aufnahmen erfassen, Session-Ordner `sessions/<ID>/`
    - `analyze` – Replay lesen → **deine** Kills (nicht die deines Teams) → Multikill-Gruppen (Kette ≤ 10 s)
@@ -21,12 +22,13 @@ YouTube Shorts **und** TikTok → alle 2 Wochen ein Highlight-Video. Die Vorbewe
 5. **📦 Upload-Paket**: Short 1080×1920 (Overlay + Endcard „Stimm ab auf clip-battle.de“) als Datei +
    Caption zum Kopieren + Checkliste YouTube / TikTok / clip-battle.de. Erst wenn YouTube **und** TikTok
    abgehakt sind (Knopf oder `/link <nr> <url>`), gilt der Clip als veröffentlicht; offene Uploads meldet der
-   Bot täglich.
+   Bot täglich. Das Häkchen TikTok legt zusätzlich einen **Post** für die Lernschleife an (siehe unten).
 6. `/battle`: zwei freigegebene Clips, du wählst den besseren → Elo. Freigaben und Battles justieren die
    Gewichte der Vorbewertung (`/gewichte`).
 7. Alle 14 Tage: `highlight` baut ein Video aus den besten Clips (Überblendungen, lizenzierte Musik mit Ducking)
-   und schickt eine Vorschau zur **Freigabe in den Bot**. Schläft der große Host, weckt ihn die Pipeline.
-8. Nach einem halben Jahr wird recycelt – Multikills ab 3 Kills bleiben für immer im Archiv.
+   und schickt eine Vorschau zur **Freigabe in den Bot**. Im Puffer-Betrieb (E19) arbeitet `highlight` nur im
+   Puffer – pve-big wird dafür nicht geweckt.
+8. Gelöscht wird nichts automatisch (Entscheidung 25.09.): Wird Platz knapp, warnt der Bot einmal am Tag.
 
 ## Regisseur (Sprint 09/2026)
 
@@ -34,6 +36,14 @@ Automatische Zusammenschnitte (16:9) und Shorts (9:16) mit Musik, Schnitten auf 
 Stimmung; Bewertung im eigenen **Lern-Bot**, der Regisseur lernt daraus. Dazu ein Sicherheitsnetz, das pve-big
 herunterfährt, wenn nichts zu tun ist. Bedienung: `docs/REGIE.md` · Entscheidungen: `docs/ENTSCHEIDUNGEN.md` ·
 Stand und Host-Änderungen: `docs/ABSCHLUSSBERICHT.md`.
+
+## Lernschleife „Publikum“ (Sprint 09/2026, Stufe 1)
+
+Jeder gepostete Short wird ein **Post**; die TikTok-Zahlen kommen per Screenshot an den Lern-Bot (Claude liest sie,
+nur Leserecht) oder von Hand, und nach 7 Tagen setzt `pipeline publikum bewerten` (Timer `clip-publikum`, 10:00)
+einen **Publikums-Score** – verglichen mit deinen eigenen letzten Posts. `/publikum` im Lern-Bot zeigt Zahlen und
+Score. Weckt nie pve-big. Bedienung, Konfig und Installation: `docs/PUBLIKUM.md` · Spec:
+`docs/superpowers/specs/2026-09-25-lernschleife-publikum-design.md`.
 
 ## Befehle
 
@@ -48,8 +58,10 @@ Stand und Host-Änderungen: `docs/ABSCHLUSSBERICHT.md`.
 | `pipeline aufraeumen [--liste] [--ausfuehren]` | Probelauf bzw. wirklich aufräumen |
 | `pipeline momente nachschneiden [--tage 14] [--probe]` | Multikill-Momente ab dem ersten Umhauen neu schneiden (nur Puffer, neue Dateien, weckt nie; erst `--probe`) |
 | `pipeline bot` | Telegram-Bot (läuft als Dienst) |
+| `pipeline publikum bewerten` | Publikums-Scores aller Posts setzen, die 7 Tage alt sind (Timer, weckt nie) |
 
 Telegram: `/battle` `/rangliste` `/gewichte` `/uploads` `/paket <nr>` `/link <nr> <url>` `/offen` `/status` `/hilfe`
+Lern-Bot: `/entwurf` `/musik` `/lernstand` `/stand` `/publikum` `/link <entwurf> <url>` `/hilfe` · Screenshot mit `#<post>`
 
 Ausgabe: Logs auf stderr, letzte Zeile auf stdout = eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 Aufruf/Konfig · 3 Speicher offline (großer Host schläft) · 4 Sperre nicht bekommen
@@ -73,8 +85,10 @@ $env:CLIP_SPEICHER = "D:\clip-test"; $env:CLIP_DATENBANK = "D:\clip-test\test.db
 ```powershell
 .venv\Scripts\python -m unittest discover -s tests -t .
 ```
-55 schlanke Tests, darunter echte FFmpeg-Läufe (Schnitt, Tonspuren, feste Bildrate, Vorschau, Short,
-Highlight) und der Vertrag mit n8n (Session-ID-Prüfung, JSON als letzte Zeile, Exit-Codes, Wake-on-LAN).
+Einige hundert Tests (die Zahl steht in der letzten Zeile des Laufs, „Ran … tests“), darunter echte FFmpeg-Läufe
+(Schnitt, Tonspuren, feste Bildrate, Vorschau, Short, Highlight, Entwürfe), der Vertrag mit n8n (Session-ID-Prüfung,
+JSON als letzte Zeile, Exit-Codes) und „nie wecken“. Der ganze Lauf dauert wegen des Renderns eine Viertelstunde und
+mehr; einzelne Module gehen schneller: `python -m unittest tests.test_publikum`.
 
 ## Replay-Parser
 
@@ -106,10 +120,12 @@ src/clip_pipeline/       verarbeitung (prepare/analyze/decide/render) · quellen
                          zeitleiste · vorbewertung · schnittliste · medien (FFmpeg) · shorts · highlight
                          caption · elo · lernen · aufraeumen · erfassung · schema + schemas/ · db + schema.sql
                          sperre (flock) · cli · bot/ (texte, aktionen, app)
+                         Lernschleife: publikum (+ publikum.sql) · lernbot_zahlen · lernbot_paket · lernbot_publikum
 tools/replay2json/       Replay -> JSON (C#)
 windows/                 Übertragung Gaming-PC -> großer Host (+ Meldung an n8n)
 deploy/                  systemd-Dienste, abgesicherter SSH-Einstieg für n8n
 docs/SERVER.md           Server einrichten (Proxmox, NFS, Samba, Wake-on-LAN, Tailscale, n8n, Telegram)
+docs/PUBLIKUM.md         Lernschleife „Publikum“: Bedienung, Konfig, Installation
 ```
 
 ## Häufige Fragen
