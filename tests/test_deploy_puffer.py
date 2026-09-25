@@ -109,6 +109,17 @@ class Units(unittest.TestCase):
         pfade = lies_unit(self.SYSTEMD / "clip-lager.service")["ReadWritePaths"][0].split()
         self.assertEqual(pfade, ["/var/lib/clip-pipeline", "/srv/puffer", "/srv/big"])
 
+    def test_dienste_duerfen_in_den_puffer_schreiben(self):
+        # Nach R5 ist /srv/clips ein Link auf /srv/puffer: ausdrücklich freigeben. "-": vor R1 fehlt /srv/puffer –
+        # ohne das Präfix startete systemd den Dienst gar nicht (226/NAMESPACE)
+        for name in ("clip-bot.service", "clip-lernbot.service", "clip-sitzungen.service"):
+            with self.subTest(name):
+                pfade = lies_unit(self.SYSTEMD / name)["ReadWritePaths"][0].split()
+                self.assertEqual(pfade, ["/var/lib/clip-pipeline", "/srv/clips", "-/srv/puffer"])
+        # clip-aufraeumen bleibt unverändert: im getrennten Betrieb ist sein Timer aus (R6)
+        self.assertEqual(lies_unit(self.SYSTEMD / "clip-aufraeumen.service")["ReadWritePaths"],
+                         ["/var/lib/clip-pipeline /srv/clips"])
+
     def test_morgenpruefung(self):
         s = lies_unit(self.SYSTEMD / "clip-puffer-pruefen.service")
         self.assertEqual(s["ExecStart"], ["/opt/clip-pipeline/.venv/bin/pipeline puffer pruefen"])
