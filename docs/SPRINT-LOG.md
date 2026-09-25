@@ -67,3 +67,22 @@ Legende: ✅ fertig und hier getestet · 🧪 gebaut, nur mit künstlichem Mater
 - **E19 gebaut** in 4 Strängen, jeder Teil: Bau mit Tests → Prüfer (Korrektheit/Datenverlust, Tests, Einfachheit) →
   Gegenprüfer je Befund → Nachbessern. Danach Schluss-QS über alles. Details siehe Commits und `docs/PUFFER.md`.
 - **Nicht angefasst:** Produktion, n8n, Gaming-PC, Host-Konfigurationen (außer clip-leerlauf auf pve-big, s. o.).
+
+### 25.09. morgens: E19 eingeführt (mit dir am Handy)
+- Deine Entscheidungen: sofort einführen · Samba + 96-GB-Puffer ok · **nie löschen, aber warnen** · **pve-big nie nachts
+  wecken** (Lüfter) → Abgleich 10:00, Prüfung 11:00, Nachtruhe 22–8 Uhr als harte Grenze · CLAUDE.md angepasst.
+- **R0–R2:** Puffer `vm-102-disk-1` (96 GB, `/srv/puffer`), Ordner und Marken, `clip-lvm-status.timer` auf pve-mini;
+  Samba im CT (Benutzer `gamingpc`, **Passwort noch nicht gesetzt** – machst du, gebraucht erst in R7).
+  Zwei echte Fehler beim ersten Lauf gefunden und behoben: `tune2fs -m 0` scheitert bei eingehängtem Volume (ext4-MMP)
+  → jetzt, solange der CT aus ist; Samba lauschte auch auf IPv6 (u. a. öffentliche Adresse) → nur noch IPv4-Heimnetz.
+- **R3:** PR #1 mit deinem OK in main übernommen (1529664), Produktion und `/opt/clip-regie` auf main, Pakete mit
+  `[whisper]`. Sicherung vorher: `/var/lib/clip-pipeline/vor-e19.sha`, `vor-e19-regie.sha`, `vor-e19.db`.
+- **R4:** `.clip-lager` auf pve-big, Übernahme 637 Dateien / 11,1 GB mit SHA-256, 0 Fehler; Delta danach 0.
+- **R5:** umgeschaltet – `lokal.toml` beider Checkouts (Sicherung `lokal.toml.vor-e19`), `[big].frist` geleert,
+  `/srv/clips → /srv/puffer`, Drop-ins `e19-puffer.conf` für clip-bot/clip-lernbot. Schreibtest mit denselben
+  Schutzregeln ok. `lager status`: getrennt, Prüfung ok.
+- **R6:** clip-lager.timer 10:00, clip-puffer-pruefen.timer 11:00 aktiv, clip-aufraeumen.timer dauerhaft aus.
+  Erster Abgleich von Hand ok (DB-Sicherung im Lager bestätigt), Prüfung ohne Befund.
+- **Offen:** Samba-Passwort (pve-mini-Shell: `pct exec 102 -- smbpasswd -a gamingpc`) · **R7 am Dienstag vor dem
+  ersten Spiel** (Gaming-PC: neues Skript, psd1-Ziel `\\192.168.178.93\clips`, cmdkey, Probelauf) – kopiert er vorher
+  noch nach pve-big, geht nichts verloren, eine Delta-Übernahme holt es nach · R8 (pve-big-Freigabe nur lesen) später.
