@@ -31,6 +31,10 @@ MIGRATIONEN += [("clips", "mic_stand", "TEXT"), ("entwuerfe", "rezept", "TEXT"),
 MIGRATIONEN += [("gewichte", "trefferquote_publikum", "REAL"), ("gewichte", "trefferquote_publikum_start", "REAL"),
                 ("gewichte", "quellen", "TEXT")]
 
+# Upload nur für Highlights (Entscheidung 25.09.): Häkchen „✅ Hochgeladen“ am Highlight-Video (Zeitpunkt, NULL = offen).
+# Eigene Spalte statt neuem Status – die CHECK-Liste von highlights.status ließe sich nur mit Tabellen-Umbau ändern.
+MIGRATIONEN += [("highlights", "hochgeladen", "TEXT")]
+
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)

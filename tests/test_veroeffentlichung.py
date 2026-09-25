@@ -12,7 +12,7 @@ from tests.hilfen import HAT_FFMPEG, MitSpeicher, testvideo
 
 class Uploads(MitSpeicher):
     def test_erst_youtube_und_tiktok_ergeben_veroeffentlicht(self):
-        cid = self.clip_anlegen(status="freigegeben")
+        cid = self.clip_anlegen(status="freigegeben", max_gruppe=3)  # Triple Kill = Highlight
         self.assertEqual(aktionen.upload_stand(self.con, cid, self.konfig), {"youtube": False, "tiktok": False, "clipbattle": False})
         knoepfe = aktionen.knoepfe_upload(cid, {"youtube": True, "tiktok": False, "clipbattle": False})
         self.assertEqual([d for reihe in knoepfe for _, d in reihe], [f"t:{cid}", f"c:{cid}"])  # nur Offenes
@@ -42,10 +42,31 @@ class Uploads(MitSpeicher):
         antwort = aktionen.entscheide(self.con, cid, "freigegeben")
         self.assertIn(f"p:{cid}", [d for reihe in antwort.knoepfe for _, d in reihe])
 
+    def test_nur_highlights_muessen_hoch(self):
+        einzel = self.clip_anlegen(status="freigegeben")
+        triple = self.clip_anlegen(status="freigegeben", max_gruppe=3)
+        mit_vr = self.clip_anlegen(status="freigegeben")
+        self.con.execute("UPDATE clips SET victory_royale = 1 WHERE id = ?", (mit_vr,))
+        # Einzelkill fehlt: kein Highlight (ein Paket gibt es trotzdem, test_nach_freigabe_gibt_es_den_paket_knopf)
+        self.assertEqual([c["id"] for c, _ in aktionen.offene_uploads(self.con, self.konfig)], [triple, mit_vr])
+        self.assertNotIn(einzel, [c["id"] for c, _ in aktionen.offene_uploads(self.con, self.konfig)])
+
+    def test_highlight_video_bis_zum_haekchen(self):
+        from clip_pipeline import highlight
+
+        zeit = iso(jetzt() - timedelta(hours=30))
+        for name, status in (("hl-1", "freigegeben"), ("hl-2", "verworfen")):
+            self.con.execute("INSERT INTO highlights (name, datei, clips, dauer, status, erstellt, entschieden)"
+                             " VALUES (?, 'x.mp4', 5, '01:40', ?, ?, ?)", (name, status, zeit, zeit))
+        self.assertEqual([h["name"] for h in aktionen.offene_highlight_videos(self.con)], ["hl-1"])
+        self.assertIsNone(highlight.hochgeladen(self.con, 2)["hochgeladen"])  # verworfen: kein Häkchen
+        self.assertIsNotNone(highlight.hochgeladen(self.con, 1)["hochgeladen"])
+        self.assertEqual(aktionen.offene_highlight_videos(self.con), [])
+
     def test_erinnerung_nur_einmal_pro_tag(self):
         from clip_pipeline.bot import app as bot_app
 
-        cid = self.clip_anlegen(status="freigegeben")
+        cid = self.clip_anlegen(status="freigegeben", max_gruppe=3)
         self.con.execute("UPDATE clips SET entschieden = ? WHERE id = ?", (iso(jetzt() - timedelta(hours=30)), cid))
         nachrichten = []
 
