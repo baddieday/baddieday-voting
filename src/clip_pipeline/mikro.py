@@ -6,10 +6,13 @@ und Spielton-Spitzen. Diese Zahlen landen in momente.merkmale. Hier werden sie z
 die Analyse vollständig ist (merkmale.mic_vollstaendig).
 
 Warum losgelöst: Whisper braucht je Clip 30–60 s. Liefe es in `render`, wartete n8n per SSH darauf. Deshalb startet
-render nur einen Kindprozess (`pipeline stimmung --clips --session ID`, nice 15, eigene Sitzung, stdout/stderr nicht
-am render-Prozess) und endet sofort mit seiner JSON-Zeile – der n8n-Vertrag bleibt unverändert. Das Kind holt die
-Pipeline-Sperre selbst (die Sperr-Datei wird nicht vererbt, PEP 446). Rückfall ohne Code: der Timer clip-sitzungen
-erfasst liegengebliebene Clips ohnehin nach ≤ 10 min (Annahme S2-A7).
+render nur einen Kindprozess (`pipeline stimmung --clips --session ID`, nice 15, eigene Sitzung, stdout und stderr
+ins Log mikro.log statt an den render-Prozess) und endet sofort mit seiner JSON-Zeile – der n8n-Vertrag bleibt
+unverändert. Das Kind holt die Pipeline-Sperre selbst (die Sperr-Datei wird nicht vererbt, PEP 446).
+Rückfall (Annahme S2-A7, ehrlich nach Befund B-1): Der Timer clip-sitzungen misst nur, wenn eine neue session_*.json
+fertig ist („Session vorbei“), und dann nur Clips OHNE momente-Zeile. Unvollständige Zeilen (Mikro da, Whisper fehlt)
+holt nur `stimmung --clips` nach – also das nächste render-Kind (es nimmt Reste aller Sessions mit) oder von Hand
+`pipeline stimmung --clips --max 5`.
 
 Lernidee: Solange ein Clip keine Mic-Analyse hat, sind seine Mic-Merkmale unbekannt (nicht 0) – /gewichte zeigt die
 Zahl „ohne Mic-Analyse“, und lernen.py vergleicht sie nicht.
@@ -20,10 +23,11 @@ Der Kindprozess `stimmung --clips` steht nicht in cli.WECKEN – er prüft den S
 Ablauf in Alltagssprache: render schneidet neue Clips und ruft starte_im_hintergrund. Das startet `pipeline stimmung
 --clips` im Hintergrund und kehrt sofort zurück. Der Hintergrundlauf (clips_nachziehen) übernimmt zuerst alles, was
 schon in momente steht (schnell), und hört dann höchstens [merkmale].mic_je_lauf Clips mit Whisper ab – die Session
-von eben zuerst. Den Rest holt der nächste Lauf oder der Timer clip-sitzungen.
+von eben zuerst. Den Rest holt der nächste Lauf (nächstes render-Kind oder von Hand). Scheitert eine Messung
+(kaputte Datei), bekommt die Zeile `fehler` und wird nicht wieder gewählt (merkmale.mic_nachholen, S2-A18).
 
 Import-Regel (Plan Stufe 2, Leitplanke 7; tests/test_vertrag_stufe2.py prüft sie):
-    mikro → db, merkmale, lernen, konfig      stimmung NUR innerhalb von clips_nachziehen (Funktions-Import)
+    mikro → db, lernen, merkmale, konfig, zeit      stimmung NUR innerhalb von clips_nachziehen (Funktions-Import)
 Grund: stimmung importiert mikro auf Modulebene (für _speichere); andersherum entstünde ein Import-Kreis.
 """
 
@@ -36,7 +40,7 @@ import sqlite3
 import subprocess
 import sys
 
-from . import lernen, merkmale
+from . import db, lernen, merkmale
 from .konfig import Konfig
 from .zeit import iso, jetzt
 
@@ -92,6 +96,7 @@ def _uebernehmen(con: sqlite3.Connection, gewichte: dict[str, float], version: i
     """Schritt (1): Clips ohne mic_stand, die schon eine momente-Zeile haben → nur übernehmen (kein Whisper).
 
     Auch verworfene Clips: Das kostet nichts, und ihre Merkmale zählen beim Lernen aus Freigaben mit.
+    Je Clip eine Transaktion (Befund K-4): clips.merkmale, Punkte und mic_stand ändern sich zusammen oder gar nicht.
     Rückgabe {"clips": betrachtet, "geaendert": davon geändert}."""
     sql = ("SELECT c.id, m.merkmale FROM clips c JOIN momente m ON m.clip_id = c.id"
            " WHERE c.mic_stand IS NULL")
@@ -105,7 +110,8 @@ def _uebernehmen(con: sqlite3.Connection, gewichte: dict[str, float], version: i
         if mk is None:
             continue
         betrachtet += 1
-        geaendert += in_clip_uebernehmen(con, int(zeile["id"]), mk, gewichte, version)
+        with db.transaktion(con):  # Aufrufer (clips_nachziehen, nachtragen) haben keine Transaktion offen
+            geaendert += in_clip_uebernehmen(con, int(zeile["id"]), mk, gewichte, version)
     return {"clips": betrachtet, "geaendert": geaendert}
 
 
@@ -119,11 +125,11 @@ def _lies(text: str | None) -> dict | None:
 
 
 def _braucht_messung(mk: dict | None, mit_whisper: bool) -> bool:
-    """Schritt (2) nötig? Ohne Zeile immer. Mit Zeile nur, wenn Whisper da ist, die Analyse unvollständig ist und die
-    Messung nicht gescheitert war – eine kaputte Datei soll nicht jeden Lauf einen Platz belegen (S2-A18)."""
+    """Schritt (2) nötig? Ohne Zeile immer. Mit Zeile nur, wenn Whisper da ist und merkmale.mic_nachholen(mk) –
+    dieselbe Regel wie in stimmung.analysiere(nur_mic=True) (S2-A18)."""
     if mk is None:
         return True
-    return mit_whisper and not merkmale.mic_vollstaendig(mk) and "fehler" not in mk
+    return mit_whisper and merkmale.mic_nachholen(mk)
 
 
 def clips_nachziehen(con: sqlite3.Connection, konfig: Konfig, *, session: str | None = None,
@@ -140,8 +146,9 @@ def clips_nachziehen(con: sqlite3.Connection, konfig: Konfig, *, session: str | 
     (ein wartender render gäbe nach [sperre].warten_s Exit 4 an n8n).
     Rückgabe: uebernommen = Clips, die Schritt (1) geändert hat · analysiert = neu gemessene Momente ·
     mit_fehler = davon Messfehler · offen = Clips (nicht verworfen), die danach noch keinen mic_stand haben
-    (dieselbe Zahl wie „ohne Mic-Analyse“ in /gewichte).
-    Fehler: sqlite3-Fehler gehen an den Aufrufer; Messfehler einzelner Dateien werden gezählt, nicht geworfen.
+    (db.ohne_mic_analyse – dieselbe Funktion wie „ohne Mic-Analyse“ in /gewichte).
+    Fehler: sqlite3-Fehler gehen an den Aufrufer; Messfehler einzelner Dateien (MedienFehler) werden gezählt, nicht
+    geworfen – die Zeile bekommt `fehler`, die anderen Momente des Laufs werden trotzdem gespeichert (Befund K-2).
     Beispiel: 5 neue Clips, mic_je_lauf 3, Whisper da → {"uebernommen": 0, "analysiert": 3, "mit_fehler": 0,
     "offen": 2}; der nächste Lauf holt die letzten zwei.
     """
@@ -164,8 +171,8 @@ def clips_nachziehen(con: sqlite3.Connection, konfig: Konfig, *, session: str | 
         n = maximal if maximal is not None else int(konfig.wert("merkmale.mic_je_lauf", MIC_JE_LAUF))
         e = stimmung.analysiere(con, konfig, claude=False, nur_clips=ids, nur_mic=True, maximal=n)
         analysiert, mit_fehler = int(e["analysiert"]), int(e["mit_fehler"])
-    offen = con.execute("SELECT COUNT(*) FROM clips WHERE mic_stand IS NULL AND status != 'verworfen'").fetchone()[0]
-    return {"uebernommen": uebernommen, "analysiert": analysiert, "mit_fehler": mit_fehler, "offen": int(offen)}
+    return {"uebernommen": uebernommen, "analysiert": analysiert, "mit_fehler": mit_fehler,
+            "offen": db.ohne_mic_analyse(con)}
 
 
 def nachtragen(con: sqlite3.Connection, konfig: Konfig, gewichte: dict[str, float], version: int, *,
@@ -186,13 +193,14 @@ def starte_im_hintergrund(konfig: Konfig, sid: str) -> bool:
     """Startet den Mic-Schritt als losgelösten Kindprozess (aufgerufen nur von cli._cmd_schritt nach render).
 
     subprocess.Popen(["nice", "-n", "15", sys.executable, "-m", "clip_pipeline", "--konfig", str(konfig.quelle),
-    "stimmung", "--clips", "--session", sid, "--max", str(n)], stdin/stdout=DEVNULL, stderr=Log neben der DB
+    "stimmung", "--clips", "--session", sid, "--max", str(n)], stdin=DEVNULL, stdout und stderr = Log neben der DB
     (angehängt), start_new_session=True). Nur wenn [merkmale].mic, getrennter Betrieb und whisper_da().
     Fehler beim Start → nur Log-Warnung, Rückgabe False; render bleibt unverändert. Paket B.
 
     Warum so: `--konfig` sorgt dafür, dass das Kind dieselbe Konfig und damit dieselbe Datenbank nutzt wie render
-    (die Umgebung erbt es ohnehin). stdout/stderr gehen nie an den render-Prozess – n8n liest dort genau eine
-    JSON-Zeile. start_new_session löst das Kind von der SSH-Sitzung von n8n. Die Pipeline-Sperre holt das Kind
+    (die Umgebung erbt es ohnehin). stdout und stderr des Kinds gehen in eine eigene Datei, nie an den
+    render-Prozess – n8n liest dort genau eine JSON-Zeile. Dass auch stdout ins Log geht (Befund B-4), hilft bei der
+    Diagnose: Die JSON-Zeile des Kinds ({"offen": …}) steht dort auch, wenn nichts zu messen war. start_new_session löst das Kind von der SSH-Sitzung von n8n. Die Pipeline-Sperre holt das Kind
     selbst: Es wartet, bis render sie freigibt (die Sperr-Datei wird nicht vererbt, PEP 446).
     Parameter: sid – die gerade gerenderte Session (von render schon geprüft). Rückgabe: True = gestartet.
     Beispiel: [merkmale].mic = true, mic_je_lauf 3, Puffer-Betrieb, faster-whisper installiert → True, im
@@ -214,10 +222,11 @@ def starte_im_hintergrund(konfig: Konfig, sid: str) -> bool:
         # "ab": anhängen – das Log erzählt die Geschichte aller Läufe. Das Kind bekommt eine eigene Kopie des
         # Dateideskriptors; wir dürfen unsere nach dem Start schließen.
         with open(log_pfad, "ab") as log_datei:
-            subprocess.Popen(befehl, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log_datei,
+            subprocess.Popen(befehl, stdin=subprocess.DEVNULL, stdout=log_datei, stderr=log_datei,
                              start_new_session=True)
     except (OSError, ValueError, subprocess.SubprocessError) as e:
-        log.warning("Mic-Schritt nicht gestartet (%s: %s) – clip-sitzungen holt ihn nach", type(e).__name__, e)
+        log.warning("Mic-Schritt nicht gestartet (%s: %s) – das nächste render-Kind oder `pipeline stimmung --clips`"
+                    " holt ihn nach", type(e).__name__, e)
         return False
     log.info("Mic-Schritt im Hintergrund gestartet (Session %s, höchstens %s Clips, Log %s)", sid, n, log_pfad)
     return True

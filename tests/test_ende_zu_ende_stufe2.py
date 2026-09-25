@@ -408,6 +408,47 @@ class Migration(MitSpeicher):
 # --- 5. Mic-Kindprozess bekommt die Testkonfig -------------------------------------------------------------------
 
 @unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class MigrationGleichzeitig(MitSpeicher):
+    """Befund B-2: Zwei Prozesse (z. B. beide Bots nach dem Neustart) verbinden gleichzeitig mit einer alten Datenbank.
+    Beide sehen die Spalte als fehlend, einer ist beim ALTER schneller – der andere darf daran nicht scheitern.
+    Deterministisch nachgestellt: Vor jedem ALTER führt eine zweite Verbindung genau dieses ALTER zuerst aus."""
+
+    def verbinde_mit_wettlauf(self, pfad: Path, fehler_statt_alter: str | None = None) -> sqlite3.Connection:
+        echt = sqlite3.connect
+
+        class Schneller(sqlite3.Connection):
+            def execute(self, sql, *args):
+                if sql.startswith("ALTER TABLE"):
+                    if fehler_statt_alter is not None:
+                        raise sqlite3.OperationalError(fehler_statt_alter)
+                    anderer = echt(pfad, isolation_level=None)
+                    try:
+                        anderer.execute(sql)  # der andere Prozess war schneller
+                    finally:
+                        anderer.close()
+                return super().execute(sql, *args)
+
+        def verbinde(*args, **kwargs):
+            return echt(*args, factory=Schneller, **kwargs)
+
+        with mock.patch.object(db.sqlite3, "connect", side_effect=verbinde):
+            return db.verbinde(pfad)
+
+    def test_spalte_schon_da_wird_geschluckt(self):
+        pfad = self.tmp / "wettlauf.db"
+        con = self.verbinde_mit_wettlauf(pfad)  # frische Datei: jede Stufe-1/2-Spalte kommt per ALTER
+        try:
+            spalten = {z["name"] for z in con.execute("PRAGMA table_info(gewichte)")}
+            self.assertLessEqual({"trefferquote_publikum", "quellen"}, spalten)
+            self.assertIn("mic_stand", {z["name"] for z in con.execute("PRAGMA table_info(clips)")})
+        finally:
+            con.close()
+
+    def test_anderer_fehler_fliegt_weiter(self):
+        with self.assertRaisesRegex(sqlite3.OperationalError, "disk I/O error"):
+            self.verbinde_mit_wettlauf(self.tmp / "kaputt.db", fehler_statt_alter="disk I/O error")
+
+
 class MicKindprozess(unittest.TestCase):
     def test_render_startet_mic_schritt_mit_testkonfig(self):
         welt = umgebung(self)

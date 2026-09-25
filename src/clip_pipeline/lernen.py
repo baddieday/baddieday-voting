@@ -45,7 +45,7 @@ from itertools import combinations, islice, product
 
 from . import merkmale as merkmal_modul
 from . import publikum
-from .db import BEWERTET, clip, merkmale
+from .db import BEWERTET, clip, merkmale, ohne_mic_analyse
 from .vorbewertung import MERKMAL_NAMEN, MERKMALE, roh_score
 from .zeit import aus_iso, iso, jetzt, spielabend
 
@@ -366,8 +366,7 @@ def berechne(con: sqlite3.Connection, konfig) -> Ergebnis:
     vertrauen = min(1.0, n / max(1, int(einstellungen["voll_vertrauen"])))
     tq_start, tqp_start = trefferquote(start, nutzer), trefferquote(start, pub)
     je_quelle = {q: sum(1 for p in nutzer + pub if p.art == q) for q in QUELLEN}
-    ohne_mic = int(con.execute(
-        "SELECT COUNT(*) FROM clips WHERE mic_stand IS NULL AND status <> 'verworfen'").fetchone()[0])
+    ohne_mic = ohne_mic_analyse(con)  # dieselbe Zählung wie „offen“ in mikro.clips_nachziehen
 
     def ergebnis(werte, aktiv, grund, tq, tqp):
         return Ergebnis(werte, start, n, n_freigaben, n_battles, round(vertrauen, 3), tq, tq_start, aktiv, grund,

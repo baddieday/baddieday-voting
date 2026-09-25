@@ -518,6 +518,9 @@ def _cmd_publikum(args, konfig, con) -> int:
         log.error("%s", e)
         _json({"fehler": "konfig", "hinweis": str(e)})
         return 2
+    # Befund B-5: Die Meldung hängt nicht vom Lernen ab – deshalb VOR dem Lernen. Fliegt dort ein sqlite3-Fehler
+    # durch (z. B. IntegrityError, weil der Clip-Bot gleichzeitig dieselbe Gewichts-Version schrieb), ist sie schon da.
+    ergebnis["meldung"] = lernbot_publikum.meldung_nach_bewerten(con, ergebnis, zeit)
     if ergebnis["bewertet"]:
         # Annahme S2-A12: neue Publikums-Scores sind neue Paare → gleich neu lernen (wie der Clip-Bot nach jeder
         # Entscheidung). Nur ins Log – die JSON-Zeile bleibt, wie sie ist.
@@ -528,7 +531,6 @@ def _cmd_publikum(args, konfig, con) -> int:
             log.info("Gewichte Version %s (%s)", version, gelernt.grund)
         except (ValueError, KeyError, TypeError) as fehler:
             log.warning("Lernen nach dem Bewerten fehlgeschlagen (%s: %s)", type(fehler).__name__, fehler)
-    ergebnis["meldung"] = lernbot_publikum.meldung_nach_bewerten(con, ergebnis, zeit)
     _json(ergebnis)
     return 1 if ergebnis["fehler"] else 0
 

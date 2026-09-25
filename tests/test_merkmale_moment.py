@@ -133,6 +133,22 @@ class MicVollstaendig(unittest.TestCase):
                 self.assertIs(merkmale.mic_vollstaendig(mk), erwartet)
 
 
+class MicNachholen(unittest.TestCase):
+    """Befund E-4: die eine Regel S2-A18 für mikro.clips_nachziehen und stimmung.analysiere(nur_mic=True)."""
+
+    def test_regel(self):
+        faelle = [
+            ({"mikro_spur": 1, "jubel_laut": 2}, True),                       # Mikro da, Whisper fehlt noch
+            ({"mikro_spur": 1, "lachen": 0}, False),                          # vollständig
+            ({"mikro_spur": None}, False),                                    # ohne Mikro ist vollständig
+            ({"mikro_spur": 1, "jubel_laut": 0, "fehler": "kaputt"}, False),  # Messung gescheitert
+            ({"fehler": "ffprobe kaputt"}, False),
+        ]
+        for mk, erwartet in faelle:
+            with self.subTest(mk=mk):
+                self.assertIs(merkmale.mic_nachholen(mk), erwartet)
+
+
 class FuerMoment(unittest.TestCase):
     def test_datei_moment_beispiel(self):
         self.assertEqual(merkmale.fuer_moment(None, {"max_gruppe": 2, "lachen": 1}, KILL_TABELLE),
