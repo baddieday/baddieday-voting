@@ -73,6 +73,7 @@ NUR_FORMAT = "short"  # Paket, Häkchen und Post nur für Shorts (Annahme A26)
 LINK_NUMMER = re.compile(r"[eE]?([0-9]+)")
 LINK_AUFRUF = "Aufruf: /link 41 https://www.tiktok.com/@…/video/… (41 = Nummer des Entwurfs, auch e41)"
 ANTWORT_MAX = 200  # Telegram zeigt am Knopf (answerCallbackQuery) höchstens 200 Zeichen
+FEHLER_MAX = 300   # so viel Fehlertext geht an dich – genug für den Grund; ffmpeg-Ausgaben wären sonst seitenlang
 
 Knoepfe = list[list[tuple[str, str]]]
 
@@ -261,10 +262,11 @@ async def sende_paket(app, entwurf_id: int) -> None:
             return
         except (MedienFehler, KonfigFehler, caption.CaptionFehler, OSError, ValueError) as fehler:
             log.warning("Upload-Paket Entwurf #%s: %s", entwurf_id, fehler)
-            await app.bot.send_message(chat, f"⚠️ Upload-Paket: {str(fehler)[:300]}")
+            await app.bot.send_message(chat, f"⚠️ Upload-Paket: {str(fehler)[:FEHLER_MAX]}")
             return
         with open(paket["datei"], "rb") as datei:
-            # Als Datei (nicht als Video): Telegram komprimiert Dateien nicht neu, du lädst genau diese Fassung hoch
+            # Als Datei (nicht als Video): Telegram komprimiert Dateien nicht neu, du lädst genau diese Fassung hoch.
+            # Zeitgrenzen wie beim Clip-Bot-Paket: bis 48 MB hochladen dauert, 300 s Lesen/Schreiben, 30 s Verbinden
             await app.bot.send_document(chat, document=datei, filename=paket["dateiname"],
                                         caption=f"📦 Entwurf #{entwurf_id} – Upload-Fassung",
                                         read_timeout=300, write_timeout=300, connect_timeout=30)
@@ -346,7 +348,7 @@ async def cmd_link(update, context) -> None:
         text, _ = link_speichern(context.bot_data["con"], context.bot_data["konfig"], eid, url)
     except (OSError, ValueError, KeyError) as fehler:  # Schnittliste fehlt/kaputt, Post verschwunden
         log.warning("/link Entwurf #%s: kein Post (%s: %s)", eid, type(fehler).__name__, fehler)
-        text = f"⚠️ Link nicht gespeichert: {str(fehler)[:300]}"
+        text = f"⚠️ Link nicht gespeichert: {str(fehler)[:FEHLER_MAX]}"
     except Exception as fehler:
         log.exception("/link Entwurf #%s fehlgeschlagen", eid)
         text = f"⚠️ Link nicht gespeichert ({type(fehler).__name__}) – Details im Log."
