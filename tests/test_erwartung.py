@@ -185,7 +185,7 @@ class Modell(MitErwartung):
         kopie.row_factory = sqlite3.Row
         self.assertEqual(eins, erwartung.modell(kopie, self.konfig, "clip"))
         kopie.close()
-        self.assertEqual(set(eins) >= {"a", "b", "c", "n_urteile", "median", "mad"}, True)
+        self.assertTrue(set(eins) >= {"a", "b", "c", "n_urteile", "median", "mad"})
 
     def test_entwuerfe_mit_zusammenschnitt(self):
         self.moment("datei:1", {"max_gruppe": 3})   # 6 Punkte
