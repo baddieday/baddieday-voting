@@ -450,7 +450,7 @@ class RenderVertrag(MitPuffer):
         with mock.patch.object(verarbeitung, "process", return_value=ergebnis), \
                 mock.patch.object(cli.erfassung, "scan", return_value={"offen": [SID]}), \
                 mock.patch.object(mikro, "starte_im_hintergrund") as starte:
-            self.assertEqual(self._cli("process", "--session", SID)[0], 0)
+            self.assertEqual(self._cli("process", SID)[0], 0)
             self.assertEqual(self._cli("scan", "--verarbeiten")[0], 0)
         starte.assert_not_called()
 

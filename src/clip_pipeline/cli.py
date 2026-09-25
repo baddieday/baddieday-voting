@@ -43,7 +43,12 @@ def _cmd_schritt(args, konfig, con) -> int:
     schritt = {"prepare": verarbeitung.prepare, "analyze": verarbeitung.analyze,
                "decide": verarbeitung.decide, "render": verarbeitung.render}[args.befehl]
     log.info("%s --session %s", args.befehl, args.session)
-    _json(schritt(con, konfig, args.session))
+    ergebnis = schritt(con, konfig, args.session)
+    if args.befehl == "render" and ergebnis.get("neu", 0) > 0:
+        # Mic-Analyse (Whisper) losgelöst im Hintergrund (Spec §8.2, §12): schreibt nichts auf unser stdout/stderr,
+        # Fehler beim Start sind nur eine Log-Warnung – die JSON-Zeile und der Exit-Code bleiben gleich (n8n-Vertrag)
+        mikro.starte_im_hintergrund(konfig, args.session)
+    _json(ergebnis)
     return 0
 
 
