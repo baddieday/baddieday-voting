@@ -255,6 +255,12 @@ class Ruhezeit(MitBewertung):
         self.konfig.daten["telegram"]["leise_von"] = ""
         self.assertEqual(len(self.schluessel(ortszeit(2026, 9, 24, 23, 30))), 4)
 
+    def test_tippfehler_in_der_ruhezeit_haelt_nichts_auf(self):
+        # Fehlerfall Konfig: eine ungültige Uhrzeit schaltet die Ruhezeit ab (mit Warnung), statt Meldungen zu stauen
+        self.konfig.daten["telegram"]["leise_von"] = "25:99"
+        with self.assertLogs("clip-bot", "WARNING"):
+            self.assertEqual(len(self.schluessel(ortszeit(2026, 9, 24, 23, 30))), 4)
+
     def test_gesendete_kommen_nicht_nochmal(self):
         self.con.execute("UPDATE lern_meldungen SET gesendet = 'x' WHERE schluessel LIKE 'abend:%'")
         self.assertEqual(self.schluessel(ortszeit(2026, 9, 25, 9, 0))[0], "publikum:bewertet:2026-09-24")
