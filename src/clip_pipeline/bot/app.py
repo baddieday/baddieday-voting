@@ -38,8 +38,20 @@ def _daten(context: ContextTypes.DEFAULT_TYPE):
 
 
 def _clip_text(con, konfig: Konfig, clip_id: int) -> str:
+    """Bildunterschrift eines Clips. Die Erwartung wird hier nur GELESEN (/offen, nach einem Klick) – festgeschrieben
+    wird sie einmal beim ersten Senden (sende_outbox, Spec §10.5)."""
     clip = db.clip(con, clip_id)
-    return texte.clip_text(clip, db.match(con, clip["match_id"]), konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+    return texte.clip_text(clip, db.match(con, clip["match_id"]), konfig.wert("zeit.zeitzone", "Europe/Berlin"),
+                           erwartung=erwartung.gespeichert(con, "clip", clip_id))
+
+
+def _erwartung_festschreiben(con, konfig: Konfig, clip_id: int) -> None:
+    """Erwartung VOR dem Senden festschreiben (sie muss feststehen, bevor du urteilst). Ein Fehler hier darf das
+    Senden nicht aufhalten: der Clip kommt dann mit „Erwartung: noch keine“, der Fehler steht im Log."""
+    try:
+        erwartung.festschreiben(con, konfig, "clip", clip_id)
+    except Exception:
+        log.exception("Erwartung für Clip #%s nicht festgeschrieben", clip_id)
 
 
 def _upload_text(con, clip_id: int, stand: dict[str, bool]) -> str:
@@ -89,6 +101,7 @@ async def sende_outbox(app: Application) -> int:
         if pfad is None or not pfad.is_file():
             log.warning("Vorschau für Clip #%s fehlt: %s", z["id"], pfad)
             continue
+        _erwartung_festschreiben(con, konfig, z["id"])  # vor send_video: die Bildunterschrift zeigt sie schon
         with pfad.open("rb") as datei:
             nachricht = await app.bot.send_video(
                 chat_id=chat, video=datei, caption=_clip_text(con, konfig, z["id"]), parse_mode=ParseMode.HTML,

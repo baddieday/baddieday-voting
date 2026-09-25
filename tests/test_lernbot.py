@@ -265,5 +265,140 @@ class EntwurfText(unittest.TestCase):
         self.assertEqual(gesehen, list(regie_lernen.GRUENDE))
 
 
+
+# --- Paket E der Stufe 2: Erwartung im Lern-Bot (Spec §10.5) -------------------------------------------------------
+
+from unittest import mock  # noqa: E402
+
+from clip_pipeline import erwartung  # noqa: E402
+
+from tests.test_erwartung import MitErwartung  # noqa: E402
+
+
+@unittest.skipIf(lernbot is None, "python-telegram-bot fehlt")
+class ErwartungImLernBot(MitErwartung):
+    """Festschreiben VOR send_video, Edit nach dem Klick liest nur. Entwürfe werden direkt angelegt (ohne ffmpeg)."""
+
+    def setUp(self):
+        super().setUp()
+        self.bot = FakeBot()
+        self.beim_senden = []
+        senden = self.bot.send_video
+
+        async def send_video(**kw):
+            eid = int(kw["caption"].split("Entwurf #")[1].split("<")[0])
+            self.beim_senden.append(erwartung.gespeichert(self.con, "entwurf", eid))
+            return await senden(**kw)
+
+        self.bot.send_video = send_video
+        self.app = SimpleNamespace(bot=self.bot, bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                                   create_task=lambda koro: koro.close())
+        self.context = SimpleNamespace(bot_data=self.app.bot_data, application=self.app, args=[])
+        self.moment("datei:1", {"max_gruppe": 3})   # 6 Punkte
+        self.moment("datei:2", {"max_gruppe": 1})   # 1 Punkt
+
+    def gerendert(self, momente: list[str]) -> int:
+        eid = self.entwurf(momente, status="gerendert")
+        liste = json.loads(Path(self.con.execute("SELECT schnittliste FROM entwuerfe WHERE id = ?",
+                                                 (eid,)).fetchone()[0]).read_text(encoding="utf-8"))
+        liste.update(dauer_s=30.0, stimmung="episch", bogen=[6.0], musik=None, hinweise=["Musik fehlt"])
+        Path(self.con.execute("SELECT schnittliste FROM entwuerfe WHERE id = ?", (eid,)).fetchone()[0]).write_text(
+            json.dumps(liste), encoding="utf-8")
+        video = self.tmp / f"entwurf{eid}.mp4"
+        video.write_bytes(b"video")
+        self.con.execute("UPDATE entwuerfe SET datei = ? WHERE id = ?", (str(video), eid))
+        return eid
+
+    def urteile_entwuerfe(self, n: int = 10) -> None:
+        for i in range(n):
+            gut = i % 2 == 0
+            self.entwurf(["datei:1" if gut else "datei:2"], daumen=1 if gut else -1,
+                         fmt="short" if i % 3 else "zusammenschnitt")
+
+    def wahrschein(self, eid: int) -> float:
+        return self.con.execute("SELECT wahrschein FROM erwartungen WHERE art = 'entwurf' AND ziel_id = ?",
+                                (eid,)).fetchone()[0]
+
+    def test_senden_schreibt_fest_klick_liest_nur(self):
+        self.urteile_entwuerfe()
+        eid = self.gerendert(["datei:1"])
+        self.assertEqual(asyncio.run(lernbot.sende_entwuerfe(self.app)), 1)
+        p = self.wahrschein(eid)
+        self.assertEqual(self.beim_senden, [p])
+        self.assertGreater(p, 0.5)
+        zeile = f"Erwartung: 👍 {round(100 * p)} %"
+        caption = self.bot.videos[0]["caption"]
+        self.assertIn(zeile, caption)
+        self.assertLess(caption.index(zeile), caption.index("⚠️ Musik fehlt"))  # vor den Hinweisen
+
+        for _ in range(15):  # das Modell ändert sich …
+            self.entwurf(["datei:1"], daumen=-1)
+        self.assertEqual(asyncio.run(lernbot.sende_entwuerfe(self.app)), 0)   # … zweites Senden: nichts
+        q = FakeQuery(f"d:{eid}:1")
+        with mock.patch.object(erwartung, "festschreiben", side_effect=AssertionError("Klick darf nicht rechnen")):
+            asyncio.run(lernbot.bei_klick(SimpleNamespace(callback_query=q), self.context))
+        self.assertIn(zeile, q.bearbeitet[0]["caption"])
+        self.assertIn("Bewertet: 👍", q.bearbeitet[0]["caption"])
+        self.assertEqual(self.wahrschein(eid), p)                              # … die Erwartung nicht
+
+    def test_unter_mindest_urteilen_noch_keine(self):
+        self.urteile_entwuerfe(9)
+        eid = self.gerendert(["datei:1"])
+        asyncio.run(lernbot.sende_entwuerfe(self.app))
+        self.assertIn("Erwartung: noch keine", self.bot.videos[0]["caption"])
+        self.assertEqual(self.beim_senden, [None])
+        self.assertIsNone(erwartung.gespeichert(self.con, "entwurf", eid))
+
+    def test_fehler_in_der_erwartung_haelt_das_senden_nicht_auf(self):
+        self.urteile_entwuerfe()
+        self.gerendert(["datei:1"])
+        with mock.patch.object(erwartung, "festschreiben", side_effect=ValueError("kaputt")), \
+                self.assertLogs("lern-bot", "ERROR"):
+            self.assertEqual(asyncio.run(lernbot.sende_entwuerfe(self.app)), 1)
+        self.assertIn("Erwartung: noch keine", self.bot.videos[0]["caption"])
+
+    def test_lernstand_mit_trefferquote(self):
+        eid = self.entwurf(["datei:1"], daumen=-1)
+        self.con.execute("INSERT INTO erwartungen (art, ziel_id, wahrschein, grundlage, erstellt)"
+                         " VALUES ('entwurf', ?, 0.3, '{}', 'x')", (eid,))
+        antworten = []
+
+        async def reply_text(text, **_):
+            antworten.append(text)
+
+        update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
+        asyncio.run(lernbot.cmd_lernstand(update, self.context))
+        self.assertTrue(antworten[0].startswith(regie_lernen.lernstand_text(self.con, self.konfig)))
+        self.assertTrue(antworten[0].endswith("\nErwartung getroffen: Entwürfe 1/1 (100 %)"))
+
+    def test_lernstand_ohne_quote_unveraendert(self):
+        antworten = []
+
+        async def reply_text(text, **_):
+            antworten.append(text)
+
+        update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
+        asyncio.run(lernbot.cmd_lernstand(update, self.context))
+        self.assertEqual(antworten, [regie_lernen.lernstand_text(self.con, self.konfig)])
+
+
+@unittest.skipIf(lernbot is None, "python-telegram-bot fehlt")
+class EntwurfTextErwartung(unittest.TestCase):
+    LISTE = {"format": "short", "dauer_s": 32.0, "stimmung": "episch", "segmente": [{"moment": "clip:1"}],
+             "bogen": [9.0], "musik": None, "hinweise": ["x" * 400] * 5}
+
+    def test_zeile_vor_den_hinweisen_und_nie_abgeschnitten(self):
+        text = lernbot.entwurf_text({"id": 7}, self.LISTE, erwartung=0.8)
+        self.assertIn("Erwartung: 👍 80 %", text)
+        self.assertLess(text.index("Erwartung"), text.index("⚠️"))
+        self.assertLessEqual(len(text), 1000)
+        self.assertIn("Erwartung: 👎 70 %", lernbot.entwurf_text({"id": 7}, self.LISTE, erwartung=0.3))
+
+    def test_ohne_erwartung_noch_keine(self):
+        text = lernbot.entwurf_text({"id": 7}, self.LISTE)
+        self.assertIn("Erwartung: noch keine", text)
+        self.assertLess(text.index("Erwartung"), text.index("⚠️"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -25,7 +25,8 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from . import big, db, entwurf, musik, regie, regie_lernen, stimmung
+from . import big, db, entwurf, erwartung, musik, regie, regie_lernen, stimmung
+from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import iso, jetzt, utc_zu_lokal
 
@@ -74,7 +75,13 @@ def _balken(werte: list[float]) -> str:
     return "".join(zeichen[min(7, int(w / hoch * 7))] for w in werte)
 
 
-def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None) -> str:
+def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None,
+                 erwartung: float | None = None) -> str:
+    """Bildunterschrift eines Entwurfs (HTML, höchstens 1000 Zeichen).
+
+    erwartung: festgeschriebene Wahrscheinlichkeit für 👍 (erwartung.gespeichert) oder None → „Erwartung: noch
+    keine“ (Spec §10.5). Die Zeile steht VOR den Hinweisen: Die Hinweise können lang sein, und alles hinter Zeichen
+    1000 schneidet der Schluss ab. Beispiel: erwartung 0,8 → „🔮 Erwartung: 👍 80 %“, 0,3 → „🔮 Erwartung: 👎 70 %“."""
     m = liste.get("musik")
     momente = len({s["moment"] for s in liste["segmente"]})  # ein Moment mit Jump-Cut hat mehrere Segmente
     teile = [f"🎬 <b>Entwurf #{zeile['id']}</b> · {FORMAT_NAMEN[liste['format']]} {liste['dauer_s']:.0f} s · "
@@ -89,6 +96,7 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         teile.append(f"✨ Look {escape(str(fx.get('look', 'neutral')))} · {impacts} Impacts"
                      + (" · Hook ✓" if fx.get("hook") else "")
                      + (" · Zeitlupe ✓" if any(s.get("lupe") for s in liste["segmente"]) else ""))
+    teile.append(f"🔮 {_erwartung_anzeige(erwartung, ja='👍', nein='👎')}")
     for h in liste.get("hinweise", [])[:3]:
         teile.append(f"⚠️ {escape(h)}")
     if bewertung is not None:
@@ -202,16 +210,23 @@ async def sende_entwuerfe(app) -> int:
 
 
 async def _sende_entwuerfe(app) -> int:
-    con, chat = app.bot_data["con"], app.bot_data["erlaubt"]
+    con, chat, konfig = app.bot_data["con"], app.bot_data["erlaubt"], app.bot_data["konfig"]
     gesendet = 0
     for z in con.execute("SELECT * FROM entwuerfe WHERE status = 'gerendert' ORDER BY id").fetchall():
         pfad = Path(z["datei"] or "")
         if not pfad.is_file():
             log.warning("Entwurf #%s: Datei fehlt (%s)", z["id"], pfad)
             continue
+        # Erwartung VOR send_video festschreiben (Spec §10.5): sie muss feststehen, bevor du 👍/👎 drückst. Ein
+        # Fehler hier hält das Senden nicht auf – der Entwurf kommt dann mit „Erwartung: noch keine“.
+        try:
+            wert = erwartung.festschreiben(con, konfig, "entwurf", z["id"])
+        except Exception:
+            log.exception("Erwartung für Entwurf #%s nicht festgeschrieben", z["id"])
+            wert = None
         with pfad.open("rb") as datei:
             nachricht = await app.bot.send_video(
-                chat_id=chat, video=datei, caption=entwurf_text(z, _liste(z)), parse_mode="HTML",
+                chat_id=chat, video=datei, caption=entwurf_text(z, _liste(z), erwartung=wert), parse_mode="HTML",
                 reply_markup=_markup(knoepfe_daumen(z["id"])), supports_streaming=True,
                 read_timeout=300, write_timeout=300, connect_timeout=30,
             )
@@ -291,7 +306,12 @@ async def cmd_stand(update, context) -> None:
 
 async def cmd_lernstand(update, context) -> None:
     con, konfig = context.bot_data["con"], context.bot_data["konfig"]
-    await update.effective_message.reply_text(regie_lernen.lernstand_text(con, konfig))
+    # Zusatz wie HILFE_ZUSATZ: der Regie-Lernstand bleibt unverändert, die Trefferquote der Erwartung (Spec §10.5)
+    # kommt dahinter – nur, wenn es schon geurteilte Erwartungen gibt
+    text = regie_lernen.lernstand_text(con, konfig)
+    if zusatz := erwartung.trefferquote_text(con, konfig):
+        text += "\n" + zusatz
+    await update.effective_message.reply_text(text)
 
 
 async def cmd_musik(update, context) -> None:
@@ -398,7 +418,9 @@ async def bei_klick(update, context) -> None:
         if weiter:  # Lernschleife: sofort der nächste Entwurf, schon mit dieser Bewertung eingerechnet
             context.application.create_task(neuer_entwurf(context.application, zeile["format"]))
     with contextlib.suppress(Exception):  # "message is not modified" bei Doppelklick
-        await query.edit_message_caption(caption=entwurf_text(zeile, _liste(zeile), bewertung), parse_mode="HTML",
+        await query.edit_message_caption(caption=entwurf_text(zeile, _liste(zeile), bewertung,
+                                                              erwartung=erwartung.gespeichert(con, "entwurf", eid)),
+                                         parse_mode="HTML",
                                          reply_markup=_markup(knoepfe) if knoepfe else None)
 
 

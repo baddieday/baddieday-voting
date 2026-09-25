@@ -480,6 +480,10 @@ def _cmd_lernstand(args, konfig, con) -> int:
     from . import regie_lernen
 
     print(regie_lernen.lernstand_text(con, konfig), file=sys.stderr)
+    # Zusatz wie HILFE_ZUSATZ: der Regie-Lernstand bleibt unverändert, die Trefferquote der Erwartung (Spec §10.5)
+    # kommt dahinter – nur, wenn es schon geurteilte Erwartungen gibt
+    if zusatz := erwartung.trefferquote_text(con, konfig):
+        print(zusatz, file=sys.stderr)
     parameter, ziel = regie_lernen.aktuelle(con, konfig)
     _json({"parameter": parameter, "musik_ziele": ziel})
     return 0
