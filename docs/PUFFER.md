@@ -557,7 +557,9 @@ anderen Fehler ab.
   eingeschaltet hast), wird auch nachts abgeglichen – das macht keinen zusätzlichen Lärm.
   `pipeline lager uebernehmen` (von Hand) kennt keine Nachtruhe. Abschalten: `nachtruhe_von = ""` in `lokal.toml`.
 - **Nachsehen:** `pipeline lager status` · `pipeline puffer status` · im Bot `/status`
-  (z. B. „Puffer 61 GB frei · Lager: letzter Abgleich 10:07 ok · 0 offen“).
+  (z. B. „Puffer 61 GB frei · Lager: 1840 GB frei, letzter Abgleich 10:07 ok · 0 offen“). Der Platz im Lager ist
+  der beim letzten Abgleich gemessene – `/status` weckt pve-big dafür nie; ist er nicht von heute, steht „(Stand …)“
+  dabei.
 - **Meldungen** kommen höchstens einmal am Tag je Thema, montags ein Lebenszeichen – Stille heißt: alles gut.
 - **Exit-Codes** von `pipeline lager …`: 0 ok (auch: in der Nachtruhe übersprungen) · 1 einzelne Dateien
   fehlgeschlagen (beim nächsten Abgleich wieder) · 2 Aufruf oder Konfiguration (z. B. Puffer und Lager verwechselbar
@@ -566,6 +568,12 @@ anderen Fehler ab.
 - **Platz:** Der Puffer wird in dieser Stufe nie automatisch geleert. 96 GB reichen bei ca. 2,6 GB je Spieltag gut
   einen Monat; die Morgenprüfung warnt unter 20 GB frei. Bestätigte Rohdaten im Puffer freizugeben (Stufe B5) kommt
   später und nur mit deinem OK.
+- **Platz im Lager:** Auch auf pve-big wird nie etwas gelöscht. Stattdessen misst jeder Abgleich, der pve-big
+  braucht, den freien Platz im Lager (nur `statvfs` – kein Dateiinhalt, für clip-leerlauf kein Zugriff) und legt ihn
+  in `lager_laeufe` ab. Die Morgenprüfung warnt unter 200 GB frei (`[puffer].lager_warnung_frei_gb`), Alarm unter
+  50 GB (`lager_alarm_frei_gb`) – höchstens einmal am Tag, mit dem Tag der Messung. Nächster Schritt dann: Platz auf
+  pve-big schaffen oder die Platte erweitern. Noch keine Messung (z. B. kurz nach R6): keine Meldung. Läuft das Lager
+  doch voll, bricht der Abgleich ab, und alles bleibt im Puffer, bis wieder Platz ist.
 
 ## Dateien
 

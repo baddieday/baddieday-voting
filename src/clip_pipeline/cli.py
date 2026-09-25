@@ -496,7 +496,7 @@ def baue_parser() -> argparse.ArgumentParser:
     a = lager_befehle.add_parser("abgleich", help="Puffer → Lager mit SHA-256 (weckt pve-big nur, wenn etwas offen "
                                                   "ist – nie in der Nachtruhe)")
     a.add_argument("--probelauf", action="store_true", help="nur zeigen, was offen ist (weckt nicht, kopiert nichts)")
-    lager_befehle.add_parser("status", help="offene Dateien, letzter Abgleich, Puffer frei (weckt nie)")
+    lager_befehle.add_parser("status", help="offene Dateien, letzter Abgleich, Puffer und Lager frei (weckt nie)")
     a = lager_befehle.add_parser("uebernehmen", help="einmalig Lager → Puffer vor dem Umschalten (docs/PUFFER.md R4/R5)")
     a.add_argument("--von", required=True, help="Lager, z. B. /srv/big/clips")
     a.add_argument("--nach", required=True, help="Puffer, z. B. /srv/puffer")

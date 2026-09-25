@@ -226,9 +226,9 @@ class StatusGetrennt(MitAbgleich):
     def test_lager_zeile_nach_abgleich(self):
         self.lauf("lager", "abgleich")
         self.geweckt.clear()
-        with self.lager_tabu():
+        with self.lager_tabu():  # auch kein statvfs im Lager: der Platz kommt aus der Tabelle
             text = _status_text(self.con, self.konfig)
-        self.assertRegex(text, r"Lager: letzter Abgleich \d\d:\d\d ok · 0 offen")
+        self.assertRegex(text, r"Lager: \d+ GB frei, letzter Abgleich \d\d:\d\d ok · 0 offen")
         self.assertEqual(self.geweckt, [])
 
     def test_status_antwortet_auch_bei_fehler(self):

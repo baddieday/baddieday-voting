@@ -10,7 +10,8 @@ Harte Regeln:
     auf den NFS-Mount eines schlafenden pve-big hinge.
   - In der Nachtruhe ([lager].nachtruhe_von/_bis) weckt der Abgleich nie – sein Lüfter soll niemanden wecken.
     Läuft pve-big ohnehin, darf abgeglichen werden.
-  - Im Puffer wird nichts gelöscht – außer alten DB-Sicherungen (keine Rohdaten, im Lager bleiben sie).
+  - Im Puffer wird nichts gelöscht – außer alten DB-Sicherungen (keine Rohdaten, im Lager bleiben sie). Im Lager
+    auch nicht: Wird es knapp, warnt die Morgenprüfung (freier Platz, beim Abgleich per statvfs gemessen).
 
 Eigene Sperre <datenbank>.lager.lock (nicht die Pipeline-Sperre): Abgleich und Übernahme laufen nie doppelt,
 die Pipeline arbeitet währenddessen im Puffer weiter.
@@ -206,6 +207,21 @@ def _wach(konfig: Konfig, name: str, grund: str, wecken: bool = True) -> Iterato
         return
     with big.wach_halten(konfig, name, grund, minuten=float(konfig.wert("lager.halten_min", 240)), wecken=wecken):
         yield
+
+
+def _miss_platz(lager: Path, e: dict) -> None:
+    """Freien Platz im Lager ins Ergebnis schreiben (lager_frei_gb, lager_gesamt_gb) – für Morgenprüfung und /status.
+    Nur statvfs (über NFS ein GETATTR bzw. FSSTAT): kein Dateiinhalt, für clip-leerlauf kein Zugriff. Nur aufrufen,
+    wenn das Lager eben geprüft eingehängt ist – auf dem Mount eines schlafenden pve-big hinge auch statvfs."""
+    if not hasattr(os, "statvfs"):
+        return
+    try:
+        st = os.statvfs(lager)
+    except OSError as f:
+        log.warning("Lager: freier Platz nicht messbar: %s", f)
+        return
+    e["lager_frei_gb"] = _gb(st.f_bavail * st.f_frsize)
+    e["lager_gesamt_gb"] = _gb(st.f_blocks * st.f_frsize)
 
 
 def raeume_teile(ordner: Iterable[Path]) -> int:
@@ -449,6 +465,7 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
                 e["lager_gebraucht"] = True
                 konfig.pruefe_lager(float(konfig.wert("lager.warten_s", 240)))
                 konfig.pruefe_getrennt()
+                _miss_platz(lager, e)  # schon hier: bricht der Lauf ab (z. B. ENOSPC), gibt es trotzdem einen Wert
                 raeume_teile({(lager / o.relativ).parent for o in offen})
                 for o in offen:
                     try:
@@ -469,6 +486,8 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
                     if art == "versioniert":
                         log.warning("%s: im Lager liegt eine andere Fassung – daneben abgelegt", o.relativ)
                         e["versioniert_liste"].append(o.relativ)
+                if not e.get("abbruch"):
+                    _miss_platz(lager, e)  # nach dem Kopieren: mit diesem Stand rechnen die nächsten Tage
             abbruch_melden = bool(e.get("abbruch"))
             if e.get("abbruch"):
                 log.error("Lager-Abgleich abgebrochen: %s", e["abbruch"])
@@ -637,6 +656,18 @@ def _letzte_laeufe(con: sqlite3.Connection) -> tuple[dict | None, str | None]:
     return letzter, None
 
 
+def letzte_messung(con: sqlite3.Connection) -> dict | None:
+    """Zuletzt beim Abgleich gemessener Platz im Lager: {"frei_gb", "gesamt_gb", "zeit"} oder None.
+    Nur aus der Tabelle – fasst das Lager nie an (pve-big schläft meist)."""
+    for z in con.execute("SELECT start, ende, ergebnis FROM lager_laeufe WHERE art = 'abgleich' AND ergebnis LIKE ? "
+                         "ORDER BY id DESC LIMIT 5", ('%"lager_frei_gb"%',)):
+        e = json.loads(z["ergebnis"])
+        if isinstance(e.get("lager_frei_gb"), (int, float)):
+            return {"frei_gb": e["lager_frei_gb"], "gesamt_gb": e.get("lager_gesamt_gb"),
+                    "zeit": z["ende"] or z["start"]}
+    return None
+
+
 def _uhr(konfig: Konfig, zeitpunkt: str) -> str:
     zone = konfig.wert("zeit.zeitzone", "Europe/Berlin")
     lokal = utc_zu_lokal(aus_iso(zeitpunkt), zone)
@@ -644,7 +675,9 @@ def _uhr(konfig: Konfig, zeitpunkt: str) -> str:
 
 
 def _zeile(konfig: Konfig, stand: dict) -> str:
-    """Eine Zeile für /status im Bot, z. B. „Puffer 61 GB frei · Lager: letzter Abgleich 10:07 ok · 0 offen“."""
+    """Eine Zeile für /status im Bot, z. B. „Puffer 61 GB frei · Lager: 1840 GB frei, letzter Abgleich 10:07 ok ·
+    0 offen“. Den Platz im Lager gibt es erst nach dem ersten Abgleich, der pve-big gebraucht hat; stammt er nicht von
+    heute, steht „(Stand …)“ dabei."""
     teile = []
     if stand.get("puffer_frei_gb") is not None:
         teile.append(f"Puffer {stand['puffer_frei_gb']:.0f} GB frei")
@@ -661,6 +694,12 @@ def _zeile(konfig: Konfig, stand: dict) -> str:
         text = f"letzter Abgleich {_uhr(konfig, lauf['ende'])} abgebrochen"
     else:
         text = f"letzter Abgleich {_uhr(konfig, lauf['ende'])} mit {lauf.get('fehler', 0)} Fehler(n)"
+    if stand.get("lager_frei_gb") is not None:
+        platz = f"{stand['lager_frei_gb']:.0f} GB frei"
+        gemessen = utc_zu_lokal(aus_iso(stand["lager_gemessen"]), konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+        if gemessen.date().isoformat() != _heute(konfig):
+            platz += f" (Stand {_uhr(konfig, stand['lager_gemessen'])})"
+        text = f"{platz}, {text}"
     teile.append(f"Lager: {text}")
     if stand["pruefung"] != "ok":
         teile.append(f"⚠️ {stand['pruefung']}")
@@ -671,8 +710,9 @@ def _zeile(konfig: Konfig, stand: dict) -> str:
 
 def status(con: sqlite3.Connection, konfig: Konfig) -> dict:
     """Stand für `pipeline lager status` und /status im Bot. Weckt nie und fasst das Lager nicht an – nur die
-    Tabelle und der Puffer (lokal). "offen" zählt ohne die DB-Sicherungen: die warten absichtlich aufs nächste
-    Wecken (sicherung_offen), sonst stünde nach jedem guten Lauf „1 offen“ da."""
+    Tabellen und der Puffer (lokal); der Platz im Lager ist der beim letzten Abgleich gemessene (lager_gemessen).
+    "offen" zählt ohne die DB-Sicherungen: die warten absichtlich aufs nächste Wecken (sicherung_offen), sonst stünde
+    nach jedem guten Lauf „1 offen“ da."""
     if not konfig.getrennt:
         return {"getrennt": False, "pruefung": "kein getrennter Betrieb: [lager].wurzel leer"}
     stand: dict = {"getrennt": True, "pruefung": "ok", "offen": None, "offen_gb": None, "aelteste": None,
@@ -689,5 +729,8 @@ def status(con: sqlite3.Connection, konfig: Konfig) -> dict:
             stand["aelteste"] = iso(datetime.fromtimestamp(min(o.mtime_ns for o in offen) / 1e9, UTC))
         stand["puffer_frei_gb"] = round(shutil.disk_usage(konfig.wurzel).free / 1e9, 1)
     stand["letzter_lauf"], stand["letzter_erfolg"] = _letzte_laeufe(con)
+    messung = letzte_messung(con) or {}
+    stand.update(lager_frei_gb=messung.get("frei_gb"), lager_gesamt_gb=messung.get("gesamt_gb"),
+                 lager_gemessen=messung.get("zeit"))
     stand["zeile"] = _zeile(konfig, stand)
     return stand

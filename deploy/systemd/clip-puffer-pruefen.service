@@ -1,6 +1,7 @@
-# Morgenprüfung (E19, src/clip_pipeline/puffer.py): Platz im Puffer, Thin-Pool (/srv/big/lvm-status.txt), letzter
-# Abgleich, Gaming-PC (sitzungen/pc-status.json), Samba. Höchstens eine Meldung je Thema und Tag, montags ein
-# Lebenszeichen – verschickt werden sie vom Bot (nicht in der Ruhezeit). Weckt pve-big NIE, fasst das Lager nicht an.
+# Morgenprüfung (E19, src/clip_pipeline/puffer.py): Platz im Puffer, Platz im Lager (beim Abgleich gemessen),
+# Thin-Pool (/srv/big/lvm-status.txt), letzter Abgleich, Gaming-PC (sitzungen/pc-status.json), Samba. Höchstens eine
+# Meldung je Thema und Tag, montags ein Lebenszeichen – verschickt werden sie vom Bot (nicht in der Ruhezeit).
+# Weckt pve-big NIE, fasst das Lager nicht an.
 # Nur im getrennten Betrieb ([lager].wurzel gesetzt) – sonst Exit 2. Einführung: docs/PUFFER.md, R6.
 # Checkout: /opt/clip-pipeline auf main (nach dem Merge von E19).
 # Von Hand: sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline puffer pruefen

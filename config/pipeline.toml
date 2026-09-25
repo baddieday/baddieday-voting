@@ -70,6 +70,9 @@ markierung = ".clip-puffer"    # liegt NUR im Puffer
 freigeben = false              # Stufe B5 (später, nur mit OK): bestätigte Rohdaten im Puffer löschen
 warnung_frei_gb = 20           # Morgenprüfung: Meldung, wenn weniger frei
 alarm_frei_gb = 8
+# Lager auf pve-big: gemessen beim Abgleich (nur statvfs), gewarnt in der Morgenprüfung. Gelöscht wird nie etwas.
+lager_warnung_frei_gb = 200    # Morgenprüfung: Warnung, wenn im Lager weniger frei
+lager_alarm_frei_gb = 50
 pool_status = "/srv/big/lvm-status.txt"   # Thin-Pool des Mini, schreibt der Host (deploy/pve-mini/clip-lvm-status)
 pool_warnung_prozent = 85      # Thin-Pool des Mini (aus pool_status, vom Host geschrieben)
 pool_alarm_prozent = 90

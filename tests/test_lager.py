@@ -14,6 +14,7 @@ import time
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from clip_pipeline import big, cli, konfig, lager, material
@@ -79,8 +80,8 @@ class MitAbgleich(MitLager):
 
     @contextlib.contextmanager
     def lager_tabu(self):
-        """Jeder stat/scandir im Lager ist ein Fehler (pve-big schläft: der NFS-Mount hinge)."""
-        echt_stat, echt_lstat, echt_scandir = os.stat, os.lstat, os.scandir
+        """Jeder stat/statvfs/scandir im Lager ist ein Fehler (pve-big schläft: der NFS-Mount hinge)."""
+        echt_stat, echt_lstat, echt_scandir, echt_statvfs = os.stat, os.lstat, os.scandir, os.statvfs
 
         def pruefe(pfad):
             if isinstance(pfad, (str, os.PathLike)) and Path(os.fspath(pfad)).is_relative_to(self.lager):
@@ -98,7 +99,12 @@ class MitAbgleich(MitLager):
             pruefe(pfad)
             return echt_scandir(pfad)
 
-        with mock.patch("os.stat", stat), mock.patch("os.lstat", lstat), mock.patch("os.scandir", scandir):
+        def statvfs(pfad):
+            pruefe(pfad)
+            return echt_statvfs(pfad)
+
+        with mock.patch("os.stat", stat), mock.patch("os.lstat", lstat), mock.patch("os.scandir", scandir), \
+                mock.patch("os.statvfs", statvfs):
             yield
 
 
@@ -576,6 +582,104 @@ class Nachtruhe(MitAbgleich):
         self.assertEqual((self.geweckt, self.wecken_erlaubt), (["uebernahme"], [True]))
 
 
+# --- Platz im Lager ------------------------------------------------------------------------
+
+GB = 10**9
+
+
+class PlatzImLager(MitAbgleich):
+    """Nie löschen, aber warnen: Der Abgleich misst den freien Platz im Lager – nur per statvfs und nur, wenn das Lager
+    eben geprüft eingehängt ist. Status und Bot zeigen den zuletzt gemessenen Wert, ohne das Lager anzufassen."""
+
+    def setUp(self):
+        super().setUp()
+        self.datei(self.puffer, "eingang/a.mp4", b"x" * 1000)
+        self.messungen: list[Path] = []
+        self.werte = [(180, 4000)]  # (frei, gesamt) in GB je Aufruf; der letzte gilt weiter
+        echt = os.statvfs
+
+        def statvfs(pfad):
+            if Path(os.fspath(pfad)) != self.lager:
+                return echt(pfad)
+            self.messungen.append(Path(os.fspath(pfad)))
+            frei, gesamt = self.werte.pop(0) if len(self.werte) > 1 else self.werte[0]
+            return SimpleNamespace(f_frsize=4096, f_bavail=frei * GB // 4096, f_blocks=gesamt * GB // 4096)
+
+        patcher = mock.patch("os.statvfs", side_effect=statvfs)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_messung_beim_abgleich(self):
+        self.werte = [(200, 4000), (180, 4000)]  # vor und nach dem Kopieren: der Stand danach zählt
+        code, e = self.lauf("lager", "abgleich")
+        self.assertEqual(code, 0, e)
+        self.assertEqual(self.messungen, [self.lager, self.lager])
+        self.assertAlmostEqual(e["lager_frei_gb"], 180, places=1)
+        self.assertAlmostEqual(e["lager_gesamt_gb"], 4000, places=1)
+        lauf = json.loads(self.con.execute("SELECT ergebnis FROM lager_laeufe").fetchone()[0])
+        self.assertEqual((lauf["lager_frei_gb"], lauf["lager_gesamt_gb"]), (e["lager_frei_gb"], e["lager_gesamt_gb"]))
+        ende = self.con.execute("SELECT ende FROM lager_laeufe").fetchone()[0]
+        messung = lager.letzte_messung(self.con)
+        self.assertEqual((messung["frei_gb"], messung["gesamt_gb"], messung["zeit"]),
+                         (e["lager_frei_gb"], e["lager_gesamt_gb"], ende))
+
+    def test_ohne_wecken_keine_messung_status_zeigt_die_letzte(self):
+        self.assertEqual(self.lauf("lager", "abgleich")[0], 0)
+        self.messungen.clear()
+        with self.lager_tabu():  # nur die DB-Sicherung ist offen: pve-big bleibt aus, das Lager unberührt
+            code, e = self.lauf("lager", "abgleich")
+            self.assertEqual(code, 0, e)
+            self.assertNotIn("lager_frei_gb", e)
+            code, stand = self.lauf("lager", "status")
+        self.assertEqual(self.messungen, [])
+        self.assertEqual(code, 0, stand)
+        self.assertAlmostEqual(stand["lager_frei_gb"], 180, places=1)
+        self.assertIsNotNone(stand["lager_gemessen"])
+        self.assertRegex(stand["zeile"], r"· Lager: 180 GB frei, letzter Abgleich \d\d:\d\d ok · 0 offen$")
+
+    def test_alte_messung_mit_stand(self):
+        vor_3_tagen = jetzt() - timedelta(days=3)
+        self.con.execute("INSERT INTO lager_laeufe (art, start, ende, ergebnis) VALUES ('abgleich', ?, ?, ?)",
+                         (iso(vor_3_tagen), iso(vor_3_tagen), json.dumps({"ok": True, "lager_frei_gb": 75.5,
+                                                                            "lager_gesamt_gb": 4000})))
+        self.con.execute("INSERT INTO lager_laeufe (art, start, ende, ergebnis) VALUES ('abgleich', ?, ?, ?)",
+                         (iso(jetzt()), iso(jetzt()), json.dumps({"ok": True, "offen": 0})))  # ohne Wecken
+        stand = lager.status(self.con, self.konfig)
+        wann = utc_zu_lokal(vor_3_tagen, "Europe/Berlin")
+        self.assertIn(f"Lager: 76 GB frei (Stand {wann:%d.%m. %H:%M}), letzter Abgleich", stand["zeile"])
+        self.assertEqual(stand["lager_gemessen"], iso(vor_3_tagen))
+
+    def test_ohne_messung_keine_angabe(self):
+        stand = lager.status(self.con, self.konfig)
+        self.assertEqual((stand["lager_frei_gb"], stand["lager_gesamt_gb"], stand["lager_gemessen"]), (None, None, None))
+        self.assertIsNone(lager.letzte_messung(self.con))
+        self.assertNotIn("GB frei,", stand["zeile"])
+
+    def test_abbruch_nur_die_erste_messung(self):
+        with mock.patch.object(lager, "kopiere_geprueft", side_effect=OSError(errno.ENOSPC, "Kein Platz")):
+            code, e = self.lauf("lager", "abgleich")
+        self.assertEqual(code, 3, e)
+        self.assertIn("Kein Platz", e["abbruch"])
+        self.assertEqual(self.messungen, [self.lager])  # nach dem Abbruch nicht mehr ins Lager sehen
+        self.assertAlmostEqual(e["lager_frei_gb"], 180, places=1)
+
+    def test_nicht_messbar_ist_kein_fehler(self):
+        with mock.patch("os.statvfs", side_effect=OSError(errno.EIO, "E/A-Fehler")), \
+                self.assertLogs("pipeline", "WARNING") as logs:
+            e = lager.abgleich(self.con, self.konfig)
+        self.assertTrue(e["ok"], e)
+        self.assertEqual(e["kopiert"], 2)
+        self.assertNotIn("lager_frei_gb", e)
+        self.assertTrue(any("nicht messbar" in z for z in logs.output), logs.output)
+
+    def test_nachtruhe_misst_nicht(self):
+        self.konfig.daten["lager"].update(_fenster(-60, 60))
+        with mock.patch.object(big, "wach", return_value=False):
+            code, e = self.lauf("lager", "abgleich")
+        self.assertEqual((code, e["nachtruhe"]), (0, True))
+        self.assertEqual(self.messungen, [])
+
+
 # --- Status --------------------------------------------------------------------------------
 
 class Status(MitAbgleich):
@@ -596,7 +700,7 @@ class Status(MitAbgleich):
         stand = lager.status(self.con, self.konfig)
         self.assertTrue(stand["letzter_lauf"]["ok"])
         self.assertEqual(stand["letzter_erfolg"], stand["letzter_lauf"]["ende"])
-        self.assertRegex(stand["zeile"], r"Lager: letzter Abgleich \d\d:\d\d ok · 0 offen$")
+        self.assertRegex(stand["zeile"], r"Lager: \d+ GB frei, letzter Abgleich \d\d:\d\d ok · 0 offen$")
         # ein späterer Lauf mit Fehler: letzter Erfolg bleibt der alte
         self.datei(self.puffer, "eingang/b.mp4", b"y")
         with mock.patch.object(lager, "kopiere_geprueft", side_effect=PermissionError("nein")):

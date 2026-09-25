@@ -1,10 +1,12 @@
 """Morgenprüfung des Puffers (E19, Timer clip-puffer-pruefen 11:00) und `pipeline puffer status`.
 
-Nur im getrennten Betrieb. Weckt pve-big NIE und fasst das Lager nicht an – gelesen werden nur die Tabelle `lager`,
-der Puffer (lokal), die Pool-Datei des Hosts ([puffer].pool_status) und sitzungen/pc-status.json vom Gaming-PC.
+Nur im getrennten Betrieb. Weckt pve-big NIE und fasst das Lager nicht an – gelesen werden nur die Tabellen `lager`
+und `lager_laeufe` (dort auch der beim Abgleich gemessene Platz im Lager), der Puffer (lokal), die Pool-Datei des
+Hosts ([puffer].pool_status) und sitzungen/pc-status.json vom Gaming-PC.
 
-Themen: lager · platz · pool · pc · samba. Je Thema und Tag höchstens eine Meldung (Schlüssel puffer:<thema>:<Datum>),
-montags ein Lebenszeichen (puffer:woche:<JJJJ-Www>) – so heißt Stille eindeutig „alles in Ordnung“.
+Themen: lager · platz · lager_platz · pool · pc · samba. Je Thema und Tag höchstens eine Meldung
+(Schlüssel puffer:<thema>:<Datum>), montags ein Lebenszeichen (puffer:woche:<JJJJ-Www>) – so heißt Stille eindeutig
+„alles in Ordnung“.
 Verschickt werden die Meldungen vom Clip-Bot, in der Ruhezeit ([telegram].leise_von/leise_bis) erst danach.
 """
 
@@ -26,7 +28,7 @@ from .zeit import aus_iso, jetzt, utc_zu_lokal
 
 log = logging.getLogger("pipeline")
 
-THEMEN = ("lager", "platz", "pool", "pc", "samba")
+THEMEN = ("lager", "platz", "lager_platz", "pool", "pc", "samba")
 POOL_ALT_H = 2       # ältere Pool-Datei: Host-Timer steht o. Ä. – still übergehen, kein Fehlalarm
 # Ältere pc-status.json (PC aus): schon geprüft – nicht jeden Morgen wiederholen. 26 statt 24 h: 2 h Spielraum
 # für den Timer. Ein Bericht kurz vor der Prüfung kommt so an höchstens zwei Morgen, aber nie gar nicht.
@@ -105,6 +107,29 @@ def _platz(konfig: Konfig) -> Befund:
     return stand, (kopf + "\nNoch ist nichts verloren – ist der Puffer voll, bleiben neue Aufnahmen auf dem "
                    "Gaming-PC liegen.\nNächster Schritt: pipeline lager status (ist alles im Lager?), dann Platz "
                    "schaffen oder den Puffer vergrößern (docs/PUFFER.md) – automatisch gelöscht wird noch nichts")
+
+
+def _lager_platz(con: sqlite3.Connection, konfig: Konfig) -> Befund:
+    """Platz im Lager auf pve-big – zuletzt beim Abgleich gemessen (statvfs), hier nur aus der Tabelle: selbst messen
+    hieße pve-big wecken. Noch keine Messung → still. Gelöscht wird auch im Lager nie etwas."""
+    messung = lager.letzte_messung(con)
+    if messung is None:
+        return {"hinweis": "noch nicht gemessen (erst beim Abgleich, der pve-big braucht)"}, None
+    frei = float(messung["frei_gb"])
+    warnung = float(konfig.wert("puffer.lager_warnung_frei_gb", 200))
+    alarm = float(konfig.wert("puffer.lager_alarm_frei_gb", 50))
+    stand = {**messung, "warnung_gb": warnung, "alarm_gb": alarm}
+    platz = f"{frei:.0f} GB frei" + (f" von {messung['gesamt_gb']:.0f} GB" if messung.get("gesamt_gb") else "")
+    wann = f"gemessen beim Abgleich am {_wann(konfig, messung['zeit'])}"
+    if frei < alarm:
+        kopf = f"🚨 Lager auf pve-big fast voll: nur noch {platz} (Alarm unter {alarm:g} GB, {wann})."
+    elif frei < warnung:
+        kopf = f"🗄️ Lager auf pve-big wird knapp: noch {platz} (Warnung unter {warnung:g} GB, {wann})."
+    else:
+        return stand, None
+    return stand, (kopf + "\nNichts verloren, nichts gelöscht – ist das Lager voll, bleibt Neues im Puffer liegen, bis "
+                   "wieder Platz ist (dann füllt sich aber der Puffer).\nNächster Schritt: bitte Platz auf pve-big "
+                   "schaffen oder die Platte erweitern (docs/PUFFER.md, „Im Alltag“). Der nächste Abgleich misst neu")
 
 
 def lies_pool(pfad: Path) -> dict:
@@ -234,7 +259,8 @@ def status(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None
     zeit = zeit or jetzt()
     pruefungen: dict[str, Callable[[], Befund]] = {
         "lager": lambda: _lager(con, konfig, zeit), "platz": lambda: _platz(konfig),
-        "pool": lambda: _pool(konfig, zeit), "pc": lambda: _pc(konfig, zeit), "samba": _samba,
+        "lager_platz": lambda: _lager_platz(con, konfig), "pool": lambda: _pool(konfig, zeit),
+        "pc": lambda: _pc(konfig, zeit), "samba": _samba,
     }
     stand: dict = {"getrennt": True, "befunde": {}, "fehler": []}
     for thema in THEMEN:
