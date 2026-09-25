@@ -290,6 +290,21 @@ def gespeichert(con: sqlite3.Connection, art: str, ziel_id: int) -> float | None
     return None if zeile is None else float(zeile["wahrschein"])
 
 
+def anzeige(wahrschein: float | None, ja: str, nein: str) -> str:
+    """Die Erwartungs-Zeile für beide Bots (Spec §10.6): „Erwartung: ✅ 78 %“ bzw. „Erwartung: noch keine“.
+
+    Das Zeichen zeigt, was der Bot erwartet (ab 50 % „gibst frei“ = ja, sonst nein), die Zahl, wie sicher er dabei
+    ist. Parameter: wahrschein – festgeschriebener Wert (gespeichert) oder None; ja/nein – Zeichen des Bots
+    (Clip-Bot ✅/🗑️, Lern-Bot 👍/👎). Fehler: keine.
+    Beispiele: 0,78 → „Erwartung: ✅ 78 %“ · 0,35 → „Erwartung: 🗑️ 65 %“ (65 % sicher, dass du verwirfst)
+    · None → „Erwartung: noch keine“ (unter [erwartung].mindest_urteile)."""
+    if wahrschein is None:
+        return "Erwartung: noch keine"
+    if wahrschein >= SCHWELLE:
+        return f"Erwartung: {ja} {round(100 * wahrschein)} %"
+    return f"Erwartung: {nein} {round(100 * (1 - wahrschein))} %"
+
+
 # --- Trefferquote --------------------------------------------------------------------------------------------------
 
 def trefferquote(con: sqlite3.Connection, art: str, letzte: int | None = None) -> tuple[int, int]:

@@ -583,5 +583,165 @@ class PostNummerImClipBot(MitSpeicher):
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM posts").fetchone()[0], 0)
 
 
+
+# --- Paket E der Stufe 2: Erwartung im Clip-Bot (Spec §10.5, §10.6 Zeile) ------------------------------------------
+
+from tests.test_erwartung import MitErwartung  # noqa: E402  (Hilfen für Urteile und feste Gewichte)
+from clip_pipeline import erwartung  # noqa: E402
+from clip_pipeline.bot import texte  # noqa: E402
+from clip_pipeline.vorbewertung import MERKMALE, bewerte  # noqa: E402
+
+
+@unittest.skipIf(bot_app is None, "python-telegram-bot fehlt")
+class ErwartungImClipBot(MitErwartung):
+    """Festschreiben VOR send_video; /offen und die Bildunterschrift nach dem Klick lesen nur."""
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten.setdefault("telegram", {}).update(leise_von="", leise_bis="")
+        self.vorschau = self.konfig.ordner("sessions") / "m1" / "vorschau" / "v.mp4"
+        self.vorschau.parent.mkdir(parents=True, exist_ok=True)
+        self.vorschau.write_bytes(b"video")
+        self.gesendet: list[dict] = []
+        self.erwartung_beim_senden: list[float | None] = []
+
+        async def send_video(**kwargs):
+            # Beim Senden steht die Erwartung schon in der Datenbank (sie gilt, BEVOR du urteilst)
+            cid = int(kwargs["caption"].split("Clip #")[1].split(" ")[0])
+            self.erwartung_beim_senden.append(erwartung.gespeichert(self.con, "clip", cid))
+            self.gesendet.append(kwargs)
+            return SimpleNamespace(message_id=70 + len(self.gesendet), video=SimpleNamespace(file_id="F"))
+
+        self.fake = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                                    bot=SimpleNamespace(send_video=send_video))
+
+    def neuer_clip(self, punkte: float) -> int:
+        cid = self.clip("vorbewertet", punkte, gesendet=False)
+        self.con.execute("UPDATE clips SET vorschau_pfad = 'sessions/m1/vorschau/v.mp4' WHERE id = ?", (cid,))
+        return cid
+
+    def wahrschein(self, cid: int) -> float:
+        return self.con.execute("SELECT wahrschein FROM erwartungen WHERE art = 'clip' AND ziel_id = ?",
+                                (cid,)).fetchone()[0]
+
+    def test_senden_schreibt_fest_offen_und_klick_lesen_nur(self):
+        self.urteile_clips()
+        cid = self.neuer_clip(10.0)
+        self.assertEqual(asyncio.run(bot_app.sende_outbox(self.fake)), 1)
+        p = self.wahrschein(cid)
+        self.assertEqual(self.erwartung_beim_senden, [p])
+        self.assertGreater(p, 0.5)
+        zeile = f"Erwartung: ✅ {round(100 * p)} %"
+        self.assertIn(zeile, self.gesendet[0]["caption"])
+
+        # Das Modell ändert sich (15 Urteile dagegen) – die festgeschriebene Zahl bleibt
+        for _ in range(15):
+            self.clip("verworfen", 10.0)
+        self.assertEqual(asyncio.run(bot_app.sende_outbox(self.fake)), 0)  # zweites Senden: nichts Neues
+        self.assertEqual(self.wahrschein(cid), p)
+
+        # /offen schickt den Clip noch einmal – mit derselben Zeile, ohne neu zu rechnen
+        antworten = []
+
+        async def reply_text(text, **_):
+            antworten.append(text)
+
+        update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
+        context = SimpleNamespace(bot_data=self.fake.bot_data, bot=self.fake.bot)
+        with mock.patch.object(erwartung, "festschreiben", side_effect=AssertionError("/offen darf nicht rechnen")):
+            asyncio.run(bot_app.cmd_offen(update, context))
+        self.assertIn(zeile, self.gesendet[-1]["caption"])
+        self.assertEqual(self.wahrschein(cid), p)
+
+        # Klick „freigeben“: die Bildunterschrift wird neu geschrieben, die Erwartung nur gelesen
+        bearbeitet = []
+
+        async def answer(text=None, **_):
+            pass
+
+        async def edit_message_caption(**kwargs):
+            bearbeitet.append(kwargs)
+
+        query = SimpleNamespace(data=f"f:{cid}", from_user=SimpleNamespace(id=42), answer=answer,
+                                edit_message_caption=edit_message_caption, message=SimpleNamespace(reply_markup=None))
+        with mock.patch.object(erwartung, "festschreiben", side_effect=AssertionError("Klick darf nicht rechnen")):
+            asyncio.run(bot_app.bei_klick(SimpleNamespace(callback_query=query), SimpleNamespace(bot_data=self.fake.bot_data)))
+        self.assertIn(zeile, bearbeitet[0]["caption"])
+        self.assertIn("Freigegeben", bearbeitet[0]["caption"])
+        self.assertEqual(self.wahrschein(cid), p)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM erwartungen").fetchone()[0], 1)
+
+    def test_unter_mindest_urteilen_noch_keine(self):
+        self.urteile_clips(gut=5, schlecht=4)   # 9 Urteile
+        cid = self.neuer_clip(10.0)
+        self.assertEqual(asyncio.run(bot_app.sende_outbox(self.fake)), 1)
+        self.assertIn("Erwartung: noch keine", self.gesendet[0]["caption"])
+        self.assertEqual(self.erwartung_beim_senden, [None])
+        self.assertIsNone(erwartung.gespeichert(self.con, "clip", cid))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM erwartungen").fetchone()[0], 0)
+
+    def test_fehler_in_der_erwartung_haelt_das_senden_nicht_auf(self):
+        self.urteile_clips()
+        cid = self.neuer_clip(10.0)
+        with mock.patch.object(erwartung, "festschreiben", side_effect=ValueError("kaputt")), \
+                self.assertLogs("clip-bot", "ERROR"):
+            self.assertEqual(asyncio.run(bot_app.sende_outbox(self.fake)), 1)
+        self.assertIn("Erwartung: noch keine", self.gesendet[0]["caption"])
+        self.assertEqual(self.con.execute("SELECT status FROM clips WHERE id = ?", (cid,)).fetchone()[0], "gesendet")
+
+    def test_gewichte_zeigt_die_trefferquote(self):
+        cid = self.clip("freigegeben", 5.0)
+        self.con.execute("INSERT INTO erwartungen (art, ziel_id, wahrschein, grundlage, erstellt)"
+                         " VALUES ('clip', ?, 0.8, '{}', 'x')", (cid,))
+        antworten = []
+
+        async def reply_text(text, **_):
+            antworten.append(text)
+
+        update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
+        asyncio.run(bot_app.cmd_gewichte(update, SimpleNamespace(bot_data=self.fake.bot_data)))
+        self.assertIn("Erwartung getroffen: Clips 1/1 (100 %)", antworten[0])
+
+
+class ClipTextErwartung(MitErwartung):
+    """texte.clip_text braucht kein Telegram."""
+
+    def text(self, cid: int, erwartung_wert: float | None = None) -> str:
+        clip = db.clip(self.con, cid)
+        return texte.clip_text(clip, db.match(self.con, clip["match_id"]), "Europe/Berlin", erwartung=erwartung_wert)
+
+    def test_zeilen(self):
+        cid = self.clip("gesendet", 3.0)
+        self.assertIn("Erwartung: ✅ 78 %", self.text(cid, 0.78))
+        self.assertIn("Erwartung: ✅ 50 %", self.text(cid, 0.5))        # 0,5 zählt als „gibst frei“
+        self.assertIn("Erwartung: 🗑️ 65 %", self.text(cid, 0.35))       # Sicherheit fürs Verwerfen
+        self.assertIn("Erwartung: noch keine", self.text(cid))
+        self.assertIn("Erwartung: noch keine", texte.clip_text(db.clip(self.con, cid), None, "Europe/Berlin"))
+
+    def test_alle_17_merkmale_bleiben_unter_1024_zeichen(self):
+        mk = {m: 1.5 + i for i, m in enumerate(MERKMALE)}
+        self.assertTrue(all(v != 0 for v in mk.values()))
+        punkte, begruendung = bewerte(mk, {m: -1.25 for m in MERKMALE}, "Victory Royale Quadruple Kill")
+        cid = self.clip("freigegeben", 3.0)
+        self.con.execute("UPDATE clips SET merkmale = ?, punkte = ?, begruendung = ?, titel = ? WHERE id = ?",
+                         (json.dumps(mk), punkte, begruendung, "Victory Royale Quadruple Kill", cid))
+        text = self.text(cid, 0.78)
+        self.assertLessEqual(len(text), 1024)
+        self.assertIn("Erwartung: ✅ 78 %", text)
+        self.assertIn("Freigegeben", text)
+
+    def test_zu_lange_begruendung_wird_gekuerzt(self):
+        cid = self.clip("freigegeben", 3.0)
+        self.con.execute("UPDATE clips SET begruendung = ? WHERE id = ?", ("Kill <3> & " * 300, cid))
+        text = self.text(cid, 0.9)
+        self.assertLessEqual(len(text), 1024)
+        self.assertIn("…</i>", text)                 # sichtbar gekürzt
+        self.assertIn("Erwartung: ✅ 90 %", text)    # alles andere bleibt
+        self.assertIn("Freigegeben", text)
+        self.assertNotRegex(text, r"&[a-z]*…")        # nie mitten in einem HTML-Zeichen (&amp; …) abgeschnitten
+        kurz = self.clip("gesendet", 3.0)
+        self.assertIn("<i>Test</i>", self.text(kurz))  # kurze Begründung unverändert
+
+
 if __name__ == "__main__":
     unittest.main()
