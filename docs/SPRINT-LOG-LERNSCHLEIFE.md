@@ -210,3 +210,8 @@ MAD-Minima). Weiter offen: R1, R2, A35, A44.
    `SYMBOLE` – vorher `FAILED (failures=4)`, nachher `Ran 42 tests` / `OK` (ganzes Modul).
 
 Verworfen: keiner.
+
+### Gesamtlauf nach den Befunden (3f48a49)
+- `PYTHONPATH=src python -m unittest $(ls tests/test_*.py | grep -v rette | sed …)` → `Ran 847 tests in 1247.011s` /
+  `OK (skipped=3)`. Ohne `tests.test_rette_skript` (6 Tests, bewusst ausgelassen) – mit ihm also dieselben 853 wie
+  beim `discover`-Lauf oben; die Befunde haben nur Subtests in einem vorhandenen Test ergänzt.
