@@ -22,8 +22,12 @@ Stufe 2 (Spec §8.2): Jede gespeicherte Zeile eines Clip-Moments bringt ihre Mic
 ohne eigene Logik. `analysiere(nur_mic=True)` holt bei vorhandenen Zeilen nur die Mic-Werte nach (_ergaenze_mic);
 Stimmung, Sicherheit und Quelle – auch eine Wahl von Claude – bleiben (Annahme S2-A18).
 
-Import-Regel (Plan Stufe 2, Leitplanke 7): stimmung → mikro, lernen auf Modulebene; mikro importiert stimmung nur
-innerhalb von clips_nachziehen. Gewichte und Version holt analysiere einmal vor der Schleife und reicht sie durch.
+Messfehler (Befund K-2): Scheitert ffprobe, die Lautheit, das WAV oder Whisper an einer Datei (MedienFehler), steht
+`fehler` in den Merkmalen dieses Moments – der Lauf geht mit den anderen weiter, und die Zeile wird beim Mic-Nachholen
+nicht wieder gewählt (merkmale.mic_nachholen). Geschrieben wird je Moment in einer Transaktion (Befund K-4).
+
+Import-Regel (Plan Stufe 2, Leitplanke 7): stimmung → mikro, lernen, merkmale auf Modulebene; mikro importiert
+stimmung nur innerhalb von clips_nachziehen. Gewichte und Version holt analysiere einmal vor der Schleife und reicht sie durch.
 """
 
 from __future__ import annotations
@@ -40,10 +44,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from statistics import median
 
-from . import bestand, lernen, material, mikro, replay
+from . import bestand, db, lernen, material, mikro, replay
 from .konfig import Konfig
 from .medien import MedienFehler, fuehre_aus, probe
-from .merkmale import mic_vollstaendig  # nur die Funktion: `merkmale` heißt hier schon die Mess-Funktion
+from .merkmale import mic_nachholen  # nur die Funktion: `merkmale` heißt hier schon die Mess-Funktion
 from .verarbeitung import _json_aus_text
 from .zeit import aus_iso, iso, jetzt
 
@@ -322,19 +326,25 @@ def merkmale(m: Moment, konfig: Konfig, sprache: Transkription | None) -> tuple[
         return mk, None
     spur_mikro = bestand.mikro_spur(info["spuren"])
     mk["mikro_spur"] = spur_mikro
-    if info["spuren"]:
-        spiel = lautheit_verlauf(m.datei, 0)
-        mk["spitzen_s"] = _ausbrueche(spiel, float(konfig.wert("stimmung.spitze_lu", 8)))
-        mk["spitzen"] = len(mk["spitzen_s"])
-        mk["energie"] = energie(spiel)
-    if spur_mikro is not None:
-        mikro = lautheit_verlauf(m.datei, spur_mikro)
-        mk["jubel_laut_s"] = _ausbrueche(mikro, float(konfig.wert("stimmung.jubel_lu", 12)), min_s=0.5)
-        mk["jubel_laut"] = len(mk["jubel_laut_s"])
-        if sprache is not None:
-            with tempfile.TemporaryDirectory() as tmp:
-                text = sprache.text(mikro_als_wav(m.datei, spur_mikro, Path(tmp) / "mikro.wav"))
-            mk.update(woerter(text))
+    # Befund K-2: Auch Lautheit, WAV und Whisper können an einer kaputten Datei scheitern. Wie bei tonspuren:
+    # `fehler` vermerken und zurückgeben – was bis dahin gemessen ist, bleibt; der Lauf geht mit den anderen weiter.
+    try:
+        if info["spuren"]:
+            spiel = lautheit_verlauf(m.datei, 0)
+            mk["spitzen_s"] = _ausbrueche(spiel, float(konfig.wert("stimmung.spitze_lu", 8)))
+            mk["spitzen"] = len(mk["spitzen_s"])
+            mk["energie"] = energie(spiel)
+        if spur_mikro is not None:
+            mikro = lautheit_verlauf(m.datei, spur_mikro)
+            mk["jubel_laut_s"] = _ausbrueche(mikro, float(konfig.wert("stimmung.jubel_lu", 12)), min_s=0.5)
+            mk["jubel_laut"] = len(mk["jubel_laut_s"])
+            if sprache is not None:
+                with tempfile.TemporaryDirectory() as tmp:
+                    text = sprache.text(mikro_als_wav(m.datei, spur_mikro, Path(tmp) / "mikro.wav"))
+                mk.update(woerter(text))
+    except MedienFehler as e:
+        mk["fehler"] = str(e)[:120]
+        return mk, text
     return mk, text
 
 
@@ -386,23 +396,25 @@ def _speichere(con, m: Moment, stimmung: str, sicherheit: float, quelle: str, mk
 
     gewichte, version: von analysiere (einmal per lernen.aktuelle geholt) – für die Punkte noch nicht gesendeter
     Clips (merkmale.aktualisiere_clip). Datei-Momente (clip_id None) berühren clips nie.
+    Zeile und Clip in einer Transaktion (Befund K-4): Scheitert der Clip, fehlt auch die Zeile – nichts Halbes.
     Beispiel: Clip 7, mk {"mikro_spur": None, …} → Zeile clip:7, clips.merkmale mic_* = 0, mic_stand gesetzt."""
     zeit = iso(jetzt())
-    con.execute(
-        """INSERT INTO momente (schluessel, clip_id, match_id, datei, start_s, ende_s, start_utc, kills, stimmung,
-                                sicherheit, quelle, merkmale, text, erstellt, geaendert)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (schluessel) DO UPDATE SET datei = excluded.datei, start_s = excluded.start_s,
-               ende_s = excluded.ende_s, start_utc = excluded.start_utc, kills = excluded.kills,
-               stimmung = excluded.stimmung,
-               sicherheit = excluded.sicherheit, quelle = excluded.quelle, merkmale = excluded.merkmale,
-               text = excluded.text, geaendert = excluded.geaendert""",
-        (m.schluessel, m.clip_id, m.match_id, str(m.datei), m.start_s, m.ende_s,
-         iso(m.start_utc) if m.start_utc else None, mk.get("kills", 0), stimmung, sicherheit, quelle,
-         json.dumps(mk, ensure_ascii=False), text, zeit, zeit),
-    )
-    if m.clip_id is not None:
-        mikro.in_clip_uebernehmen(con, m.clip_id, mk, gewichte, version)
+    with db.transaktion(con):  # Aufrufer (analysiere) hat keine Transaktion offen
+        con.execute(
+            """INSERT INTO momente (schluessel, clip_id, match_id, datei, start_s, ende_s, start_utc, kills, stimmung,
+                                    sicherheit, quelle, merkmale, text, erstellt, geaendert)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (schluessel) DO UPDATE SET datei = excluded.datei, start_s = excluded.start_s,
+                   ende_s = excluded.ende_s, start_utc = excluded.start_utc, kills = excluded.kills,
+                   stimmung = excluded.stimmung,
+                   sicherheit = excluded.sicherheit, quelle = excluded.quelle, merkmale = excluded.merkmale,
+                   text = excluded.text, geaendert = excluded.geaendert""",
+            (m.schluessel, m.clip_id, m.match_id, str(m.datei), m.start_s, m.ende_s,
+             iso(m.start_utc) if m.start_utc else None, mk.get("kills", 0), stimmung, sicherheit, quelle,
+             json.dumps(mk, ensure_ascii=False), text, zeit, zeit),
+        )
+        if m.clip_id is not None:
+            mikro.in_clip_uebernehmen(con, m.clip_id, mk, gewichte, version)
 
 
 def _ergaenze_mic(con, m: Moment, mk_neu: dict, text: str | None, *,
@@ -410,37 +422,44 @@ def _ergaenze_mic(con, m: Moment, mk_neu: dict, text: str | None, *,
     """Nur die Mic-Werte einer vorhandenen momente-Zeile nachholen (Annahme S2-A18).
 
     Aus der neuen Messung zählen nur MIC_SCHLUESSEL und das Transkript; stimmung, sicherheit, quelle und alle
-    anderen Schlüssel der Zeile bleiben – eine Wahl von Claude geht so nicht verloren. Misslingt die Messung
-    (`fehler` in mk_neu), bleibt die Zeile unverändert. Danach mikro.in_clip_uebernehmen für Clip-Momente.
-    Fehlt die Zeile (sollte nicht vorkommen), passiert nichts.
+    anderen Schlüssel der Zeile bleiben – eine Wahl von Claude geht so nicht verloren. Danach
+    mikro.in_clip_uebernehmen für Clip-Momente. Misslingt die Messung (`fehler` in mk_neu), kommt NUR `fehler` in die
+    Zeile (Befund K-2): Stimmung, Quelle, Text und alle Werte bleiben, aber merkmale.mic_nachholen wählt die Zeile
+    nicht mehr – sonst belegte eine kaputte Datei in jedem Lauf einen Platz. Den Clip berührt das nicht.
+    Lesen und Schreiben in einer Transaktion (Befund K-4). Fehlt die Zeile (sollte nicht vorkommen), passiert nichts.
     Beispiel: Zeile {"spitzen": 2, "mikro_spur": 1}, quelle "claude", neu {"spitzen": 7, "lachen": 2, …}
-    → {"spitzen": 2, "mikro_spur": 1, "lachen": 2, …}, quelle bleibt "claude"."""
-    if "fehler" in mk_neu:
-        return
-    zeile = con.execute("SELECT merkmale FROM momente WHERE schluessel = ?", (m.schluessel,)).fetchone()
-    if zeile is None:
-        return
-    try:
-        mk = json.loads(zeile["merkmale"])
-    except json.JSONDecodeError:
-        mk = None
-    if not isinstance(mk, dict):
-        return
-    mk.update({k: mk_neu[k] for k in MIC_SCHLUESSEL if k in mk_neu})
-    # Ohne Mikro-Spur gibt es kein Transkript – dann bleibt das alte stehen (COALESCE)
-    con.execute("UPDATE momente SET merkmale = ?, text = COALESCE(?, text), geaendert = ? WHERE schluessel = ?",
-                (json.dumps(mk, ensure_ascii=False), text, iso(jetzt()), m.schluessel))
-    if m.clip_id is not None:
-        mikro.in_clip_uebernehmen(con, m.clip_id, mk, gewichte, version)
+    → {"spitzen": 2, "mikro_spur": 1, "lachen": 2, …}, quelle bleibt "claude".
+    Beispiel Messfehler: neu {"fehler": "ffprobe kaputt"} → {"spitzen": 2, "mikro_spur": 1, "fehler": "ffprobe kaputt"}."""
+    with db.transaktion(con):  # Aufrufer (analysiere) hat keine Transaktion offen
+        zeile = con.execute("SELECT merkmale FROM momente WHERE schluessel = ?", (m.schluessel,)).fetchone()
+        if zeile is None:
+            return
+        try:
+            mk = json.loads(zeile["merkmale"])
+        except json.JSONDecodeError:
+            mk = None
+        if not isinstance(mk, dict):
+            return
+        if "fehler" in mk_neu:
+            mk["fehler"] = mk_neu["fehler"]
+            con.execute("UPDATE momente SET merkmale = ?, geaendert = ? WHERE schluessel = ?",
+                        (json.dumps(mk, ensure_ascii=False), iso(jetzt()), m.schluessel))
+            return
+        mk.update({k: mk_neu[k] for k in MIC_SCHLUESSEL if k in mk_neu})
+        # Ohne Mikro-Spur gibt es kein Transkript – dann bleibt das alte stehen (COALESCE)
+        con.execute("UPDATE momente SET merkmale = ?, text = COALESCE(?, text), geaendert = ? WHERE schluessel = ?",
+                    (json.dumps(mk, ensure_ascii=False), text, iso(jetzt()), m.schluessel))
+        if m.clip_id is not None:
+            mikro.in_clip_uebernehmen(con, m.clip_id, mk, gewichte, version)
 
 
 def _mic_fehlt(merkmale_text: str) -> bool:
-    """Vorhandene Zeile, deren Mic-Analyse unvollständig ist und deren Messung nicht gescheitert war."""
+    """Vorhandene Zeile, deren Mic-Analyse nachgeholt werden soll (merkmale.mic_nachholen, Annahme S2-A18)."""
     try:
         mk = json.loads(merkmale_text)
     except json.JSONDecodeError:
         return False
-    return isinstance(mk, dict) and not mic_vollstaendig(mk) and "fehler" not in mk
+    return isinstance(mk, dict) and mic_nachholen(mk)
 
 
 def analysiere(con: sqlite3.Connection, konfig: Konfig, *, dateien: bool = False, neu: bool = False,

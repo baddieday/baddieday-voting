@@ -17,12 +17,14 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import builtins
+import sqlite3
 import subprocess
 import sys
 import unittest
 from unittest import mock
 
-from clip_pipeline import cli, db, mikro, stimmung, verarbeitung
+from clip_pipeline import cli, db, lernen, mikro, stimmung, verarbeitung
 from clip_pipeline import konfig as konfig_modul
 from clip_pipeline.zeit import iso
 
@@ -155,15 +157,58 @@ class Speichern(Grundlage):
                          (2, 1, 0, 2, [1.0, 3.0]))
         self.assertIsNotNone(self.clip_zeile(cid)["mic_stand"])
 
-    def test_ergaenze_mic_messfehler_laesst_zeile_stehen(self):
+    def test_ergaenze_mic_messfehler_schreibt_nur_fehler(self):
+        # Befund K-2: Früher blieb die Zeile ganz unverändert – ohne `fehler` wählte der nächste Lauf sie wieder
+        # (Endlosschleife). Jetzt kommt nur `fehler` dazu; Stimmung, Quelle, Text und die alten Werte bleiben.
         cid = self.clip()
         self.moment_zeile(cid, {"mikro_spur": 1, "jubel_laut": 0}, text="alt")
         vorher = dict(self.zeile(cid))
         m = stimmung.Moment(f"clip:{cid}", self.tmp / "a.mp4", 0.0, 8.0, START, cid, SID)
         stimmung._ergaenze_mic(self.con, m, {"kills": 1, "fehler": "ffprobe kaputt"}, None, gewichte=GEWICHTE,
                                version=0)
-        self.assertEqual(dict(self.zeile(cid)), vorher)
+        nachher = dict(self.zeile(cid))
+        self.assertEqual(json.loads(nachher.pop("merkmale")),
+                         {"mikro_spur": 1, "jubel_laut": 0, "fehler": "ffprobe kaputt"})
+        vorher.pop("merkmale")
+        vorher.pop("geaendert")
+        nachher.pop("geaendert")
+        self.assertEqual(nachher, vorher)  # stimmung, quelle, sicherheit, text unverändert
         self.assertIsNone(self.clip_zeile(cid)["mic_stand"])
+
+    def test_speichere_halb_geschrieben_gibt_es_nicht(self):
+        # Befund K-4: momente-Zeile und Clip gehören zusammen – scheitert der Clip, fehlt auch die Zeile
+        cid = self.clip()
+        m = stimmung.Moment(f"clip:{cid}", self.tmp / "a.mp4", 0.0, 5.0, START, cid, SID)
+        with mock.patch.object(stimmung.mikro, "in_clip_uebernehmen", side_effect=sqlite3.OperationalError("weg")), \
+                self.assertRaises(sqlite3.OperationalError):
+            stimmung._speichere(self.con, m, "lustig", 0.5, "regel", {"mikro_spur": None}, None,
+                                gewichte=GEWICHTE, version=0)
+        self.assertIsNone(self.zeile(cid))
+        self.assertFalse(self.con.in_transaction)
+
+    def test_ergaenze_mic_halb_geschrieben_gibt_es_nicht(self):
+        cid = self.clip()
+        self.moment_zeile(cid, {"mikro_spur": 1, "jubel_laut": 0})
+        vorher = dict(self.zeile(cid))
+        m = stimmung.Moment(f"clip:{cid}", self.tmp / "a.mp4", 0.0, 8.0, START, cid, SID)
+        with mock.patch.object(stimmung.mikro, "in_clip_uebernehmen", side_effect=sqlite3.OperationalError("weg")), \
+                self.assertRaises(sqlite3.OperationalError):
+            stimmung._ergaenze_mic(self.con, m, {"mikro_spur": 1, "lachen": 2, "jubel": 0, "frust": 0}, "haha",
+                                   gewichte=GEWICHTE, version=0)
+        self.assertEqual(dict(self.zeile(cid)), vorher)
+        self.assertFalse(self.con.in_transaction)
+
+    def test_uebernehmen_halb_geschrieben_gibt_es_nicht(self):
+        # Befund K-4: clips.merkmale und mic_stand eines Clips ändern sich zusammen oder gar nicht.
+        # mikro.iso wird nur beim mic_stand-UPDATE gerufen – also NACH aktualisiere_clip.
+        cid = self.clip()
+        self.moment_zeile(cid, {"mikro_spur": 1, "lachen": 2, "jubel": 0, "frust": 0, "jubel_laut": 0})
+        vorher = dict(self.clip_zeile(cid))
+        with mock.patch.object(mikro, "iso", side_effect=RuntimeError("mitten drin")), \
+                self.assertRaises(RuntimeError):
+            mikro.nachtragen(self.con, self.konfig, GEWICHTE, 0)
+        self.assertEqual(dict(self.clip_zeile(cid)), vorher)  # kein mic_lachen ohne mic_stand
+        self.assertFalse(self.con.in_transaction)
 
     def test_analysiere_holt_gewichte_einmal(self):
         for _ in range(3):
@@ -265,6 +310,65 @@ class Nachziehen(Grundlage):
         self.assertEqual((e["analysiert"], e["mit_fehler"], e["offen"]), (1, 1, 1))
         self.assertIsNone(self.clip_zeile(cid)["mic_stand"])
 
+    def test_messfehler_in_lautheit_bricht_den_lauf_nicht_ab(self):
+        # Befund K-2: Ein kaputter Clip (ffmpeg scheitert bei der Lautheit) hielt den ganzen Lauf an – auch die
+        # schon gemessenen Momente gingen verloren. Jetzt: `fehler` am kaputten Clip, die anderen sind gespeichert.
+        kaputt = self.clip(punkte=9)
+        gut = self.clip(punkte=1)
+
+        def lautheit(datei, spur):
+            if datei.name == f"{kaputt}.mp4":
+                raise stimmung.MedienFehler("Lautheit-Verlauf kaputt: Exit 1")
+            return [(0.0, -30.0)] * 10
+
+        with mock.patch.object(stimmung.bestand, "tonspuren", return_value={"spuren": [{"nr": 0}, {"nr": 1}]}), \
+                mock.patch.object(stimmung.bestand, "mikro_spur", return_value=1), \
+                mock.patch.object(stimmung, "lautheit_verlauf", side_effect=lautheit), \
+                mock.patch.object(stimmung.Transkription, "verfuegbar", return_value=False), \
+                mock.patch.object(mikro, "whisper_da", return_value=False):
+            e = mikro.clips_nachziehen(self.con, self.konfig)
+        self.assertEqual((e["analysiert"], e["mit_fehler"]), (2, 1))
+        self.assertIn("Lautheit-Verlauf kaputt", json.loads(self.zeile(kaputt)["merkmale"])["fehler"])
+        gut_mk = json.loads(self.zeile(gut)["merkmale"])
+        self.assertNotIn("fehler", gut_mk)
+        self.assertEqual(gut_mk["jubel_laut"], 0)
+        # nächster Lauf mit Whisper: nur der gute Clip wird nachgeholt, der kaputte belegt keinen Platz mehr
+        reihenfolge, messe = _gemessen(ohne_mikro=False)
+        with mock.patch.object(stimmung, "merkmale", side_effect=messe), \
+                mock.patch.object(mikro, "whisper_da", return_value=True), \
+                mock.patch.object(stimmung.Transkription, "verfuegbar", return_value=True):
+            mikro.clips_nachziehen(self.con, self.konfig)
+        self.assertEqual(reihenfolge, [gut])
+
+    def test_nachholen_mit_messfehler_wird_nicht_wiederholt(self):
+        # Befund K-2: Scheitert das Nachholen, bekommt die Zeile `fehler` – sonst würde sie jeden Lauf neu gewählt
+        cid = self.clip()
+        self.moment_zeile(cid, {"kills": 1, "mikro_spur": 1, "jubel_laut": 0})
+        with mock.patch.object(stimmung, "merkmale", return_value=({"kills": 1, "fehler": "kaputt"}, None)) as messung, \
+                mock.patch.object(mikro, "whisper_da", return_value=True), \
+                mock.patch.object(stimmung.Transkription, "verfuegbar", return_value=True):
+            e1 = mikro.clips_nachziehen(self.con, self.konfig)
+            e2 = mikro.clips_nachziehen(self.con, self.konfig)
+        self.assertEqual(messung.call_count, 1)
+        self.assertEqual((e1["analysiert"], e1["mit_fehler"], e1["offen"]), (1, 1, 1))
+        self.assertEqual((e2["analysiert"], e2["offen"]), (0, 1))
+        z = self.zeile(cid)
+        self.assertEqual((z["stimmung"], z["quelle"]), ("spannend", "claude"))
+        self.assertEqual(json.loads(z["merkmale"])["fehler"], "kaputt")
+
+    def test_offen_ist_dieselbe_zahl_wie_in_gewichte(self):
+        # Befund E-5: „offen“ und „ohne Mic-Analyse“ in /gewichte kommen aus derselben Funktion
+        self.clip()
+        self.clip(status="verworfen")
+        fertig = self.clip()
+        self.moment_zeile(fertig, {"mikro_spur": None})
+        with mock.patch.object(stimmung, "merkmale", return_value=({"kills": 1, "fehler": "kaputt"}, None)), \
+                mock.patch.object(mikro, "whisper_da", return_value=False):
+            e = mikro.clips_nachziehen(self.con, self.konfig)
+        self.assertEqual(e["offen"], 1)
+        self.assertEqual(db.ohne_mic_analyse(self.con), 1)
+        self.assertEqual(lernen.berechne(self.con, self.konfig).ohne_mic, e["offen"])
+
     def test_nachtragen_nur_uebernehmen_und_session(self):
         hier = self.clip(match_id=SID)
         dort = self.clip(match_id=ANDERE)
@@ -354,14 +458,26 @@ class MitPuffer(Grundlage):
         self.konfig.quelle = self.tmp / "test.toml"
 
 
+def verbiete_faster_whisper():
+    """Befund T-3: Jeder Import von faster_whisper wirft AssertionError – unabhängig davon, ob ein früherer Test das
+    Paket schon geladen hat (sys.modules zu prüfen wäre reihenfolgeabhängig)."""
+    echt = builtins.__import__
+
+    def importiere(name, *args, **kwargs):
+        if name == "faster_whisper" or name.startswith("faster_whisper."):
+            raise AssertionError("faster_whisper darf hier nicht importiert werden")
+        return echt(name, *args, **kwargs)
+
+    return mock.patch.object(builtins, "__import__", side_effect=importiere)
+
+
 class Hintergrund(MitPuffer):
 
     def test_whisper_da_importiert_nicht(self):
         spec = mock.sentinel.spec
-        with mock.patch("importlib.util.find_spec", return_value=spec) as finde:
+        with mock.patch("importlib.util.find_spec", return_value=spec) as finde, verbiete_faster_whisper():
             self.assertTrue(mikro.whisper_da())
         finde.assert_called_once_with("faster_whisper")
-        self.assertNotIn("faster_whisper", sys.modules)
         with mock.patch("importlib.util.find_spec", return_value=None):
             self.assertFalse(mikro.whisper_da())
 
@@ -376,8 +492,11 @@ class Hintergrund(MitPuffer):
                                   str(self.tmp / "test.toml"), "stimmung", "--clips", "--session", SID, "--max", "4"])
         self.assertLess(befehl.index("--konfig"), befehl.index("stimmung"))
         kw = popen.call_args.kwargs
-        self.assertEqual((kw["stdin"], kw["stdout"], kw["start_new_session"]),
-                         (subprocess.DEVNULL, subprocess.DEVNULL, True))
+        self.assertEqual((kw["stdin"], kw["start_new_session"]), (subprocess.DEVNULL, True))
+        # Befund B-4: auch stdout (die JSON-Zeile mit „offen“) geht ins Log des Kinds – nie an render/n8n
+        self.assertIs(kw["stdout"], kw["stderr"])
+        self.assertIsNot(kw["stdout"], sys.stdout)
+        self.assertNotIn(kw["stdout"], (None, subprocess.DEVNULL, subprocess.PIPE))
         self.assertEqual(kw["stderr"].name, str(self.tmp / mikro.LOG_NAME))  # neben der Test-DB
         self.assertIn("a", kw["stderr"].mode)  # angehängt, nicht überschrieben
         self.assertTrue((self.tmp / mikro.LOG_NAME).is_file())
@@ -403,11 +522,10 @@ class Hintergrund(MitPuffer):
             with self.subTest(name):
                 self.konfig.daten["merkmale"].update(merkmale)
                 self.konfig.daten["lager"]["wurzel"] = lager
-                with mock.patch("importlib.util.find_spec", return_value=spec), \
+                with mock.patch("importlib.util.find_spec", return_value=spec), verbiete_faster_whisper(), \
                         mock.patch.object(mikro.subprocess, "Popen") as popen:
                     self.assertFalse(mikro.starte_im_hintergrund(self.konfig, SID))
                 popen.assert_not_called()
-                self.assertNotIn("faster_whisper", sys.modules)
 
 
 class RenderVertrag(MitPuffer):

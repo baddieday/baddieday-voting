@@ -109,6 +109,22 @@ def mic_vollstaendig(moment_merkmale: dict) -> bool:
     return "lachen" in moment_merkmale or _ohne_mikro(moment_merkmale)
 
 
+def mic_nachholen(moment_merkmale: dict) -> bool:
+    """True, wenn für diesen Moment die Mic-Analyse nachgeholt werden soll – die eine Regel aus Annahme S2-A18.
+
+    not mic_vollstaendig(mk) and "fehler" not in mk: Die Analyse ist unvollständig (meist lief Whisper noch nicht),
+    und die Messung ist nicht gescheitert. Eine kaputte Datei scheitert beim nächsten Mal wieder – sie soll nicht in
+    jedem Lauf einen der wenigen Plätze ([merkmale].mic_je_lauf) belegen. Genutzt von mikro.clips_nachziehen (welche
+    Clips werden gemessen?) und stimmung.analysiere(nur_mic=True) (welche Zeilen werden ergänzt?) – so wählen
+    beide dieselben Momente. Ob Whisper installiert ist, prüft der Aufrufer.
+
+    Parameter: moment_merkmale – momente.merkmale eines Moments. Rückgabe: bool. Fehler: keine.
+    Beispiele: {"mikro_spur": 1, "jubel_laut": 2} → True · {"mikro_spur": 1, "lachen": 0} → False (fertig) ·
+    {"mikro_spur": None} → False (kein Mikro, fertig) · {"mikro_spur": 1, "fehler": "…"} → False (gescheitert).
+    """
+    return not mic_vollstaendig(moment_merkmale) and "fehler" not in moment_merkmale
+
+
 def fuer_moment(clip_merkmale: dict | None, moment_merkmale: dict | None,
                 kill_tabelle: list[float]) -> dict[str, float]:
     """Merkmale eines Regisseur-Moments für roh_score (Spec §8.2).
