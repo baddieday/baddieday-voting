@@ -365,6 +365,19 @@ class PostsAusDemClipBot(MitSpeicher):
         self.assertEqual((post["plattform"], post["ziel"], post["url"], post["video_id"]),
                          ("youtube", f"clip:{zweiter}", "https://youtube.com/shorts/xyz", None))
 
+    def test_post_plattform_ohne_eintrag_in_der_checkliste(self):
+        """YouTube bekommt Posts ([publikum]), steht aber nicht in [veroeffentlichung] – dann gibt es keine
+        Checklisten-Zeile, und der Post gilt ab diesem /link."""
+        self.konfig.daten["veroeffentlichung"].update(pflicht=["tiktok"], zusatz=[])
+        self.konfig.daten["publikum"]["plattformen"] = ["tiktok", "youtube"]
+        antwort, stand = aktionen.link_speichern(self.con, self.cid, "https://youtube.com/shorts/abc", self.konfig,
+                                                 zeit=HAKEN)
+        self.assertEqual(stand, {"tiktok": False})  # Checkliste wie bisher: YouTube kommt darin nicht vor
+        [post] = self.posts()
+        self.assertEqual((post["plattform"], post["gepostet_utc"], post["url"]),
+                         ("youtube", iso(HAKEN), "https://youtube.com/shorts/abc"))
+        self.assertIsNone(self.veroeffentlichung("youtube"))
+
     def test_nicht_freigegebener_clip_wird_wie_bisher_abgelehnt(self):
         offen = self.clip_anlegen(status="gesendet")
         antwort, stand = aktionen.link_speichern(self.con, offen, TIKTOK, self.konfig, zeit=HAKEN)
@@ -418,7 +431,7 @@ class PostsAusDemClipBot(MitSpeicher):
             antwort, stand = aktionen.link_speichern(self.con, self.cid, TIKTOK, self.konfig, zeit=HAKEN)
         self.assertIsNone(stand)
         self.assertTrue(antwort.hinweis.startswith("⚠️ TikTok nicht abgehakt"), antwort.hinweis)
-        self.assertEqual(self.veroeffentlichung("tiktok"), (None, None))
+        self.assertIsNone(self.veroeffentlichung("tiktok"))  # nicht einmal die Checklisten-Zeile: alles zurückgerollt
         self.assertEqual(self.posts(), [])  # der schon angelegte Post ist mit zurückgerollt
 
     def test_kaputte_merkmale_und_danach_nochmal(self):
@@ -427,7 +440,7 @@ class PostsAusDemClipBot(MitSpeicher):
         with self.assertLogs("clip-bot", "ERROR"):
             antwort, stand = aktionen.plattform_erledigt(self.con, self.cid, "tiktok", self.konfig, zeit=HAKEN)
         self.assertIsNone(stand)
-        self.assertEqual((self.veroeffentlichung("tiktok"), self.posts()), ((None, None), []))
+        self.assertEqual((self.veroeffentlichung("tiktok"), self.posts()), (None, []))
 
         self.con.execute("UPDATE clips SET merkmale = '{}' WHERE id = ?", (self.cid,))
         antwort, stand = aktionen.plattform_erledigt(self.con, self.cid, "tiktok", self.konfig, zeit=HAKEN)
@@ -440,7 +453,7 @@ class PostsAusDemClipBot(MitSpeicher):
             antwort, stand = aktionen.plattform_erledigt(self.con, self.cid, "tiktok", self.konfig, zeit=HAKEN)
         self.assertIsNone(stand)
         self.assertIn("[publikum].plattformen", antwort.hinweis)
-        self.assertEqual(self.veroeffentlichung("tiktok"), (None, None))
+        self.assertIsNone(self.veroeffentlichung("tiktok"))  # nicht einmal die Checklisten-Zeile: alles zurückgerollt
 
     def test_datenbankfehler_fliegen_weiter(self):
         """Nur fachliche Fehler werden zur Meldung; eine kaputte Datenbank bleibt ein echter Fehler (bot.app.bei_fehler
@@ -448,7 +461,7 @@ class PostsAusDemClipBot(MitSpeicher):
         with mock.patch.object(publikum, "post_anlegen", side_effect=sqlite3.OperationalError("disk I/O error")):
             with self.assertRaises(sqlite3.OperationalError):
                 aktionen.plattform_erledigt(self.con, self.cid, "tiktok", self.konfig, zeit=HAKEN)
-        self.assertEqual(self.veroeffentlichung("tiktok"), (None, None))
+        self.assertIsNone(self.veroeffentlichung("tiktok"))  # nicht einmal die Checklisten-Zeile: alles zurückgerollt
         self.assertFalse(self.con.in_transaction)
 
     def test_veroeffentlicht_erst_nach_allen_pflicht_plattformen(self):
@@ -555,6 +568,14 @@ class PostNummerImClipBot(MitSpeicher):
                 self.assertLogs("clip-bot", "ERROR"):
             text = _link(self.con, self.konfig, str(self.cid), TIKTOK)
         self.assertTrue(text.startswith("⚠️ TikTok nicht abgehakt"), text)
+
+    def test_fehlergrund_wird_fuer_html_maskiert(self):
+        """Die /link-Antwort geht als HTML raus: ein „<“ im Grund darf sie nicht kaputt machen."""
+        with mock.patch.object(publikum, "post_anlegen", side_effect=ValueError("Dauer <0> & kaputt")), \
+                self.assertLogs("clip-bot", "ERROR"):
+            text = _link(self.con, self.konfig, str(self.cid), TIKTOK)
+        self.assertIn("Dauer &lt;0&gt; &amp; kaputt", text)
+        self.assertNotIn("<0>", text)
 
     def test_fremder_klick_legt_keinen_post_an(self):
         antworten, _ = _klick(self.con, self.konfig, f"t:{self.cid}", nutzer=99)
