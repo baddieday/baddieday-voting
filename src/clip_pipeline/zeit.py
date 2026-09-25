@@ -50,6 +50,28 @@ def aus_iso(text: str) -> datetime:
     return zeitpunkt if zeitpunkt.tzinfo else zeitpunkt.replace(tzinfo=UTC)
 
 
+def uhrzeit(text: str) -> int:
+    """Minuten seit Mitternacht, z. B. "23:00" -> 1380. ValueError bei Unsinn."""
+    stunde, minute = (int(t) for t in text.strip().split(":"))
+    if not (0 <= stunde < 24 and 0 <= minute < 60):
+        raise ValueError(text)
+    return stunde * 60 + minute
+
+
+def im_zeitfenster(zeitpunkt: datetime, von: str, bis: str, zonen_name: str) -> bool:
+    """Liegt zeitpunkt (Ortszeit) in von … bis? Über Mitternacht erlaubt (23:00–08:00). Leer oder von = bis: nie.
+    Ungültige Uhrzeit: ValueError – was das heißt, entscheidet der Aufrufer ([telegram].leise_*, [lager].nachtruhe_*)."""
+    von, bis = von.strip(), bis.strip()
+    if not von or not bis:
+        return False
+    anfang, ende = uhrzeit(von), uhrzeit(bis)
+    lokal = utc_zu_lokal(zeitpunkt, zonen_name)
+    minute = lokal.hour * 60 + lokal.minute
+    if anfang <= ende:
+        return anfang <= minute < ende
+    return minute >= anfang or minute < ende
+
+
 def spielabend(zeitpunkt: datetime, zonen_name: str, wechsel_stunde: int = 6) -> date:
     """Zu welchem Abend gehört eine Runde? Runden bis 06:00 zählen zum Vortag."""
     lokal = utc_zu_lokal(zeitpunkt, zonen_name)

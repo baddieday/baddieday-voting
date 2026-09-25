@@ -98,13 +98,13 @@ class Units(unittest.TestCase):
         self.assertEqual(s["Type"], ["oneshot"])
         self.assertEqual(s["SuccessExitStatus"], ["3 4"])
         t = lies_unit(self.SYSTEMD / "clip-lager.timer")
-        self.assertEqual(t["OnCalendar"], ["*-*-* 04:30"])
+        self.assertEqual(t["OnCalendar"], ["*-*-* 10:00"])  # tagsüber, nie nachts
         self.assertEqual(t["Persistent"], ["true"])
         self.assertEqual(t["RandomizedDelaySec"], ["10min"])
         self.assertEqual(t["WantedBy"], ["timers.target"])
 
     def test_lager_verdeckt_das_nfs_nicht(self):
-        # Um 04:30 schläft pve-big meist: /srv/big/clips ist beim Start noch ein leerer Ordner. Ein eigener
+        # Um 10:00 schläft pve-big meist: /srv/big/clips ist beim Start noch ein leerer Ordner. Ein eigener
         # Bind darauf (ReadWritePaths=/srv/big/clips oder der Link /srv/clips) würde das spätere NFS verdecken.
         pfade = lies_unit(self.SYSTEMD / "clip-lager.service")["ReadWritePaths"][0].split()
         self.assertEqual(pfade, ["/var/lib/clip-pipeline", "/srv/puffer", "/srv/big"])
@@ -114,7 +114,7 @@ class Units(unittest.TestCase):
         self.assertEqual(s["ExecStart"], ["/opt/clip-pipeline/.venv/bin/pipeline puffer pruefen"])
         self.assertEqual(s["ReadWritePaths"], ["/var/lib/clip-pipeline"])  # nur die Datenbank, Puffer nur lesen
         t = lies_unit(self.SYSTEMD / "clip-puffer-pruefen.timer")
-        self.assertEqual(t["OnCalendar"], ["*-*-* 09:30"])
+        self.assertEqual(t["OnCalendar"], ["*-*-* 11:00"])  # nach dem Abgleich
         self.assertEqual(t["Persistent"], ["true"])
 
     def test_haertung_wie_im_bestand(self):

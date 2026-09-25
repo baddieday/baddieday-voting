@@ -12,13 +12,14 @@ import os
 import sqlite3
 import time
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
 from clip_pipeline import big, cli, konfig, lager, material
+from clip_pipeline.konfig import KonfigFehler
 from clip_pipeline.sperre import sperre
-from clip_pipeline.zeit import iso, jetzt, utc_zu_lokal
+from clip_pipeline.zeit import iso, jetzt, lokal_zu_utc, utc_zu_lokal
 
 from tests.test_getrennt import ECHT_DATEISYSTEM, MitLager
 
@@ -32,12 +33,15 @@ class MitAbgleich(MitLager):
     def setUp(self):
         super().setUp()
         self.konfig.daten["lager"].update(ruhe_min=0, warten_s=0)  # Testdateien sind frisch geschrieben
+        self.konfig.daten["lager"]["nachtruhe_von"] = ""           # nicht von der Uhrzeit abhängen (Klasse Nachtruhe)
         self.konfig.daten["big"]["host"] = "pve-big"               # damit der Abgleich wach_halten benutzt
         self.geweckt: list[str] = []
+        self.wecken_erlaubt: list[bool] = []
 
         @contextlib.contextmanager
-        def wach_halten(k, name, grund, minuten=120):
+        def wach_halten(k, name, grund, minuten=120, *, wecken=True):
             self.geweckt.append(name)
+            self.wecken_erlaubt.append(wecken)
             yield True
 
         for p in (mock.patch.object(big, "wach_halten", wach_halten),
@@ -277,7 +281,7 @@ class Abgleich(MitAbgleich):
         self.assertFalse(list(self.lager.rglob("*.teil")))
         [(_, text)] = self.meldungen()
         self.assertIn("Nichts verloren", text)
-        # nächste Nacht klappt es (Datei ist fertig)
+        # beim nächsten Abgleich klappt es (Datei ist fertig)
         code, e = self.lauf("lager", "abgleich")
         self.assertEqual((code, e["kopiert"]), (0, 2))
         self.assertEqual((self.lager / "eingang" / "a.mp4").read_bytes(), b"a" * 5000 + b"mehr")
@@ -444,6 +448,132 @@ class OfflineUndSperre(MitAbgleich):
             self.assertEqual(code, 2)
             self.assertEqual(e["fehler"], "kein getrennter Betrieb: [lager].wurzel leer")
         self.assertEqual(self.geweckt, [])
+
+
+# --- Nachtruhe -----------------------------------------------------------------------------
+
+def _um(stunde: int, minute: int = 0) -> datetime:
+    return lokal_zu_utc(datetime(2026, 9, 25, stunde, minute), "Europe/Berlin")
+
+
+def _fenster(von_min: int, bis_min: int) -> dict:
+    """Nachtruhe relativ zur echten Uhrzeit (Ortszeit): (-60, 60) = jetzt mittendrin, (60, 120) = jetzt nicht."""
+    lokal = utc_zu_lokal(jetzt(), "Europe/Berlin")
+    return {"nachtruhe_von": f"{lokal + timedelta(minutes=von_min):%H:%M}",
+            "nachtruhe_bis": f"{lokal + timedelta(minutes=bis_min):%H:%M}"}
+
+
+class Nachtruhe(MitAbgleich):
+    """Der Lüfter von pve-big soll niemanden wecken: In der Nachtruhe weckt der Abgleich nie – auch nicht beim
+    Nachholen nach einem Neustart des Mini (Persistent=true ist nur ein Lauf zur Unzeit). Läuft er, wird abgeglichen."""
+
+    def setUp(self):
+        super().setUp()
+        self.datei(self.puffer, "eingang/a.mp4", b"x" * 1000)
+
+    def test_zeitfenster(self):
+        self.konfig.daten["lager"].update(nachtruhe_von="22:00", nachtruhe_bis="08:00")
+        erwartet = {(21, 59): False, (22, 0): True, (0, 30): True, (4, 30): True, (7, 59): True, (8, 0): False,
+                    (10, 0): False, (11, 0): False}
+        for (stunde, minute), ruhe in erwartet.items():
+            self.assertEqual(lager.nachtruhe(self.konfig, _um(stunde, minute)), ruhe, (stunde, minute))
+        del self.konfig.daten["lager"]["nachtruhe_von"], self.konfig.daten["lager"]["nachtruhe_bis"]
+        self.assertTrue(lager.nachtruhe(self.konfig, _um(3)))  # ohne Eintrag (alte lokal.toml): 22:00–08:00
+        self.assertFalse(lager.nachtruhe(self.konfig, _um(10)))
+
+    def test_leer_ist_aus(self):
+        for von, bis in (("", "08:00"), ("22:00", ""), ("", "")):
+            self.konfig.daten["lager"].update(nachtruhe_von=von, nachtruhe_bis=bis)
+            self.assertFalse(lager.nachtruhe(self.konfig, _um(3)), (von, bis))
+
+    def test_tippfehler_schaltet_nicht_still_ab(self):
+        self.konfig.daten["lager"].update(nachtruhe_von="25:00", nachtruhe_bis="8")
+        with self.assertRaises(KonfigFehler):
+            lager.nachtruhe(self.konfig, _um(3))
+        code, e = self.lauf("lager", "abgleich")
+        self.assertEqual((code, e["fehler"]), (2, "konfig"))
+        self.assertIn("nachtruhe", e["hinweis"])
+        self.assertEqual(self.geweckt, [])
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM lager_laeufe").fetchone()[0], 0)
+        self.assertEqual(self.meldungen(), [])
+
+    def test_schlafend_wird_nicht_geweckt(self):
+        self.konfig.daten["lager"].update(_fenster(-60, 60))
+        with mock.patch.object(big, "wach", return_value=False) as wach, self.lager_tabu():
+            code, e = self.lauf("lager", "abgleich")
+            with self.assertLogs("pipeline", "INFO") as logs:
+                lager.abgleich(self.con, self.konfig)  # zweiter Lauf, z. B. nachgeholt nach einem Neustart
+        self.assertEqual(code, 0, e)
+        self.assertTrue(e["nachtruhe"])
+        self.assertEqual((e["offen"], e["kopiert"], e["lager_gebraucht"], e["fehler"]), (2, 0, False, 0))
+        self.assertEqual(self.geweckt, [])  # kein wach_halten, also auch kein Wake-on-LAN
+        self.assertEqual(wach.call_count, 2)
+        self.assertTrue(any("Nachtruhe" in z and "nicht geweckt" in z for z in logs.output), logs.output)
+        self.assertEqual(self.lager_inhalt(), {".clip-lager"})
+        self.assertEqual(self.meldungen(), [])  # keine Meldung
+        lauf = json.loads(self.con.execute("SELECT ergebnis FROM lager_laeufe").fetchone()[0])
+        self.assertTrue(lauf["nachtruhe"])
+        # kein Erfolg: das Offene liegt noch im Puffer – sonst schwiege die Morgenprüfung, auch wenn es anhält
+        stand = lager.status(self.con, self.konfig)
+        self.assertIsNone(stand["letzter_erfolg"])
+        self.assertIn("in der Nachtruhe übersprungen · 1 offen", stand["zeile"])
+
+    def test_wach_wird_abgeglichen_ohne_zu_wecken(self):
+        self.konfig.daten["lager"].update(_fenster(-60, 60))
+        with mock.patch.object(big, "wach", return_value=True):
+            code, e = self.lauf("lager", "abgleich")
+        self.assertEqual(code, 0, e)
+        self.assertNotIn("nachtruhe", e)
+        self.assertEqual((e["kopiert"], e["ok"]), (2, True))
+        self.assertEqual(self.geweckt, ["lager"])
+        self.assertEqual(self.wecken_erlaubt, [False])  # wach_halten darf nicht wecken, falls er gerade einschläft
+        self.assertTrue((self.lager / "eingang/a.mp4").is_file())
+
+    def test_einschlafen_zwischen_blick_und_abgleich_weckt_nicht(self):
+        """Harte Grenze: Schläft pve-big genau zwischen dem Blick und wach_halten ein, bleibt es dabei."""
+        self.konfig.daten["lager"].update(_fenster(-60, 60))
+        self.konfig.daten["speicher"]["wol_mac"] = "aa:bb:cc:dd:ee:ff"
+        with mock.patch.object(big, "wach_halten", ECHT_WACH_HALTEN), \
+                mock.patch.object(big, "wach", side_effect=[True, False]), \
+                mock.patch.object(big, "darf_wecken", return_value=None), \
+                mock.patch.object(big, "sende_wake_on_lan") as wol:
+            code, e = self.lauf("lager", "abgleich")
+        self.assertEqual((code, e["fehler"]), (3, "nicht_geweckt"))
+        self.assertIn("Nachtruhe", e["hinweis"])
+        wol.assert_not_called()
+        self.assertEqual(self.lager_inhalt(), {".clip-lager"})
+
+    def test_ausserhalb_wie_bisher(self):
+        self.konfig.daten["lager"].update(_fenster(60, 120))
+        with mock.patch.object(big, "wach", side_effect=AssertionError("außerhalb der Nachtruhe nicht fragen")):
+            code, e = self.lauf("lager", "abgleich")
+        self.assertEqual(code, 0, e)
+        self.assertNotIn("nachtruhe", e)
+        self.assertEqual((self.geweckt, self.wecken_erlaubt), (["lager"], [True]))
+
+    def test_leer_wie_bisher(self):
+        self.konfig.daten["lager"].update(nachtruhe_von="", nachtruhe_bis="08:00")
+        with mock.patch.object(big, "wach", side_effect=AssertionError("ohne Nachtruhe nicht fragen")):
+            code, e = self.lauf("lager", "abgleich")
+        self.assertEqual(code, 0, e)
+        self.assertEqual((self.geweckt, self.wecken_erlaubt), (["lager"], [True]))
+
+    def test_probelauf_zeigt_die_nachtruhe(self):
+        self.konfig.daten["lager"].update(_fenster(-60, 60))
+        with mock.patch.object(big, "wach", side_effect=AssertionError("der Probelauf fragt pve-big nicht")), \
+                self.lager_tabu():
+            code, e = self.lauf("lager", "abgleich", "--probelauf")
+        self.assertEqual(code, 0, e)
+        self.assertEqual((e["wuerde_wecken"], e["nachtruhe"]), (True, True))
+        self.assertEqual(self.geweckt, [])
+
+    def test_uebernahme_kennt_keine_nachtruhe(self):
+        self.konfig.daten["lager"].update(_fenster(-60, 60), wurzel="")
+        self.datei(self.lager, "replays/r.replay", b"replay")
+        with mock.patch.object(big, "wach", side_effect=AssertionError("die Übernahme fragt nicht nach der Nachtruhe")):
+            code, e = self.lauf("lager", "uebernehmen", "--von", str(self.lager), "--nach", str(self.puffer))
+        self.assertEqual(code, 0, e)
+        self.assertEqual((self.geweckt, self.wecken_erlaubt), (["uebernahme"], [True]))
 
 
 # --- Status --------------------------------------------------------------------------------

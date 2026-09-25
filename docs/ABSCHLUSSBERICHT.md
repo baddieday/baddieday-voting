@@ -2,8 +2,9 @@
 
 Stand: 24.09.2026 · Branch `sprint-regisseur` · Draft-PR https://github.com/baddieday/baddieday-voting/pull/1
 
-> **Nachtrag 25.09. (E19):** Der Datenweg ist neu – Puffer auf dem Mini, pve-big nur noch nachts als Lager.
-> Einführung Schritt für Schritt: `docs/PUFFER.md`. Die Host-Schritte unten bleiben gültig und gehören zu R3.
+> **Nachtrag 25.09. (E19):** Der Datenweg ist neu – Puffer auf dem Mini, pve-big nur noch als Lager (Abgleich
+> einmal am Tag um 10:00, nie nachts). Einführung Schritt für Schritt: `docs/PUFFER.md`. Die Host-Schritte unten
+> bleiben gültig und gehören zu R3.
 
 ## Das Wichtigste zuerst
 - **Die Sitzung lief nicht auf dem Mini**, sondern in einem Cloud-Container ohne Heimnetz. Alles ist gebaut und

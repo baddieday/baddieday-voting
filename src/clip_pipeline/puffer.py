@@ -1,4 +1,4 @@
-"""Morgenprüfung des Puffers (E19, Timer clip-puffer-pruefen 09:30) und `pipeline puffer status`.
+"""Morgenprüfung des Puffers (E19, Timer clip-puffer-pruefen 11:00) und `pipeline puffer status`.
 
 Nur im getrennten Betrieb. Weckt pve-big NIE und fasst das Lager nicht an – gelesen werden nur die Tabelle `lager`,
 der Puffer (lokal), die Pool-Datei des Hosts ([puffer].pool_status) und sitzungen/pc-status.json vom Gaming-PC.
@@ -79,6 +79,9 @@ def _lager(con: sqlite3.Connection, konfig: Konfig, zeit: datetime) -> Befund:
     grund = ""
     if lauf and lauf.get("abbruch"):
         grund = f" Letzter Versuch {_wann(konfig, lauf['ende'] or lauf['start'])}: {str(lauf['abbruch'])[:200]}."
+    elif lauf and lauf.get("nachtruhe"):
+        grund = (f" Letzter Versuch {_wann(konfig, lauf['ende'] or lauf['start'])}: in der Nachtruhe, pve-big schlief "
+                 "und wurde nicht geweckt.")
     return stand, (f"🗄️ Lager: {stand['offen']} Datei(en) ({stand['offen_gb']:.1f} GB) warten im Puffer – "
                    f"{wie_lange}.{grund}\n"
                    "Nichts verloren – alles liegt sicher im Puffer.\n"
@@ -286,6 +289,6 @@ def melde(con: sqlite3.Connection, konfig: Konfig, stand: dict, zeit: datetime |
 
 
 def pruefe_morgens(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None) -> list[str]:
-    """Morgenprüfung (Timer 09:30): status() + melde(). Liefert die Schlüssel der neuen Meldungen."""
+    """Morgenprüfung (Timer 11:00): status() + melde(). Liefert die Schlüssel der neuen Meldungen."""
     zeit = zeit or jetzt()
     return melde(con, konfig, status(con, konfig, zeit), zeit)

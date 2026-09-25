@@ -371,14 +371,17 @@ def darf_wecken(konfig: Konfig, zeit: datetime | None = None) -> str | None:
 
 
 @contextmanager
-def wach_halten(konfig: Konfig, name: str, grund: str, minuten: float = 120) -> Iterator[bool]:
+def wach_halten(konfig: Konfig, name: str, grund: str, minuten: float = 120, *, wecken: bool = True) -> Iterator[bool]:
     """Weckt pve-big (falls nötig und erlaubt), hält ihn für die Aufgabe wach und fährt ihn danach sofort
     herunter – außer jemand anderes braucht ihn noch oder er lief schon vorher.
 
     Liefert True, wenn pve-big bereitsteht. Wirft WeckenVerboten, wenn er schläft und nicht geweckt werden darf.
+    wecken=False: nur nutzen, wenn er ohnehin läuft (Nachtruhe des Lager-Abgleichs) – nie Wake-on-LAN.
     """
     schon_wach = wach(konfig)
     if not schon_wach:
+        if not wecken:
+            raise WeckenVerboten("pve-big schläft, und Wecken ist gerade nicht erlaubt (Nachtruhe)")
         if grund_dagegen := darf_wecken(konfig):
             raise WeckenVerboten(grund_dagegen)
     setze_marke(konfig, name, minuten, grund)

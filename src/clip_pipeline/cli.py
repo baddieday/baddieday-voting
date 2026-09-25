@@ -227,7 +227,8 @@ def _cmd_material(args, konfig, con) -> int:
 
 def _cmd_lager(args, konfig, con) -> int:
     """Puffer ↔ Lager (E19). Exit: 0 ok · 1 Datei-Fehler (Übernahme auch: Konflikt, zu jung) · 2 Aufruf/Konfig ·
-    3 Lager offline/nicht geweckt · 4 Lager-Sperre belegt (Gesperrt, in main). Der Probelauf endet ohne Abbruch mit 0.
+    3 Lager offline/nicht geweckt · 4 Lager-Sperre belegt (Gesperrt, in main). Der Probelauf endet ohne Abbruch mit 0,
+    ebenso ein Abgleich, der in der Nachtruhe nicht wecken durfte ("nachtruhe": true).
     Die Übernahme läuft vor dem Umschalten, also auch ohne [lager]."""
     from . import lager
 
@@ -492,7 +493,8 @@ def baue_parser() -> argparse.ArgumentParser:
 
     s = unter.add_parser("lager", help="Puffer ↔ Lager auf pve-big (E19): abgleich | status | uebernehmen")
     lager_befehle = s.add_subparsers(dest="aktion", required=True)
-    a = lager_befehle.add_parser("abgleich", help="Puffer → Lager mit SHA-256 (weckt pve-big nur, wenn etwas offen ist)")
+    a = lager_befehle.add_parser("abgleich", help="Puffer → Lager mit SHA-256 (weckt pve-big nur, wenn etwas offen "
+                                                  "ist – nie in der Nachtruhe)")
     a.add_argument("--probelauf", action="store_true", help="nur zeigen, was offen ist (weckt nicht, kopiert nichts)")
     lager_befehle.add_parser("status", help="offene Dateien, letzter Abgleich, Puffer frei (weckt nie)")
     a = lager_befehle.add_parser("uebernehmen", help="einmalig Lager → Puffer vor dem Umschalten (docs/PUFFER.md R4/R5)")

@@ -1,7 +1,7 @@
 ﻿# Kopiere diese Datei nach "uebertragung.psd1" und passe Ziel, ZielHost und MAC an.
 #
 # Puffer-Betrieb (E19): Der PC kopiert wie bisher alle 2 min, aber auf den Mini (läuft immer); pve-big holt sich
-# die Daten nachts selbst ab. Dafür nur diese drei Werte ändern, alles andere bleibt gleich (docs/PUFFER.md, R7):
+# die Daten einmal am Tag (10:00) selbst ab. Dafür nur diese drei Werte ändern, alles andere bleibt gleich (docs/PUFFER.md, R7):
 #     Ziel         = '\\192.168.178.93\clips'   # Samba-Freigabe im CT auf dem Mini (Puffer, mit .clip-speicher)
 #     ZielHost     = '192.168.178.93'
 #     WakeOnLanMac = ''                          # leer: der Mini ist immer an, der PC weckt nie

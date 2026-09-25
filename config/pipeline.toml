@@ -43,7 +43,7 @@ frist = "2026-09-28T20:00:00+02:00"
 # Bis die SSH-Steuerung eingerichtet ist, enden diese Schritte bei schlafendem pve-big mit Exit 3 (Alarm).
 alter_weckweg_nur_mit_aus = true
 # So lange gilt ein erfolgreicher Test der Steuerung (der Wächter erneuert ihn, solange pve-big läuft).
-# 60 statt 14 (E19): mit Puffer ist pve-big oft tagelang aus – danach soll der nächtliche Abgleich ihn trotzdem wecken.
+# 60 statt 14 (E19): mit Puffer ist pve-big oft tagelang aus – danach soll der tägliche Abgleich ihn trotzdem wecken.
 status_gueltig_tage = 60
 
 [lager]
@@ -56,10 +56,16 @@ warten_s = 240                 # nach dem Wecken so lange auf die Markierung war
 ordner = ["eingang", "replays", "sessions", "highlights", "sitzungen", "musik", "archiv", "sicherung"]
 roh = ["eingang", "replays"]   # Rohdaten: im Lager nie überschreiben, nie löschen
 ruhe_min = 10                  # jüngere Dateien (mtime ODER ctime) gelten als "wird noch geschrieben"
-sicherungen_behalten = 30      # so viele nächtliche DB-Sicherungen in sicherung/ behalten
+sicherungen_behalten = 30      # so viele tägliche DB-Sicherungen in sicherung/ behalten
+# Nachtruhe (Ortszeit, über Mitternacht erlaubt): Schläft pve-big, weckt der Abgleich ihn in dieser Zeit NIE – auch
+# nicht beim Nachholen nach einem Neustart des Mini (Persistent=true). Läuft er ohnehin, wird abgeglichen.
+# Der Timer steht auf 10:00 (deploy/systemd/clip-lager.timer). Leer = aus; ein Tippfehler ist ein Konfig-Fehler (Exit 2).
+nachtruhe_von = "22:00"
+nachtruhe_bis = "08:00"
 
 [puffer]
-# Puffer auf dem Mini (E19, nur im getrennten Betrieb): hier arbeitet die Pipeline, nachts geht alles ins Lager.
+# Puffer auf dem Mini (E19, nur im getrennten Betrieb): hier arbeitet die Pipeline, einmal am Tag (10:00) geht alles
+# ins Lager. Die Morgenprüfung läuft um 11:00 (deploy/systemd/clip-puffer-pruefen.timer).
 markierung = ".clip-puffer"    # liegt NUR im Puffer
 freigeben = false              # Stufe B5 (später, nur mit OK): bestätigte Rohdaten im Puffer löschen
 warnung_frei_gb = 20           # Morgenprüfung: Meldung, wenn weniger frei

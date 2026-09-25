@@ -107,7 +107,7 @@ class BotApp(MitSpeicher):
 
         fake = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
                                bot=SimpleNamespace(send_message=send_message))
-        with mock.patch.object(aktionen, "jetzt", return_value=_um(4, 35)):  # nach dem Abgleich um 04:30
+        with mock.patch.object(aktionen, "jetzt", return_value=_um(4, 35)):  # mitten in der Ruhezeit (bis 08:00)
             self.assertEqual(asyncio.run(bot_app.sende_meldungen(fake)), 1)
         self.assertEqual(gesendet, ["⚠️ 2 Kills ohne Aufnahme"])  # andere Meldungen wie bisher sofort
         with mock.patch.object(aktionen, "jetzt", return_value=_um(8, 0)):

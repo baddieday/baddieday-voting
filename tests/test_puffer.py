@@ -255,12 +255,24 @@ class LagerThema(MitPuffer):
 
     def test_einzelner_weck_fehlschlag_still(self):
         """Ein Abbruch (pve-big nicht geweckt) ist meist vorübergehend: keine Meldung, solange der letzte Erfolg
-        jünger als lager_spaetestens_h ist – sonst käme nach jeder schlechten Nacht ein Fehlalarm."""
+        jünger als lager_spaetestens_h ist – sonst käme nach jedem schlechten Abgleich ein Fehlalarm."""
         self.datei(self.puffer, "eingang/a.mp4", b"x" * 1000)
         self.con.execute("DELETE FROM lager_laeufe")
         self.lauf_eintragen(20)
         self.lauf_eintragen(3, ok=False, abbruch="SpeicherOffline: Lager-Host pve-big schläft")
         self.assertEqual(self.pruefe(), [])
+
+    def test_nachtruhe_zaehlt_nicht_als_erfolg(self):
+        """Ein Abgleich, der in der Nachtruhe nicht wecken durfte, hat nichts ins Lager gebracht. Hält das an (z. B.
+        der Timer steht versehentlich wieder nachts), meldet die Morgenprüfung – mit dem Grund."""
+        self.datei(self.puffer, "eingang/a.mp4", b"x" * 1000)
+        self.con.execute("DELETE FROM lager_laeufe")
+        self.lauf_eintragen(40)
+        self.lauf_eintragen(1, nachtruhe=True, offen=1)
+        self.assertEqual(self.pruefe(), [f"puffer:lager:{self.tag()}"])
+        text = self.text(f"puffer:lager:{self.tag()}")
+        self.assertIn("seit 40 h kein erfolgreicher Abgleich", text)
+        self.assertIn("in der Nachtruhe", text)
 
     def test_nichts_offen_keine_meldung(self):
         self.lauf_eintragen(100)  # lange her, aber nichts wartet
