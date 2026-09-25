@@ -198,7 +198,7 @@ class UploadFassungPruefungen(MitUpload):
     def test_datei_verschwunden_wird_neu_gerendert(self):
         # upload_pfad gemerkt, aber die Datei ist weg (z. B. von Hand gelöscht): nicht „übersprungen“ melden
         self.con.execute("UPDATE entwuerfe SET upload_pfad = ? WHERE id = ?", (str(self.tmp / "weg.mp4"), self.eid))
-        with mock.patch.object(entwurf, "rendere", side_effect=lambda l, z, k, **kw: _falsches_ergebnis(z)) as r:
+        with mock.patch.object(entwurf, "rendere", side_effect=lambda liste, ziel, k, **kw: _falsches_ergebnis(ziel)) as r:
             ergebnis = entwurf.upload_fassung(self.con, self.konfig, self.eid)
         self.assertEqual((r.call_count, ergebnis["uebersprungen"]), (1, False))
 
@@ -284,7 +284,7 @@ class UploadFassungNieWecken(MitUpload):
                 mock.patch("clip_pipeline.konfig.sende_wake_on_lan") as wol, \
                 mock.patch.object(big, "wach_halten") as wach, \
                 mock.patch("socket.create_connection", side_effect=AssertionError("Netzwerkzugriff")), \
-                mock.patch.object(entwurf, "rendere", side_effect=lambda l, z, k, **kw: _falsches_ergebnis(z)):
+                mock.patch.object(entwurf, "rendere", side_effect=lambda liste, ziel, k, **kw: _falsches_ergebnis(ziel)):
             r = entwurf.upload_fassung(self.con, self.konfig, eid)
         self.assertFalse(r["uebersprungen"])
         wol.assert_not_called()
