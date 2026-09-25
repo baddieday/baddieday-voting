@@ -166,7 +166,7 @@ class Trainieren(MitPosts):
 
     def test_mic_lachen_auf_beiden_seiten_wird_gelernt(self):
         start = {m: float(self.konfig.wert(f"vorbewertung.startgewichte.{m}", 0.0)) for m in MERKMALE}
-        paar = Paar(alt(1.0, mic_lachen=1.0), alt(1.0, mic_lachen=0.0), "battle")
+        paar = Paar(alt(1.0, mic_lachen=0.5), alt(1.0, mic_lachen=0.0), "battle")   # Vorsprung 0,5 < Marge
         w = lernen.trainiere([paar], start, self.einstellungen())
         self.assertGreater(w["mic_lachen"], start["mic_lachen"])
 
@@ -247,8 +247,8 @@ class PublikumPaare(MitPosts):
         self.con.execute("UPDATE clips SET merkmale = ? WHERE id = ?",
                          (json.dumps(alt(6.0, bot_opfer=1.0)), hook))
         self.con.execute("INSERT INTO momente (schluessel, clip_id, datei, start_s, ende_s, stimmung, sicherheit,"
-                         " quelle, merkmale, erstellt) VALUES (?, ?, 'x.mp4', 0, 10, 'episch', 1, 'regel', ?, ?)",
-                         (f"clip:{hook}", hook, json.dumps({"lachen": 5, "mikro_spur": 1}), iso(T0)))
+                         " quelle, merkmale, erstellt, geaendert) VALUES (?, ?, 'x.mp4', 0, 10, 'episch', 1, 'regel', ?, ?, ?)",
+                         (f"clip:{hook}", hook, json.dumps({"lachen": 5, "mikro_spur": 1}), iso(T0), iso(T0)))
         momente = [{"moment": f"clip:{hook}", "clip_id": hook, "merkmale": alt(6.0, bot_opfer=0.0)},
                    {"moment": f"clip:{anderer}", "clip_id": anderer, "merkmale": alt(10.0)}]
         self.entwurf_post(1, f"clip:{hook}", momente, 2.0, tag=1)
@@ -263,8 +263,9 @@ class PublikumPaare(MitPosts):
 
     def test_datei_moment_mit_momente_zeile(self):
         self.con.execute("INSERT INTO momente (schluessel, clip_id, datei, start_s, ende_s, stimmung, sicherheit,"
-                         " quelle, merkmale, erstellt) VALUES ('datei:c', NULL, 'c.mp4', 0, 10, 'lustig', 1, 'regel',"
-                         " ?, ?)", (json.dumps({"max_gruppe": 2, "lachen": 1, "spitzen_s": [1.0]}), iso(T0)))
+                         " quelle, merkmale, erstellt, geaendert) VALUES ('datei:c', NULL, 'c.mp4', 0, 10, 'lustig', 1,"
+                         " 'regel', ?, ?, ?)", (json.dumps({"max_gruppe": 2, "lachen": 1, "spitzen_s": [1.0]}),
+                                                iso(T0), iso(T0)))
         self.entwurf_post(1, "datei:c", [{"moment": "datei:c", "clip_id": None, "merkmale": {}}], 1.0, tag=1)
         self.entwurf_post(2, "datei:d", [{"moment": "datei:d", "clip_id": None,
                                           "merkmale": {"kill_punkte": 1.0, "text": "x"}}], 0.0, tag=2)
@@ -501,7 +502,7 @@ class GewichteAnzeige(MitPosts):
         self.assertIn("Sortier-Quote du: ", text)
         self.assertIn("Sortier-Quote Publikum: 100 % (Start 100 %) – 1 Paar, zählt für die Schranke erst ab 10", text)
         self.assertIn("Paare: 0 Battles · 8 Freigaben · 1 Publikum", text)
-        self.assertIn("ohne Mic-Analyse: 10 Clips", text)
+        self.assertIn("ohne Mic-Analyse: 6 Clips", text)   # 4 freigegeben + 2 Post-Clips (4 verworfen zählen nicht)
 
 
 # --- pipeline publikum bewerten lernt neu (Annahme S2-A12) ---------------------------------------------------
@@ -544,3 +545,30 @@ class BestehenderTestMitHalbemGewicht(MitPosts):
         voll = lernen.berechne(self.con, self.konfig)
         self.assertGreaterEqual(voll.werte["lautstaerke"], e.werte["lautstaerke"])
 
+
+
+class KaputteDaten(MitPosts):
+    """Ein kaputter Post (JSON) hält das Lernen nicht auf – er wird geloggt und übersprungen."""
+
+    def test_kaputtes_score_teile_und_merkmale(self):
+        self.clip_post(alt(1.0), 0.0, tag=1)
+        self.clip_post(alt(3.0), 1.0, tag=2)
+        _, kaputt1 = self.clip_post(alt(5.0), 2.0, tag=3)
+        _, kaputt2 = self.clip_post(alt(6.0), 3.0, tag=4)
+        self.con.execute("UPDATE posts SET score_teile = '{kaputt' WHERE id = ?", (kaputt1,))
+        self.con.execute("UPDATE posts SET merkmale = '{kaputt' WHERE id = ?", (kaputt2,))
+        with self.assertLogs("pipeline", "WARNING") as logs:
+            paare = lernen.publikum_paare(self.con, self.konfig)
+        self.assertEqual([(p.besser["kill_punkte"], p.schlechter["kill_punkte"]) for p in paare], [(3.0, 1.0)])
+        self.assertTrue(any(f"#{kaputt1}" in z for z in logs.output) and any(f"#{kaputt2}" in z for z in logs.output))
+
+    def test_publikum_bewerten_kommt_trotz_lernfehler_mit_json_zeile(self):
+        aus = io.StringIO()
+        ergebnis = {"bewertet": 1, "ohne_messung": 0, "noch_zu_jung": 0, "fehler": 0, "posts": [{"id": 1, "score": 1}]}
+        with mock.patch.object(cli, "lade", return_value=self.konfig), \
+                mock.patch.object(publikum, "bewerte_alle", return_value=ergebnis), \
+                mock.patch("clip_pipeline.lernbot_publikum.meldung_nach_bewerten", return_value=False), \
+                mock.patch.object(lernen, "aktualisiere", side_effect=KeyError("gewicht_freigabe")), \
+                contextlib.redirect_stdout(aus), self.assertLogs("pipeline", "WARNING"):
+            self.assertEqual(cli.main(["publikum", "bewerten"]), 0)
+        self.assertEqual(json.loads(aus.getvalue().strip().splitlines()[-1])["bewertet"], 1)

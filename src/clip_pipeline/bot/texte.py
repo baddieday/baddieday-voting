@@ -6,7 +6,7 @@ import json
 from datetime import date
 from html import escape
 
-from ..lernen import Ergebnis
+from ..lernen import Ergebnis, anzeige_zeilen, datenbasis_text
 from ..vorbewertung import MERKMAL_NAMEN, MERKMALE, gruppiere, zahl
 from ..zeit import aus_iso, utc_zu_lokal
 
@@ -84,6 +84,11 @@ def rangliste_text(zeilen: list, saison: tuple[date, date]) -> str:
 
 
 def gewichte_text(e: Ergebnis, version: int) -> str:
+    """/gewichte im Clip-Bot (Spec §8.3): Tabelle der 17 Gewichte (Start, aktuell, Δ), darunter beide
+    Sortier-Quoten (du · Publikum), die Paare je Quelle, die Clips ohne Mic-Analyse und – wenn ihr auseinander
+    liegt – „Du magst X, das Publikum Y“. Die Zeilen unter der Tabelle kommen aus lernen.anzeige_zeilen (eine
+    Stelle für Bot und CLI). Die Erwartungs-Zeile hängt bot/app.cmd_gewichte an.
+    Beispiel-Fuß: „Sortier-Quote Publikum: 64 % (Start 50 %) – 3 Paare, zählt für die Schranke erst ab 10“."""
     zeilen = [f"{'Merkmal':<15}{'Start':>7}{'Aktuell':>9}{'Δ':>7}"]
     for m in MERKMALE:
         delta = e.werte[m] - e.start[m]
@@ -93,13 +98,11 @@ def gewichte_text(e: Ergebnis, version: int) -> str:
         )
     kopf = [
         f"🧠 <b>Vorbewertung – Gewichte</b> (Version {version})",
-        f"Datenbasis: {e.datenbasis} Bewertungen ({e.freigaben} Freigaben/Verwerfungen, {e.battles} Battles)",
+        escape(datenbasis_text(e)),
         f"Status: {escape(e.grund)} · Vertrauen {round(e.vertrauen * 100)} %",
     ]
-    fuss = []
-    if e.trefferquote is not None:
-        fuss.append(f"Trefferquote: {round(e.trefferquote * 100)} % (Startgewichte: {round((e.trefferquote_start or 0) * 100)} %)")
-    return "\n".join(kopf) + "\n<pre>" + escape("\n".join(zeilen)) + "</pre>" + ("\n" + "\n".join(fuss) if fuss else "")
+    fuss = [escape(z) for z in anzeige_zeilen(e)]
+    return "\n".join(kopf) + "\n<pre>" + escape("\n".join(zeilen)) + "</pre>\n" + "\n".join(fuss)
 
 
 def status_text(anzahl: dict[str, int], speicher: str, letzte: str | None, lager: str | None = None) -> str:
