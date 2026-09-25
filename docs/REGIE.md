@@ -27,7 +27,8 @@ Musik (NCS / Lern-Bot) ─► pipeline musik ─► Tempo, Beats, Energie ─┤
 | `pipeline big aus [--sofort]` | von Hand herunterfahren |
 | `pipeline bestand [--bericht docs/BESTAND.md]` | Replays, Videos, Tonspuren (Mikro?), VA-API, Platz – weckt nicht |
 | `pipeline material [--probelauf]` | Replays, Sessions, Videos auf den Mini kopieren (1× wecken, SHA-256) |
-| `pipeline stimmung [--dateien] [--neu] [--ohne-claude] [--ohne-whisper]` | Stimmung je Moment |
+| `pipeline stimmung [--dateien] [--neu] [--ohne-claude] [--ohne-whisper] [--max n]` | Stimmung je Moment |
+| `pipeline stimmung --clips [--session ID] [--max n]` | Mic-Schritt (Stufe 2): Mic-Merkmale in die Clips, ohne Claude, nur Puffer – startet sonst im Hintergrund nach `render` |
 | `pipeline musik ncs --stimmung episch --anzahl 3` | NCS-Titel laden (mit Quellenangabe) |
 | `pipeline musik hinzufuegen <datei> --quelle "…" [--titel --kuenstler]` | eigenen Titel aufnehmen |
 | `pipeline musik analysieren <datei>` · `pipeline musik liste` | Tempo/Energie ansehen |
@@ -92,10 +93,13 @@ Alles wird bei jedem Lauf aus den gespeicherten Bewertungen neu berechnet und is
 kann nichts kaputt machen (je Moment höchstens ±3).
 
 ## Abwechslung – warum nicht immer dieselben Clips kommen
-Jeder Moment hat Punkte (Kill-Serie 1/3/6/10, Victory +5, Stimmung, Elo, Freigabe, Gelerntes). Früher gewannen
+Jeder Moment hat Punkte: seine Stärke nach derselben Bewertung wie im Clip-Bot (`vorbewertung.roh_score`, seit
+Lernschleife Stufe 2 – Kill-Serie 1/3/6/10, Victory +5, Bot-Opfer, Clutch, Mic-Werte …), dazu gelernter
+Stimmungs-Bonus, Elo und Freigabe. Der feste Stimmungswert zählt nicht mehr zur Stärke (offene Rückfrage S2-R2 in
+`docs/ENTSCHEIDUNGEN.md`), er entscheidet nur noch bei der Musik mit. Früher gewannen
 bei jedem Entwurf dieselben Top-Momente; nur die Musik wechselte. Jetzt verliert ein Moment, der im **letzten**
 Entwurf war, **70 %** seiner Punkte, einer aus dem vorletzten 35 %, davor 17,5 % … (zusammen höchstens 100 %,
-die letzten 12 Entwürfe zählen). Ein Vierfach-Kill (13,5 Punkte) fällt damit nach einem Auftritt auf 4 und
+die letzten 12 Entwürfe zählen). Ein Vierfach-Kill (10 Punkte) fällt damit nach einem Auftritt auf 3 und
 kommt ein, zwei Entwürfe später wieder; dazwischen kommen die anderen dran.
 Einstellbar: `[regie.vorgaben] abwechslung = 0.7` (0 = immer die besten, 1 = maximal wechseln).
 Je mehr Clips eine Stimmung haben, desto mehr Auswahl: `regie-starten.sh` analysiert die nächsten 40, der

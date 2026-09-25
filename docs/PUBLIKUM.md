@@ -365,8 +365,8 @@ Art), `/gewichte` zeigt zwei Quoten („du“ und „Publikum“). Beim Senden s
 | Schritt | Freigabe nötig? | Rückweg |
 |---|---|---|
 | S1 Code einspielen | **ja** – Produktion ändern; Tabelle `gewichte` bekommt drei Spalten | alten Stand auschecken |
-| S2 Merkmale nachtragen | nein – nur Datenbank, weckt nie, beliebig oft | Datenbank-Sicherung aus S1 |
-| S3 Waffen-Nummern eintragen | nein – nur `lokal.toml` | Zeilen entfernen |
+| S2 Waffen-Nummern eintragen | nein – nur `lokal.toml` | Zeilen entfernen |
+| S3 Merkmale nachtragen | nein – nur Datenbank, weckt nie, beliebig oft | Datenbank-Sicherung aus S1 |
 | S4 Mic-Schritt prüfen | nein – nur lesen | `[merkmale] mic = false` |
 
 ### S1 · Code einspielen
@@ -378,6 +378,7 @@ cd /opt/clip-pipeline
 [ -e /var/lib/clip-pipeline/vor-stufe2.sha ] || sudo -u pipeline git rev-parse HEAD | tee /var/lib/clip-pipeline/vor-stufe2.sha
 [ -e /var/lib/clip-pipeline/vor-stufe2.db ] || sudo -u pipeline sqlite3 /var/lib/clip-pipeline/pipeline.db ".backup /var/lib/clip-pipeline/vor-stufe2.db"
 sudo -u pipeline git fetch -q origin && sudo -u pipeline git pull --ff-only
+sudo -u pipeline .venv/bin/pipeline status     # verbindet einmal: neue Spalten, bevor die Bots gleichzeitig starten
 [ -d /opt/clip-regie ] && sudo -u pipeline git -C /opt/clip-regie fetch -q origin \
   && sudo -u pipeline git -C /opt/clip-regie checkout -q --detach origin/main
 systemctl restart clip-bot clip-lernbot
@@ -386,23 +387,13 @@ sudo -u pipeline .venv/bin/pipeline gewichte   # 17 Zeilen, „Sortier-Quote du 
 **Was du lernst:** Neue Merkmale ohne gespeichertes Gewicht bekommen ihr Startgewicht aus `pipeline.toml`
 (`lernen.aktuelle` füllt auf) – eine alte Gewichts-Version bleibt gültig.
 
-### S2 · Merkmale für vorhandene Clips nachtragen
-
-```bash
-sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline merkmale nachtragen
-# JSON: {"replay": {"clips", "geaendert", "ohne_replay", "waffen_gemeldet"}, "mic": {"clips", "geaendert"}}
-```
-**Was:** rechnet die Replay-Merkmale aus `sessions/<ID>/replay.json` im Puffer und übernimmt vorhandene Mic-Werte
-aus den momente-Zeilen – ohne Whisper, ohne Sperre, weckt nie. `ohne_replay` zählt Clips, deren replay.json nicht
-(mehr) im Puffer liegt; die behalten „unbekannt“ und werden beim Lernen für diese Merkmale nicht verglichen.
-Fehlende Mic-Analysen holt der Mic-Schritt nach (S4) – von Hand: `pipeline stimmung --clips --max 5`.
-**Ohne Puffer-Betrieb** lehnen beide Befehle mit Exit 2 ab.
-
-### S3 · Waffen-Nummern kalibrieren
+### S2 · Waffen-Nummern kalibrieren
 
 Das Replay speichert die Waffe nur als **Zahl** (FortniteReplayReader 3.1.0 liest ein Byte, Namen gibt es nicht).
-Deshalb startet `[merkmale.waffen]` leer, und alles zählt als `sonstige`, bis du die Zahlen einträgst:
-1. Ein Match nehmen, in dem du weißt, womit du welchen Kill gemacht hast, und ansehen:
+Solange `[merkmale.waffen]` leer ist, bleiben `sniper` und `nahkampf` **unbekannt** (sie zählen 0 und werden beim
+Lernen nicht verglichen). Deshalb zuerst kalibrieren, dann nachtragen (S3):
+1. Ein Match nehmen, in dem du weißt, womit du welchen Kill gemacht hast, und ansehen (geht erst nach S1 – die
+   Waffen-Spalte ist neu):
    `sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline replay /srv/clips/replays/<datei>.replay`
    Jede Zeile endet mit `[Waffe n · Bot ja/nein/? · n übrig]`.
 2. In `/opt/clip-pipeline/config/lokal.toml` eintragen (ein `[merkmale.waffen]`-Kopf, nicht zweimal):
@@ -412,9 +403,21 @@ Deshalb startet `[merkmale.waffen]` leer, und alles zählt als `sonstige`, bis d
    nahkampf = [3, 27]
    sonstige = [5]
    ```
-3. `pipeline merkmale nachtragen` rechnet `sniper`/`nahkampf` für Clips neu, denen die Replay-Merkmale **fehlen** –
-   schon nachgetragene behalten ihren Wert. Das ist bewusst so (idempotent); eine Neuberechnung nach der
-   Kalibrierung ist eine offene Rückfrage.
+Nummern, die später neu auftauchen (Fortnite-Update), meldet der Clip-Bot als Sammelmeldung; sie zählen bis zum
+Eintragen als `sonstige`.
+
+### S3 · Merkmale für vorhandene Clips nachtragen
+
+```bash
+sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline merkmale nachtragen
+# JSON: {"replay": {"clips", "geaendert", "ohne_replay", "waffen_gemeldet"}, "mic": {"clips", "geaendert"}}
+```
+**Was:** rechnet die Replay-Merkmale aus `sessions/<ID>/replay.json` im Puffer und übernimmt vorhandene Mic-Werte
+aus den momente-Zeilen – ohne Whisper, ohne Sperre, weckt nie. `ohne_replay` zählt Clips, deren replay.json nicht
+(mehr) im Puffer liegt; die behalten „unbekannt“ und werden beim Lernen für diese Merkmale nicht verglichen.
+Fehlende Mic-Analysen holt der Mic-Schritt nach (S4) – von Hand: `pipeline stimmung --clips --max 5` (mehrmals
+möglich; je Lauf höchstens so viele Clips, die Pipeline-Sperre bleibt kurz belegt).
+**Ohne Puffer-Betrieb** lehnen beide Befehle mit Exit 2 ab.
 
 ### S4 · Mic-Schritt prüfen
 
@@ -427,8 +430,12 @@ loginctl show-user pipeline -p KillUserProcesses 2>/dev/null; grep -i '^KillUser
 tail -n 20 /var/lib/clip-pipeline/mikro.log
 ```
 Steht bei logind `yes`: Der Mic-Schritt würde mit dem Ende des SSH-Aufrufs beendet. Dann `[merkmale] mic = false` in
-`lokal.toml` – der Timer `clip-sitzungen` holt die Mic-Werte ohnehin nach (≤ 10 min). Melden, dann bauen wir eine
-eigene systemd-Einheit (Rückfrage).
+`lokal.toml` und melden – eine eigene systemd-Einheit ist Rückfrage S2-R3. **Ehrlich zum Rückfall:** Der Timer
+`clip-sitzungen` misst nur einmal je Spielabend (neue `session_*.json`) Clips **ohne** momente-Zeile; unvollständige
+Mic-Werte holt nur `stimmung --clips` nach – das nächste render oder du von Hand (`pipeline stimmung --clips --max 5`).
+Hat ein Match mehr Clips als `[merkmale].mic_je_lauf` (3), nimmt das nächste render die übrigen mit.
+Ein Rückstand-Lauf (`deploy/rueckstand.sh`, systemd-run) beendet seine Mic-Kinder mit dem Ende der Unit – danach
+einmal `pipeline stimmung --clips --max 5` von Hand.
 
 ### Abnahme (Stufe 2)
 

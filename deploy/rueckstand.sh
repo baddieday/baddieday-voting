@@ -10,6 +10,9 @@
 #         rueckstand.sh --liste    -> nur offene Sessions ausgeben (auch: RUECKSTAND_LISTE=1)
 # Start als Dienst: systemd-run --unit=clip-rueckstand --uid=pipeline --gid=pipeline \
 #   -p WorkingDirectory=/opt/clip-pipeline --collect /opt/clip-pipeline/deploy/rueckstand.sh
+# Mic-Schritt (Lernschleife Stufe 2): Jedes render startet einen Mic-Kindprozess, der auf die Sperre wartet. Endet
+# diese Unit, beendet systemd auch diese Kinder (sie liegen in ihrer cgroup) – danach einmal von Hand
+# `pipeline stimmung --clips --max 5`. KillMode=process wäre schlechter: verwaiste Prozesse ohne Unit.
 set -u
 export LC_ALL=C
 PIPE=/opt/clip-pipeline/.venv/bin/pipeline
