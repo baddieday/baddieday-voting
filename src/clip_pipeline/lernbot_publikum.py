@@ -66,6 +66,7 @@ HILFE_ZUSATZ = """
 🔗 /link <code>41 https://www.tiktok.com/@…/video/…</code> – Post zu Entwurf 41 anlegen, der Bot nennt die Post-Nummer.
 📸 Screenshot der TikTok-Statistik mit Bildunterschrift <code>#17</code> (Post-Nummer) – Claude liest die Zahlen.
 ✏️ Von Hand: <code>#17 1240 61 6.8 34</code> = Views, Likes, Ø Wiedergabe (s), ganz angesehen (%), „–“ = unbekannt.
+➕ Optional dahinter Kommentare, Shares, Saves: <code>#17 1240 61 6.8 34 3 5 2</code>
 /publikum – letzte Posts mit Zahlen und Score (sobald der Post alt genug ist – /publikum zeigt, ab wann).
 Zeichen: 👁 Views · ❤️ Likes · ⏱ Ø Wiedergabe · 🏁 ganz angesehen"""
 

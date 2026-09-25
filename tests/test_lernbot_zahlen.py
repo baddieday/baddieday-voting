@@ -175,10 +175,19 @@ class Hilfen(unittest.TestCase):
         self.assertEqual(lernbot_zahlen.lies_text_eingabe("  #3 1240 61 – 34")[1]["wiedergabe_s"], None)
         self.assertIsNone(lernbot_zahlen.lies_text_eingabe("1240 61 6.8 34"))  # ohne #Nummer: kein Messungs-Text
         self.assertIsNone(lernbot_zahlen.lies_text_eingabe("Hallo #17"))       # Nummer nicht am Anfang
-        with self.assertRaisesRegex(ValueError, "genau vier Werte"):
+        with self.assertRaisesRegex(ValueError, "4 oder 7 Werte, nicht 2"):
             lernbot_zahlen.lies_text_eingabe("#17 1240 61")
-        with self.assertRaisesRegex(ValueError, "genau vier Werte"):
+        with self.assertRaisesRegex(ValueError, "4 oder 7 Werte, nicht 0"):
             lernbot_zahlen.lies_text_eingabe("#17")
+        with self.assertRaisesRegex(ValueError, "4 oder 7 Werte, nicht 8"):              # zu viele Felder
+            lernbot_zahlen.lies_text_eingabe("#17 1240 61 6.8 34 3 5 2 9")
+
+    def test_lies_text_eingabe_mit_sieben_werten(self):
+        # Florian 25.09.: auch ohne Bild gehen Kommentare, Shares, Saves dahinter
+        nr, werte = lernbot_zahlen.lies_text_eingabe("#17 1240 61 6.8 34 3 5 2")
+        self.assertEqual(nr, 17)
+        self.assertEqual(werte, publikum.lies_hand_eingabe("1240 61 6.8 34 3 5 2"))
+        self.assertEqual((werte["kommentare"], werte["shares"], werte["saves"]), (3, 5, 2))
 
     def test_knoepfe_posts(self):
         posts = [{"id": 17, "art": "entwurf", "clip_id": None, "entwurf_id": 41, "plattform": "tiktok",
@@ -231,6 +240,8 @@ class Hilfen(unittest.TestCase):
         self.assertIn("#17", bitte)
         self.assertIn("Sekunden", bitte)
         self.assertIn(publikum.HAND_FORM, bitte)  # dieselbe Form wie im Fehlertext von lies_hand_eingabe
+        self.assertIn(publikum.HAND_HINWEIS, bitte)  # … samt Zusatz-Zählern und Beispielen – ein Text für beide
+        self.assertIn("Kommentare Shares Saves", bitte)
 
     def test_endung_fuer(self):
         self.assertEqual(lernbot_zahlen.endung_fuer("image/png", "x.png"), ".png")
@@ -456,6 +467,50 @@ class HandEingabe(MitLernBot):
                          ("hand", 1240, 61, 6.8, 34.0, None))
         self.assertIn(f"💾 #{pid} gespeichert (von Hand)", self.letzte())
 
+    def test_text_mit_sieben_werten_wird_gespeichert(self):
+        # Florian 25.09.: Kommentare, Shares, Saves dahinter – gespeichert und in der Bestätigung gezeigt
+        pid = self.post()
+        self.text(f"#{pid} 1240 61 6,8 34 3 5 2")
+        (m,) = self.messungen(pid)
+        self.assertEqual((m["quelle"], m["views"], m["kommentare"], m["shares"], m["saves"]), ("hand", 1240, 3, 5, 2))
+        self.assertEqual(self.letzte(), f"💾 #{pid} gespeichert (von Hand): "
+                                        "👁 1 240 · ❤️ 61 · 💬 3 · ↗️ 5 · 🔖 2 · ⏱ 6,8 s · 🏁 34 %")
+
+    def test_sieben_werte_nach_dem_stift(self):
+        # Nach ✏️ reichen die Zahlen ohne #Nummer – auch mit den drei Zusatz-Zählern
+        pid = self.post()
+        self.alte_messung(pid, views=5000)
+        self.text(f"#{pid} 1240 61 6,8 34")                     # Views „gesunken“ → Rückfrage
+        self.klick(f"pm:{pid}:hand")
+        self.text("5100 61 6,8 34 3 5 2")
+        neu = self.messungen(pid)[-1]
+        self.assertEqual((neu["views"], neu["kommentare"], neu["shares"], neu["saves"]), (5100, 3, 5, 2))
+
+    def test_gesunkene_zusatz_zaehler_fragen_nach(self):
+        # Plausibilität gilt auch für die neuen Felder: Kommentare 10 → 3 ist fast sicher ein Tippfehler
+        pid = self.post()
+        self.alte_messung(pid, views=1000, kommentare=10)
+        self.text(f"#{pid} 1240 61 6,8 34 3 5 2")
+        self.assertEqual(len(self.messungen(pid)), 1)            # nur die alte Messung – nichts ungeprüft gespeichert
+        self.assertIn("⚠️ Kommentare gesunken: 10 → 3", self.letzte())
+        self.assertEqual(self.bot.nachrichten[-1][1], lernbot_zahlen.knoepfe_rueckfrage(pid))
+
+    def test_zu_viele_werte(self):
+        pid = self.post()
+        self.text(f"#{pid} 1240 61 6,8 34 3 5 2 9")
+        self.assertIn("4 oder 7 Werte, nicht 8", self.letzte())
+        self.assertIn(publikum.HAND_HINWEIS, self.letzte())      # die Erklärung gleich dabei
+        self.assertEqual(self.messungen(pid), [])
+
+    def test_kaputte_zusatz_zaehler(self):
+        pid = self.post()
+        for text, stichwort in ((f"#{pid} 1240 61 6,8 34 1.240 5 2", "Kommentare müssen eine ganze Zahl sein"),
+                                (f"#{pid} 1240 61 6,8 34 3 -5 2", "negativ")):
+            with self.subTest(text=text):
+                self.text(text)
+                self.assertIn(stichwort, self.letzte())
+        self.assertEqual(self.messungen(pid), [])
+
     def test_hand_eingabe_unplausibel_fragt_nach(self):
         pid = self.post()
         self.alte_messung(pid, views=2000)
@@ -478,7 +533,7 @@ class HandEingabe(MitLernBot):
         with FakeClaude("kein JSON").aktiv():
             self.foto(f"#{pid}")
         self.text("1240 61")
-        self.assertIn("genau vier Werte", self.letzte())
+        self.assertIn("4 oder 7 Werte", self.letzte())
         self.text("1.240 61 6,8 34")  # Tausenderpunkt fällt auf
         self.assertIn("ganze Zahl", self.letzte())
         self.assertEqual(self.vorgang()["art"], "hand")

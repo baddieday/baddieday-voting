@@ -94,13 +94,18 @@ class Anleitung(unittest.TestCase):
 
     def test_bedienung_ist_erklaert(self):
         for thema in ("📦", "/link", "Screenshot", "#17", "Hand-Eingabe", "1240 61 6.8 34", "/publikum",
-                      "Basis zu klein", "Ruhezeit", "pipeline publikum bewerten", "## Was tun, wenn"):
+                      "Basis zu klein", "Ruhezeit", "pipeline publikum bewerten", "## Was tun, wenn",
+                      # Florian 25.09.: Hand-Eingabe mit Kommentaren/Shares/Saves, MAD-Minimum je Teil
+                      "#17 1240 61 6.8 34 3 5 2", "4 oder 7", "[publikum.mad_minimum]", "0,27"):
             with self.subTest(thema):
                 self.assertIn(thema, self.text)
 
     def test_jeder_konfig_schluessel_ist_erklaert(self):
         schluessel = [f"[publikum].{k}" for k, w in KONFIG["publikum"].items() if not isinstance(w, dict)]
-        schluessel += [f"[publikum.gewichte].{k}" for k in KONFIG["publikum"]["gewichte"]]
+        # jede Untertabelle von [publikum] (gewichte, mad_minimum, …) mit jedem ihrer Schlüssel
+        schluessel += [f"[publikum.{tabelle}].{k}" for tabelle, inhalt in KONFIG["publikum"].items()
+                       if isinstance(inhalt, dict) for k in inhalt]
+        self.assertIn("[publikum.mad_minimum].engagement", schluessel)  # die Schleife sieht die neue Tabelle
         schluessel += [f"[lernbot].{k}" for k in KONFIG["lernbot"] if k.startswith("screenshot")]
         schluessel += ["[decide].programm", "[telegram].leise_von", "[vorschau].max_mb"]
         tabelle = abschnitt(self.text, "Konfig-Schlüssel")
@@ -136,6 +141,18 @@ class Anleitung(unittest.TestCase):
         for pflicht in ("**Was:**", "**Warum:**", "**Freigabe nötig?**", "**Rückweg:**", "**Was du lernst:**", "🏠"):
             with self.subTest(pflicht):
                 self.assertIn(pflicht, installation)
+
+    def test_stufe_1_kommt_jetzt_aus_main(self):
+        """Florian 25.09.: Stufe 1 wird sofort eingespielt – über einen eigenen PR nach main, danach `git pull` wie
+        bisher; nicht erst nach Stufe 5 mit dem ganzen Sprint."""
+        installation = abschnitt(self.text, "Installation")
+        vorab = installation[:installation.index("### P1")]
+        for teil in ("Stufe 1 kommt jetzt nach `main`", "eigenen PR", "`git pull`", "nicht erst"):
+            with self.subTest(teil):
+                self.assertIn(teil, vorab)
+        self.assertNotIn("Draft-PR gemergt", installation)  # die alte Annahme „ganzer Sprint auf einmal“
+        p1 = installation[installation.index("### P1"):installation.index("### P2")]
+        assertReihenfolge(self, p1, ["git log --oneline HEAD..origin/main", "git pull --ff-only"])
 
     def test_probe_wie_der_dienst(self):
         """Die systemd-run-Probe in P2 nutzt dieselben Schutzregeln wie der Dienst (Haupt-Unit + Drop-in) und

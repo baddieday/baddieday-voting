@@ -168,7 +168,8 @@ naechster_nach_bewertung = true
 stimmung_je_entwurf = 10
 intervall_s = 30
 # Lernschleife „Publikum“ (Spec §7.1): Screenshots der TikTok-Statistik per `claude -p` lesen (1 Aufruf je Bild,
-# zählt gegen dein Abo). false = der Bot fragt die Zahlen gleich von Hand ab (views likes wiedergabe voll%).
+# zählt gegen dein Abo). false = der Bot fragt die Zahlen gleich von Hand ab (views likes wiedergabe voll%,
+# optional dahinter kommentare shares saves).
 # Braucht einen claude-Login für den Benutzer pipeline, den der Dienst sehen darf (docs/PUBLIKUM.md, Installation).
 screenshot_claude = true
 # Fester Auftrag an claude (Platzhalter {bild} = Bildname). Relativ zum Projektordner (/opt/clip-pipeline), nicht zu
@@ -201,6 +202,21 @@ upload_ordner = "export"
 wiedergabe = 0.5
 engagement = 0.3
 reichweite = 0.2
+
+[publikum.mad_minimum]
+# Kleinste Streuung (MAD) je Score-Teil, mit der z gerechnet wird: z = (x − Median) / (1,4826 · max(MAD, Minimum)).
+# Warum ein Minimum: Liegen deine letzten Posts fast gleich, wäre der MAD fast 0 und schon ein winziger Unterschied
+# gäbe einen riesigen z-Wert. Warum je Teil (Florian 25.09.; Spec §6.3 sagt pauschal 0,05): Die drei Teile haben
+# ganz verschiedene Größenordnungen. Scores werden nie überschrieben – eine Änderung gilt nur für neue Scores.
+# Wiedergabe r = gesehener Anteil des Videos (0 … 1,2) – 0,05 = 5 Prozentpunkte, wie in der Spec
+wiedergabe = 0.05
+# Engagement e = Reaktionen je View, liegt um 0,05 und streut nur um ~0,01. Mit 0,05 als Minimum wäre ein
+# Engagement-Ausreißer fast wirkungslos: e 0,09 gegen 0,05 … 0,09 ergäbe z 0,27 statt 1,35. 0,005 = die halbe
+# übliche Streuung – greift nur, wenn deine Posts wirklich fast gleich sind.
+engagement = 0.005
+# Reichweite v = ln(1 + Views) streut in ganzen Einheiten (1 000 Views ≈ 6,9; 10 000 ≈ 9,2). 0,1 ≈ 10 % mehr Views
+# (ln 1,1 ≈ 0,095) – kleinere Unterschiede in der Reichweite sind Zufall der TikTok-Verteilung.
+reichweite = 0.1
 
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.

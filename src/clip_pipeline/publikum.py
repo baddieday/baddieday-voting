@@ -59,19 +59,36 @@ FELDER = (*ZAEHLER, "wiedergabe_s", "voll_prozent")
 # So heißen die Zähler in Meldungen an dich (so stehen sie auch in der TikTok-Statistik)
 ZAEHLER_NAMEN = {"views": "Views", "likes": "Likes", "kommentare": "Kommentare", "shares": "Shares",
                  "saves": "Saves"}
-# Reihenfolge der Hand-Eingabe „views likes wiedergabe voll%“ (Spec §7.1) – die übrigen Felder bleiben None
+# Reihenfolge der Hand-Eingabe „views likes wiedergabe voll%“ (Spec §7.1) …
 HAND_FELDER = ("views", "likes", "wiedergabe_s", "voll_prozent")
-# Die Hand-Eingabe in Worten, mit Einheiten – genau so in der Bitte des Lern-Bots und in jeder Fehlermeldung. Die
-# Einheit steht dabei, weil die TikTok-App die Wiedergabe als „0:07“ zeigt, gebraucht werden aber Sekunden.
+# … und optional dahinter die drei übrigen Zähler (Florian 25.09., Rückfrage R4): Dann ist das Engagement vollständig,
+# statt Kommentare/Shares/Saves als 0 zu zählen (Annahme A10). Nur alle drei oder keiner – ein unbekannter bekommt
+# „–“ –, damit eine fünfte Zahl nie still im falschen Feld landet (Annahme A41).
+HAND_FELDER_ZUSATZ = ("kommentare", "shares", "saves")
+# Erlaubte Hand-Eingaben: Anzahl der Werte → Felder in dieser Reihenfolge (also 4 oder 7 Werte)
+HAND_FORMEN = {len(HAND_FELDER): HAND_FELDER,
+               len(HAND_FELDER + HAND_FELDER_ZUSATZ): HAND_FELDER + HAND_FELDER_ZUSATZ}
+# Die Hand-Eingabe in Worten, mit Einheiten. Die Einheit steht dabei, weil die TikTok-App die Wiedergabe als „0:07“
+# zeigt, gebraucht werden aber Sekunden.
 HAND_FORM = "Views Likes Ø-Wiedergabe-in-Sekunden Ganz-angesehen-in-%"
+HAND_FORM_ZUSATZ = "Kommentare Shares Saves"
+# Die ganze Erklärung mit Beispielen – genau so in der Bitte des Lern-Bots (lernbot_zahlen.HAND_BITTE) und in jeder
+# Fehlermeldung von lies_hand_eingabe (eine Stelle für den Text). Keine geschweiften Klammern: HAND_BITTE geht
+# durch str.format.
+HAND_HINWEIS = (f"{HAND_FORM} – z. B. „1240 61 6,8 34“; optional dahinter {HAND_FORM_ZUSATZ}: "
+                "„1240 61 6,8 34 3 5 2“. „–“ für unbekannt.")
 # Diese Zeichen bedeuten in der Hand-Eingabe „weiß ich nicht“ (Halbgeviertstrich, Bindestrich, Geviertstrich –
 # das Handy macht aus „-“ gern automatisch „–“)
 UNBEKANNT = ("–", "-", "—")
 
 # --- Konstanten der Score-Formel (Spec §6). Alles, was du ändern können sollst, steht in [publikum]. ---
 MAD_FAKTOR = 1.4826      # macht den MAD bei normalverteilten Daten zur Standardabweichung (Spec §6.3)
-MAD_MINIMUM = 0.05       # kleiner als das wird die Streuung nicht – sonst explodiert z bei fast gleichen Posts
+# Das MAD-Minimum (kleiner wird die Streuung nicht – sonst explodiert z bei fast gleichen Posts) steht je Score-Teil
+# in [publikum.mad_minimum] (Florian 25.09.: je Teil statt pauschal 0,05 wie in Spec §6.3; Gründe in pipeline.toml).
 Z_GRENZE = 2.5           # z wird auf ±2,5 begrenzt: ein Viral-Ausreißer soll nicht alles andere überstimmen
+# So heißen die Score-Teile r, e, v in der Konfig ([publikum.gewichte], [publikum.mad_minimum]) – in score_teile
+# und im Code bleiben es die kurzen Namen aus Spec §6
+KONFIG_NAMEN = {"r": "wiedergabe", "e": "engagement", "v": "reichweite"}
 # Unter 5 Posts in der Basis: alle z = 0, Score 0 („Basis zu klein“, kein Lernen aus dem Nichts). Genug Posts,
 # aber unter 5 r-Werten: r fällt weg, e/v werden auf 0,6/0,4 hochgerechnet („Basis ohne Wiedergabe“, Annahme A11).
 MINDEST_BASIS = 5
@@ -366,7 +383,7 @@ def posts_ohne_messung(con: sqlite3.Connection, *, stunden: float = 24, grenze: 
 # --- Messungen --------------------------------------------------------------------------
 
 def _hand_wert(text: str, feld: str) -> int | float | None:
-    """Ein Wert der Hand-Eingabe: „–“ → None, sonst eine nicht negative, endliche Zahl; Zähler ganzzahlig.
+    """Ein Wert der Hand-Eingabe: „–“ → None, sonst eine nicht negative, endliche Zahl; alle fünf Zähler ganzzahlig.
     Beim Anteil „ganz angesehen“ darf ein „%“ dahinter stehen (die Form nennt „in %“, „34%“ meint 34)."""
     if text in UNBEKANNT:
         return None
@@ -391,19 +408,25 @@ def _hand_wert(text: str, feld: str) -> int | float | None:
 
 
 def lies_hand_eingabe(text: str) -> dict:
-    """Hand-Eingabe `views likes wiedergabe voll%` (Spec §7.1, in Worten HAND_FORM), Leerzeichen-getrennt, „–“
-    oder „-“ = unbekannt, Komma als Dezimaltrenner erlaubt, „34%“ geht auch. Beispiel: "1240 61 6,8 34" →
-    {"views": 1240, "likes": 61, "wiedergabe_s": 6.8, "voll_prozent": 34.0, übrige Felder None}.
-    Nur die vier Felder – kommentare/shares/saves bleiben None (zählen im Engagement als 0, A10; offene
-    Rückfrage R4, docs/ENTSCHEIDUNGEN.md). ValueError mit verständlichem Text bei falscher Anzahl, keiner Zahl
-    (bei der Wiedergabe mit dem Hinweis „in Sekunden“) oder negativen Werten.
-    Geprüft wird danach wie beim Screenshot mit pruefe_plausibel (der Lern-Bot fragt bei einem Verstoß nach).
-    Views und Likes müssen ganze Zahlen sein – so fällt „1.240“ (Tausenderpunkt) auf, statt als 1,24 zu gelten."""
+    """Hand-Eingabe `views likes wiedergabe voll%` (Spec §7.1), optional dahinter `kommentare shares saves`
+    (in Worten HAND_HINWEIS). Leerzeichen-getrennt, „–“ oder „-“ = unbekannt, Komma als Dezimaltrenner erlaubt,
+    „34%“ geht auch. Es sind also 4 oder 7 Werte (HAND_FORMEN).
+    Beispiele: "1240 61 6,8 34" → {"views": 1240, "likes": 61, "wiedergabe_s": 6.8, "voll_prozent": 34.0,
+    kommentare/shares/saves None} – die fehlenden Zähler zählen im Engagement dann als 0 (Annahme A10);
+    "1240 61 6,8 34 3 5 2" → dazu kommentare 3, shares 5, saves 2 (das Engagement ist vollständig);
+    "1240 61 6,8 34 3 – 2" → shares None.
+    ValueError mit verständlichem Text bei falscher Anzahl (auch 5, 6 oder mehr als 7), keiner Zahl (bei der
+    Wiedergabe mit dem Hinweis „in Sekunden“) oder negativen Werten.
+    Geprüft wird danach wie beim Screenshot mit pruefe_plausibel – auch die drei Zusatz-Zähler dürfen gegenüber
+    der letzten Messung nicht sinken (der Lern-Bot fragt bei einem Verstoß nach). Alle Zähler müssen ganze
+    Zahlen sein – so fällt „1.240“ (Tausenderpunkt) auf, statt als 1,24 zu gelten."""
     teile = text.split()
-    if len(teile) != len(HAND_FELDER):
-        raise ValueError(f"Bitte genau vier Werte: {HAND_FORM} – z. B. „1240 61 6,8 34“, „–“ für unbekannt.")
+    felder = HAND_FORMEN.get(len(teile))
+    if felder is None:
+        anzahlen = " oder ".join(str(n) for n in HAND_FORMEN)  # „4 oder 7“
+        raise ValueError(f"Bitte {anzahlen} Werte, nicht {len(teile)}: {HAND_HINWEIS}")
     werte: dict = {feld: None for feld in FELDER}
-    for feld, teil in zip(HAND_FELDER, teile):
+    for feld, teil in zip(felder, teile):
         werte[feld] = _hand_wert(teil, feld)
     return werte
 
@@ -526,18 +549,24 @@ def ist_faellig(post: sqlite3.Row | dict, konfig: Konfig, zeit: datetime | None 
     return alter_in_tagen(post["gepostet_utc"], zeit or jetzt()) >= float(einstellung(konfig, "alter_tage"))
 
 
-def robust_z(x: float, basis: list[float]) -> tuple[float, float, float]:
-    """Robuste Standardisierung (Spec §6.3): z = (x − Median) / (1,4826 · max(MAD, 0,05)), auf ±2,5 begrenzt.
-    Rückgabe (z, median, mad) – mad ist der gemessene MAD (vor dem Minimum), damit score_teile ehrlich bleibt.
-    Beispiel: basis [1, 2, 3, 4, 5], x = 5 → Median 3, MAD 1, z = 2/1,4826 ≈ 1,349.
-    Zahlenbeispiel zum MAD-Minimum: Engagement-Werte [0,05 0,06 0,07 0,08 0,09] haben MAD 0,01 – gerechnet wird mit
-    0,05, x = 0,09 ergibt z = 0,02/0,0741 ≈ 0,27 statt 1,35 (offene Rückfrage R3, docs/ENTSCHEIDUNGEN.md).
+def robust_z(x: float, basis: list[float], mad_minimum: float) -> tuple[float, float, float]:
+    """Robuste Standardisierung (Spec §6.3): z = (x − Median) / (1,4826 · max(MAD, mad_minimum)), auf ±2,5 begrenzt.
+    Die einzige Stelle, an der diese Formel steht.
+
+    mad_minimum: kleinste Streuung DIESES Score-Teils aus [publikum.mad_minimum] (score_fuer gibt je Teil den
+    passenden Wert mit, siehe _mad_minima). Rückgabe (z, median, mad) – mad ist der gemessene MAD (vor dem
+    Minimum), damit score_teile ehrlich bleibt.
+    Beispiel: basis [1, 2, 3, 4, 5], x = 5, Minimum 0,1 → Median 3, MAD 1, z = 2/1,4826 ≈ 1,349.
+    Zahlenbeispiel, warum das Minimum je Teil verschieden ist (Begründung in config/pipeline.toml): Engagement-Werte
+    [0,05 0,06 0,07 0,08 0,09] haben MAD 0,01. Mit dem Engagement-Minimum 0,005 zählt der echte MAD: x = 0,09 ergibt
+    z = 0,02 / (1,4826 · 0,01) ≈ 1,35. Mit dem pauschalen 0,05 der Spec wären es nur 0,02 / 0,0741 ≈ 0,27 – ein
+    Engagement-Ausreißer wäre fast wirkungslos.
     basis darf keine None enthalten (die filtert score_fuer); ValueError bei leerer basis."""
     if not basis:
         raise ValueError("Leere Vergleichsbasis – ohne Vergleich gibt es keinen z-Wert")
     median = statistics.median(basis)
     mad = statistics.median(abs(b - median) for b in basis)
-    z = (x - median) / (MAD_FAKTOR * max(mad, MAD_MINIMUM))
+    z = (x - median) / (MAD_FAKTOR * max(mad, mad_minimum))
     return max(-Z_GRENZE, min(Z_GRENZE, z)), median, mad
 
 
@@ -580,11 +609,48 @@ def vergleichsbasis(con: sqlite3.Connection, post: sqlite3.Row | dict, konfig: K
     return basis
 
 
+def _je_teil(konfig: Konfig, name: str) -> dict[str, float]:
+    """Eine Tabelle aus [publikum] mit einem Wert je Score-Teil ([publikum.gewichte], [publikum.mad_minimum]) als
+    {"r": …, "e": …, "v": …} – die Konfig-Namen stehen in KONFIG_NAMEN.
+    Beispiel: _je_teil(konfig, "gewichte") == {"r": 0.5, "e": 0.3, "v": 0.2}.
+
+    Fachliche Prüfung wie bei jedem [publikum]-Schlüssel (einstellung): Fehlt die Tabelle, fehlt ein Teil darin
+    oder ist ein Wert keine Zahl, ist die Konfiguration kaputt → KonfigFehler mit dem vollen Namen, z. B.
+    „[publikum.mad_minimum].engagement fehlt …“ (die CLI endet dann mit Exit 2 und nennt ihn)."""
+    tabelle = einstellung(konfig, name)
+    if not isinstance(tabelle, dict):
+        raise KonfigFehler(f"[publikum].{name} muss eine Tabelle mit {', '.join(KONFIG_NAMEN.values())} sein")
+    werte: dict[str, float] = {}
+    for teil, schluessel in KONFIG_NAMEN.items():
+        if schluessel not in tabelle:
+            raise KonfigFehler(f"[publikum.{name}].{schluessel} fehlt in der Konfiguration "
+                               "(Standard steht in config/pipeline.toml)")
+        wert = tabelle[schluessel]
+        if isinstance(wert, bool) or not isinstance(wert, (int, float)):  # true/false oder "0,5" sind keine Zahlen
+            raise KonfigFehler(f"[publikum.{name}].{schluessel} = {wert!r} ist keine Zahl")
+        werte[teil] = float(wert)
+    return werte
+
+
+def _mad_minima(konfig: Konfig) -> dict[str, float]:
+    """Kleinste Streuung je Score-Teil aus [publikum.mad_minimum], z. B. {"r": 0.05, "e": 0.005, "v": 0.1}.
+    Spec §6.3 nennt pauschal 0,05; Florian hat am 25.09. ein Minimum je Teil gewählt, weil die Teile ganz
+    verschiedene Größenordnungen haben (Zahlenbeispiel in robust_z, Begründung in config/pipeline.toml).
+
+    Fachliche Prüfung zusätzlich zu _je_teil: Jedes Minimum ist eine endliche Zahl größer als 0 – mit 0 teilte
+    robust_z bei lauter gleichen Posts durch 0 → sonst KonfigFehler."""
+    minima = _je_teil(konfig, "mad_minimum")
+    for teil, wert in minima.items():
+        if not (wert > 0 and math.isfinite(wert)):  # so formuliert, dass auch NaN durchfällt
+            raise KonfigFehler(f"[publikum.mad_minimum].{KONFIG_NAMEN[teil]} muss größer als 0 sein, nicht {wert}")
+    return minima
+
+
 def _gewichte(konfig: Konfig, mit_r: bool) -> dict[str, float]:
-    """Gewichte der Komponenten aus [publikum.gewichte]. Ohne r werden e und v auf 1 hochgerechnet (Spec §6.4):
-    0,3 / (0,3 + 0,2) = 0,6 und 0,2 / 0,5 = 0,4 – so bleibt der Score auf derselben Skala."""
-    g = einstellung(konfig, "gewichte")
-    w = {"r": float(g["wiedergabe"]), "e": float(g["engagement"]), "v": float(g["reichweite"])}
+    """Gewichte der Komponenten aus [publikum.gewichte] (gelesen über _je_teil). Ohne r werden e und v auf 1
+    hochgerechnet (Spec §6.4): 0,3 / (0,3 + 0,2) = 0,6 und 0,2 / 0,5 = 0,4 – so bleibt der Score auf derselben
+    Skala."""
+    w = _je_teil(konfig, "gewichte")
     if mit_r:
         return w
     rest = w["e"] + w["v"]
@@ -609,17 +675,24 @@ def score_fuer(post: sqlite3.Row | dict, messungen: list, basis: list[dict],
         „Basis ohne Wiedergabe“ – so bleibt der Score auf derselben Skala, statt dass z_r = 0 ihn halbiert.
     Beispiel: 20 Posts in der Basis, nur 2 davon mit r → score = 0,6·z_e + 0,4·z_v.
 
+    Jeder Teil wird mit SEINEM MAD-Minimum aus [publikum.mad_minimum] standardisiert (robust_z, _mad_minima).
+    Fehlt die Tabelle oder ein Teil, oder ist ein Minimum keine Zahl bzw. ≤ 0: KonfigFehler (bewerte_alle bricht
+    dann ab, die CLI endet mit Exit 2). Dasselbe gilt für [publikum.gewichte].
+
     score_teile (Spec §6.5): r, e, v, z_r, z_e, z_v (None, wo nicht gerechnet), median/mad je Komponente,
-    messung_id, messung_alter_tage (z. B. 7,1), basis_n, basis_n_r, vermerke; dazu "gewichte" (die benutzten).
+    messung_id, messung_alter_tage (z. B. 7,1), basis_n, basis_n_r, vermerke; dazu "gewichte" und "mad_minimum"
+    (die benutzten, je {"r", "e", "v"} – so bleibt ein Score nachvollziehbar, auch wenn die Konfig später anders ist).
     Der Score ist auf 4 Nachkommastellen gerundet, die Teile nicht (sie sind die Basis späterer Posts)."""
     messung = waehle_messung(post, messungen, konfig)
     if messung is None:
         return None, {"vermerke": ["keine Messung ab dem Mindestalter mit Views"]}
 
     k = komponenten(messung, float(post["dauer_s"]))
+    minima = _mad_minima(konfig)
     basis_r = [b["r"] for b in basis if b["r"] is not None]
     teile: dict = {"r": k["r"], "e": k["e"], "v": k["v"], "z_r": None, "z_e": None, "z_v": None,
                    "median_r": None, "mad_r": None, "median_e": None, "mad_e": None, "median_v": None, "mad_v": None,
+                   "mad_minimum": minima,
                    "messung_id": _feld(messung, "id"),
                    # auf zwei Stellen: „7,1 Tage“ reicht zum Nachvollziehen, mehr ist Rauschen der Uhrzeit
                    "messung_alter_tage": round(alter_in_tagen(post["gepostet_utc"], messung["gemessen_utc"]), 2),
@@ -634,8 +707,8 @@ def score_fuer(post: sqlite3.Row | dict, messungen: list, basis: list[dict],
         teile["gewichte"] = _gewichte(konfig, mit_r=k["r"] is not None)
         return 0.0, teile
 
-    teile["z_e"], teile["median_e"], teile["mad_e"] = robust_z(k["e"], [b["e"] for b in basis])
-    teile["z_v"], teile["median_v"], teile["mad_v"] = robust_z(k["v"], [b["v"] for b in basis])
+    teile["z_e"], teile["median_e"], teile["mad_e"] = robust_z(k["e"], [b["e"] for b in basis], minima["e"])
+    teile["z_v"], teile["median_v"], teile["mad_v"] = robust_z(k["v"], [b["v"] for b in basis], minima["v"])
     # Fachliche Regel 2 (Spec §6.4): ohne eigenes r → e und v hochgerechnet.
     # Fachliche Regel 3 (Annahme A11): r gemessen, aber zu wenige r-Werte in der Basis → ebenso.
     if k["r"] is None:
@@ -643,7 +716,7 @@ def score_fuer(post: sqlite3.Row | dict, messungen: list, basis: list[dict],
     elif len(basis_r) < MINDEST_BASIS:
         teile["vermerke"].append("Basis ohne Wiedergabe")
     else:
-        teile["z_r"], teile["median_r"], teile["mad_r"] = robust_z(k["r"], basis_r)
+        teile["z_r"], teile["median_r"], teile["mad_r"] = robust_z(k["r"], basis_r, minima["r"])
 
     gewichte = _gewichte(konfig, mit_r=teile["z_r"] is not None)
     teile["gewichte"] = gewichte
@@ -666,7 +739,8 @@ def bewerte_alle(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None 
     "posts": [{"id": 17, "score": 0.8}, {"id": 18, "score": -0.3}]}.
 
     Als „fachlicher“ Fehler eines Posts gelten ValueError, KeyError und TypeError (kaputte Daten); ein
-    sqlite3.Error bedeutet, dass die Datenbank selbst nicht geht – der fliegt immer durch."""
+    sqlite3.Error bedeutet, dass die Datenbank selbst nicht geht – der fliegt immer durch. Ebenso KonfigFehler
+    (z. B. [publikum.mad_minimum] fehlt): Eine kaputte Konfig betrifft jeden Post, nicht nur einen (Annahme a5)."""
     zeitpunkt = zeit or jetzt()
     ergebnis: dict = {"bewertet": 0, "ohne_messung": 0, "noch_zu_jung": 0, "fehler": 0, "posts": []}
     offene = con.execute("SELECT * FROM posts WHERE bewertet_utc IS NULL ORDER BY gepostet_utc, id").fetchall()
