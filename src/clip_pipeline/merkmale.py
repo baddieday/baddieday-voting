@@ -26,13 +26,16 @@ Nichts hier weckt pve-big: gelesen wird nur im Puffer (sessions/<ID>/replay.json
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from . import db, vorbewertung
+from . import db, replay, vorbewertung
 from .konfig import Konfig
 from .replay import Match
-from .zeit import iso, jetzt
+from .zeit import aus_iso, iso, jetzt
+
+log = logging.getLogger("pipeline")
 
 MIC_DECKEL = 3        # Wortzähler und Mikro-Spitzen: mehr als 3 sagt nichts Neues (Spec §8.1)
 SPITZEN_DECKEL = 4    # Spielton-Spitzen (Spec §8.1)
@@ -178,12 +181,70 @@ def aktualisiere_clip(con: sqlite3.Connection, clip_id: int, neue: dict[str, flo
     return True
 
 
+# --- Replay-Merkmale (Paket A2) -----------------------------------------------------------------------------
+
+WAFFEN_KATEGORIEN = ("sniper", "nahkampf", "sonstige")  # Reihenfolge = Vorrang, falls eine Zahl doppelt eingetragen ist
+# Rückfallwerte wie in config/pipeline.toml [merkmale] – nur für Konfigs ohne den Abschnitt (alte lokal.toml, Tests)
+ENDGAME_SPIELER = 10
+CLUTCH_VOR_S = 30.0
+CLUTCH_NACH_S = 10.0
+# Kill-Zeiten aus clips.kill_zeiten sind ISO-Texte mit Millisekunden (zeit.iso) – beim Zurücklesen kann eine
+# Zeit bis knapp 1 ms vom Replay-Zeitpunkt abweichen. Zwei eigene Kills liegen nie so dicht, ohne gleich zu sein.
+ZUORDNUNG_TOLERANZ = timedelta(milliseconds=1)
+
+
+def _waffen_listen(konfig: Konfig) -> dict[str, set[int]]:
+    """[merkmale.waffen] als Kategorie → Menge von GunType-Zahlen; fehlt der Abschnitt, sind alle Listen leer."""
+    eintraege = konfig.wert("merkmale.waffen", {}) or {}
+    return {kategorie: {int(n) for n in (eintraege.get(kategorie) or [])} for kategorie in WAFFEN_KATEGORIEN}
+
+
 def waffen_kategorie(waffe: int | None, konfig: Konfig) -> str:
     """Waffen-Kategorie "sniper" | "nahkampf" | "sonstige" aus [merkmale.waffen] (Listen von GunType-ZAHLEN, replay2json).
 
     Rein (keine DB, keine Meldung). Unbekannte Zahl und None → "sonstige".
-    Beispiel: waffe 7, [merkmale.waffen] sniper = [7] → "sniper". Paket A2."""
-    raise NotImplementedError
+    Beispiel: waffe 7, [merkmale.waffen] sniper = [7] → "sniper". Paket A2.
+
+    Parameter: waffe – GunType-Zahl eines Kills (MeinEreignis.waffe) oder None; konfig – liest nur
+    [merkmale.waffen]. Rückgabe: Kategorie als Text. Fehler: keine; fehlt der Abschnitt, ist alles "sonstige".
+    Steht eine Zahl in zwei Listen, gewinnt die erste in der Reihenfolge sniper, nahkampf, sonstige.
+    Hinweis: FortniteReplayReader 3.1.0 liest GunType nur als Byte ohne Namen – welche Zahl welche Waffe ist,
+    zeigt erst die Kalibrierung mit `pipeline replay <datei>` (docs/PUBLIKUM.md). Bis dahin ist alles "sonstige".
+    """
+    if waffe is None:
+        return "sonstige"
+    for kategorie, zahlen in _waffen_listen(konfig).items():
+        if waffe in zahlen:
+            return kategorie
+    return "sonstige"
+
+
+def _zugeordnet(ereignis_zeit: datetime, kill_zeiten: list[datetime]) -> bool:
+    """Gehört ein Kill-Ereignis zu diesem Kandidaten? Gleicher Zeitpunkt (bis auf die ISO-Rundung)."""
+    return any(abs(ereignis_zeit - z) <= ZUORDNUNG_TOLERANZ for z in kill_zeiten)
+
+
+def _anteil(anzahl: int, gesamt: int) -> float:
+    """Anteil 0..1; ohne Kills 0 (nichts da, das Sniper oder Bot sein könnte)."""
+    return anzahl / gesamt if gesamt else 0.0
+
+
+def _phase(zeitpunkt: datetime, match: Match) -> float:
+    """Lage im Match: 0 = Replay-Start … 1 = Replay-Ende, auf 0..1 begrenzt (Annahme S2-A3).
+    Das Replay beginnt, wenn ich ins Match komme, und endet, wenn ich es verlasse – es ist die Länge MEINES Matches,
+    nicht die des ganzen Matches. Ohne Länge (laenge_ms 0) ist die Phase 0."""
+    laenge_s = (match.ende_utc - match.start_utc).total_seconds()
+    if laenge_s <= 0:
+        return 0.0
+    return min(1.0, max(0.0, (zeitpunkt - match.start_utc).total_seconds() / laenge_s))
+
+
+def _ist_clutch(kill_zeit: datetime, ereignisse: list, vor: timedelta, nach: timedelta) -> bool:
+    """Clutch: Ich war in [T − vor, T] selbst am Boden und bin in (T, T + nach] nicht gestorben.
+    Endet das Replay vor T + nach, gibt es dort kein tod-Ereignis – das zählt als „nicht gestorben“."""
+    am_boden = any(e.art == "knock_erlitten" and kill_zeit - vor <= e.zeit_utc <= kill_zeit for e in ereignisse)
+    gestorben = any(e.art == "tod" and kill_zeit < e.zeit_utc <= kill_zeit + nach for e in ereignisse)
+    return am_boden and not gestorben
 
 
 def aus_replay(match: Match | None, kill_zeiten: list[datetime], konfig: Konfig) -> dict[str, float]:
@@ -195,8 +256,60 @@ def aus_replay(match: Match | None, kill_zeiten: list[datetime], konfig: Konfig)
     endgame = 1, wenn bei einem Kill verbleibend ≤ [merkmale].endgame_spieler ·
     clutch = 1, wenn knock_erlitten in [T − clutch_vor_s, T] und kein tod in (T, T + clutch_nach_s].
     Rekorder-Rückfall (match.ich_quelle None) oder kein Match: nur platzierung (falls bekannt), Rest 0.
-    Beispiel: 2 Kills, einer davon ein Bot, Platz 4 → {"platzierung": 0.25, "bot_opfer": 0.5, …}. Paket A2."""
-    raise NotImplementedError
+    Beispiel: 2 Kills, einer davon ein Bot, Platz 4 → {"platzierung": 0.25, "bot_opfer": 0.5, …}. Paket A2.
+
+    Parameter: match – aus replay.lies/match_aus_json oder None (Replay unlesbar); kill_zeiten – die Kill-Zeitpunkte
+    des Kandidaten (vorbewertung.Kandidat.kill_zeiten oder clips.kill_zeiten; beim Team-Wipe steht dieselbe Zeit
+    mehrfach da, jedes Kill-Ereignis zählt trotzdem genau einmal); konfig – [merkmale], [merkmale.waffen].
+    Rückgabe: genau die sieben Schlüssel als float. Fehler: keine – Unbekanntes zählt 0.
+    Einzelheiten: T ist der Kill-Zeitpunkt, wie ihn die Kill-Regel festlegt (beim Teammate-Finish mein Umhauen).
+    Die Phase misst an der ersten AKTION (mein Umhauen) der zugeordneten Kills; ist kein Kill zugeordnet, am
+    frühesten Wert aus kill_zeiten. bot_opfer zählt nur sichere Bots (opfer_bot True; null = kein Bot).
+    Beispiel Clutch: 20 s vor dem Kill umgehauen, danach 10 s überlebt → clutch 1.0.
+    """
+    ergebnis = dict.fromkeys(REPLAY_MERKMALE, 0.0)
+    if match is None:
+        return ergebnis
+    if match.platzierung:  # None oder 0 = unbekannt
+        ergebnis["platzierung"] = 1.0 / match.platzierung
+    if match.ich_quelle is None:
+        # Rekorder-Rückfall: Die Kills stammen vom Rekorder, die Replay-Ereignisse gehören nicht sicher zu mir
+        return ergebnis
+
+    kills = [e for e in match.ereignisse if e.art == "kill" and _zugeordnet(e.zeit_utc, kill_zeiten)]
+    kategorien = [waffen_kategorie(e.waffe, konfig) for e in kills]
+    ergebnis["sniper"] = _anteil(kategorien.count("sniper"), len(kills))
+    ergebnis["nahkampf"] = _anteil(kategorien.count("nahkampf"), len(kills))
+    ergebnis["bot_opfer"] = _anteil(sum(1 for e in kills if e.opfer_bot is True), len(kills))
+
+    erste = min((e.aktion for e in kills), default=min(kill_zeiten, default=None))
+    if erste is not None:
+        ergebnis["phase"] = _phase(erste, match)
+
+    grenze = int(konfig.wert("merkmale.endgame_spieler", ENDGAME_SPIELER))
+    if any(e.verbleibend is not None and e.verbleibend <= grenze for e in kills):
+        ergebnis["endgame"] = 1.0
+
+    vor = timedelta(seconds=float(konfig.wert("merkmale.clutch_vor_s", CLUTCH_VOR_S)))
+    nach = timedelta(seconds=float(konfig.wert("merkmale.clutch_nach_s", CLUTCH_NACH_S)))
+    if any(_ist_clutch(e.zeit_utc, match.ereignisse, vor, nach) for e in kills):
+        ergebnis["clutch"] = 1.0
+    return ergebnis
+
+
+def _unbekannte_waffen(konfig: Konfig, match: Match | None) -> list[int]:
+    """GunType-Zahlen meiner Kills, die in keiner Liste von [merkmale.waffen] stehen, aufsteigend und ohne Doppel.
+    Rekorder-Rückfall und kein Match: keine (die Ereignisse gehören dann nicht sicher zu mir)."""
+    if match is None or match.ich_quelle is None:
+        return []
+    bekannt = set().union(*_waffen_listen(konfig).values())
+    return sorted({e.waffe for e in match.ereignisse if e.art == "kill" and e.waffe is not None} - bekannt)
+
+
+def _waffen_text(sid: str, zahlen: list[int]) -> str:
+    return (f"Neue Waffen-Nummern in Match {sid}: {', '.join(map(str, zahlen))} – zählen als sonstige. "
+            "Eintragen in config/lokal.toml [merkmale.waffen]; bestimmen mit `pipeline replay <datei>`, "
+            "docs/PUBLIKUM.md")
 
 
 def melde_unbekannte_waffen(con: sqlite3.Connection, konfig: Konfig, sid: str, match: Match | None) -> list[int]:
@@ -205,8 +318,56 @@ def melde_unbekannte_waffen(con: sqlite3.Connection, konfig: Konfig, sid: str, m
     Schon gemeldete Zahlen stehen als Vermerk `merkmale:waffe:<n>` in meldungen (mit gesendet = erstellt, der Bot
     verschickt sie nie). Die Sammelmeldung `merkmale:waffen:<sid>` wartet die Ruhezeit ab (LEISE_MELDUNGEN).
     Rückgabe: die neu gemeldeten Zahlen, aufsteigend. Beispiel: Kills mit 12, 27, 12, nichts eingetragen → [12, 27].
-    Paket A2."""
-    raise NotImplementedError
+    Paket A2.
+
+    Parameter: con – offene Verbindung; läuft in der Transaktion des Aufrufers (analyze, nachtragen_replay);
+    konfig – [merkmale.waffen]; sid – Session-ID für Schlüssel und Text; match – wie bei aus_replay.
+    Fehler: sqlite3-Fehler gehen an den Aufrufer. Warum Vermerke statt einer Meldung je Zahl: Die erste Kalibrierung
+    brächte sonst Dutzende Nachrichten; so kommt je Match höchstens eine, und nur mit Zahlen, die neu sind.
+    Beispiel zweites Match mit 27 und 31 nach dem ersten → [31], Meldung „… in Match s2: 31 – …“.
+    """
+    unbekannt = _unbekannte_waffen(konfig, match)
+    if not unbekannt:
+        return []
+    schon = {z["schluessel"] for z in con.execute(
+        f"SELECT schluessel FROM meldungen WHERE schluessel IN ({', '.join('?' * len(unbekannt))})",
+        [f"merkmale:waffe:{n}" for n in unbekannt])}
+    neu = [n for n in unbekannt if f"merkmale:waffe:{n}" not in schon]
+    if not neu:
+        return []
+    zeit = iso(jetzt())
+    for n in neu:
+        # gesendet = erstellt: ein Vermerk, keine Nachricht – aktionen.faellige_meldungen sieht nur gesendet IS NULL
+        con.execute("INSERT OR IGNORE INTO meldungen (schluessel, text, erstellt, gesendet) VALUES (?, ?, ?, ?)",
+                    (f"merkmale:waffe:{n}", f"Waffen-Nummer {n} gemeldet (Match {sid})", zeit, zeit))
+    db.meldung(con, f"merkmale:waffen:{sid}", _waffen_text(sid, neu))
+    return neu
+
+
+def _fehlen_replay_merkmale(merkmale_json: str) -> bool:
+    """Fehlt einem Clip mindestens eines der sieben Replay-Merkmale? (Schlüssel fehlt = nie gemessen)"""
+    try:
+        vorhanden = json.loads(merkmale_json)
+    except json.JSONDecodeError:
+        return True
+    return not isinstance(vorhanden, dict) or any(m not in vorhanden for m in REPLAY_MERKMALE)
+
+
+def _match_aus_puffer(konfig: Konfig, sid: str) -> Match | None:
+    """sessions/<ID>/replay.json aus dem Puffer lesen (Muster stimmung._eigene_ereignisse, aber ohne material.lokal).
+
+    Bewusst nur konfig.ordner("sessions"): Im getrennten Betrieb ist das der Puffer auf dem Mini. Kein Rückfall auf
+    das Lager – ein Zugriff dort hielte pve-big per NFS wach oder hinge, wenn es schläft. None = fehlt/unlesbar."""
+    pfad = konfig.ordner("sessions") / sid / "replay.json"
+    if not pfad.is_file():
+        return None
+    try:
+        roh = json.loads(pfad.read_text(encoding="utf-8"))
+        return replay.match_aus_json(roh, sid, zonen_name=konfig.wert("zeit.zeitzone", "Europe/Berlin"),
+                                     start_ist_ortszeit=bool(konfig.wert("zeit.replay_start_ist_ortszeit", True)))
+    except (json.JSONDecodeError, replay.ReplayFehler, ValueError, TypeError, AttributeError) as e:
+        log.warning("replay.json %s: %s", sid, e)
+        return None
 
 
 def nachtragen_replay(con: sqlite3.Connection, konfig: Konfig, gewichte: dict[str, float], version: int, *,
@@ -215,5 +376,41 @@ def nachtragen_replay(con: sqlite3.Connection, konfig: Konfig, gewichte: dict[st
 
     Liest sessions/<ID>/replay.json im Puffer, ordnet clips.kill_zeiten zu (Toleranz 1 ms wegen ISO), schreibt über
     aktualisiere_clip, meldet je Session unbekannte Waffen. Fehlt die Datei: zählen, nicht abbrechen. Weckt nie.
-    Idempotent. Rückgabe {"clips", "geaendert", "ohne_replay", "waffen_gemeldet"}. Paket A2."""
-    raise NotImplementedError
+    Idempotent. Rückgabe {"clips", "geaendert", "ohne_replay", "waffen_gemeldet"}. Paket A2.
+
+    Parameter: con – offene Verbindung (ohne offene Transaktion: je Session eine eigene); konfig – Pfade,
+    [merkmale]; gewichte, version – vom äußersten Aufrufer (cli._cmd_merkmale per lernen.aktuelle); session – nur
+    diese Session (schon geprüfte ID), None = alle. Rückgabe: clips = Clips, denen Replay-Merkmale fehlten;
+    geaendert = davon tatsächlich geändert; ohne_replay = davon ohne lesbare replay.json (bleiben unbekannt und
+    werden beim nächsten Lauf wieder versucht); waffen_gemeldet = neu gemeldete GunType-Zahlen, aufsteigend.
+    Fehler: sqlite3-Fehler brechen ab (die Transaktion der Session rollt zurück, fertige Sessions bleiben).
+    Punkte ändern sich nur bei Status vorbewertet (aktualisiere_clip, Annahme S2-A5).
+    Beispiel: 3 Clips ohne Replay-Merkmale, einer ohne replay.json → {"clips": 3, "geaendert": 2, "ohne_replay": 1,
+    "waffen_gemeldet": [12]}; der zweite Lauf → {"clips": 1, "geaendert": 0, "ohne_replay": 1, …}.
+    """
+    if session:
+        zeilen = con.execute("SELECT id, match_id, kill_zeiten, merkmale FROM clips WHERE match_id = ? ORDER BY id",
+                             (session,)).fetchall()
+    else:
+        zeilen = con.execute("SELECT id, match_id, kill_zeiten, merkmale FROM clips ORDER BY match_id, id").fetchall()
+    je_session: dict[str, list[sqlite3.Row]] = {}
+    for z in zeilen:
+        if _fehlen_replay_merkmale(z["merkmale"]):
+            je_session.setdefault(z["match_id"], []).append(z)
+
+    ergebnis = {"clips": 0, "geaendert": 0, "ohne_replay": 0, "waffen_gemeldet": []}
+    gemeldet: set[int] = set()
+    for sid, clips in je_session.items():
+        ergebnis["clips"] += len(clips)
+        match = _match_aus_puffer(konfig, sid)
+        if match is None:
+            ergebnis["ohne_replay"] += len(clips)
+            continue
+        with db.transaktion(con):
+            for c in clips:
+                kill_zeiten = [aus_iso(z) for z in json.loads(c["kill_zeiten"] or "[]")]
+                if aktualisiere_clip(con, c["id"], aus_replay(match, kill_zeiten, konfig), gewichte, version):
+                    ergebnis["geaendert"] += 1
+            gemeldet.update(melde_unbekannte_waffen(con, konfig, sid, match))
+    ergebnis["waffen_gemeldet"] = sorted(gemeldet)
+    return ergebnis
