@@ -169,6 +169,8 @@ liegt danach in `/root/samba-original/`.
 - `veto files` vergleicht **jeden Namen auf jeder Ebene**: `/highlights/` würde auch `eingang\nvidia\highlights`
   still verschwinden lassen. Deshalb steht dort nur `.aktiv`.
 - `interfaces` + `bind interfaces only` + `hosts allow`: nur Heimnetz, nicht über Tailscale; kein Gast, nur SMB3.
+  `interfaces = 127.0.0.1 192.168.178.0/24` statt `eth0`: So lauscht Samba nur auf der IPv4-Adresse im Heimnetz – mit
+  `eth0` hörte es auch auf dessen IPv6-Adressen, darunter eine öffentliche. Prüfen: `ss -ltn | grep ':445'`.
 - `testparm` prüft die Konfiguration, **bevor** sie gilt. `strict sync`: Samba bestätigt ein „Speichern“ des PCs
   erst, wenn es auf der Platte ist.
 - Systembenutzer mit `nologin`: kann sich nicht per SSH anmelden; nur Samba kennt sein Passwort.

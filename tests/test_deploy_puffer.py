@@ -156,7 +156,7 @@ class SambaVorlage(unittest.TestCase):
         g = self.smb["global"]
         self.assertEqual(g["server min protocol"], "SMB3")
         self.assertEqual(g["disable netbios"], "yes")
-        self.assertEqual(g["interfaces"], "lo eth0")
+        self.assertEqual(g["interfaces"], "127.0.0.1 192.168.178.0/24")  # nur IPv4-Heimnetz, kein IPv6/Tailscale
         self.assertEqual(g["bind interfaces only"], "yes")
         self.assertEqual(g["hosts allow"], "127.0.0.1 192.168.178.0/24")
         self.assertEqual(g["map to guest"], "never")

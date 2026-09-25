@@ -96,7 +96,7 @@ fi
 
 sag "5/5 smbd starten (auch nach jedem Neustart), nmbd (NetBIOS) aus"
 if command -v ip >/dev/null 2>&1 && ! ip link show eth0 >/dev/null 2>&1; then
-  echo "ACHTUNG: Netzwerkkarte eth0 fehlt – in smb-puffer.conf 'interfaces' anpassen (ip -br link)."
+  echo "ACHTUNG: Netzwerkkarte eth0 fehlt – prüfen, ob das Heimnetz in smb-puffer.conf 'interfaces' stimmt (ip -br addr)."
 fi
 frage "smbd jetzt (neu) starten?" || abbruch "smbd nicht neu gestartet."
 tu systemctl enable smbd
