@@ -245,3 +245,140 @@ class Abwechslung(MitRegieMaterial):
         self.assertIn("weniger gern gesehen", regie_lernen.lernstand_text(self.con, self.konfig))
         danach = self.momente(lies(regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel)))
         self.assertNotEqual(danach, m)                                        # andere Clips, obwohl ohne Abwechslung
+
+
+class EffekteLernen(MitRegieMaterial):
+    """Stufe 2 (Regisseur 2.0): „🎆 zu viele Effekte“ / „💥 mehr Action“ je Hauptstimmung, „zu hektisch“ dämpft.
+    Ohne Video: Entwürfe direkt in der Datenbank, die Schnittliste nur mit Stimmung und Momenten."""
+
+    # (Stimmung, Momente, Daumen, Gründe, mit Musik) – nur die alten Gründe, Werte unten vom Code vor Stufe 2
+    ALTE_FOLGE = [
+        ("episch", ["a", "b"], 1, [], False), ("spannend", ["b", "c"], -1, ["hektisch", "lang"], False),
+        ("episch", ["a", "d"], -1, ["musik"], True), ("lustig", ["e"], 1, ["getroffen"], True),
+        ("episch", ["a"], -1, ["langweilig", "abgeschnitten"], False), ("spannend", ["c"], -1, [], False),
+        ("chill", ["f"], 1, ["hektisch"], False), ("episch", ["b"], 1, [], False),
+    ]
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["regie"].update(vorgaben={}, lernen_ab=3)
+        self.n = 0
+
+    def entwurf(self, stimmung, gruende=(), daumen=None, momente=("a",), track=None):
+        self.n += 1
+        pfad = self.tmp / f"e{self.n}.json"
+        pfad.write_text(json.dumps({"stimmung": stimmung, "segmente": [{"moment": m} for m in momente]}),
+                        encoding="utf-8")
+        eid = self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, track_id, erstellt) "
+                               "VALUES (?, 'short', ?, '{}', ?, 'x')", (f"e{self.n}", str(pfad), track)).lastrowid
+        if daumen is not None:
+            regie_lernen.bewerte(self.con, eid, daumen=daumen)
+        for g in gruende:
+            regie_lernen.bewerte(self.con, eid, grund=g)
+        return eid
+
+    def p(self):
+        return regie_lernen.aktuelle(self.con, self.konfig)[0]
+
+    def test_neue_gruende_hinten(self):
+        self.assertEqual(list(regie_lernen.GRUENDE)[:6],
+                         ["musik", "hektisch", "getroffen", "lang", "abgeschnitten", "langweilig"])
+        self.assertEqual(list(regie_lernen.GRUENDE.items())[6:],
+                         [("effekte_viel", "🎆 zu viele Effekte"), ("action", "💥 mehr Action")])
+        self.assertEqual((regie.PARAMETER["effekt_staerke"], regie.PARAMETER["effekt_hektik"]), ({}, 1.0))
+
+    def test_vorgaben_mit_grenzen(self):
+        self.konfig.daten["regie"]["vorgaben"] = {
+            "effekt_hektik": 5, "effekt_staerke": {"episch": 2.0, "chill": 0, "lustig": 0.7, "wütend": 1.0,
+                                                   "spannend": "viel", "frustriert": True}}
+        p, _, hinweise = regie_lernen.vorgaben(self.konfig)
+        self.assertEqual(p["effekt_staerke"], {"episch": 1.5, "chill": 0.0, "lustig": 0.7})
+        self.assertEqual(p["effekt_hektik"], 1.3)
+        self.assertEqual(sorted(hinweise), [f"regie.vorgaben.effekt_staerke.{s} ignoriert"
+                                            for s in ("frustriert", "spannend", "wütend")])
+        self.assertEqual(regie.PARAMETER["effekt_staerke"], {})          # die Startwerte bleiben unberührt
+        self.konfig.daten["regie"]["vorgaben"] = {"effekt_hektik": 0.1, "effekt_staerke": 0.5}
+        p, _, hinweise = regie_lernen.vorgaben(self.konfig)
+        self.assertEqual((p["effekt_hektik"], p["effekt_staerke"]), (0.3, {}))
+        self.assertEqual(hinweise, ["regie.vorgaben.effekt_staerke ignoriert (unbekannt oder keine Zahl)"])
+
+    def test_regeln_je_hauptstimmung(self):
+        self.entwurf("episch", ["effekte_viel"])
+        self.assertEqual(self.p()["effekt_staerke"], {"episch": 0.85})
+        self.entwurf("episch", ["effekte_viel"])
+        self.entwurf("spannend", ["action"])
+        self.entwurf("lustig", ["effekte_viel", "action"])                # beide zugleich: nichts
+        self.entwurf("chill", daumen=1)                                   # 👍/👎 ohne Grund: nichts
+        self.entwurf("frustriert", daumen=-1)
+        p = self.p()
+        self.assertEqual(p["effekt_staerke"], {"episch": 0.722, "spannend": 1.15})
+        self.assertEqual(p["effekt_hektik"], 1.0)
+        self.assertEqual(self.con.execute("SELECT daumen FROM entwurf_bewertungen WHERE entwurf_id = 3")
+                         .fetchone()[0], -1)                              # „mehr Action“ ist Kritik
+
+    def test_chronologisch_mit_grenzen(self):
+        for _ in range(4):
+            self.entwurf("episch", ["action"])                            # 1,15 · 1,323 · 1,5 (Grenze) · 1,5
+        self.entwurf("episch", ["effekte_viel"])
+        self.assertEqual(self.p()["effekt_staerke"], {"episch": 1.275})   # von der Grenze aus, nicht von 1,749
+        for _ in range(20):
+            self.entwurf("spannend", ["effekte_viel"])
+        self.assertEqual(self.p()["effekt_staerke"]["spannend"], 0.1)     # nie ganz aus durch Lernen
+        self.entwurf("spannend", ["action"])
+        self.assertEqual(self.p()["effekt_staerke"]["spannend"], 0.115)
+
+    def test_hektisch_daempft_und_vorgabe_null_bleibt(self):
+        self.konfig.daten["regie"]["vorgaben"] = {"effekt_staerke": {"chill": 0}, "effekt_hektik": 1.2}
+        self.entwurf("chill", ["action"])
+        self.entwurf("chill", ["hektisch"])
+        p = self.p()
+        self.assertEqual(p["effekt_staerke"], {"chill": 0.0})             # deine 0 heißt: ohne Effekte
+        self.assertEqual(p["effekt_hektik"], 1.08)                        # 1,2 × 0,9
+        for _ in range(15):
+            self.entwurf("episch", ["hektisch"])
+        self.assertEqual(self.p()["effekt_hektik"], 0.3)                  # Untergrenze
+        self.konfig.daten["regie"]["vorgaben"] = {"effekt_staerke": {"lustig": 0.05}}
+        self.entwurf("lustig", ["effekte_viel"])                          # unter 0,1: 🎆 hebt nie an
+        self.assertEqual(self.p()["effekt_staerke"]["lustig"], 0.05)
+
+    def test_regression_alte_bewertungen(self):
+        for n, (energie, bpm) in enumerate(((0.4, 100.0), (0.8, 140.0)), 1):
+            self.con.execute("INSERT INTO tracks (datei, titel, kuenstler, quelle, sha256, dauer_s, bpm, energie, "
+                             "beats, verlauf, stimmungen, erstellt) VALUES (?, 'T', 'K', 'CC0', ?, 200, ?, ?, '[]', "
+                             "'[]', '[]', 'x')", (f"t{n}.mp3", f"s{n}", bpm, energie))
+        for stimmung, momente, daumen, gruende, musik in self.ALTE_FOLGE:
+            self.entwurf(stimmung, gruende, daumen, momente, 2 if musik else None)
+        p, ziel = regie_lernen.aktuelle(self.con, self.konfig)
+        alt = {"abwechslung": 0.7, "beats_pro_schnitt": 2, "dauer_faktor": 0.9, "luecke_max_s": 4.0,
+               "max_je_match": 3, "moment_bonus": {"a": -0.5, "b": 1.0, "c": -0.5, "e": 0.5, "f": 0.5},
+               "musik_pegel": 0.35, "puffer_nach_s": 1.8, "puffer_vor_s": 3.0, "seg_min_faktor": 1.322,
+               "stimmung_bonus": {"chill": 0.25, "episch": -0.25, "lustig": 0.5, "spannend": -0.25},
+               "track_malus": {"2": 1.0}, "uebergang_faktor": 1.21}
+        self.assertEqual({k: v for k, v in p.items() if k in alt}, alt)
+        self.assertEqual(set(p) - set(alt), {"effekt_staerke", "effekt_hektik"})
+        self.assertEqual((p["effekt_staerke"], p["effekt_hektik"]), ({}, 0.81))   # zweimal „zu hektisch“
+        self.assertEqual(ziel["lustig"], {"energie": 0.64, "bpm": 117.6})
+
+    def test_lernstand_zeigt_effekte(self):
+        self.konfig.daten["regie"]["effekte"]["an"] = True                 # MitRegieMaterial schaltet sie aus
+        self.konfig.daten["regie"]["vorgaben"] = {"effekt_staerke": {"chill": 0.5, "lustig": 0.8}}
+        self.entwurf("episch", ["effekte_viel", "hektisch"])
+        self.entwurf("lustig", ["action"])
+
+        def zeile():
+            return [z for z in regie_lernen.lernstand_text(self.con, self.konfig).splitlines()
+                    if z.startswith("Effekte:")]
+
+        self.assertEqual(zeile(), ["Effekte: episch 0.85 · spannend 1.0 · lustig 0.92 (Vorgabe 0.8) · "
+                                   "frustriert 1.0 · chill 0.5 (deine Vorgabe) · Hektik 0.9"])
+        self.konfig.daten["regie"]["effekte"]["an"] = False
+        self.assertTrue(zeile()[0].endswith("Hektik 0.9 – ausgeschaltet ([regie.effekte] an = false)"))
+
+    def test_cli_gruende_aus_einer_quelle(self):
+        import argparse
+
+        from clip_pipeline import cli
+
+        unter = next(a for a in cli.baue_parser()._actions if isinstance(a, argparse._SubParsersAction))
+        grund = next(a for a in unter.choices["bewerte"]._actions if a.dest == "grund")
+        self.assertEqual(set(grund.choices), set(regie_lernen.GRUENDE))

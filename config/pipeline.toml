@@ -130,6 +130,27 @@ lernen_ab = 3
 # pve-big höchstens so lange für den Final-Render wach halten
 final_halten_min = 60
 
+[regie.effekte]
+# Regisseur 2.0: Der Regisseur schreibt einen Effekt-Plan in die Schnittliste (src/clip_pipeline/effekte.py), der
+# Renderer setzt ihn nur um. Spielbild clean: im Bild nur Übergänge, Zoom und Farblook; Kill-Titel und Zähler im Short
+# nur im unscharfen Rand, im Zusammenschnitt kein Zähler. Profile je Stimmung: effekte.PROFIL, anpassbar in
+# config/lokal.toml unter [regie.effekte.<stimmung>] (Beispiele in config/lokal.beispiel.toml).
+# Aus = wie vorher (gleiche Übergänge, gleicher Filtergraph):
+an = true
+# steigt, wenn sich die Profilwerte im Code ändern (steht in jeder Schnittliste)
+profil_version = 1
+# Effekte schwächer als das fallen weg (Stärke 0..1 = Profilwert × gelernte Effekt-Stärke)
+schwelle = 0.15
+# Zoom-Ereignisse (Punch, Beat-Akzent, Meme) liegen mindestens so weit auseinander
+effekt_abstand_s = 0.4
+# höchstens so viele Glitch-Übergänge je Video (weitere werden zum Whip)
+max_glitch = 1
+# selbst erzeugte Sound-Effekte (ffmpeg aevalsrc, lizenzfrei) und ihr Pegel
+sfx_ordner = "/var/lib/clip-pipeline/sfx"
+sfx_pegel = 0.8
+# Kill-Titel in der Schrift aus [shorts].schriften (DejaVu Sans Bold): Breite eines Zeichens / Schriftgröße
+titel_zeichenbreite = 0.75
+
 [sitzungen]
 # "Session vorbei"-Dateien des Gaming-PCs (windows/Uebertragung.ps1, SessionVorbeiMinuten)
 ordner = "sitzungen"

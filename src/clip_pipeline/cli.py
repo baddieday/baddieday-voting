@@ -366,6 +366,9 @@ def _cmd_render_entwurf(args, konfig, con) -> int:
             _json({"fehler": "konfig", "hinweis": str(e)})
             return 2
         return 0
+    if args.messen:  # Renderzeit messen: Temp-Datei, danach weg, Datenbank unverändert
+        _json(entwurf.messen(con, konfig, args.entwurf))
+        return 0
     _json(entwurf.entwurf(con, konfig, args.entwurf))
     return 0
 
@@ -566,7 +569,10 @@ def baue_parser() -> argparse.ArgumentParser:
 
     s = unter.add_parser("render-entwurf", help="Entwurf eines compose-Laufs rendern (Mini) bzw. --final beauftragen")
     s.add_argument("entwurf", type=int)
-    s.add_argument("--final", action="store_true", help="auf pve-big in voller Qualität (NVENC): 1× wecken, danach aus")
+    art = s.add_mutually_exclusive_group()
+    art.add_argument("--final", action="store_true", help="auf pve-big in voller Qualität (NVENC): 1× wecken, danach aus")
+    art.add_argument("--messen", action="store_true",
+                     help="nur Renderzeit messen: Temp-Datei, danach gelöscht, Datenbank unverändert")
     s.set_defaults(fn=_cmd_render_entwurf, sperren=True)
 
     s = unter.add_parser("render-final", help="(auf pve-big) Auftrag in voller Qualität rendern")
@@ -595,8 +601,9 @@ def baue_parser() -> argparse.ArgumentParser:
     daumen = s.add_mutually_exclusive_group(required=True)
     daumen.add_argument("--gut", action="store_true", help="👍")
     daumen.add_argument("--schlecht", action="store_true", help="👎")
-    s.add_argument("--grund", action="append", default=[],
-                   choices=["musik", "hektisch", "getroffen", "lang", "abgeschnitten", "langweilig"])
+    from . import regie_lernen  # die Gründe gibt es nur an einer Stelle (auch für die Bot-Knöpfe)
+
+    s.add_argument("--grund", action="append", default=[], choices=list(regie_lernen.GRUENDE))
     s.set_defaults(fn=_cmd_bewerte, sperren=False)
 
     s = unter.add_parser("lernstand", help="Was hat der Regisseur gelernt? (inkl. deiner Vorgaben)")

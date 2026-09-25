@@ -65,6 +65,8 @@ class MitRegieMaterial(MitSpeicher):
         super().setUp()
         self.konfig.daten["musik"]["ordner"] = str(self.tmp / "musik")
         self.konfig.daten.setdefault("regie", {})["ordner"] = str(self.tmp / "regie")
+        # Bestandstests prüfen den Schnitt ohne Effekte (Regisseur 2.0); Effekt-Tests schalten sie selbst ein
+        self.konfig.daten["regie"].setdefault("effekte", {})["an"] = False
 
     def momente_anlegen(self, momente=MOMENTE, *, video_mit_ton: int = 2, farbig: bool = False) -> list[int]:
         ids = []
