@@ -1,6 +1,7 @@
 """Kommandozeile `pipeline ...` – Vertrag mit n8n (siehe CLAUDE.md, "Schnittstelle zu n8n"):
 
   prepare|analyze|decide|render --session ID     highlight --id ID --tage 14
+  (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe])
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -83,7 +84,12 @@ def _cmd_replay(args, konfig, con) -> int:
     print(f"Start {utc_zu_lokal(match.start_utc, zone):%d.%m.%Y %H:%M:%S} · Ende {utc_zu_lokal(match.ende_utc, zone):%H:%M:%S}")
     namen = {"kill": "Kill", "knock": "Knock", "tod": "gestorben", "knock_erlitten": "selbst am Boden"}
     for e in match.ereignisse:
-        print(f"  {utc_zu_lokal(e.zeit_utc, zone):%H:%M:%S.%f}"[:-3] + f"  {namen.get(e.art, e.art)}")
+        zeile = f"  {utc_zu_lokal(e.zeit_utc, zone):%H:%M:%S.%f}"[:-3] + f"  {namen.get(e.art, e.art)}"
+        if e.art == "kill" and e.aktion_utc is not None and e.aktion_utc != e.zeit_utc:
+            # Aktion = mein Umhauen: dort beginnt der Clip (beim Team-Wipe Sekunden vor dem Kill)
+            vorher = (e.zeit_utc - e.aktion_utc).total_seconds()
+            zeile += f"  (umgehauen {utc_zu_lokal(e.aktion_utc, zone):%H:%M:%S}, {vorher:.1f} s vorher)"
+        print(zeile)
     for w in match.warnungen:
         print(f"  ⚠️ {w}")
     return 0
@@ -227,7 +233,8 @@ def _cmd_material(args, konfig, con) -> int:
 
 def _cmd_lager(args, konfig, con) -> int:
     """Puffer ↔ Lager (E19). Exit: 0 ok · 1 Datei-Fehler (Übernahme auch: Konflikt, zu jung) · 2 Aufruf/Konfig ·
-    3 Lager offline/nicht geweckt · 4 Lager-Sperre belegt (Gesperrt, in main). Der Probelauf endet ohne Abbruch mit 0.
+    3 Lager offline/nicht geweckt · 4 Lager-Sperre belegt (Gesperrt, in main). Der Probelauf endet ohne Abbruch mit 0,
+    ebenso ein Abgleich, der in der Nachtruhe nicht wecken durfte ("nachtruhe": true).
     Die Übernahme läuft vor dem Umschalten, also auch ohne [lager]."""
     from . import lager
 
@@ -244,7 +251,8 @@ def _cmd_lager(args, konfig, con) -> int:
         if args.aktion == "abgleich":
             ergebnis = lager.abgleich(con, konfig, probelauf=args.probelauf)
         else:
-            ergebnis = lager.uebernahme(con, konfig, Path(args.von), Path(args.nach), args.eingang_tage,
+            tage = args.eingang_tage if args.eingang_tage is not None else int(konfig.wert("puffer.rohdaten_tage", 14))
+            ergebnis = lager.uebernahme(con, konfig, Path(args.von), Path(args.nach), tage,
                                         probelauf=args.probelauf)
     except KonfigFehler as e:  # z. B. Puffer und Lager verwechselbar – dann wurde nichts kopiert
         log.error("%s", e)
@@ -286,6 +294,22 @@ def _cmd_stimmung(args, konfig, con) -> int:
     _json(stimmung.analysiere(con, konfig, dateien=args.dateien, neu=args.neu, claude=not args.ohne_claude,
                               whisper=not args.ohne_whisper, maximal=args.max))
     return 0
+
+
+def _cmd_momente(args, konfig, con) -> int:
+    """Vorhandene Multikill-Momente aus dem Puffer neu schneiden (Aktion drin). Nur getrennter Betrieb, weckt nie.
+    Exit: 0 ok · 1 mindestens ein Moment mit Fehler · 2 Konfig (kein getrennter Betrieb, Puffer-Marke fehlt)."""
+    from . import nachschnitt
+
+    tage = args.tage if args.tage is not None else int(konfig.wert("puffer.rohdaten_tage", 14))
+    try:
+        ergebnis = nachschnitt.nachschneiden(con, konfig, tage=tage, probe=args.probe)
+    except KonfigFehler as e:
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
+    _json(ergebnis)
+    return 1 if ergebnis["fehler"] else 0
 
 
 def _cmd_musik(args, konfig, con) -> int:
@@ -341,6 +365,9 @@ def _cmd_render_entwurf(args, konfig, con) -> int:
             log.error("%s", e)
             _json({"fehler": "konfig", "hinweis": str(e)})
             return 2
+        return 0
+    if args.messen:  # Renderzeit messen: Temp-Datei, danach weg, Datenbank unverändert
+        _json(entwurf.messen(con, konfig, args.entwurf))
         return 0
     _json(entwurf.entwurf(con, konfig, args.entwurf))
     return 0
@@ -492,13 +519,15 @@ def baue_parser() -> argparse.ArgumentParser:
 
     s = unter.add_parser("lager", help="Puffer ↔ Lager auf pve-big (E19): abgleich | status | uebernehmen")
     lager_befehle = s.add_subparsers(dest="aktion", required=True)
-    a = lager_befehle.add_parser("abgleich", help="Puffer → Lager mit SHA-256 (weckt pve-big nur, wenn etwas offen ist)")
+    a = lager_befehle.add_parser("abgleich", help="Puffer → Lager mit SHA-256 (weckt pve-big nur, wenn etwas offen "
+                                                  "ist – nie in der Nachtruhe)")
     a.add_argument("--probelauf", action="store_true", help="nur zeigen, was offen ist (weckt nicht, kopiert nichts)")
-    lager_befehle.add_parser("status", help="offene Dateien, letzter Abgleich, Puffer frei (weckt nie)")
+    lager_befehle.add_parser("status", help="offene Dateien, letzter Abgleich, Puffer und Lager frei (weckt nie)")
     a = lager_befehle.add_parser("uebernehmen", help="einmalig Lager → Puffer vor dem Umschalten (docs/PUFFER.md R4/R5)")
     a.add_argument("--von", required=True, help="Lager, z. B. /srv/big/clips")
     a.add_argument("--nach", required=True, help="Puffer, z. B. /srv/puffer")
-    a.add_argument("--eingang-tage", type=int, default=3, help="von eingang/ nur Dateien der letzten N Tage")
+    a.add_argument("--eingang-tage", type=int, default=None,
+                   help="von eingang/ nur Dateien der letzten N Tage (Standard: [puffer].rohdaten_tage = 14)")
     a.add_argument("--probelauf", action="store_true", help="nur zählen (weckt nicht, kopiert nichts)")
     s.set_defaults(fn=_cmd_lager, sperren=False)  # eigene Lager-Sperre statt der Pipeline-Sperre
 
@@ -513,6 +542,15 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--ohne-whisper", action="store_true")
     s.add_argument("--max", type=int, help="höchstens so viele (die besten zuerst), Rest beim nächsten Lauf")
     s.set_defaults(fn=_cmd_stimmung, sperren=True)
+
+    s = unter.add_parser("momente", help="Momente pflegen: nachschneiden (Multikills ab der ersten Aktion, nur Puffer)")
+    momente_befehle = s.add_subparsers(dest="aktion", required=True)
+    a = momente_befehle.add_parser("nachschneiden", help="Momente mit ≥ 2 Kills neu aus der Quellaufnahme im Puffer "
+                                                         "schneiden (neue Dateien, weckt nie)")
+    a.add_argument("--tage", type=int, default=None,
+                   help="nur Clips der letzten N Tage (Standard: [puffer].rohdaten_tage = 14)")
+    a.add_argument("--probe", action="store_true", help="nur zeigen, was geschähe (schneidet und schreibt nichts)")
+    s.set_defaults(fn=_cmd_momente, sperren=True)  # rechenintensiv: Pipeline-Sperre; nicht in WECKEN
 
     s = unter.add_parser("musik", help="Musik: analysieren, hinzufügen (mit Quelle), NCS laden, Liste")
     s.add_argument("aktion", choices=["analysieren", "hinzufuegen", "ncs", "liste"])
@@ -531,7 +569,10 @@ def baue_parser() -> argparse.ArgumentParser:
 
     s = unter.add_parser("render-entwurf", help="Entwurf eines compose-Laufs rendern (Mini) bzw. --final beauftragen")
     s.add_argument("entwurf", type=int)
-    s.add_argument("--final", action="store_true", help="auf pve-big in voller Qualität (NVENC): 1× wecken, danach aus")
+    art = s.add_mutually_exclusive_group()
+    art.add_argument("--final", action="store_true", help="auf pve-big in voller Qualität (NVENC): 1× wecken, danach aus")
+    art.add_argument("--messen", action="store_true",
+                     help="nur Renderzeit messen: Temp-Datei, danach gelöscht, Datenbank unverändert")
     s.set_defaults(fn=_cmd_render_entwurf, sperren=True)
 
     s = unter.add_parser("render-final", help="(auf pve-big) Auftrag in voller Qualität rendern")
@@ -560,8 +601,9 @@ def baue_parser() -> argparse.ArgumentParser:
     daumen = s.add_mutually_exclusive_group(required=True)
     daumen.add_argument("--gut", action="store_true", help="👍")
     daumen.add_argument("--schlecht", action="store_true", help="👎")
-    s.add_argument("--grund", action="append", default=[],
-                   choices=["musik", "hektisch", "getroffen", "lang", "abgeschnitten", "langweilig"])
+    from . import regie_lernen  # die Gründe gibt es nur an einer Stelle (auch für die Bot-Knöpfe)
+
+    s.add_argument("--grund", action="append", default=[], choices=list(regie_lernen.GRUENDE))
     s.set_defaults(fn=_cmd_bewerte, sperren=False)
 
     s = unter.add_parser("lernstand", help="Was hat der Regisseur gelernt? (inkl. deiner Vorgaben)")
@@ -584,6 +626,12 @@ def _vorab_ablehnen(args, konfig) -> int | None:
     """Befehle, die in dieser Konfig nicht laufen dürfen, sofort ablehnen (Exit 2) – vor der Pipeline-Sperre.
     Sonst wartete z. B. ein noch aktiver clip-aufraeumen-Timer bis zu [sperre].warten_s auf einen laufenden render
     und endete dann mit „gesperrt“ (Exit 4, im Timer kein Fehler) statt mit dem Hinweis, ihn auszuschalten."""
+    if args.befehl == "momente" and not konfig.getrennt:
+        # Ohne getrennten Betrieb wäre [speicher].wurzel pve-big selbst – der Nachschnitt arbeitet nur im Puffer
+        hinweis = "kein getrennter Betrieb: [lager].wurzel leer – momente nachschneiden arbeitet nur im Puffer (E19)"
+        log.error("%s", hinweis)
+        _json({"fehler": "konfig", "hinweis": hinweis})
+        return 2
     if args.befehl != "aufraeumen":
         return None
     try:

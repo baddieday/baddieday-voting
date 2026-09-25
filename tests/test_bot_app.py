@@ -107,7 +107,7 @@ class BotApp(MitSpeicher):
 
         fake = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
                                bot=SimpleNamespace(send_message=send_message))
-        with mock.patch.object(aktionen, "jetzt", return_value=_um(4, 35)):  # nach dem Abgleich um 04:30
+        with mock.patch.object(aktionen, "jetzt", return_value=_um(4, 35)):  # mitten in der Ruhezeit (bis 08:00)
             self.assertEqual(asyncio.run(bot_app.sende_meldungen(fake)), 1)
         self.assertEqual(gesendet, ["⚠️ 2 Kills ohne Aufnahme"])  # andere Meldungen wie bisher sofort
         with mock.patch.object(aktionen, "jetzt", return_value=_um(8, 0)):
@@ -226,9 +226,9 @@ class StatusGetrennt(MitAbgleich):
     def test_lager_zeile_nach_abgleich(self):
         self.lauf("lager", "abgleich")
         self.geweckt.clear()
-        with self.lager_tabu():
+        with self.lager_tabu():  # auch kein statvfs im Lager: der Platz kommt aus der Tabelle
             text = _status_text(self.con, self.konfig)
-        self.assertRegex(text, r"Lager: letzter Abgleich \d\d:\d\d ok · 0 offen")
+        self.assertRegex(text, r"Lager: \d+ GB frei, letzter Abgleich \d\d:\d\d ok · 0 offen")
         self.assertEqual(self.geweckt, [])
 
     def test_status_antwortet_auch_bei_fehler(self):

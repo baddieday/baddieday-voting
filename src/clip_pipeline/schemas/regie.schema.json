@@ -1,11 +1,11 @@
 {
-  "$comment": "Schnittliste des Regisseurs (pipeline compose). Wird vor dem Speichern geprüft (regie.pruefe_liste).",
+  "$comment": "Schnittliste des Regisseurs (pipeline compose). Wird vor dem Speichern geprüft (regie.pruefe_liste). version 4: Effekt-Plan (effekte.py); version 3 ohne Effekte bleibt gültig.",
   "type": "object",
   "required": ["version", "art", "name", "format", "aufloesung", "fps", "dauer_s", "stimmung", "parameter",
                "musik", "overlay", "bogen", "segmente", "hinweise", "erstellt"],
   "additionalProperties": false,
   "properties": {
-    "version": {"type": "integer", "enum": [3]},
+    "version": {"type": "integer", "enum": [3, 4]},
     "art": {"type": "string", "enum": ["regie"]},
     "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"},
     "format": {"type": "string", "enum": ["zusammenschnitt", "short"]},
@@ -30,6 +30,20 @@
       }
     },
     "overlay": {"type": ["string", "null"]},
+    "effekte": {
+      "$comment": "Regisseur 2.0: an = false heißt ohne jeden Effekt (wie version 3)",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["an"],
+      "properties": {
+        "an": {"type": "boolean"},
+        "profil_version": {"type": "integer", "minimum": 1, "maximum": 99},
+        "look": {"type": "string", "enum": ["neutral", "cinematic", "kalt", "warm", "entsaettigt", "soft"]},
+        "look_staerke": {"type": "number", "minimum": 0, "maximum": 1},
+        "hook": {"type": "boolean"},
+        "loop": {"type": "boolean"}
+      }
+    },
     "bogen": {"type": "array", "items": {"type": "number"}},
     "auswahl": {
       "type": "object",
@@ -45,6 +59,7 @@
     "segmente": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 200,
       "items": {
         "type": "object",
         "required": ["nr", "moment", "datei", "stimmung", "quelle_start_s", "quelle_ende_s", "quelle_dauer_s",
@@ -53,6 +68,7 @@
         "properties": {
           "nr": {"type": "integer", "minimum": 1},
           "moment": {"type": "string", "minLength": 1},
+          "teil": {"type": "integer", "minimum": 1, "$comment": "Jump-Cut: n-ter Teil desselben Moments (fehlt = ein Stück)"},
           "clip_id": {"type": ["integer", "null"]},
           "match_id": {"type": ["string", "null"]},
           "datei": {"type": "string", "minLength": 1},
@@ -69,12 +85,48 @@
           "zeit_start": {"type": "number", "minimum": 0},
           "zeit_ende": {"type": "number", "minimum": 0},
           "auf_beat": {"type": "boolean"},
+          "rolle": {"type": "string", "enum": ["moment", "hook"]},
+          "kill_s": {"type": "array", "maxItems": 20, "items": {"type": "number", "minimum": 0},
+                     "$comment": "sichtbare eigene Kills (Anker: mein Umhauen, sonst der Kill) in Quellsekunden"},
+          "lupe": {
+            "type": ["object", "null"],
+            "required": ["ab_s", "bis_s", "faktor", "ton"],
+            "additionalProperties": false,
+            "properties": {
+              "ab_s": {"type": "number", "minimum": 0},
+              "bis_s": {"type": "number", "minimum": 0},
+              "faktor": {"type": "number", "enum": [0.5]},
+              "ton": {"type": "string", "enum": ["tief", "tempo", "stumm"]}
+            }
+          },
+          "effekte": {
+            "$comment": "Effekt-Plan (effekte.plane): t_s = Quellzeit, dauer_s = Dauer im Video. Spielbild clean: kein Blitz, kein Wackeln, kein Glitch-Ereignis",
+            "type": "array",
+            "maxItems": 24,
+            "items": {
+              "type": "object",
+              "required": ["art", "t_s", "staerke"],
+              "additionalProperties": false,
+              "properties": {
+                "art": {"type": "string", "enum": ["punch", "akzent", "meme", "titel", "zaehler", "sfx"]},
+                "t_s": {"type": "number", "minimum": 0},
+                "dauer_s": {"type": "number", "minimum": 0, "maximum": 3},
+                "staerke": {"type": "number", "minimum": 0, "maximum": 1},
+                "text": {"type": "string", "enum": ["DOUBLE KILL", "TRIPLE KILL", "QUAD KILL", "PENTA KILL", "MULTI KILL",
+                                                     "VICTORY ROYALE"]},
+                "zahl": {"type": "integer", "minimum": 1, "maximum": 99},
+                "klang": {"type": "string", "enum": ["basshit", "tick", "whoosh", "pop", "einschlag", "riser"]}
+              }
+            }
+          },
           "uebergang": {
             "type": "object",
             "required": ["art", "dauer_s"],
             "additionalProperties": false,
             "properties": {
-              "art": {"type": "string", "enum": ["schnitt", "fade", "fadeblack", "fadewhite", "wipeleft", "slideleft", "circleopen"]},
+              "art": {"type": "string", "enum": ["schnitt", "fade", "fadeblack", "fadewhite", "wipeleft", "slideleft", "circleopen",
+                                                  "whip", "zoom", "glitch", "squeeze", "dissolve"],
+                      "$comment": "whip, zoom, glitch, squeeze, dissolve sind eigene Namen – die ffmpeg-Art bestimmt der Renderer"},
               "dauer_s": {"type": "number", "minimum": 0, "maximum": 3}
             }
           }

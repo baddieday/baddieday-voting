@@ -13,4 +13,6 @@ SupplementaryGroups=render
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/clip-pipeline /srv/clips
+# /srv/puffer ausdrücklich (E19): Nach dem Umschalten (docs/PUFFER.md, R5) ist /srv/clips nur ein Link darauf –
+# systemd löst ihn sonst nur implizit beim Start auf. "-": fehlt /srv/puffer (vor R1), startet der Dienst trotzdem.
+ReadWritePaths=/var/lib/clip-pipeline /srv/clips -/srv/puffer

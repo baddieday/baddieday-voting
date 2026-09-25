@@ -119,22 +119,30 @@ def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
 
     kandidaten, ohne_video = [], []
     for k in vorbewertung.kandidaten(zl, einstellungen):
+        if k.hinweis:
+            warnungen.append(k.hinweis)
         s = schnittliste.waehle_aufnahme(k, aufnahmen, prioritaet)
         if s is None:
             ohne_video.append({"nr": k.nr, "titel": k.titel, "kill_zeiten_utc": [iso(z) for z in k.kill_zeiten]})
             continue
-        k.merkmale["laenge"] = vorbewertung.laenge_merkmal(s.dauer_s, float(einstellungen["laenge_frei_s"]))
+        k.merkmale["laenge"] = vorbewertung.laenge_ab_kill(
+            s.start_s, s.ende_s, s.aufnahme.sekunde(k.kill_zeiten[0]), float(einstellungen["puffer_vorne_s"]),
+            float(einstellungen["laenge_frei_s"]))
         k.punkte, k.begruendung = vorbewertung.bewerte(k.merkmale, gewichte, k.titel)
+        kill_sekunden = [round(s.aufnahme.sekunde(z), 2) for z in k.kill_zeiten]
+        aktion_sekunden = [round(s.aufnahme.sekunde(z), 2) for z in k.aktion_zeiten]  # darf < 0 sein
         kandidaten.append({
             "nr": k.nr, "titel": k.titel, "typ": k.typ, "kills": k.kills, "max_gruppe": k.max_gruppe,
             "victory_royale": k.victory_royale,
             "kill_zeiten_utc": [iso(z) for z in k.kill_zeiten],
-            "kill_sekunden": [round(s.aufnahme.sekunde(z), 2) for z in k.kill_zeiten],
+            "kill_sekunden": kill_sekunden,
+            "aktion_sekunden": aktion_sekunden,
             "serie_sekunden": serie_sekunden({"kill_zeiten_utc": [iso(z) for z in k.kill_zeiten]},
                                              float(einstellungen["multikill_fenster_s"])),
             "aufnahme": s.aufnahme.pfad, "quelle": s.aufnahme.quelle, "abdeckung": s.abdeckung,
             "vorschlag": {"start_s": s.start_s, "ende_s": s.ende_s},
-            "grenzen": {"min_start_s": 0.0, "max_ende_s": round(s.aufnahme.dauer_s, 3)},
+            "grenzen": {"min_start_s": 0.0, "max_ende_s": round(s.aufnahme.dauer_s, 3),
+                        "spaetester_start_s": spaetester_start(0.0, kill_sekunden, aktion_sekunden, s.start_s)},
             "merkmale": k.merkmale, "punkte": k.punkte, "begruendung": k.begruendung,
         })
     if ohne_video:
@@ -162,9 +170,11 @@ def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
 # --- decide ---------------------------------------------------------------------
 
 AUFTRAG = """Du bist Cutter für Fortnite-Shorts. Lies mit dem Read-Tool die Datei analyse.json im aktuellen Ordner.
-Sie enthält Kill-Kandidaten mit Vorschlag (start_s/ende_s, Sekunden in der Aufnahme), Grenzen und Kill-Sekunden.
-Lege für JEDEN Kandidaten den Schnitt fest: kurz vor der Action beginnen, kurz nach dem letzten Kill enden.
-Regeln: start_s >= grenzen.min_start_s und start_s <= erste kill_sekunden - 2; ende_s <= grenzen.max_ende_s und
+Sie enthält Kill-Kandidaten mit Vorschlag (start_s/ende_s, Sekunden in der Aufnahme), Grenzen, Kill-Sekunden und
+Aktions-Sekunden. aktion_sekunden gehört Eintrag für Eintrag zu kill_sekunden: wann ich diesen Gegner umgehauen
+habe (die eigentliche Action; beim Team-Wipe Sekunden vor dem Kill, kann auch vor Beginn der Aufnahme liegen).
+Lege für JEDEN Kandidaten den Schnitt fest: kurz vor der ersten Aktion beginnen, kurz nach dem letzten Kill enden.
+Regeln: start_s >= grenzen.min_start_s und start_s <= grenzen.spaetester_start_s; ende_s <= grenzen.max_ende_s und
 ende_s >= letzte kill_sekunden + 1; Dauer 5 bis 60 Sekunden.
 Optional "beschreibung": deutsch, max. 120 Zeichen, höchstens 1 Emoji, NUR aus den Fakten (max_gruppe als
 Anzahl Kills, typ, serie_sekunden, victory_royale, match.platzierung, match.kills). Keine Waffen, Orte, Namen
@@ -220,15 +230,30 @@ def serie_sekunden(kandidat: dict, fenster_s: float) -> int:
     return max(1, round((serie[-1] - serie[0]).total_seconds()))
 
 
+def spaetester_start(min_start_s: float, kill_sekunden: list[float], aktion_sekunden: list[float],
+                     vorschlag_start_s: float) -> float:
+    """Spätester erlaubter Schnittbeginn: 2 s vor der ersten Aktion.
+
+    Passt die Serie ab der Aktion nicht in MAX_DAUER_S (oder liegt die Aktion vor der Aufnahme), darf später
+    begonnen werden – so weit, dass die Regeln erfüllbar bleiben (und der Regel-Vorschlag erlaubt ist).
+    Nie später als 2 s vor dem ersten Kill.
+    """
+    erster, letzter = kill_sekunden[0], kill_sekunden[-1]
+    spaet = max(min(aktion_sekunden) - 2, letzter + 1 - vorbewertung.MAX_DAUER_S, vorschlag_start_s)
+    return round(max(min_start_s, min(erster - 2, spaet)), 3)
+
+
 def pruefe_wahl(wahl: dict, kandidat: dict) -> str | None:
     """Fachliche Prüfung eines Schnitts – das Schema allein kennt die Kill-Zeiten nicht."""
     start, ende = float(wahl["start_s"]), float(wahl["ende_s"])
     erster, letzter = kandidat["kill_sekunden"][0], kandidat["kill_sekunden"][-1]
+    # Neuere analyse.json: vor der ersten Aktion beginnen; ältere: 2 s vor dem ersten Kill (wie bisher)
+    spaet = kandidat["grenzen"].get("spaetester_start_s", erster - 2)
     if start < kandidat["grenzen"]["min_start_s"] or ende > kandidat["grenzen"]["max_ende_s"] + 0.01:
         return "außerhalb der Aufnahme"
-    if start > erster - 2 + 0.01 or ende < letzter + 1 - 0.01:
+    if start > spaet + 0.01 or ende < letzter + 1 - 0.01:
         return "schneidet einen Kill ab"
-    if not 5 <= ende - start <= 60:
+    if not 5 <= ende - start <= vorbewertung.MAX_DAUER_S:
         return "Dauer nicht 5–60 s"
     return None
 
@@ -249,11 +274,14 @@ def decide(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
             hinweise.append(hinweis)
     version, gewichte = lernen.aktuelle(con, konfig)
     frei = float(konfig.wert("vorbewertung.laenge_frei_s", 30))
+    vorne = float(konfig.wert("vorbewertung.puffer_vorne_s", 8))
     fenster = float(konfig.wert("vorbewertung.multikill_fenster_s", 10))
 
     clips = []
     for k in analyse["kandidaten"]:
         start, ende = k["vorschlag"]["start_s"], k["vorschlag"]["ende_s"]
+        # Länge des Vorschlags hat analyze schon gerechnet (gleiche Eingaben -> gleicher Wert)
+        laenge = k["merkmale"].get("laenge", vorbewertung.laenge_merkmal(ende - start, frei))
         beschreibung = grund = None
         wahl = (antwort or {}).get(k["nr"])
         if wahl:
@@ -261,6 +289,9 @@ def decide(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
                 hinweise.append(f"Clip {k['nr']}: Claude-Schnitt verworfen ({fehler})")
             else:
                 start, ende, grund = round(float(wahl["start_s"]), 3), round(float(wahl["ende_s"]), 3), wahl.get("grund")
+                # Anlauf vor dem ersten Kill kostet keine Punkte; ältere analyse.json ohne Aktionen wie bisher
+                laenge = (vorbewertung.laenge_ab_kill(start, ende, k["kill_sekunden"][0], vorne, frei)
+                          if "aktion_sekunden" in k else vorbewertung.laenge_merkmal(ende - start, frei))
             text = (wahl.get("beschreibung") or "").strip()
             fakten = {"kills": k["max_gruppe"], "sekunden": serie_sekunden(k, fenster),
                       "platzierung": analyse["match"]["platzierung"], "kills_match": analyse["match"]["kills"]}
@@ -268,16 +299,19 @@ def decide(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
                 beschreibung = text
             elif text:
                 hinweise.append(f"Clip {k['nr']}: Beschreibung verworfen (erfundene Zahl oder zu lang)")
-        merkmale = dict(k["merkmale"], laenge=vorbewertung.laenge_merkmal(ende - start, frei))
+        merkmale = dict(k["merkmale"], laenge=laenge)
         punkte, begruendung = vorbewertung.bewerte(merkmale, gewichte, k["titel"])
-        clips.append({
+        clip = {
             **{f: k[f] for f in ("nr", "titel", "typ", "kills", "max_gruppe", "victory_royale", "kill_zeiten_utc",
                                  "kill_sekunden", "aufnahme", "quelle", "abdeckung")},
             "start_s": start, "ende_s": ende,
             "min_start_s": k["grenzen"]["min_start_s"], "max_ende_s": k["grenzen"]["max_ende_s"],
             "merkmale": merkmale, "punkte": punkte, "begruendung": begruendung,
             "beschreibung": beschreibung, "grund": grund,
-        })
+        }
+        if "aktion_sekunden" in k:
+            clip["aktion_sekunden"] = k["aktion_sekunden"]
+        clips.append(clip)
 
     liste = {
         "version": 2, "session": sid, "entschieden_von": "claude" if antwort is not None else "regel",
@@ -309,6 +343,18 @@ def _lautstaerke(con: sqlite3.Connection, konfig: Konfig, aufnahme, clip_datei: 
     return round(min(1.0, max(0.0, (spitze - referenz) / spanne)), 2)
 
 
+def schneide_aufnahme(konfig: Konfig, aufnahme, start_s: float, dauer_s: float, ziel: Path) -> None:
+    """Schneidet aus einer erfassten Aufnahme (Pfad relativ zur Speicherwurzel) – framegenau, feste Bildrate.
+
+    Gemeinsam für die Bot-Clips (render) und den Nachschnitt der Momente: gleiche Encoder-Einstellungen.
+    """
+    medien.schneide(
+        konfig.absolut(aufnahme.pfad), start_s, dauer_s, ziel, fps=aufnahme.fps,
+        encoder=str(konfig.wert("schnitt.encoder", "libx264")), crf=int(konfig.wert("schnitt.crf", 18)),
+        vaapi_geraet=str(konfig.wert("schnitt.vaapi_geraet", "/dev/dri/renderD128")),
+    )
+
+
 def render(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
     konfig.pruefe_speicher()
     arbeitsordner = ordner(konfig, sid)
@@ -327,11 +373,7 @@ def render(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
             continue
         dauer = c["ende_s"] - c["start_s"]
         clip_datei = arbeitsordner / "clips" / f"{c['nr']:03d}_{c['typ']}_{c['kills']}k.mp4"
-        medien.schneide(
-            konfig.absolut(aufnahme.pfad), c["start_s"], dauer, clip_datei, fps=aufnahme.fps,
-            encoder=str(konfig.wert("schnitt.encoder", "libx264")), crf=int(konfig.wert("schnitt.crf", 18)),
-            vaapi_geraet=str(konfig.wert("schnitt.vaapi_geraet", "/dev/dri/renderD128")),
-        )
+        schneide_aufnahme(konfig, aufnahme, c["start_s"], dauer, clip_datei)
         merkmale = dict(c["merkmale"], lautstaerke=_lautstaerke(con, konfig, aufnahme, clip_datei, hinweise))
         punkte, begruendung = vorbewertung.bewerte(merkmale, gewichte, c["titel"])
         vorschau_datei = arbeitsordner / "vorschau" / f"{c['nr']:03d}.mp4"

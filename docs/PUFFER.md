@@ -2,12 +2,13 @@
 
 Bisher liegt alles direkt auf pve-big: Jeder Zugriff der Pipeline weckt ihn, tagsüber oft mehrmals. Neu (Entscheidung
 E19 in `docs/ENTSCHEIDUNGEN.md`): Die Pipeline arbeitet nur noch auf einem **Puffer** auf dem Mini, der immer läuft.
-pve-big ist nur noch das **Lager** und wird höchstens einmal pro Nacht geweckt – und nur, wenn es etwas Neues gibt.
+pve-big ist nur noch das **Lager** und wird höchstens einmal am Tag geweckt – um 10:00, nie nachts (sein Lüfter
+soll niemanden wecken) – und nur, wenn es etwas Neues gibt.
 
 ```
 Gaming-PC ──SMB, alle 2 min──► MINI · CT "clips" · /srv/puffer  (= /srv/clips)
                                  Pipeline, Bot, n8n-Aufrufe arbeiten NUR hier – wecken nie
-                                       │  nachts 04:30, nur wenn Neues da ist
+                                       │  täglich 10:00, nur wenn Neues da ist – nie nachts
                                        │  NFS · SHA-256 · zurücklesen · Rohdaten nie überschreiben
                                        ▼
                                pve-big · Lager (ZFS-Pool/clips, im CT /srv/big/clips)
@@ -20,8 +21,9 @@ Gaming-PC ──SMB, alle 2 min──► MINI · CT "clips" · /srv/puffer  (= /
 |---|---|
 | **Puffer** | eigenes 96-GB-Volume auf dem Mini, im CT `/srv/puffer`. Nach dem Umschalten zeigt `/srv/clips` darauf. Marke `.clip-puffer`. |
 | **Lager** | pve-big, `ZFS-Pool/clips`, im CT `/srv/big/clips` (NFS). Marke `.clip-lager`. Nicht „Archiv“ nennen – `archiv/` sind die Multikills. |
-| **Abgleich** | nachts Puffer → Lager, jede Datei mit SHA-256 zurückgelesen: `pipeline lager abgleich` |
+| **Abgleich** | einmal am Tag (10:00) Puffer → Lager, jede Datei mit SHA-256 zurückgelesen: `pipeline lager abgleich` |
 | **Übernahme** | einmalig Lager → Puffer vor dem Umschalten: `pipeline lager uebernehmen` |
+| **Nachtruhe** | 22:00–08:00 (`[lager].nachtruhe_von/_bis`): Der Abgleich weckt pve-big dann nie. |
 | **getrennter Betrieb** | `[lager].wurzel` ist gesetzt. Leer = alles exakt wie bisher – das ist der eingebaute Rückweg. |
 
 ## Bevor du anfängst
@@ -249,7 +251,8 @@ Timern, und alles, was seit R3 in der Datenbank passiert ist, ist dann weg.
 ## R4 · Lager markieren + Übernahme
 
 **Was:** Auf pve-big `.clip-lager` anlegen. Dann die vorhandenen Daten einmal Lager → Puffer kopieren: alle
-Ordner aus `[lager].ordner` außer `eingang/` ganz, von `eingang/` nur die letzten 3 Tage.
+Ordner aus `[lager].ordner` außer `eingang/` ganz, von `eingang/` die letzten 14 Tage (`[puffer].rohdaten_tage`: so
+lange hält der Puffer Rohvideos – der Regisseur braucht sie für seine Momente).
 **Warum:** Nach dem Umschalten arbeitet die Pipeline nur im Puffer – Sessions, Replays, Highlights, Musik usw. müssen
 dort schon liegen. Die Marken machen eine Verwechslung unmöglich: `.clip-lager` nur im Lager, `.clip-puffer` nur im
 Puffer, dazu verschiedene Dateisysteme – sonst bricht jeder Abgleich mit Klartext ab und kopiert nichts.
@@ -266,14 +269,14 @@ kopiert (nur kopiert: im Lager ändert sich nichts).
 2. Im CT erst der Probelauf – er zeigt Anzahl und GB:
    ```bash
    sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen \
-     --von /srv/big/clips --nach /srv/puffer --eingang-tage 3 --probelauf
+     --von /srv/big/clips --nach /srv/puffer --eingang-tage 14 --probelauf
    ```
    Passt es nicht bequem (Faustregel: mehr als die Hälfte des Puffers, also über 48 GB): **nicht weitermachen,
    melden.** Dann entscheiden wir gemeinsam (weniger eingang-Tage, größerer Puffer oder alte Sessions im Lager lassen).
 3. Dann echt, als eigener Dienst (läuft weiter, auch wenn du das Fenster schließt):
    ```bash
    systemd-run --unit=clip-uebernahme --uid=pipeline --gid=pipeline -p WorkingDirectory=/opt/clip-pipeline --collect \
-     /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 3
+     /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 14
    journalctl -u clip-uebernahme -f                  # Fortschritt; Strg+C beendet nur das Zuschauen
    ```
 
@@ -297,7 +300,7 @@ Code nutzt sie erst ab R5.
 **Was:** Dienste stoppen → 10 min warten → Delta-Übernahme (erst bei „ok“ weiter) → `lokal.toml` beider Checkouts →
 `/srv/clips` auf den Puffer → prüfen → Dienste starten.
 **Warum:** Ab jetzt arbeitet die Pipeline nur noch im Puffer und weckt pve-big nie (`[speicher].host` leer). Nur der
-nächtliche Abgleich darf wecken – über `[big].host` und `[speicher].wol_mac`.
+tägliche Abgleich (10:00, nie in der Nachtruhe) darf wecken – über `[big].host` und `[speicher].wol_mac`.
 **Was dann nicht mehr geht:** `pipeline render-entwurf <id> --final` (Final-Render auf pve-big, `docs/REGIE.md`).
 pve-big rendert aus seinem Speicher – dem Lager –, Auftrag und neue Clips lägen aber im Puffer. Der Befehl bricht
 deshalb mit Exit 2 ab, ohne zu wecken; die Entwürfe vom Mini (`render-entwurf <id>` ohne `--final`) bleiben das
@@ -326,7 +329,7 @@ Was dann noch auf dem PC wartet, bleibt dort und kommt nach R7 in den Puffer.
    dazugekommen ist. Was der letzte Schritt oder der PC eben erst ins Lager geschrieben hat, gilt vorher als „wird
    noch geschrieben“ und bliebe aus:
    ```bash
-   sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 3; echo "Exit $?"
+   sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 14; echo "Exit $?"
    ```
    **Erst weiter bei `Exit 0` und `"ok": true`** in der JSON-Zeile darüber. Sonst:
    - `Exit 1` mit `"zu_jung"` über 0: noch einmal 10 min warten, dann wiederholen (Gleiches wird übersprungen).
@@ -349,7 +352,7 @@ Was dann noch auf dem PC wartet, bleibt dort und kommt nach R7 in den Puffer.
    ```toml
    [speicher]
    host = ""                   # vorher "192.168.178.51": der Puffer ist lokal – nie pingen, nie wecken
-   wol_mac = "…"               # UNVERÄNDERT lassen: damit weckt der nächtliche Abgleich pve-big
+   wol_mac = "…"               # UNVERÄNDERT lassen: damit weckt der Abgleich um 10:00 pve-big
 
    [big]
    host = "192.168.178.51"     # pve-big (kam bisher aus [speicher].host)
@@ -390,7 +393,7 @@ kopiert es auch nie ein zweites Mal (er merkt sich, was schon übertragen ist).
    sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager abgleich
    sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager status   # erst bei 0 offen weiter, sonst abgleich nochmal
    ```
-4. **Timer aus R6 ausschalten** – ohne `[lager].wurzel` endeten sie jede Nacht mit Exit 2 und stünden auf „failed“:
+4. **Timer aus R6 ausschalten** – ohne `[lager].wurzel` endeten sie jeden Tag mit Exit 2 und stünden auf „failed“:
    `systemctl disable --now clip-lager.timer clip-puffer-pruefen.timer`
 5. **Umstellen:** `ln -sfn /srv/big/clips /srv/clips`, dann `lokal.toml.vor-e19` in beiden Checkouts zurück nach
    `lokal.toml` kopieren. Ist der Sprint vorbei, muss `[big] frist = ""` dabei stehen bleiben (sonst weckt die
@@ -427,9 +430,10 @@ wenn Schritt 3 wirklich 0 offen gezeigt hat.
 
 ## R6 · Timer an, clip-aufraeumen aus
 
-**Was:** `clip-lager.timer` (jede Nacht 04:30) und `clip-puffer-pruefen.timer` (jeden Morgen 09:30) einschalten,
+**Was:** `clip-lager.timer` (jeden Tag 10:00) und `clip-puffer-pruefen.timer` (jeden Tag 11:00) einschalten,
 `clip-aufraeumen.timer` ausschalten.
-**Warum:** Der Abgleich bringt jede Nacht das Neue ins Lager. Die Morgenprüfung meldet Probleme höchstens einmal
+**Warum:** Der Abgleich bringt einmal am Tag das Neue ins Lager – tagsüber, damit der Lüfter von pve-big niemanden
+weckt (in der Nachtruhe 22:00–08:00 weckt er nie). Die Morgenprüfung meldet Probleme höchstens einmal
 am Tag je Thema, montags kommt ein Lebenszeichen. Das alte Aufräumen würde Puffer-Dateien verschieben und Pfade in der
 Datenbank umschreiben; im getrennten Betrieb verweigert es (Exit 2). Löschen im Puffer kommt erst mit Stufe B5 – nur
 mit deinem OK.
@@ -448,16 +452,18 @@ sudo -u pipeline .venv/bin/pipeline puffer pruefen                 # Morgenprüf
 systemctl enable --now clip-lager.timer clip-puffer-pruefen.timer
 systemctl list-timers 'clip-*'
 ```
-**Prüfen:** `list-timers` zeigt 04:30 und 09:30; `pipeline lager status` zeigt den letzten Lauf mit „ok“.
+**Prüfen:** `list-timers` zeigt 10:00 (plus bis zu 10 min Zufall) und 11:00; `pipeline lager status` zeigt den
+letzten Lauf mit „ok“.
 **Rückweg:** `systemctl disable --now clip-lager.timer clip-puffer-pruefen.timer`. `clip-aufraeumen.timer` erst
 nach dem Zurückschalten (Rückweg R5) wieder einschalten.
 **Was du lernst:**
 - `OnCalendar` (feste Uhrzeit), `Persistent=true` (verpasste Läufe nachholen), `RandomizedDelaySec` (nicht auf die
-  Sekunde genau).
+  Sekunde genau). Holt der Timer nach einem Neustart des Mini einen Abgleich mitten in der Nacht nach, weckt dieser
+  pve-big trotzdem nicht: Die Nachtruhe prüft die Pipeline selbst, nicht systemd.
 - `SuccessExitStatus=3 4`: „pve-big nicht wach geworden“ oder „anderer Abgleich läuft“ sind kein roter Zustand in
-  systemd – nächste Nacht wieder; bleibt es dabei, meldet die Morgenprüfung.
+  systemd – am nächsten Tag wieder; bleibt es dabei, meldet die Morgenprüfung.
 - Härtung wie bei den anderen Diensten (`ProtectSystem=strict`, nur die `ReadWritePaths` beschreibbar). Beim
-  Abgleich steht dort `/srv/big` statt `/srv/big/clips`: Um 04:30 schläft pve-big meist, der Einhängepunkt ist beim
+  Abgleich steht dort `/srv/big` statt `/srv/big/clips`: Um 10:00 schläft pve-big meist, der Einhängepunkt ist beim
   Start noch leer – ein eigener Bind darauf würde das später eingehängte NFS für den Dienst verdecken.
 
 ---
@@ -505,7 +511,7 @@ R5 (mit `--eingang-tage` bis zu diesem Tag) holt sie in den Puffer; die betroffe
 - im CT nach wenigen Minuten: `ls -lt /srv/puffer/replays | head -3`,
 - der Bot schickt die Clips wie gewohnt,
 - `cat /srv/puffer/sitzungen/pc-status.json` zeigt den letzten Lauf des PCs,
-- `pipeline lager status` zeigt Dateien als offen; am nächsten Morgen nach 04:30: 0 offen
+- `pipeline lager status` zeigt Dateien als offen; am nächsten Tag nach dem Abgleich (10:00): 0 offen
   (`journalctl -u clip-lager`).
 
 **Rückweg:** In der psd1 wieder die Werte für pve-big eintragen (`Ziel`, `ZielHost`, `WakeOnLanMac` wie vorher).
@@ -543,17 +549,32 @@ anderen Fehler ab.
 
 ## Im Alltag
 
-- **Zeiten:** Clips kommen wie bisher kurz nach dem Match. 04:30 Abgleich (weckt pve-big nur mit neuen Dateien),
-  09:30 Morgenprüfung. Zwischen 23:00 und 08:00 kommen keine Meldungen.
+- **Zeiten:** Clips kommen wie bisher kurz nach dem Match. 10:00 Abgleich (weckt pve-big nur mit neuen Dateien),
+  11:00 Morgenprüfung. Zwischen 23:00 und 08:00 kommen keine Meldungen.
+- **Nachtruhe:** Zwischen 22:00 und 08:00 (`[lager].nachtruhe_von/_bis`, Ortszeit) weckt der Abgleich pve-big nie –
+  auch nicht, wenn der Mini nachts neu startet und der Timer den verpassten Abgleich nachholt. Die JSON-Zeile
+  zeigt dann `"nachtruhe": true` (Exit 0, keine Meldung), `/status` „in der Nachtruhe übersprungen“; das Offene
+  bleibt im Puffer und kommt beim nächsten Abgleich um 10:00 mit. Läuft pve-big ohnehin (z. B. weil du ihn
+  eingeschaltet hast), wird auch nachts abgeglichen – das macht keinen zusätzlichen Lärm.
+  `pipeline lager uebernehmen` (von Hand) kennt keine Nachtruhe. Abschalten: `nachtruhe_von = ""` in `lokal.toml`.
 - **Nachsehen:** `pipeline lager status` · `pipeline puffer status` · im Bot `/status`
-  (z. B. „Puffer 61 GB frei · Lager: letzter Abgleich 04:37 ok · 0 offen“).
+  (z. B. „Puffer 61 GB frei · Lager: 1840 GB frei, letzter Abgleich 10:07 ok · 0 offen“). Der Platz im Lager ist
+  der beim letzten Abgleich gemessene – `/status` weckt pve-big dafür nie; ist er nicht von heute, steht „(Stand …)“
+  dabei.
 - **Meldungen** kommen höchstens einmal am Tag je Thema, montags ein Lebenszeichen – Stille heißt: alles gut.
-- **Exit-Codes** von `pipeline lager …`: 0 ok · 1 einzelne Dateien fehlgeschlagen (nächste Nacht wieder) · 2 Aufruf
-  oder Konfiguration (z. B. Puffer und Lager verwechselbar – dann wurde **nichts** kopiert) · 3 Lager offline bzw.
-  pve-big nicht wach geworden · 4 ein anderer Abgleich läuft.
+- **Exit-Codes** von `pipeline lager …`: 0 ok (auch: in der Nachtruhe übersprungen) · 1 einzelne Dateien
+  fehlgeschlagen (beim nächsten Abgleich wieder) · 2 Aufruf oder Konfiguration (z. B. Puffer und Lager verwechselbar
+  – dann wurde **nichts** kopiert – oder eine ungültige Nachtruhe) · 3 Lager offline bzw. pve-big nicht wach
+  geworden · 4 ein anderer Abgleich läuft.
 - **Platz:** Der Puffer wird in dieser Stufe nie automatisch geleert. 96 GB reichen bei ca. 2,6 GB je Spieltag gut
   einen Monat; die Morgenprüfung warnt unter 20 GB frei. Bestätigte Rohdaten im Puffer freizugeben (Stufe B5) kommt
   später und nur mit deinem OK.
+- **Platz im Lager:** Auch auf pve-big wird nie etwas gelöscht. Stattdessen misst jeder Abgleich, der pve-big
+  braucht, den freien Platz im Lager (nur `statvfs` – kein Dateiinhalt, für clip-leerlauf kein Zugriff) und legt ihn
+  in `lager_laeufe` ab. Die Morgenprüfung warnt unter 200 GB frei (`[puffer].lager_warnung_frei_gb`), Alarm unter
+  50 GB (`lager_alarm_frei_gb`) – höchstens einmal am Tag, mit dem Tag der Messung. Nächster Schritt dann: Platz auf
+  pve-big schaffen oder die Platte erweitern. Noch keine Messung (z. B. kurz nach R6): keine Meldung. Läuft das Lager
+  doch voll, bricht der Abgleich ab, und alles bleibt im Puffer, bis wieder Platz ist.
 
 ## Dateien
 
@@ -563,5 +584,5 @@ anderen Fehler ab.
 | `deploy/pve-mini/puffer-zurueck.sh` | pve-mini (Host) | Rückweg R1 |
 | `deploy/pve-mini/clip-lvm-status` (+ `.service`, `.timer`) | pve-mini (Host) | Füllstand des Pools alle 15 min |
 | `deploy/mini/samba-einrichten.sh`, `deploy/mini/smb-puffer.conf` | CT | R2 |
-| `deploy/systemd/clip-lager.service` / `.timer` | CT | Abgleich 04:30 (R6) |
-| `deploy/systemd/clip-puffer-pruefen.service` / `.timer` | CT | Morgenprüfung 09:30 (R6) |
+| `deploy/systemd/clip-lager.service` / `.timer` | CT | Abgleich 10:00 (R6) |
+| `deploy/systemd/clip-puffer-pruefen.service` / `.timer` | CT | Morgenprüfung 11:00 (R6) |

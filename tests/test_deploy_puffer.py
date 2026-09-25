@@ -98,23 +98,34 @@ class Units(unittest.TestCase):
         self.assertEqual(s["Type"], ["oneshot"])
         self.assertEqual(s["SuccessExitStatus"], ["3 4"])
         t = lies_unit(self.SYSTEMD / "clip-lager.timer")
-        self.assertEqual(t["OnCalendar"], ["*-*-* 04:30"])
+        self.assertEqual(t["OnCalendar"], ["*-*-* 10:00"])  # tagsüber, nie nachts
         self.assertEqual(t["Persistent"], ["true"])
         self.assertEqual(t["RandomizedDelaySec"], ["10min"])
         self.assertEqual(t["WantedBy"], ["timers.target"])
 
     def test_lager_verdeckt_das_nfs_nicht(self):
-        # Um 04:30 schläft pve-big meist: /srv/big/clips ist beim Start noch ein leerer Ordner. Ein eigener
+        # Um 10:00 schläft pve-big meist: /srv/big/clips ist beim Start noch ein leerer Ordner. Ein eigener
         # Bind darauf (ReadWritePaths=/srv/big/clips oder der Link /srv/clips) würde das spätere NFS verdecken.
         pfade = lies_unit(self.SYSTEMD / "clip-lager.service")["ReadWritePaths"][0].split()
         self.assertEqual(pfade, ["/var/lib/clip-pipeline", "/srv/puffer", "/srv/big"])
+
+    def test_dienste_duerfen_in_den_puffer_schreiben(self):
+        # Nach R5 ist /srv/clips ein Link auf /srv/puffer: ausdrücklich freigeben. "-": vor R1 fehlt /srv/puffer –
+        # ohne das Präfix startete systemd den Dienst gar nicht (226/NAMESPACE)
+        for name in ("clip-bot.service", "clip-lernbot.service", "clip-sitzungen.service"):
+            with self.subTest(name):
+                pfade = lies_unit(self.SYSTEMD / name)["ReadWritePaths"][0].split()
+                self.assertEqual(pfade, ["/var/lib/clip-pipeline", "/srv/clips", "-/srv/puffer"])
+        # clip-aufraeumen bleibt unverändert: im getrennten Betrieb ist sein Timer aus (R6)
+        self.assertEqual(lies_unit(self.SYSTEMD / "clip-aufraeumen.service")["ReadWritePaths"],
+                         ["/var/lib/clip-pipeline /srv/clips"])
 
     def test_morgenpruefung(self):
         s = lies_unit(self.SYSTEMD / "clip-puffer-pruefen.service")
         self.assertEqual(s["ExecStart"], ["/opt/clip-pipeline/.venv/bin/pipeline puffer pruefen"])
         self.assertEqual(s["ReadWritePaths"], ["/var/lib/clip-pipeline"])  # nur die Datenbank, Puffer nur lesen
         t = lies_unit(self.SYSTEMD / "clip-puffer-pruefen.timer")
-        self.assertEqual(t["OnCalendar"], ["*-*-* 09:30"])
+        self.assertEqual(t["OnCalendar"], ["*-*-* 11:00"])  # nach dem Abgleich
         self.assertEqual(t["Persistent"], ["true"])
 
     def test_haertung_wie_im_bestand(self):

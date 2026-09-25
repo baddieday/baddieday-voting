@@ -5,7 +5,7 @@
 [speicher]
 # großer Proxmox-Host (pve-big): Erreichbarkeit prüfen und bei Bedarf per Wake-on-LAN wecken
 host = "192.168.178.51"
-wol_mac = "40:61:86:2e:9a:ff"
+wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 
 # --- Regisseur steuern (optional) ---------------------------------------------------------
 # Startwerte, von denen aus der Regisseur mit deinen Bewertungen weiterlernt. Nur eintragen, was du ändern willst.
@@ -17,8 +17,24 @@ wol_mac = "40:61:86:2e:9a:ff"
 # puffer_nach_s = 2.0       # länger nach dem letzten Kill (0.5 … 4 s)
 # uebergang_faktor = 1.2    # weichere, längere Übergänge
 # musik_pegel = 0.3         # Musik leiser (0 … 1)
+# effekt_hektik = 0.8       # Beat-Akzente schwächer (0.3 … 1.3; „zu hektisch“ lernt ×0.9)
 # [regie.vorgaben.stimmung_bonus]
 # lustig = 1.0              # lustige Momente bevorzugen (−2 … +2)
+# [regie.vorgaben.effekt_staerke]
+# chill = 0.5               # Effekte je Stimmung schwächer/stärker (0 … 1.5, 0 = ohne Effekte; Start 1.0;
+# episch = 1.2              # „zu viele Effekte“ lernt ×0.85, „mehr Action“ ×1.15)
 # [regie.musik_ziele.episch]
 # bpm = 150                 # für epische Momente schnellere Musik
 # energie = 0.9             # und energiereichere (Rang in deiner Bibliothek, 0 … 1)
+# --- Effekte (Regisseur 2.0) ---------------------------------------------------------------
+# Ganz aus (Schnitt und Übergänge wie vorher):
+# [regie.effekte]
+# an = false
+# Einzelne Profilwerte je Stimmung überschreiben (Stärken 0 … 1, 0 = aus; Werte in src/clip_pipeline/effekte.py):
+# [regie.effekte.episch]
+# punch = 0.5               # sanfterer Zoom auf dem Finisher (Standard 0.7)
+# look = "warm"             # Farblook: neutral, cinematic, kalt, warm, entsaettigt, soft
+# look_staerke = 0.4
+# uebergaenge = [["whip", 0.25], ["schnitt", 0]]   # Rotation der Übergänge in epische Momente
+# [regie.effekte.lustig]
+# max_ruhe_s = 0            # keine Beat-Akzente (Zoom auf dem Beat nach so vielen Sekunden Ruhe)

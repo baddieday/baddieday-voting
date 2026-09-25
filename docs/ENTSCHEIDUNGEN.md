@@ -277,6 +277,12 @@ Rückgriff aufs Lager für sehr alte Dateien, Scrub-Nacht, LEERLAUF_MIN = 10.
 übernommen, `[big].frist` geleert, Übernahme der vorhandenen Daten mit ausdrücklichen Pfaden, Umschalten erst nach
 geprüftem Abgleich.
 
+**Nachtrag 25.09.: Abgleich tagsüber, nie nachts.** Der Lüfter von pve-big soll niemanden wecken. Der Abgleich läuft
+deshalb um 10:00 statt 04:30, die Morgenprüfung um 11:00 statt 09:30. Dazu eine Nachtruhe als harte Grenze
+(`[lager].nachtruhe_von/_bis`, Standard 22:00–08:00): Schläft pve-big, weckt der Abgleich ihn dann nie – auch nicht,
+wenn systemd nach einem Neustart des Mini einen verpassten Lauf nachholt. Läuft er ohnehin, wird abgeglichen.
+„Nachts“, „04:30“ und „09:30“ oben sind damit überholt.
+
 ## E20 · Zugang für Claude: flüchtiges Tailnet-Gerät statt Tags und Schlüssel (24.09., abweichend von E18)
 Am Handy waren Tags, Policy-Umbau und Schlüssel in den Umgebungs-Einstellungen nicht machbar. Stattdessen:
 - Die Cloud-Sitzung startet Tailscale **flüchtig** (`tailscaled --state=mem:`, Userspace-Netz) und meldet sich per
@@ -288,3 +294,46 @@ Am Handy waren Tags, Policy-Umbau und Schlüssel in den Umgebungs-Einstellungen 
   pve-mini ohne SSH-Regel). Schlüssel-Ablauf für beide Server abgeschaltet.
 - Nachteil: Als „dein Gerät“ könnte der Container für die Dauer der Sitzung alle deine Tailnet-Geräte erreichen.
   Später (am PC) enger machen: eigenes Tag für die Sitzung und eine Regel nur auf die zwei Hosts.
+
+## E21 · Multikills am Stück: Aktions-Zeitpunkt, Serie als ein Stück, Nachschnitt (25.09.)
+**Befund (echte Daten, 88 Sessions):** Double/Triple Kills waren oft nur als Einzelkills zu sehen. 21 von 37 Multikills
+sind Team-Wipes: Ist der letzte Gegner eines Teams umgehauen, sterben alle umgehauenen gleichzeitig. Alle Kills haben dann
+den Zeitstempel des Wipes, das eigentliche Umhauen lag 3–22 s davor. Der Clip begann 8 s vor dem ersten *Kill* und
+verpasste in 15 von 21 Fällen das erste Umhauen. Der Regisseur schnitt noch enger.
+
+**Entscheidung:**
+- **Zählen bleibt wie bisher.** Serie (Kette ≤ 10 s), Punkte, Titel, Captions, Elo und die Tabelle `clips` laufen weiter
+  über den Kill-Zeitpunkt. Ein Team-Wipe-Triple bleibt ein Triple.
+- **Neu je Kill: der Aktions-Zeitpunkt** = mein Umhauen dieses Gegners (höchstens 90 s alt), sonst der Kill selbst.
+  Er bestimmt nur, wo ein Clip beginnt: neue Clips starten 8 s vor der ersten Aktion (höchstens 60 s, sonst vorne
+  gekappt). `analyse.json`, Schnittliste und Moment-Merkmale bekommen `aktion_sekunden` parallel zu `kill_sekunden`.
+- **Regisseur: Serie als ein Stück.** Ab 2 Kills darf ein Segment bis `serie_max_s` lang werden (Short 20 s,
+  Zusammenschnitt 30 s). Pausen über 4 s zwischen zwei Aktionen überspringt ein Jump-Cut (1,5 s nach der vorigen
+  Aktion raus, 2,0 s vor der nächsten wieder rein, harter Schnitt, gleiche Datei). Passt eine Serie auch so nicht in
+  einen Short, wird sie dort nicht gewählt statt zerteilt; im Zusammenschnitt kommt sie ganz.
+- **Nachschnitt vorhandener Momente:** `pipeline momente nachschneiden [--tage 14] [--probe]` schneidet Momente
+  `clip:N` mit ≥ 2 Kills neu aus der Quellaufnahme im Puffer, in eigene Dateien unter `sessions/<ID>/momente/`.
+  Bot-Clips, Tabelle `clips`, Stimmung und gelernter Moment-Bonus bleiben. `merkmale.nachschnitt` merkt sich, was
+  geschehen ist; damit ist der Befehl idempotent, und `pipeline stimmung --neu` setzt den Moment nicht zurück.
+
+**Harte Regeln für den Nachschnitt:** nur im getrennten Betrieb (E19, sonst Exit 2), nur im Puffer. Die Quelle wird
+über `[speicher].wurzel` gelesen, jede Pfad-Komponente per `lstat` geprüft, Links werden nie verfolgt. Liegt die
+Aufnahme nur noch im Lager, wird der Moment übersprungen und gezählt (`ohne_quelle`); pve-big wird nie geweckt.
+Nie überschreiben: Eine vorhandene Zieldatei wird übernommen, wenn ihre Dauer passt, sonst ist es ein Fehler
+(Exit 1). Neue Dateien entstehen über eine versteckte Zwischendatei und einen harten Link. Pipeline-Sperre (flock)
+wie bei render.
+
+**Abweichungen von der Vorgabe (mit Grund):**
+- Liegt im Anlauf ein Kill eines *früheren* Clips (echtes Beispiel: Einzelkill 6 s vor dem ersten Umhauen eines
+  Wipes), beginnen Nachschnitt und neue Clips aus `analyze` kurz danach (0,5 s, höchstens bis 1 s vor der Aktion;
+  eine Regel für beide: `vorbewertung.anlauf_start`). Sonst stünde dieser Kill in
+  `kill_sekunden` des Moments, käme doppelt in Zusammenschnitte, und sein frühes Umhauen zöge den Regisseur an den
+  Dateianfang. `stimmung.py` nimmt alle Kills im Fenster, also hilft nur ein späterer Fensterbeginn.
+- Liegt die Aktion schon im Bot-Clip (Claude hat früh genug begonnen), wird kein Video geschnitten. Es kommen nur
+  `aktion_sekunden` und der Eintrag `nachschnitt` (mit `neu_geschnitten: false`) dazu; dafür muss die Quelle nicht
+  im Puffer liegen.
+- Das Ende bleibt das des Bot-Clips (`clips.quelle_ende_s`), damit ein von Claude gewähltes Ende erhalten bleibt.
+
+**Reihenfolge im Betrieb (nur mit deinem OK):** Code auf den Mini, zuerst `pipeline momente nachschneiden --probe`
+(zeigt Anzahl, Anlauf, fehlende Quellen), dann echt, am besten außerhalb der Spielzeit (Neu-Kodierung, rund 37
+Momente). Die neuen Dateien (grob 1–2 GB) sichert der tägliche Abgleich mit `sessions/` ins Lager.

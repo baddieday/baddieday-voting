@@ -23,15 +23,28 @@ class Zeitleiste:
     victory_royale: bool = False
     platzierung: int | None = None
     warnungen: list[str] = field(default_factory=list)
+    # parallel zu kills: Aktions-Zeitpunkt (mein Umhauen) je Kill. Leer = Aktion ist der Kill selbst
+    # (Rekorder-Rückfall und ältere Aufrufer).
+    aktionen: list[datetime] = field(default_factory=list)
+
+    @property
+    def kill_aktionen(self) -> list[tuple[datetime, datetime]]:
+        """(Kill, Aktion) je Kill in der Reihenfolge von kills."""
+        if len(self.aktionen) != len(self.kills):
+            return [(k, k) for k in self.kills]
+        return list(zip(self.kills, self.aktionen))
 
 
 def aus_replay(match: Match) -> Zeitleiste:
+    # Paare statt dict über die Zeit: beim Team-Wipe haben mehrere Kills denselben Zeitpunkt
+    paare = match.kill_aktionen
     return Zeitleiste(
-        kills=sorted(match.kills),
+        kills=[k for k, _ in paare],
         quelle="replay",
         victory_royale=match.victory_royale,
         platzierung=match.platzierung,
         warnungen=list(match.warnungen),
+        aktionen=[a for _, a in paare],
     )
 
 

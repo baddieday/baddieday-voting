@@ -7,6 +7,11 @@ Merkmale (alles nachvollziehbar, in momente.merkmale gespeichert):
       energie  = 0..1, wie laut es insgesamt ist
   - Transkript der Mikro-Spur (faster-whisper "small", Deutsch) -> Wörter für Lachen, Jubel, Frust
   - aus dem Replay: Kills, größte Serie, Victory Royale, selbst umgehauen, Tod
+  - kill_sekunden / aktion_sekunden (Vertrag mit regie.py und nachschnitt.py): Sekunden in der Moment-Datei,
+    aktion_sekunden parallel zu kill_sekunden (gleiche Länge und Reihenfolge = nach Kill sortiert) = mein
+    Umhauen je Kill; nicht monoton, darf < 0 sein (Aktion vor Dateibeginn). Fehlt der Schlüssel: alter Moment.
+  - nachschnitt: Moment wurde neu aus der Quellaufnahme geschnitten (`pipeline momente nachschneiden`).
+    Dann gelten datei, start_s/ende_s und start_utc der momente-Zeile, nicht die des Bot-Clips.
 
 Stimmung = Punkte-Regeln (siehe punkte()). Die höchste Summe gewinnt; "sicherheit" sagt, wie knapp es war.
 Nur die unsicheren Momente gehen gesammelt in EINEN Aufruf von `claude -p` (nur Leserechte). Dessen Antwort
@@ -35,6 +40,7 @@ from .zeit import aus_iso, iso, jetzt
 
 log = logging.getLogger("pipeline")
 STIMMUNGEN = ("episch", "lustig", "spannend", "frustriert", "chill")
+NACHSCHNITT = "nachschnitt"  # Schlüssel in momente.merkmale (dict); wird bei jedem Lauf unverändert übernommen
 
 # Wortlisten (klein geschrieben, ganze Wörter; "*" = beliebige Fortsetzung)
 LACHEN = ("haha*", "hehe*", "hihi*", "lol", "lustig", "[lachen]", "(lachen)", "(lacht)", "*lacht*", "xd")
@@ -57,6 +63,20 @@ class Moment:
     max_gruppe: int = 0
     victory_royale: bool = False
     ereignisse: list[tuple[float, str]] = field(default_factory=list)  # (Sekunde im Moment, kill|knock_erlitten|tod)
+    aktion_sekunden: list[float] | None = None  # parallel zu den Kills; None = ohne Replay (alter Stand)
+    nachschnitt: dict | None = None  # Eintrag aus merkmale.nachschnitt, falls neu geschnitten
+
+
+def kill_und_aktion_sekunden(eigene: list[replay.MeinEreignis], start_utc: datetime,
+                             dauer_s: float) -> tuple[list[float], list[float]]:
+    """Kills, deren Kill-Zeit im Fenster liegt, nach Kill sortiert – als Sekunden ab start_utc.
+
+    Zweite Liste parallel dazu: die Aktion (mein Umhauen) je Kill; sie darf vor dem Fenster liegen (< 0).
+    """
+    ende = start_utc + timedelta(seconds=dauer_s)
+    paare = sorted((e.zeit_utc, e.aktion) for e in eigene if e.art == "kill" and start_utc <= e.zeit_utc <= ende)
+    return ([(k - start_utc).total_seconds() for k, _ in paare],
+            [(a - start_utc).total_seconds() for _, a in paare])
 
 
 # --- Momente finden -----------------------------------------------------------------
@@ -78,24 +98,52 @@ def _eigene_ereignisse(konfig: Konfig, match_id: str, cache: dict) -> list[repla
     return cache[match_id]
 
 
+def _nachgeschnittene(con: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    """momente-Zeilen mit merkmale.nachschnitt (neu geschnittene Datei) – nach Schlüssel."""
+    ergebnis = {}
+    for z in con.execute("SELECT * FROM momente WHERE merkmale LIKE ?", (f'%"{NACHSCHNITT}"%',)):
+        try:
+            mk = json.loads(z["merkmale"])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(mk, dict) and isinstance(mk.get(NACHSCHNITT), dict):
+            ergebnis[z["schluessel"]] = z
+    return ergebnis
+
+
 def momente_aus_clips(con: sqlite3.Connection, konfig: Konfig) -> list[Moment]:
     ergebnis, cache = [], {}
+    nachgeschnitten = _nachgeschnittene(con)
     # Beste zuerst (freigegebene, dann nach Punkten) – verworfene braucht der Regisseur nie
     for c in con.execute(
         """SELECT * FROM clips WHERE clip_pfad IS NOT NULL AND status != 'verworfen'
             ORDER BY CASE WHEN status IN ('freigegeben', 'veroeffentlicht', 'im_highlight') THEN 0 ELSE 1 END,
                      punkte DESC, id""").fetchall():
+        schluessel = f"clip:{c['id']}"
         datei = material.lokal(konfig, c["clip_pfad"])
         start = aus_iso(c["start_utc"])
-        dauer = float(c["quelle_ende_s"]) - float(c["quelle_start_s"])
-        m = Moment(f"clip:{c['id']}", datei, 0.0, dauer, start, c["id"], c["match_id"], int(c["kills"]),
-                   int(c["max_gruppe"]), bool(c["victory_royale"]))
+        von_s, dauer = 0.0, float(c["quelle_ende_s"]) - float(c["quelle_start_s"])
+        nachschnitt = None
+        if (zeile := nachgeschnitten.get(schluessel)) is not None:
+            if Path(zeile["datei"]).is_file():
+                # Neu geschnittene Datei behalten – sonst würde `stimmung --neu` den Nachschnitt zurücksetzen.
+                # start_utc der Zeile = Zeitpunkt von start_s in der neuen Datei.
+                datei, von_s = Path(zeile["datei"]), float(zeile["start_s"])
+                dauer = float(zeile["ende_s"]) - von_s
+                start = aus_iso(zeile["start_utc"]) if zeile["start_utc"] else start
+                nachschnitt = json.loads(zeile["merkmale"])[NACHSCHNITT]
+            else:
+                log.warning("Nachschnitt %s fehlt (%s) – nehme den Bot-Clip", schluessel, zeile["datei"])
+        m = Moment(schluessel, datei, von_s, von_s + dauer, start, c["id"], c["match_id"], int(c["kills"]),
+                   int(c["max_gruppe"]), bool(c["victory_royale"]), nachschnitt=nachschnitt)
         eigene = _eigene_ereignisse(konfig, c["match_id"], cache)
         if eigene:
-            m.ereignisse = [((e.zeit_utc - start).total_seconds(), e.art) for e in eigene
+            m.ereignisse = [(von_s + (e.zeit_utc - start).total_seconds(), e.art) for e in eigene
                             if start <= e.zeit_utc <= start + timedelta(seconds=dauer)]
+            _, aktionen = kill_und_aktion_sekunden(eigene, start, dauer)
+            m.aktion_sekunden = [von_s + a for a in aktionen]
         else:  # ohne Replay: Kill-Zeiten aus der Datenbank
-            m.ereignisse = [((aus_iso(z) - start).total_seconds(), "kill") for z in json.loads(c["kill_zeiten"])]
+            m.ereignisse = [(von_s + (aus_iso(z) - start).total_seconds(), "kill") for z in json.loads(c["kill_zeiten"])]
         ergebnis.append(m)
     return ergebnis
 
@@ -251,6 +299,10 @@ def merkmale(m: Moment, konfig: Konfig, sprache: Transkription | None) -> tuple[
         "tod_sekunde": next((round(t, 1) for t, a in m.ereignisse if a == "tod"), None),
         "dauer_s": round(m.ende_s - m.start_s, 1),
     }
+    if m.aktion_sekunden is not None:
+        mk["aktion_sekunden"] = [round(t, 1) for t in m.aktion_sekunden]  # parallel zu kill_sekunden
+    if m.nachschnitt is not None:
+        mk[NACHSCHNITT] = m.nachschnitt
     text = None
     try:
         info = bestand.tonspuren(m.datei)
@@ -324,7 +376,8 @@ def _speichere(con, m: Moment, stimmung: str, sicherheit: float, quelle: str, mk
                                 sicherheit, quelle, merkmale, text, erstellt, geaendert)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (schluessel) DO UPDATE SET datei = excluded.datei, start_s = excluded.start_s,
-               ende_s = excluded.ende_s, kills = excluded.kills, stimmung = excluded.stimmung,
+               ende_s = excluded.ende_s, start_utc = excluded.start_utc, kills = excluded.kills,
+               stimmung = excluded.stimmung,
                sicherheit = excluded.sicherheit, quelle = excluded.quelle, merkmale = excluded.merkmale,
                text = excluded.text, geaendert = excluded.geaendert""",
         (m.schluessel, m.clip_id, m.match_id, str(m.datei), m.start_s, m.ende_s,
@@ -361,7 +414,8 @@ def analysiere(con: sqlite3.Connection, konfig: Konfig, *, dateien: bool = False
     claude_wahl: dict[str, str] = {}
     if claude and unsicher and konfig.wert("stimmung.claude", True):
         kandidaten = [{"id": m.schluessel, "regel": s, "punkte": p, "text": (t or "")[:400],
-                       **{k: v for k, v in mk.items() if not k.endswith("_s")}} for m, mk, t, s, _, p in unsicher]
+                       **{k: v for k, v in mk.items() if not k.endswith("_s") and k != NACHSCHNITT}}
+                      for m, mk, t, s, _, p in unsicher]
         claude_wahl, hinweis = frage_claude(konfig, kandidaten)
         if hinweis:
             hinweise.append(hinweis)

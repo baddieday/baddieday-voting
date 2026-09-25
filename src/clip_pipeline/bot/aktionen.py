@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from .. import db, elo
-from ..zeit import aus_iso, iso, jetzt, spielabend, utc_zu_lokal
+from ..zeit import aus_iso, im_zeitfenster, iso, jetzt, spielabend
 
 log = logging.getLogger("clip-bot")
 
@@ -83,30 +83,15 @@ def rueckgaengig(con: sqlite3.Connection, clip_id: int) -> Antwort:
 LEISE_MELDUNGEN = ("puffer:", "lager:")
 
 
-def _uhrzeit(text: str) -> int:
-    """Minuten seit Mitternacht, z. B. "23:00" -> 1380."""
-    stunde, minute = (int(t) for t in text.strip().split(":"))
-    if not (0 <= stunde < 24 and 0 <= minute < 60):
-        raise ValueError(text)
-    return stunde * 60 + minute
-
-
 def ruhezeit(konfig, zeit: datetime | None = None) -> bool:
     """Liegt zeit (Ortszeit) in [telegram].leise_von … leise_bis? Über Mitternacht erlaubt (23:00–08:00).
     Leer oder von = bis: nie leise. Ein Tippfehler in der Konfig hält keine Nachricht auf (dann nie leise)."""
     von, bis = (str(konfig.wert(f"telegram.leise_{n}", "") or "").strip() for n in ("von", "bis"))
-    if not von or not bis:
-        return False
     try:
-        anfang, ende = _uhrzeit(von), _uhrzeit(bis)
+        return im_zeitfenster(zeit or jetzt(), von, bis, konfig.wert("zeit.zeitzone", "Europe/Berlin"))
     except ValueError:
         log.warning("[telegram] leise_von/leise_bis ungültig (%r/%r) – Ruhezeit aus", von, bis)
         return False
-    lokal = utc_zu_lokal(zeit or jetzt(), konfig.wert("zeit.zeitzone", "Europe/Berlin"))
-    minute = lokal.hour * 60 + lokal.minute
-    if anfang <= ende:
-        return anfang <= minute < ende
-    return minute >= anfang or minute < ende
 
 
 def faellige_meldungen(con: sqlite3.Connection, konfig, zeit: datetime | None = None) -> list[sqlite3.Row]:

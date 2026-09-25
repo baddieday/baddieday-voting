@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from unittest import mock
 
 from clip_pipeline import stimmung
+from clip_pipeline.medien import MedienFehler
 from clip_pipeline.zeit import UTC, iso
 
 from tests.hilfen import HAT_FFMPEG, MitSpeicher
@@ -144,3 +145,104 @@ class Reihenfolge(Durchlauf):
         self.assertEqual([z["clip_id"] for z in self.con.execute("SELECT clip_id FROM momente")], [self.tod])
         self.con.execute("UPDATE clips SET status = 'verworfen' WHERE id = ?", (self.episch,))
         self.assertEqual(stimmung.analysiere(self.con, self.konfig, claude=False, whisper=False)["analysiert"], 0)
+
+
+SITZUNG = "2026-09-21_21-00-00"
+CLIP_START = START + timedelta(minutes=5)
+
+
+def team_wipe_replay(sitzung):
+    """Team-Wipe im Clip ab Minute 5: umgehauen bei −3 s (vor dem Clip), +2 s und +4 s; alle sterben bei +4 s."""
+    def elim(t, opfer, knock=False):
+        return {"t_ms": round(t * 1000), "eliminator": "ICH", "eliminiert": opfer, "knock": knock}
+
+    sitzung.mkdir(parents=True, exist_ok=True)
+    (sitzung / "replay.json").write_text(json.dumps({
+        "replay_start": iso(START), "replay_start_kind": "Utc", "laenge_ms": 900000, "ich_quelle": "konfig",
+        "ich": {"epic_id": "ICH", "platzierung": 5},
+        "eliminierungen": [elim(297, "OPFER-1", True), elim(302, "OPFER-2", True), elim(304, "OPFER-3", True),
+                           elim(304, "OPFER-1"), elim(304, "OPFER-2"), elim(304, "OPFER-3")],
+    }))
+
+
+class Aktionen(MitSpeicher):
+    """aktion_sekunden in den Moment-Merkmalen (Vertrag mit regie.py) – ohne FFmpeg."""
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["material"] = {"ordner": str(self.tmp / "mini")}
+        team_wipe_replay(self.konfig.ordner("sessions") / SITZUNG)
+        self.wipe = self.clip_anlegen(status="freigegeben", start=CLIP_START, max_gruppe=3, match_id=SITZUNG)
+        self.ohne_replay = self.clip_anlegen(status="freigegeben", start=CLIP_START, max_gruppe=1, match_id="ohne-replay")
+        for cid in (self.wipe, self.ohne_replay):
+            self.con.execute("UPDATE clips SET clip_pfad = ?, kills = max_gruppe, quelle_start_s = 0, quelle_ende_s = 8"
+                             " WHERE id = ?", (f"sessions/{SITZUNG}/clips/{cid}.mp4", cid))
+
+    def test_kill_und_aktion_sekunden(self):
+        from clip_pipeline import replay
+        e = replay.MeinEreignis
+        eigene = [e(CLIP_START + timedelta(seconds=4), "kill", aktion_utc=CLIP_START - timedelta(seconds=3)),
+                  e(CLIP_START + timedelta(seconds=4), "kill", aktion_utc=CLIP_START + timedelta(seconds=2)),
+                  e(CLIP_START + timedelta(seconds=1), "knock"),
+                  e(CLIP_START + timedelta(seconds=20), "kill")]  # außerhalb des Fensters
+        self.assertEqual(stimmung.kill_und_aktion_sekunden(eigene, CLIP_START, 8.0), ([4.0, 4.0], [-3.0, 2.0]))
+
+    def test_momente_und_merkmale(self):
+        momente = {m.schluessel: m for m in stimmung.momente_aus_clips(self.con, self.konfig)}
+        wipe, ohne = momente[f"clip:{self.wipe}"], momente[f"clip:{self.ohne_replay}"]
+        self.assertEqual(wipe.aktion_sekunden, [-3.0, 2.0, 4.0])
+        self.assertIsNone(ohne.aktion_sekunden)  # ohne Replay: alter Stand
+        with mock.patch.object(stimmung.bestand, "tonspuren", side_effect=MedienFehler("keine Datei")):
+            mk, _ = stimmung.merkmale(wipe, self.konfig, None)
+            mk_ohne, _ = stimmung.merkmale(ohne, self.konfig, None)
+        self.assertEqual((mk["kill_sekunden"], mk["aktion_sekunden"]), ([4.0, 4.0, 4.0], [-3.0, 2.0, 4.0]))
+        self.assertNotIn("aktion_sekunden", mk_ohne)
+        self.assertNotIn(stimmung.NACHSCHNITT, mk)
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class Nachschnitt(MitSpeicher):
+    """`stimmung --neu` darf einen neu geschnittenen Moment nicht auf den Bot-Clip zurücksetzen."""
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["material"] = {"ordner": str(self.tmp / "mini")}
+        sitzung = self.konfig.ordner("sessions") / SITZUNG
+        team_wipe_replay(sitzung)
+        self.bot_clip = video(sitzung / "clips" / "1.mp4", spiel_knall_s=(4,))
+        self.neu = video(sitzung / "momente" / "clip_1.mp4", spiel_knall_s=(1, 8), dauer=12)
+        self.cid = self.clip_anlegen(status="freigegeben", start=CLIP_START, max_gruppe=3, match_id=SITZUNG)
+        self.con.execute("UPDATE clips SET clip_pfad = ?, kills = 3, quelle_start_s = 0, quelle_ende_s = 8 WHERE id = ?",
+                         (self.konfig.relativ(self.bot_clip), self.cid))
+        # so, wie der Nachschnitt die Zeile hinterlässt: neue Datei, beginnt 4 s vor dem Bot-Clip
+        self.eintrag = {"datei_vorher": str(self.bot_clip), "anlauf_s": 4.0}
+        self.con.execute(
+            """INSERT INTO momente (schluessel, clip_id, match_id, datei, start_s, ende_s, start_utc, kills, stimmung,
+                                    sicherheit, quelle, merkmale, erstellt, geaendert)
+               VALUES (?, ?, ?, ?, 0, 12, ?, 3, 'episch', 0.5, 'regel', ?, 'x', 'x')""",
+            (f"clip:{self.cid}", self.cid, SITZUNG, str(self.neu), iso(CLIP_START - timedelta(seconds=4)),
+             json.dumps({"kill_sekunden": [8.0, 8.0, 8.0], "aktion_sekunden": [1.0, 6.0, 8.0],
+                         stimmung.NACHSCHNITT: self.eintrag})))
+
+    def _zeile(self):
+        return self.con.execute("SELECT * FROM momente WHERE schluessel = ?", (f"clip:{self.cid}",)).fetchone()
+
+    def test_neu_behaelt_den_nachschnitt(self):
+        stimmung.analysiere(self.con, self.konfig, neu=True, claude=False, whisper=False)
+        z = self._zeile()
+        self.assertEqual((z["datei"], z["start_s"], z["ende_s"], z["start_utc"]),
+                         (str(self.neu), 0.0, 12.0, iso(CLIP_START - timedelta(seconds=4))))
+        mk = json.loads(z["merkmale"])
+        self.assertEqual(mk[stimmung.NACHSCHNITT], self.eintrag)
+        self.assertEqual((mk["kill_sekunden"], mk["aktion_sekunden"], mk["dauer_s"]),
+                         ([8.0, 8.0, 8.0], [1.0, 6.0, 8.0], 12.0))  # auf die neue Datei bezogen
+
+    def test_fehlt_die_datei_gilt_wieder_der_bot_clip(self):
+        self.con.execute("UPDATE momente SET datei = ? WHERE schluessel = ?", (str(self.tmp / "fehlt.mp4"), f"clip:{self.cid}"))
+        with self.assertLogs("pipeline", "WARNING"):
+            stimmung.analysiere(self.con, self.konfig, neu=True, claude=False, whisper=False)
+        z = self._zeile()
+        self.assertEqual((z["datei"], z["ende_s"], z["start_utc"]), (str(self.bot_clip), 8.0, iso(CLIP_START)))
+        mk = json.loads(z["merkmale"])
+        self.assertNotIn(stimmung.NACHSCHNITT, mk)
+        self.assertEqual((mk["kill_sekunden"], mk["aktion_sekunden"]), ([4.0, 4.0, 4.0], [-3.0, 2.0, 4.0]))
