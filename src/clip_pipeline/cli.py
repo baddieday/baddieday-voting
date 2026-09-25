@@ -466,7 +466,7 @@ def _cmd_publikum(args, konfig, con) -> int:
     zeit = jetzt()
     try:
         ergebnis = publikum.bewerte_alle(con, konfig, zeit)
-    except KonfigFehler as e:  # z. B. alter_tage in lokal.toml falsch geschrieben – dann ist nichts bewertet
+    except KonfigFehler as e:  # z. B. alter_tage in lokal.toml falsch geschrieben – fällt meist beim ersten Post auf
         log.error("%s", e)
         _json({"fehler": "konfig", "hinweis": str(e)})
         return 2
