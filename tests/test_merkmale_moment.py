@@ -205,15 +205,16 @@ class AktualisiereClip(MitSpeicher):
         self.assertEqual(z["punkte"], -0.5)                                 # 1 − 2 + 0,5
         self.assertIn("Bot-Opfer", z["begruendung"])
 
-    def test_gesendet_behaelt_punkte(self):
+    def test_jeder_status_rechnet_punkte_neu(self):
+        # Florians Antwort auf S2-R6: auch schon gesendete Clips bekommen neue Punkte und Begründung
         for status in ("gesendet", "freigegeben", "verworfen", "veroeffentlicht", "im_highlight", "neu"):
             with self.subTest(status=status):
                 cid = self.clip_anlegen(status=status)
                 self.assertTrue(merkmale.aktualisiere_clip(self.con, cid, {"bot_opfer": 1.0}, GEWICHTE, 7))
                 z = self.zeile(cid)
                 self.assertEqual(json.loads(z["merkmale"])["bot_opfer"], 1.0)
-                # was der Bot gezeigt hat, bleibt (Annahme S2-A5)
-                self.assertEqual((z["punkte"], z["begruendung"], z["gewichte_version"]), (1.0, "Test", 0))
+                self.assertEqual((z["punkte"], z["gewichte_version"]), (-1.0, 7))   # 1 − 2
+                self.assertIn("Bot-Opfer", z["begruendung"])
 
     def test_zweiter_aufruf_aendert_nichts(self):
         for status in ("vorbewertet", "gesendet"):
@@ -229,6 +230,7 @@ class AktualisiereClip(MitSpeicher):
 
     def test_listen_bool_und_fehlende_nicht_uebernommen(self):
         cid = self.clip_anlegen(status="gesendet")
+        merkmale.aktualisiere_clip(self.con, cid, {}, GEWICHTE, 1)  # Punkte erst auf die Gewichte bringen (S2-R6)
         vorher = dict(self.zeile(cid))
         neu = {"spitzen_s": [1.0, 2.0], "tod": True, "text": "gg", "leer": None}
         self.assertFalse(merkmale.aktualisiere_clip(self.con, cid, neu, GEWICHTE, 1))

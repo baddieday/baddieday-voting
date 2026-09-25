@@ -166,16 +166,16 @@ def aktualisiere_clip(con: sqlite3.Connection, clip_id: int, neue: dict[str, flo
                       gewichte: dict[str, float], version: int) -> bool:
     """Mischt die Zahlen aus `neue` in clips.merkmale – die einzige Stelle, die clips.merkmale ändert.
 
-    Nie Listen; fehlende Schlüssel werden NICHT mit 0 angelegt. Bei Status `vorbewertet` (noch nicht gesendet,
-    Annahme S2-A5) werden auch punkte, begruendung und gewichte_version neu gesetzt; sonst bleiben sie, wie der Bot
-    sie gezeigt hat. Idempotent, läuft in der Transaktion des Aufrufers, holt keine Gewichte selbst.
-    Rückgabe: True, wenn sich etwas geändert hat. Unbekannte clip_id → False. Paket A1.
+    Nie Listen; fehlende Schlüssel werden NICHT mit 0 angelegt. punkte, begruendung und gewichte_version werden bei
+    jedem Status neu gesetzt – auch bei schon gesendeten Clips (Florians Antwort auf Rückfrage S2-R6: lieber
+    aktuelle Punkte als die von damals). Idempotent, läuft in der Transaktion des Aufrufers, holt keine Gewichte.
+    Rückgabe: True, wenn sich etwas geändert hat. Unbekannte clip_id → False.
 
     Parameter: con – offene Verbindung; clip_id – clips.id; neue – Merkmal → Wert (nur int/float werden übernommen,
     bool, Listen, Texte und None fallen weg); gewichte, version – vom äußersten Aufrufer (lernen.aktuelle).
     Punkte und Begründung rechnet vorbewertung.bewerte mit clips.titel – genau wie render.
     Fehler: sqlite3-Fehler gehen an den Aufrufer (seine Transaktion rollt dann zurück).
-    Beispiel: Clip `vorbewertet`, merkmale {"kill_punkte": 1}, neue {"bot_opfer": 1.0}, Gewichte kill_punkte 1 und
+    Beispiel: Clip (beliebiger Status), merkmale {"kill_punkte": 1}, neue {"bot_opfer": 1.0}, Gewichte kill_punkte 1 und
     bot_opfer −2, version 7 → merkmale {"kill_punkte": 1, "bot_opfer": 1.0}, punkte −1.0, gewichte_version 7, True.
     Derselbe Aufruf noch einmal → False.
     """
@@ -187,11 +187,8 @@ def aktualisiere_clip(con: sqlite3.Connection, clip_id: int, neue: dict[str, flo
     gemischt.update(nur_zahlen(neue))
     # 1 == 1.0 in Python: ein int aus render und derselbe Wert als float sind keine Änderung
     merkmale_neu = gemischt != alt
-    punkte, begruendung, gewichte_version = zeile["punkte"], zeile["begruendung"], zeile["gewichte_version"]
-    if zeile["status"] == "vorbewertet":
-        # Noch nicht gesendet (Annahme S2-A5): Punkte dürfen sich ändern. Danach bleibt, was der Bot gezeigt hat.
-        punkte, begruendung = vorbewertung.bewerte(gemischt, gewichte, zeile["titel"])
-        gewichte_version = version
+    punkte, begruendung = vorbewertung.bewerte(gemischt, gewichte, zeile["titel"])
+    gewichte_version = version
     if not merkmale_neu and (punkte, begruendung, gewichte_version) == (
             zeile["punkte"], zeile["begruendung"], zeile["gewichte_version"]):
         return False
@@ -386,15 +383,6 @@ def melde_unbekannte_waffen(con: sqlite3.Connection, konfig: Konfig, sid: str, m
     return neu
 
 
-def _fehlen_replay_merkmale(merkmale_json: str) -> bool:
-    """Fehlt einem Clip mindestens eines der sieben Replay-Merkmale? (Schlüssel fehlt = nie gemessen)"""
-    try:
-        vorhanden = json.loads(merkmale_json)
-    except json.JSONDecodeError:
-        return True
-    return not isinstance(vorhanden, dict) or any(m not in vorhanden for m in REPLAY_MERKMALE)
-
-
 def _match_aus_puffer(konfig: Konfig, sid: str) -> Match | None:
     """sessions/<ID>/replay.json aus dem Puffer lesen (Muster stimmung._eigene_ereignisse, aber ohne material.lokal).
 
@@ -414,24 +402,22 @@ def _match_aus_puffer(konfig: Konfig, sid: str) -> Match | None:
 
 def nachtragen_replay(con: sqlite3.Connection, konfig: Konfig, gewichte: dict[str, float], version: int, *,
                       session: str | None = None) -> dict:
-    """Replay-Merkmale für Clips nachtragen, denen sie fehlen (`pipeline merkmale nachtragen`).
+    """Replay-Merkmale aller Clips aus dem Puffer neu rechnen (`pipeline merkmale nachtragen`).
 
     Liest sessions/<ID>/replay.json im Puffer, ordnet clips.kill_zeiten zu (Toleranz 1 ms wegen ISO), schreibt über
-    aktualisiere_clip, meldet je Session unbekannte Waffen. Fehlt die Datei: zählen, nicht abbrechen. Weckt nie.
-    Idempotent. Rückgabe {"clips", "geaendert", "ohne_replay", "waffen_gemeldet"}. Paket A2.
+    aktualisiere_clip (auch Punkte und Begründung, jeder Status – Rückfrage S2-R6), meldet je Session unbekannte
+    Waffen. Fehlt die Datei: zählen, nicht abbrechen, vorhandene Werte bleiben. Weckt nie. Idempotent.
+    Warum alle Clips und nicht nur die ohne Werte: Nach einer Waffen-Kalibrierung ([merkmale.waffen]) sollen auch
+    schon gemessene sniper/nahkampf neu gerechnet werden.
 
     Parameter: con – offene Verbindung (ohne offene Transaktion: je Session eine eigene); konfig – Pfade,
     [merkmale]; gewichte, version – vom äußersten Aufrufer (cli._cmd_merkmale per lernen.aktuelle); session – nur
-    diese Session (schon geprüfte ID), None = alle. Rückgabe: clips = Clips, denen Replay-Merkmale fehlten;
-    geaendert = davon tatsächlich geändert; ohne_replay = davon ohne lesbare replay.json (bleiben unbekannt und
-    werden beim nächsten Lauf wieder versucht); waffen_gemeldet = neu gemeldete GunType-Zahlen, aufsteigend.
+    diese Session (schon geprüfte ID), None = alle. Rückgabe {"clips", "geaendert", "ohne_replay",
+    "waffen_gemeldet"}: clips = betrachtete Clips; geaendert = davon tatsächlich geändert; ohne_replay = davon ohne
+    lesbare replay.json; waffen_gemeldet = neu gemeldete GunType-Zahlen, aufsteigend.
     Fehler: sqlite3-Fehler brechen ab (die Transaktion der Session rollt zurück, fertige Sessions bleiben).
-    Punkte ändern sich nur bei Status vorbewertet (aktualisiere_clip, Annahme S2-A5).
-    Ein Clip, dem nach dem Lauf noch Replay-Merkmale fehlen (z. B. sniper/nahkampf vor der Waffen-Kalibrierung,
-    Rekorder-Rückfall), zählt beim nächsten Lauf wieder unter „clips“ – so holt der Lauf nach der Kalibrierung
-    die Werte von selbst nach.
-    Beispiel: 3 Clips ohne Replay-Merkmale, einer ohne replay.json → {"clips": 3, "geaendert": 2, "ohne_replay": 1,
-    "waffen_gemeldet": [12]}; der zweite Lauf → {"clips": 1, "geaendert": 0, "ohne_replay": 1, …}.
+    Beispiel: 3 Clips, einer ohne replay.json → {"clips": 3, "geaendert": 2, "ohne_replay": 1, "waffen_gemeldet":
+    [12]}; der zweite Lauf → {"clips": 3, "geaendert": 0, "ohne_replay": 1, "waffen_gemeldet": []}.
     """
     if session:
         zeilen = con.execute("SELECT id, match_id, kill_zeiten, merkmale FROM clips WHERE match_id = ? ORDER BY id",
@@ -440,8 +426,9 @@ def nachtragen_replay(con: sqlite3.Connection, konfig: Konfig, gewichte: dict[st
         zeilen = con.execute("SELECT id, match_id, kill_zeiten, merkmale FROM clips ORDER BY match_id, id").fetchall()
     je_session: dict[str, list[sqlite3.Row]] = {}
     for z in zeilen:
-        if _fehlen_replay_merkmale(z["merkmale"]):
-            je_session.setdefault(z["match_id"], []).append(z)
+        # Alle Clips, nicht nur die mit fehlenden Werten: So wirkt eine spätere Waffen-Kalibrierung auch auf schon
+        # gemessene Clips (Rückfrage S2-R6). aktualisiere_clip schreibt nur, wenn sich wirklich etwas ändert.
+        je_session.setdefault(z["match_id"], []).append(z)
 
     ergebnis = {"clips": 0, "geaendert": 0, "ohne_replay": 0, "waffen_gemeldet": []}
     gemeldet: set[int] = set()

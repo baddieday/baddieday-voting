@@ -571,3 +571,11 @@ Stand beim Vertrag (25.09.). Die Bauer-Annahmen und die Befunde des Panels komme
   Zahlen) oder nur die Merkmale fürs Lernen (heute)? Dazu: sollen schon gemessene `sniper`/`nahkampf` nach einer
   späteren Kalibrierung neu gerechnet werden?
 - **S2-R7 Publikum gegen dich:** Ab wie vielen Publikums-Paaren darf das Publikum dein Modell blockieren (heute 10)?
+
+### Stufe 2 – Florians Antworten (25.09.)
+- **S2-R2:** Stimmungswert bleibt aus der Momentstärke draußen (wie gebaut).
+- **S2-R4:** Datei-Momente später einem Match zuordnen – tendenziell ja, keine Eile.
+- **S2-R5:** `kommentar` bleibt (immer 0 → ändert das Lernen nicht, Streichen brächte nichts).
+- **S2-R6:** Ja – `merkmale nachtragen` rechnet Merkmale, Punkte und Begründung aller Clips neu, auch gesendeter und
+  nach einer Waffen-Kalibrierung. **S2-A5 ist damit aufgehoben.**
+- **S2-R3:** Antwort betraf „fremde Stimmen auf eigener Spur herausfiltern“ – Rückfrage offen.

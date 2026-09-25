@@ -359,8 +359,8 @@ Art), `/gewichte` zeigt zwei Quoten („du“ und „Publikum“). Beim Senden s
 - Nach `render` startet im Hintergrund der Mic-Schritt (`pipeline stimmung --clips`, `nice 15`, höchstens
   `[merkmale].mic_je_lauf` Clips). n8n wartet nicht darauf; sein Log steht in `/var/lib/clip-pipeline/mikro.log`.
 - Neue Waffen-Nummern meldet der Clip-Bot einmal je Match als Sammelmeldung (nach der Ruhezeit).
-- Punkte ändern sich nur bei **neu gerenderten** Clips und bei Clips, die noch nicht gesendet sind (`vorbewertet`,
-  Annahme S2-A5). Was der Bot dir schon gezeigt hat, bleibt.
+- `pipeline merkmale nachtragen` rechnet Merkmale, Punkte und Begründung **aller** Clips neu – auch schon
+  gesendeter (Rückfrage S2-R6: ja). Der Bot zeigt danach die neuen Punkte.
 
 | Schritt | Freigabe nötig? | Rückweg |
 |---|---|---|

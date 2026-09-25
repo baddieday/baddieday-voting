@@ -347,7 +347,8 @@ class Nachtragen(MitSpeicher):
         self.assertAlmostEqual(zeile["punkte"], 2.055, delta=0.006)
         self.assertEqual(zeile["gewichte_version"], 3)
         self.assertIn("Bot-Opfer", zeile["begruendung"])
-        self.assertEqual(self.trage_nach(), {"clips": 0, "geaendert": 0, "ohne_replay": 0, "waffen_gemeldet": []})
+        # zweiter Lauf rechnet neu (S2-R6), ändert aber nichts
+        self.assertEqual(self.trage_nach(), {"clips": 1, "geaendert": 0, "ohne_replay": 0, "waffen_gemeldet": []})
 
     def test_waffen_erst_nach_kalibrierung(self):
         # Befund S-3: leere [merkmale.waffen] → sniper/nahkampf fehlen; nach dem Eintragen holt nachtragen sie nach
@@ -363,6 +364,11 @@ class Nachtragen(MitSpeicher):
         self.assertEqual(self.trage_nach()["clips"], 1)  # fehlt noch → wird wieder versucht
         mk = json.loads(db.clip(self.con, cid)["merkmale"])
         self.assertEqual((mk["sniper"], mk["nahkampf"]), (0.5, 0.5))
+        # S2-R6: nach einer Korrektur der Listen rechnet nachtragen schon gemessene Werte neu
+        self.konfig.daten["merkmale"]["waffen"] = {"sniper": [SNIPER, SHOTGUN], "nahkampf": [], "sonstige": []}
+        self.assertEqual(self.trage_nach()["geaendert"], 1)
+        mk = json.loads(db.clip(self.con, cid)["merkmale"])
+        self.assertEqual((mk["sniper"], mk["nahkampf"]), (1.0, 0.0))
 
     def test_ohne_replay_zaehlen_nicht_abbrechen(self):
         self.replay("s1", [elim(110, ICH, "A", bot=True)])
@@ -381,14 +387,15 @@ class Nachtragen(MitSpeicher):
         with self.assertLogs("pipeline", "WARNING"):
             self.assertEqual(self.trage_nach()["ohne_replay"], 1)
 
-    def test_nur_eine_session_und_gesendete_behalten_punkte(self):
+    def test_nur_eine_session_und_gesendete_bekommen_neue_punkte(self):
         self.replay("s1", [elim(110, ICH, "A", bot=True)])
         self.replay("s2", [elim(110, ICH, "A", bot=True)])
         gesendet = self.clip_anlegen(status="gesendet", start=CLIP_START, match_id="s1")
         andere = self.clip_anlegen(status="vorbewertet", start=CLIP_START, match_id="s2")
         self.assertEqual(self.trage_nach(session="s1")["clips"], 1)
         zeile = db.clip(self.con, gesendet)
-        self.assertEqual((json.loads(zeile["merkmale"])["bot_opfer"], zeile["punkte"]), (1.0, 1))  # Annahme S2-A5
+        self.assertEqual(json.loads(zeile["merkmale"])["bot_opfer"], 1.0)
+        self.assertLess(zeile["punkte"], 1)  # S2-R6: auch gesendete Clips werden neu bewertet (Bot-Opfer −2)
         self.assertNotIn("bot_opfer", json.loads(db.clip(self.con, andere)["merkmale"]))
 
     def test_weckt_nie(self):

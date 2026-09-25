@@ -325,7 +325,7 @@ def _cmd_stimmung(args, konfig, con) -> int:
 def _cmd_merkmale(args, konfig, con) -> int:
     """`pipeline merkmale nachtragen [--session ID]` (Stufe 2): Replay- und Mic-Merkmale für vorhandene Clips aus dem
     Puffer nachrechnen (sessions/<ID>/replay.json, momente-Zeilen). Ohne Whisper, weckt nie, idempotent.
-    Punkte ändern sich nur bei Clips im Status vorbewertet (Annahme S2-A5). Exit: 0 ok · 1 ungültige Session-ID ·
+    Punkte und Begründung werden bei jedem Status neu gerechnet (Rückfrage S2-R6). Exit: 0 ok · 1 ungültige Session-ID ·
     2 kein getrennter Betrieb (lehnt main vorab ab)."""
     session = verarbeitung.pruefe_id(args.session) if args.session else None
     version, gewichte = lernen.aktuelle(con, konfig)  # einmal holen, durchreichen (Import-Regel, Leitplanke 7)
