@@ -1,0 +1,13 @@
+# Alle 10 Minuten nachsehen, ob pve-big unnötig läuft.
+# Aktivieren: sudo systemctl enable --now clip-big-waechter.timer
+[Unit]
+Description=Clip-Pipeline: pve-big alle 10 Minuten prüfen
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

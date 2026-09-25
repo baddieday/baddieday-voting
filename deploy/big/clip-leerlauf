@@ -1,0 +1,437 @@
+#!/usr/bin/env python3
+"""clip-leerlauf – läuft AUF pve-big jede Minute (systemd-Timer) und fährt ihn herunter, wenn er nichts zu tun hat.
+
+Sicherheitsnetz neben dem Wächter auf dem Mini (der fällt aus, wenn der Mini-Container nicht läuft).
+
+Aktivität (setzt die Leerlauf-Uhr zurück):
+  A  Datenzähler seit der letzten Minute: ZFS-Dataset des Clips-Speichers (writes, nunlinks, nread > 1 MiB;
+     zählt SMB, NFS und lokale Zugriffe gleich, aber kein stat/readdir/Scrub) und – falls vorhanden – die
+     NFS-Datenoperationen des Kernel-nfsd (READ/WRITE/CREATE/REMOVE/RENAME …, NICHT GETATTR/LOOKUP/ACCESS).
+  B  Belegt-Gründe im Moment der Prüfung: offene NFSv4-Dateien, offene SMB-Dateien mit Datenzugriff, frische
+     *.teil-Kopien, Herzschlag-Dateien in <speicher>/.aktiv/ (höchstens HERZSCHLAG_MAX_H Stunden je Schritt),
+     ffmpeg/Final-Render/zfs send/vzdump, dpkg, aktive Proxmox-Tasks, Shutdown-Inhibitoren, Resilver, laufende
+     Gäste, angemeldete Menschen, die in den letzten LEERLAUF_MIN Minuten getippt haben, Halten-Datei.
+Ausdrücklich KEINE Aktivität: Verbindungen auf 445/2049, stat() auf .clip-speicher, Lease-Erneuerung, eine offene
+Konsole, in der niemand mehr tippt (sonst hielte ein vergessener Browser-Tab pve-big für immer wach).
+Im Zweifel wach: Ist eine Quelle nicht lesbar, zählt die Minute als aktiv (Warnung höchstens stündlich).
+
+Ist LEERLAUF_MIN lang nichts los: 15 s warten, ALLES noch einmal messen, dann
+`systemctl poweroff --check-inhibitors=yes`. Mit TROCKEN=1 (Standard) wird nur protokolliert.
+Protokoll: journalctl -t clip-leerlauf   Zustand: /run/clip-leerlauf/status.json
+Für den Mini: leere Datei <speicher>/.leerlauf-scharf (Zeitstempel jede Minute, siehe melde_speicher).
+Konfiguration: /etc/clip-leerlauf.conf (SCHLUESSEL=wert). Jede Quelle ist per Umgebungsvariable CLIP_LL_*
+austauschbar – so wird es ohne echten Server getestet (tests/test_clip_leerlauf.py).
+"""
+
+from __future__ import annotations
+
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+E = os.environ.get
+STANDARD = {
+    "SPEICHER": "/tank/clips",          # Clips-Ordner auf pve-big (mit .clip-speicher)
+    "DATASET": "",                      # ZFS-Dataset des Speichers, z. B. tank/clips (leer = automatisch)
+    "ZFS_ZAEHLER": "1",                 # 0, wenn clips KEIN eigenes Dataset ist (sonst zählen fremde Zugriffe mit)
+    "LEERLAUF_MIN": "20",               # 20 bis der Herzschlag überall läuft, dann 10
+    "MINDEST_WACH_MIN": "10",           # nach dem Hochfahren mindestens so lange an
+    "GAESTE_ERLAUBT": "",               # VM/CT-IDs, die ihn NICHT wachhalten (Leerzeichen-getrennt)
+    "TROCKEN": "1",                     # 1 = nur protokollieren, 0 = wirklich ausschalten
+    "HERZSCHLAG_MIN": "3",              # .aktiv/<name> hält wach, solange jünger als das
+    "HERZSCHLAG_MAX_H": "4",            # ... aber nie länger (hängender Schritt)
+    "TEIL_MIN": "5",                    # *.teil mit frischer ctime = laufende Kopie
+    "NREAD_SCHWELLE": str(1024 * 1024), # so viele gelesene Bytes pro Minute zählen als Zugriff
+}
+NFS3_OPS = {"setattr", "read", "write", "create", "mkdir", "symlink", "mknod", "remove", "rmdir", "rename", "link", "commit"}
+# NFSv4-Operationen (RFC 7862-Nummern): COMMIT 5, CREATE 6, LINK 11, LOCK 12, OPEN 18, READ 25, REMOVE 28,
+# RENAME 29, SETATTR 34, WRITE 38, ALLOCATE 59, COPY 60, DEALLOCATE 62, READ_PLUS 68, CLONE 71
+NFS4_OPS = [5, 6, 11, 12, 18, 25, 28, 29, 34, 38, 59, 60, 62, 68, 71]
+SMB_DATEN = 0x1 | 0x2 | 0x4             # FILE_READ_DATA | FILE_WRITE_DATA | FILE_APPEND_DATA
+
+
+class Unklar(Exception):
+    """Eine Quelle ist nicht lesbar -> im Zweifel wach."""
+
+
+def konfig() -> dict:
+    k = dict(STANDARD)
+    datei = Path(E("CLIP_LL_KONF", "/etc/clip-leerlauf.conf"))
+    if datei.is_file():
+        for zeile in datei.read_text(encoding="utf-8").splitlines():
+            zeile = zeile.split("#", 1)[0].strip()
+            if "=" in zeile:
+                s, w = zeile.split("=", 1)
+                k[s.strip()] = w.strip().strip('"').strip("'")
+    return k
+
+
+def befehl(*args: str, timeout: float = 20) -> str:
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise Unklar(f"{args[0]}: {type(e).__name__}") from None
+    if r.returncode not in (0, 1):  # 1 = "nichts gefunden" bei pgrep/fuser
+        raise Unklar(f"{args[0]} Exit {r.returncode}")
+    return r.stdout
+
+
+def uptime() -> float:
+    return float(Path(E("CLIP_LL_UPTIME", "/proc/uptime")).read_text().split()[0])
+
+
+# --- A: Datenzähler --------------------------------------------------------------------
+
+def zfs_zaehler(k: dict) -> dict[str, int]:
+    """Summe über das Dataset des Speichers und seine Kinder (ohne Snapshots)."""
+    dataset = k["DATASET"]
+    if not dataset:
+        try:
+            dataset = befehl("zfs", "list", "-H", "-o", "name", k["SPEICHER"]).strip().splitlines()[0]
+        except (Unklar, IndexError):
+            raise Unklar("ZFS-Dataset des Speichers unbekannt (DATASET in /etc/clip-leerlauf.conf setzen)") from None
+    summe = {"writes": 0, "nread": 0, "nunlinks": 0}
+    gefunden = False
+    for datei in glob.glob(os.path.join(E("CLIP_LL_KSTAT", "/proc/spl/kstat/zfs"), "*", "objset-0x*")):
+        werte = {}
+        try:
+            for zeile in Path(datei).read_text().splitlines()[2:]:
+                teile = zeile.split()
+                if len(teile) >= 3:
+                    werte[teile[0]] = teile[2]
+        except OSError:
+            continue
+        name = werte.get("dataset_name", "")
+        if "@" in name or not (name == dataset or name.startswith(dataset + "/")):
+            continue
+        gefunden = True
+        for feld in summe:
+            summe[feld] += int(werte.get(feld, 0))
+    if not gefunden:
+        raise Unklar(f"kein ZFS-Zähler für {dataset}")
+    return summe
+
+
+def nfs_zaehler() -> dict[str, int]:
+    """Datenoperationen des Kernel-nfsd (fehlt nfsd, ist das kein Fehler)."""
+    pfad = Path(E("CLIP_LL_NFSD_STAT", "/proc/net/rpc/nfsd"))
+    if not pfad.is_file():
+        return {}
+    ergebnis = {"nfs3": 0, "nfs4": 0}
+    namen3 = ["null", "getattr", "setattr", "lookup", "access", "readlink", "read", "write", "create", "mkdir",
+              "symlink", "mknod", "remove", "rmdir", "rename", "link", "readdir", "readdirplus", "fsstat", "fsinfo",
+              "pathconf", "commit"]
+    for zeile in pfad.read_text().splitlines():
+        teile = zeile.split()
+        if teile[:1] == ["proc3"]:
+            werte = [int(x) for x in teile[2:]]
+            ergebnis["nfs3"] = sum(w for n, w in zip(namen3, werte) if n in NFS3_OPS)
+        elif teile[:1] == ["proc4ops"]:
+            werte = [int(x) for x in teile[2:]]
+            ergebnis["nfs4"] = sum(werte[i] for i in NFS4_OPS if i < len(werte))
+    return ergebnis
+
+
+# --- B: Belegt-Gründe --------------------------------------------------------------------
+
+def nfs_offen(k: dict) -> list[str]:
+    wurzel = Path(E("CLIP_LL_NFSD_CLIENTS", "/proc/fs/nfsd/clients"))
+    if not wurzel.is_dir():
+        return []
+    try:
+        lease = int(Path(E("CLIP_LL_LEASETIME", "/proc/fs/nfsd/nfsv4leasetime")).read_text().strip())
+    except (OSError, ValueError):
+        lease = 90
+    gruende = []
+    for client in sorted(wurzel.iterdir()):
+        try:
+            info = (client / "info").read_text()
+            states = (client / "states").read_text()
+        except OSError:
+            continue
+        status = re.search(r"status:\s*(\w+)", info)
+        erneuert = re.search(r"seconds from last renew:\s*(\d+)", info)
+        if not status or status.group(1) != "confirmed" or (erneuert and int(erneuert.group(1)) > lease):
+            continue  # abgestürzter/abgelaufener Client hält nicht wach
+        adresse = (re.search(r"address:\s*\"?([^\"\n]+)", info) or [None, "?"])[1]
+        for zeile in states.splitlines():
+            typ = re.search(r"type:\s*(\w+)", zeile)
+            name = re.search(r'filename:\s*"([^"]*)"', zeile)
+            if typ and typ.group(1) in ("open", "lock") and not (name and name.group(1).endswith(".clip-speicher")):
+                gruende.append(f"NFS offen: {adresse} {name.group(1) if name else '?'}")
+    return gruende
+
+
+def smb_offen(k: dict) -> list[str]:
+    if not shutil.which("smbstatus"):
+        return []
+    try:
+        daten = json.loads(befehl("smbstatus", "-L", "--json") or "{}")
+    except json.JSONDecodeError:
+        raise Unklar("smbstatus --json unlesbar") from None
+    gruende = []
+    for datei in (daten.get("open_files") or {}).values():
+        pfad = os.path.join(datei.get("service_path", ""), datei.get("filename", ""))
+        for handle in (datei.get("opens") or {}).values():
+            maske = handle.get("access_mask", 0)
+            maske = maske.get("hex", 0) if isinstance(maske, dict) else maske
+            maske = int(maske, 16) if isinstance(maske, str) else int(maske)
+            if maske & SMB_DATEN and os.path.isfile(pfad) and not pfad.endswith(".clip-speicher"):
+                gruende.append(f"SMB offen: {datei.get('filename', '?')}")
+                break
+    return gruende
+
+
+def teil_dateien(k: dict) -> list[str]:
+    grenze = time.time() - float(k["TEIL_MIN"]) * 60
+    treffer = []
+    kandidaten = [d for ordner in ("eingang", "replays", "sitzungen")
+                  for d in glob.glob(os.path.join(k["SPEICHER"], ordner, "**", "*.teil*"), recursive=True)]
+    for datei in kandidaten:
+        try:
+            if os.stat(datei).st_ctime > grenze:  # ctime: das Windows-Skript setzt die mtime zurück
+                treffer.append(f"Kopie läuft: {os.path.relpath(datei, k['SPEICHER'])}")
+        except OSError:
+            pass
+    return treffer[:3]
+
+
+def herzschlag(k: dict) -> list[str]:
+    """Frische Dateien in <speicher>/.aktiv/ (der Mini berührt sie jede Minute, solange ein Schritt läuft).
+    Name <rechner>-<schritt>-<pid>-<startzeit>: Läuft ein Schritt länger als HERZSCHLAG_MAX_H, hängt er
+    vermutlich – dann hält er pve-big nicht mehr wach (die Datei bleibt liegen, der Mini räumt sie weg)."""
+    ordner = Path(k["SPEICHER"]) / ".aktiv"
+    jetzt = time.time()
+    gruende = []
+    for datei in ordner.glob("*") if ordner.is_dir() else []:
+        try:
+            alter = jetzt - datei.stat().st_mtime
+        except OSError:
+            continue  # gerade weggeräumt
+        start = datei.name.rsplit("-", 1)[-1]
+        if start.isdigit() and len(start) >= 9 and jetzt - int(start) > float(k["HERZSCHLAG_MAX_H"]) * 3600:
+            continue
+        if alter < float(k["HERZSCHLAG_MIN"]) * 60:
+            gruende.append(f"Herzschlag: {datei.name}")
+    return gruende
+
+
+def lokale_arbeit(k: dict) -> list[str]:
+    gruende = []
+    for suche, text in ((["-x", "ffmpeg"], "ffmpeg läuft"), (["-f", "pipeline render-final"], "Final-Render läuft"),
+                        (["-f", "zfs (send|recv|receive)"], "zfs send/recv läuft"), (["-f", "vzdump"], "Backup läuft")):
+        if befehl("pgrep", *suche).strip():
+            gruende.append(text)
+    if shutil.which("fuser") and Path("/var/lib/dpkg/lock-frontend").exists():
+        if befehl("fuser", "/var/lib/dpkg/lock-frontend").strip():
+            gruende.append("Paketverwaltung läuft")
+    if shutil.which("systemd-inhibit"):
+        blockiert = [z for z in befehl("systemd-inhibit", "--list", "--no-legend").splitlines()
+                     if "shutdown" in z and "block" in z]
+        if blockiert:
+            gruende.append("Shutdown-Sperre: " + blockiert[0].split()[0])
+    if shutil.which("zpool") and re.search(r"resilver in progress", befehl("zpool", "status")):
+        gruende.append("ZFS-Resilver läuft")
+    if shutil.which("pvesh"):
+        try:
+            aktiv = json.loads(befehl("pvesh", "get", "/nodes/localhost/tasks", "--source", "active",
+                                      "--output-format", "json") or "[]")
+        except json.JSONDecodeError:
+            raise Unklar("pvesh-Ausgabe unlesbar") from None
+        # Konsolen (Web-Shell, VNC/SPICE) sind keine Arbeit an sich – ob dort jemand tippt, prüft menschen()
+        aktiv = [a for a in aktiv if a.get("type") not in KONSOLEN_AUFGABEN]
+        if aktiv:
+            gruende.append(f"Proxmox-Aufgabe: {aktiv[0].get('type', '?')}")
+    return gruende
+
+
+def gaeste(k: dict) -> list[str]:
+    erlaubt = set(k["GAESTE_ERLAUBT"].split())
+    gruende = []
+    for prog in ("qm", "pct"):
+        if not shutil.which(prog):
+            continue
+        for zeile in befehl(prog, "list").splitlines()[1:]:
+            teile = zeile.split()
+            if len(teile) >= 2 and "running" in teile and teile[0] not in erlaubt:
+                gruende.append(f"Gast {teile[0]} läuft")
+    return gruende
+
+
+KONSOLEN_AUFGABEN = {"vncshell", "termproxy", "vncproxy", "spiceshell", "spiceproxy"}
+
+
+def menschen(k: dict) -> list[str]:
+    """Angemeldete Menschen (auch die Proxmox-Web-Shell: termproxy startet ein login mit utmp-Eintrag) – aber nur,
+    wer in den letzten LEERLAUF_MIN Minuten getippt hat. Maß ist die Zugriffszeit des Terminals /dev/<tty>, die
+    der Kernel bei Eingaben setzt (daraus rechnet auch `who -u` die Leerlaufzeit). Unlesbar = aktiv."""
+    grenze = time.time() - float(k["LEERLAUF_MIN"]) * 60
+    gruende = []
+    for zeile in befehl("who").splitlines():
+        teile = zeile.split()
+        if len(teile) < 2:
+            continue
+        try:
+            getippt = (Path(E("CLIP_LL_DEV", "/dev")) / teile[1]).stat().st_atime
+        except OSError:
+            getippt = time.time()
+        if getippt >= grenze:
+            gruende.append(f"angemeldet: {teile[0]} {teile[1]}")
+    return gruende
+
+
+def belegt(k: dict) -> tuple[list[str], list[str]]:
+    """(Gründe, Unklarheiten). Jede Quelle für sich: eine kaputte Quelle verdeckt die anderen nicht."""
+    gruende, unklar = [], []
+    for halten in (E("CLIP_LL_HALTEN", "/run/clip-halten"),):
+        if Path(halten).exists():
+            gruende.append("Halten-Datei")
+    for quelle in (nfs_offen, smb_offen, teil_dateien, herzschlag, lokale_arbeit, gaeste, menschen):
+        try:
+            gruende += quelle(k)
+        except Unklar as e:
+            unklar.append(str(e))
+    return gruende, unklar
+
+
+def messung(k: dict) -> tuple[dict, list[str], list[str]]:
+    # Erst die langsamen Prüfungen (pvesh, qm, pct … dauern Sekunden), die Zähler zuletzt: So ist die Lücke
+    # zwischen letztem Blick und Ausschalten so klein wie möglich.
+    gruende, unklar = belegt(k)
+    zaehler = {}
+    if k["ZFS_ZAEHLER"] == "1":
+        try:
+            zaehler.update(zfs_zaehler(k))
+        except Unklar as e:
+            unklar.append(str(e))
+    zaehler.update(nfs_zaehler())
+    return zaehler, gruende, unklar
+
+
+def bewegung(alt: dict, neu: dict, k: dict) -> list[str]:
+    """Welche Zähler zeigen einen echten Zugriff seit der letzten Messung?"""
+    zeichen = []
+    for feld, wert in neu.items():
+        vorher = alt.get(feld)
+        if vorher is None:
+            continue
+        if wert < vorher:
+            zeichen.append(f"{feld} zurückgesetzt")
+        elif feld == "nread":
+            if wert - vorher > int(k["NREAD_SCHWELLE"]):
+                zeichen.append(f"gelesen +{(wert - vorher) // 1024} KiB")
+        elif wert > vorher:
+            zeichen.append(f"{feld} +{wert - vorher}")
+    return zeichen
+
+
+# --- Zustand und Ablauf ---------------------------------------------------------------------
+
+def zustand_ordner() -> Path:
+    return Path(E("CLIP_LL_ZUSTAND", "/run/clip-leerlauf"))
+
+
+def lies_zustand() -> dict:
+    try:
+        return json.loads((zustand_ordner() / "zustand.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def schreibe(name: str, daten: dict) -> None:
+    ordner = zustand_ordner()
+    ordner.mkdir(parents=True, exist_ok=True)
+    tmp = ordner / f".{name}.tmp"
+    tmp.write_text(json.dumps(daten, ensure_ascii=False, indent=1))
+    tmp.replace(ordner / name)
+
+
+MARKEN = {"scharf": ".leerlauf-scharf", "probe": ".leerlauf-probe"}
+
+
+def melde_speicher(k: dict) -> None:
+    """Lebenszeichen für den Mini: die LEERE Datei <speicher>/.leerlauf-scharf (bei TROCKEN=1 .leerlauf-probe),
+    deren Änderungszeit jede Minute neu gesetzt wird. Der Mini sieht per stat() – über NFS nur GETATTR, das zählt
+    nicht als Zugriff –, dass pve-big sich selbst abschaltet, und darf ihn dann wecken.
+    Bewusst ohne Inhalt: Schreiben (ZFS "writes") und Lesen über NFS (OPEN/READ) zählen hier als Zugriff und
+    hielten pve-big für immer wach. utime() zählen weder die ZFS- noch die nfsd-Zähler. Fehler hier sind egal."""
+    speicher = Path(k["SPEICHER"])
+    marke = speicher / MARKEN["probe" if k["TROCKEN"] == "1" else "scharf"]
+    try:
+        for name in MARKEN.values():
+            if name != marke.name and (speicher / name).exists():
+                (speicher / name).unlink()  # Moduswechsel – ein einziges Mal
+        marke.touch(mode=0o644)             # neu: leer anlegen (kein write); sonst nur die Zeit setzen
+    except OSError:
+        pass
+
+
+def log(text: str) -> None:
+    print(text, flush=True)  # systemd schreibt es ins Journal (SyslogIdentifier=clip-leerlauf)
+
+
+def lauf() -> int:
+    k = konfig()
+    if Path(E("CLIP_LL_AUS_DATEI", "/etc/clip-leerlauf/aus")).exists():
+        return 0  # Automatik ganz aus
+    jetzt = uptime()
+    z = lies_zustand()
+    if z.get("boot") is None or jetzt < z.get("uptime", 0):  # neuer Boot (Zustand liegt auf tmpfs, aber sicher ist sicher)
+        z = {"boot": time.time() - jetzt, "letzte_aktivitaet": 0.0, "zaehler": {}, "gruende": [], "warnung": 0.0}
+    zaehler, gruende, unklar = messung(k)
+    zeichen = bewegung(z.get("zaehler", {}), zaehler, k)
+    alle = gruende + zeichen
+    if unklar:
+        alle.append("Quelle unklar")
+        if time.time() - z.get("warnung", 0) > 3600:
+            log("WARNUNG Quelle unklar (gilt als aktiv): " + "; ".join(unklar))
+            z["warnung"] = time.time()
+    mindest = float(k["MINDEST_WACH_MIN"]) * 60
+    if alle:  # die Uhr läuft ab dem Hochfahren; die Mindest-Wachzeit verhindert nur das Ausschalten davor
+        if set(alle) != set(z.get("gruende", [])):
+            ruhe = jetzt - z.get("letzte_aktivitaet", 0)
+            log(("aktiv: " if not z.get("gruende") and ruhe >= 120 else "") + " · ".join(alle)
+                + (f" (nach {int(ruhe // 60)} min Ruhe)" if not z.get("gruende") and ruhe >= 120 else ""))
+        z["letzte_aktivitaet"] = jetzt
+    ruhig_s = jetzt - z["letzte_aktivitaet"]
+    leerlauf_s = float(k["LEERLAUF_MIN"]) * 60
+    z.update(uptime=jetzt, zaehler=zaehler, gruende=alle)
+    status = {"ruhig_seit_s": int(ruhig_s), "gruende": alle, "leerlauf_min": float(k["LEERLAUF_MIN"]),
+              "trocken": k["TROCKEN"] == "1", "unklar": unklar}
+    if ruhig_s >= leerlauf_s and jetzt >= mindest:
+        # Gegenprobe: kurz warten und ALLES noch einmal messen
+        time.sleep(float(E("CLIP_LL_WARTE", "15")))
+        zaehler2, gruende2, unklar2 = messung(k)
+        noch = gruende2 + bewegung(zaehler, zaehler2, k) + (["Quelle unklar"] if unklar2 else [])
+        if noch:
+            log("Gegenprobe: doch aktiv – " + " · ".join(noch))
+            z.update(letzte_aktivitaet=uptime(), zaehler=zaehler2, gruende=noch)
+            schreibe("zustand.json", z)
+            schreibe("status.json", {**status, "ruhig_seit_s": 0, "gruende": noch})
+            return 0
+        if k["TROCKEN"] == "1":
+            if not z.get("trocken_gemeldet"):
+                log(f"würde ausschalten: {int(ruhig_s // 60)} min ohne Zugriff (TROCKEN=1)")
+                z["trocken_gemeldet"] = True
+        else:
+            log(f"schalte aus: {int(ruhig_s // 60)} min ohne Zugriff")
+            schreibe("zustand.json", z)
+            schreibe("status.json", {**status, "aus": True})
+            aus = E("CLIP_LL_AUS_BEFEHL", "systemctl poweroff --check-inhibitors=yes").split()
+            return subprocess.run(aus).returncode
+    else:
+        z["trocken_gemeldet"] = False
+    schreibe("zustand.json", z)
+    schreibe("status.json", status)
+    melde_speicher(k)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(lauf())

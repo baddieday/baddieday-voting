@@ -1,0 +1,18 @@
+# Sicherheitsnetz: fährt pve-big herunter, wenn kein Auftrag läuft (siehe src/clip_pipeline/big.py).
+# 3 = Konfig/Einrichtung fehlt -> kein Fehlerzustand in systemd, steht aber im Journal.
+[Unit]
+Description=Clip-Pipeline: pve-big herunterfahren, wenn nichts zu tun ist
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/opt/clip-pipeline
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline big waechter
+SuccessExitStatus=3
+TimeoutStartSec=5min
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/clip-pipeline

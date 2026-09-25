@@ -1,0 +1,13 @@
+# /etc/clip-leerlauf.conf auf pve-big – Erklärung in deploy/big/clip-leerlauf
+# Clips-Ordner (dort liegt .clip-speicher) und sein ZFS-Dataset (zfs list | grep clips)
+SPEICHER=/tank/clips
+DATASET=tank/clips
+# 0, falls clips nur ein Ordner in einem größeren Dataset ist (dann zählen nur NFS/SMB/Herzschlag)
+ZFS_ZAEHLER=1
+# Minuten ohne echten Zugriff bis zum Ausschalten. 20, bis der Herzschlag der Pipeline überall läuft, dann 10.
+LEERLAUF_MIN=20
+MINDEST_WACH_MIN=10
+# Gäste (VM/CT-IDs), die pve-big NICHT wachhalten sollen, z. B. "105 110"
+GAESTE_ERLAUBT=
+# Erst ein paar Spielabende nur protokollieren (journalctl -t clip-leerlauf), dann auf 0 stellen
+TROCKEN=1

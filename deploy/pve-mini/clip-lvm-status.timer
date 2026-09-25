@@ -1,0 +1,12 @@
+# pve-mini (Host): Füllstand des Thin-Pools alle 15 Minuten (die Pipeline ignoriert Werte, die älter als 2 h sind).
+# Aktivieren: systemctl enable --now clip-lvm-status.timer
+[Unit]
+Description=Clip-Pipeline: Füllstand des Thin-Pools alle 15 Minuten
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=15min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

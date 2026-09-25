@@ -1,0 +1,13 @@
+# Jede Nacht um 04:30 (plus bis zu 10 min Zufall) Puffer -> Lager abgleichen. Ohne neue Dateien bleibt pve-big aus.
+# Persistent: war der CT um 04:30 aus, läuft der Abgleich beim nächsten Start nach.
+# Aktivieren (erst nach dem Umschalten, docs/PUFFER.md R6): sudo systemctl enable --now clip-lager.timer
+[Unit]
+Description=Clip-Pipeline: Puffer jede Nacht ins Lager abgleichen
+
+[Timer]
+OnCalendar=*-*-* 04:30
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

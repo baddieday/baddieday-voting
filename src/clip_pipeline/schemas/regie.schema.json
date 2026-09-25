@@ -1,0 +1,85 @@
+{
+  "$comment": "Schnittliste des Regisseurs (pipeline compose). Wird vor dem Speichern geprüft (regie.pruefe_liste).",
+  "type": "object",
+  "required": ["version", "art", "name", "format", "aufloesung", "fps", "dauer_s", "stimmung", "parameter",
+               "musik", "overlay", "bogen", "segmente", "hinweise", "erstellt"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"type": "integer", "enum": [3]},
+    "art": {"type": "string", "enum": ["regie"]},
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"},
+    "format": {"type": "string", "enum": ["zusammenschnitt", "short"]},
+    "aufloesung": {"type": "array", "minItems": 2, "items": {"type": "integer", "minimum": 16}},
+    "fps": {"type": "integer", "minimum": 1, "maximum": 120},
+    "dauer_s": {"type": "number", "minimum": 0},
+    "stimmung": {"type": "string", "enum": ["episch", "lustig", "spannend", "frustriert", "chill"]},
+    "parameter": {"type": "object"},
+    "musik": {
+      "type": ["object", "null"],
+      "required": ["track_id", "datei", "titel", "quelle", "bpm", "start_s", "pegel"],
+      "properties": {
+        "track_id": {"type": "integer"},
+        "datei": {"type": "string", "minLength": 1},
+        "titel": {"type": "string", "minLength": 1},
+        "kuenstler": {"type": ["string", "null"]},
+        "quelle": {"type": "string", "minLength": 1},
+        "bpm": {"type": ["number", "null"]},
+        "start_s": {"type": "number", "minimum": 0},
+        "pegel": {"type": "number", "minimum": 0, "maximum": 1},
+        "wertung": {"type": "object"}
+      }
+    },
+    "overlay": {"type": ["string", "null"]},
+    "bogen": {"type": "array", "items": {"type": "number"}},
+    "auswahl": {
+      "type": "object",
+      "properties": {
+        "kandidaten": {"type": "integer", "minimum": 0},
+        "neu": {"type": "integer", "minimum": 0},
+        "schon_gezeigt": {"type": "integer", "minimum": 0},
+        "abwechslung": {"type": "number", "minimum": 0}
+      }
+    },
+    "hinweise": {"type": "array", "items": {"type": "string"}},
+    "erstellt": {"type": "string"},
+    "segmente": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["nr", "moment", "datei", "stimmung", "quelle_start_s", "quelle_ende_s", "quelle_dauer_s",
+                     "muss", "zeit_start", "zeit_ende", "uebergang"],
+        "additionalProperties": false,
+        "properties": {
+          "nr": {"type": "integer", "minimum": 1},
+          "moment": {"type": "string", "minLength": 1},
+          "clip_id": {"type": ["integer", "null"]},
+          "match_id": {"type": ["string", "null"]},
+          "datei": {"type": "string", "minLength": 1},
+          "stimmung": {"type": "string", "enum": ["episch", "lustig", "spannend", "frustriert", "chill"]},
+          "intensitaet": {"type": "number"},
+          "grund": {"type": "string"},
+          "punkte": {"type": "number"},
+          "abzug": {"type": "number", "minimum": 0},
+          "gezeigt": {"type": "integer", "minimum": 0},
+          "quelle_start_s": {"type": "number", "minimum": 0},
+          "quelle_ende_s": {"type": "number", "minimum": 0},
+          "quelle_dauer_s": {"type": "number", "minimum": 0},
+          "muss": {"type": "array", "minItems": 2, "items": {"type": "number"}},
+          "zeit_start": {"type": "number", "minimum": 0},
+          "zeit_ende": {"type": "number", "minimum": 0},
+          "auf_beat": {"type": "boolean"},
+          "uebergang": {
+            "type": "object",
+            "required": ["art", "dauer_s"],
+            "additionalProperties": false,
+            "properties": {
+              "art": {"type": "string", "enum": ["schnitt", "fade", "fadeblack", "fadewhite", "wipeleft", "slideleft", "circleopen"]},
+              "dauer_s": {"type": "number", "minimum": 0, "maximum": 3}
+            }
+          }
+        }
+      }
+    }
+  }
+}

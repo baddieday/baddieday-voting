@@ -102,9 +102,12 @@ def gewichte_text(e: Ergebnis, version: int) -> str:
     return "\n".join(kopf) + "\n<pre>" + escape("\n".join(zeilen)) + "</pre>" + ("\n" + "\n".join(fuss) if fuss else "")
 
 
-def status_text(anzahl: dict[str, int], speicher: str, letzte: str | None) -> str:
+def status_text(anzahl: dict[str, int], speicher: str, letzte: str | None, lager: str | None = None) -> str:
+    """lager: Zeile aus lager.status (nur im getrennten Betrieb), z. B. „Puffer 61 GB frei · Lager: … · 0 offen“."""
     namen = ["vorbewertet", "gesendet", "freigegeben", "verworfen", "veroeffentlicht", "im_highlight"]
     zeilen = ["📊 <b>Status</b>", f"Speicher: {escape(speicher)}"]
+    if lager:
+        zeilen.append(f"🗄️ {escape(lager)}")
     zeilen += [f"{n}: {anzahl.get(n, 0)}" for n in namen]
     if letzte:
         zeilen.append(f"Letztes Match: {escape(letzte)}")

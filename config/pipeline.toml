@@ -4,6 +4,7 @@
 
 [speicher]
 # Wurzel des Clip-Speichers. Auf dem Mini ist das der NFS-Mount vom großen Host.
+# Im getrennten Betrieb ([lager].wurzel gesetzt) ist das der Puffer auf dem Mini (host = "", weckt nie).
 wurzel = "/srv/clips"
 # Diese Datei muss in der Wurzel liegen. Fehlt sie (großer Host aus, Mount fehlt),
 # fasst die Pipeline nichts an – so wird nie ein leerer Mount-Ordner befüllt.
@@ -22,6 +23,119 @@ highlights = "highlights"      # Highlight-Videos alle 2 Wochen
 musik = "musik"                # nur lizenzierte Titel, je Titel eine <name>.lizenz.txt daneben
 archiv = "archiv"              # Multikills ab 3 Kills – wird nie aufgeräumt
 papierkorb = "papierkorb"
+
+[big]
+# Sicherheitsnetz für pve-big (src/clip_pipeline/big.py, Timer clip-big-waechter alle 10 min).
+# Host und Port für "ist er wach?" – leer = [speicher].host; Port 22 = SSH.
+host = ""
+port = 22
+# Herunterfahren per SSH mit eigenem Schlüssel (auf pve-big per command= auf clip-big-steuer festgelegt).
+# Solange ssh_ziel leer ist oder "pipeline big pruefen" nie geklappt hat, weckt die Pipeline pve-big NICHT.
+ssh_ziel = ""                                   # z. B. "root@pve-big"
+ssh_schluessel = "/var/lib/clip-pipeline/.ssh/pve-big"
+# Nach dem Aufwachen mindestens so lange an lassen (der Gaming-PC hat ihn evtl. gerade geweckt)
+mindest_wach_min = 20
+aus_warten_s = 180
+# Ab dieser Zeit wird pve-big nicht mehr geweckt; läuft er, fährt der Wächter ihn einmal herunter.
+# Sprint-Regel bis Mo 28.09., 20:00. NACH DEM SPRINT LEEREN (frist = ""), sonst weckt die Pipeline nie mehr.
+frist = "2026-09-28T20:00:00+02:00"
+# Auch der bisherige Weckweg (n8n-Schritte, /paket, highlight) weckt nur, wenn das Herunterfahren gesichert ist.
+# Bis die SSH-Steuerung eingerichtet ist, enden diese Schritte bei schlafendem pve-big mit Exit 3 (Alarm).
+alter_weckweg_nur_mit_aus = true
+# So lange gilt ein erfolgreicher Test der Steuerung (der Wächter erneuert ihn, solange pve-big läuft).
+# 60 statt 14 (E19): mit Puffer ist pve-big oft tagelang aus – danach soll der nächtliche Abgleich ihn trotzdem wecken.
+status_gueltig_tage = 60
+
+[lager]
+# Langzeit-Lager auf pve-big (E19). Leer = kein getrennter Betrieb: [speicher] ist dann direkt pve-big (wie bisher).
+# Im getrennten Betrieb: [speicher] = Puffer auf dem Mini (host = ""), Lager = NFS von pve-big.
+wurzel = ""                    # z. B. "/srv/big/clips"
+markierung = ".clip-lager"     # liegt NUR im Lager (auf pve-big anlegen)
+port = 2049                    # "erreichbar?" = TCP [big].host:port
+warten_s = 240                 # nach dem Wecken so lange auf die Markierung warten (Nachzieher hängt NFS alle 30 s ein)
+ordner = ["eingang", "replays", "sessions", "highlights", "sitzungen", "musik", "archiv", "sicherung"]
+roh = ["eingang", "replays"]   # Rohdaten: im Lager nie überschreiben, nie löschen
+ruhe_min = 10                  # jüngere Dateien (mtime ODER ctime) gelten als "wird noch geschrieben"
+sicherungen_behalten = 30      # so viele nächtliche DB-Sicherungen in sicherung/ behalten
+
+[puffer]
+# Puffer auf dem Mini (E19, nur im getrennten Betrieb): hier arbeitet die Pipeline, nachts geht alles ins Lager.
+markierung = ".clip-puffer"    # liegt NUR im Puffer
+freigeben = false              # Stufe B5 (später, nur mit OK): bestätigte Rohdaten im Puffer löschen
+warnung_frei_gb = 20           # Morgenprüfung: Meldung, wenn weniger frei
+alarm_frei_gb = 8
+pool_status = "/srv/big/lvm-status.txt"   # Thin-Pool des Mini, schreibt der Host (deploy/pve-mini/clip-lvm-status)
+pool_warnung_prozent = 85      # Thin-Pool des Mini (aus pool_status, vom Host geschrieben)
+pool_alarm_prozent = 90
+lager_spaetestens_h = 36       # offene Dateien, aber seit so vielen Stunden kein erfolgreicher Abgleich → Meldung
+pc_status_datei = "sitzungen/pc-status.json"   # schreibt der Gaming-PC (Uebertragung.ps1)
+pc_stau_h = 24                 # älteste nicht übertragene Datei auf dem PC älter → Meldung
+
+[material]
+# Lokale Kopie auf dem Mini (pipeline material): gleiche Ordner wie in der Speicher-Wurzel.
+ordner = "/var/lib/clip-pipeline/material"
+# So viel bleibt immer frei
+reserve_gb = 2
+# Reicht der Platz nicht für alle Rohvideos: je Video nur die letzten Sekunden, verlustfrei (-c copy)
+ende_s = 90
+# pve-big höchstens so lange für die Kopie wach halten (danach greift der Wächter)
+halten_min = 240
+stichprobe = 5
+
+[stimmung]
+# faster-whisper auf der Mikro-Spur (CPU). "small" braucht ca. 1 GB RAM, int8 ist auf dem Ryzen am schnellsten.
+modell = "small"
+sprache = "de"
+geraet = "cpu"
+rechenart = "int8"
+threads = 6
+# Spitzen: Spielton so viele LU über seinem Median; Jubel: Mikro so viele LU über seinem Median
+spitze_lu = 8
+jubel_lu = 12
+# Momente mit Sicherheit darunter fragt `claude -p` – gesammelt in EINEM Aufruf pro Durchlauf
+claude = true
+unsicher_unter = 0.35
+claude_max = 40
+claude_timeout_s = 180
+
+[musik]
+# Musik für den Regisseur liegt auf dem Mini (pve-big darf schlafen). Je Titel <name>.lizenz.txt daneben.
+ordner = "/var/lib/clip-pipeline/musik"
+
+[musik.ncs_stimmungen]
+# `pipeline musik ncs --stimmung X` sucht auf ncs.io mit diesen Mood-Filtern (IDs aus der NCS-Suche)
+episch = [4, 32, 38]        # Epic, powerful, majestic
+spannend = [23, 41, 26]     # Suspense, tense, Chasing
+lustig = [8, 16, 11]        # Funny, Quirky, Happy
+frustriert = [1, 30, 18]    # Angry, Heavy, Restless
+chill = [13, 17, 15]        # Laid Back, relaxed, Peaceful
+
+[regie]
+# Schnittlisten und Entwürfe des Regisseurs (auf dem Mini)
+ordner = "/var/lib/clip-pipeline/regie"
+# Entwürfe per VA-API kodieren, wenn /dev/dri da ist (sonst CPU)
+vaapi = true
+# Lernen aus 👍/👎 ohne Grund erst ab so vielen Bewertungen (Gründe wirken sofort)
+lernen_ab = 3
+# pve-big höchstens so lange für den Final-Render wach halten
+final_halten_min = 60
+
+[sitzungen]
+# "Session vorbei"-Dateien des Gaming-PCs (windows/Uebertragung.ps1, SessionVorbeiMinuten)
+ordner = "sitzungen"
+# So lange auf n8n warten, bis alle Matches des Abends verarbeitet sind
+warten_h = 2
+format = "short"
+
+[lernbot]
+# Abends einmal ein Satz zum Stand (Ortszeit)
+abendstand = true
+abend_uhrzeit = "21:00"
+# Nach jeder fertigen Bewertung (✅) sofort den nächsten Entwurf bauen – die Lernschleife
+naechster_nach_bewertung = true
+# Vor jedem Entwurf so viele weitere Clips analysieren (Stimmung, Whisper) – die Auswahl wächst mit; 0 = aus
+stimmung_je_entwurf = 10
+intervall_s = 30
 
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.
@@ -177,6 +291,13 @@ erinnerung_h = 24
 
 [telegram]
 outbox_intervall_s = 30
+# Ruhezeit (Ortszeit, über Mitternacht erlaubt). Gilt IMMER – auch ohne getrennten Betrieb ([lager] leer):
+#  - Meldungen aus Puffer/Lager werden dann nicht verschickt, sie bleiben bis leise_bis liegen;
+#  - Clip- und Highlight-Videos kommen weiter sofort, aber ohne Ton (disable_notification);
+#  - andere Meldungen (z. B. Kills ohne Aufnahme) wie bisher.
+# Abschalten: leise_von = "" (leer lassen), z. B. in config/lokal.toml.
+leise_von = "23:00"
+leise_bis = "08:00"
 
 [aufraeumen]
 # Nach so vielen Tagen wird recycelt (erst Papierkorb, dann endgültig) ...

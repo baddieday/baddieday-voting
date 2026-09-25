@@ -22,6 +22,11 @@ class Gesperrt(RuntimeError):
     pass
 
 
+# Sperren, die DIESER Prozess gerade hält. flock auf einem zweiten Dateideskriptor derselben Datei würde auch
+# gegen den eigenen Prozess "belegt" melden – so kann big.pipeline_beschaeftigt() den eigenen Lauf erkennen.
+GEHALTEN: set[str] = set()
+
+
 def _versuche(fd: int) -> bool:
     if sys.platform == "win32":
         import msvcrt
@@ -68,9 +73,11 @@ def sperre(pfad: Path, warten_s: float = 0.0, melde=None) -> Iterator[None]:
                 melde("warte auf laufenden Schritt …")
                 gemeldet = True
             time.sleep(1)
+        GEHALTEN.add(str(Path(pfad).resolve()))
         try:
             yield
         finally:
+            GEHALTEN.discard(str(Path(pfad).resolve()))
             _freigeben(fd)
     finally:
         os.close(fd)

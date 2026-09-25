@@ -1,0 +1,16 @@
+# "Session vorbei" abholen: Stimmung + Short des Abends (siehe src/clip_pipeline/sitzung.py).
+# 3 = pve-big schläft (wird NICHT geweckt), 4 = anderer Schritt läuft -> kein Fehler, nächster Timer-Lauf.
+[Unit]
+Description=Clip-Pipeline: Session vorbei verarbeiten
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/opt/clip-pipeline
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline sitzungen
+SuccessExitStatus=3 4
+SupplementaryGroups=render
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/clip-pipeline /srv/clips

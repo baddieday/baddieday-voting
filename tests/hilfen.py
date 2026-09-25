@@ -24,8 +24,13 @@ class MitSpeicher(unittest.TestCase):
         self.tmp = Path(self._tmp.name)
         self.konfig = konfig.lade()
         self.konfig.daten["speicher"]["wurzel"] = str(self.tmp / "speicher")
-        self.konfig.daten["speicher"]["host"] = ""
+        # Nie einen echten Host oder Mount berühren – auch wenn config/lokal.toml Werte setzt
+        self.konfig.daten["speicher"].update(host="", wol_mac="")
+        self.konfig.daten.setdefault("lager", {})["wurzel"] = ""
         self.konfig.daten["datenbank"]["pfad"] = str(self.tmp / "test.db")
+        # Tests sollen nicht vom Datum abhängen: Sprint-Frist aus, Zustand von pve-big im Testordner
+        self.konfig.daten.setdefault("big", {}).update(frist="", zustand_ordner=str(self.tmp / "zustand"), host="",
+                                                       ssh_ziel="")
         for name in ("eingang", "replays", "sessions", "highlights", "musik", "archiv", "papierkorb"):
             self.konfig.ordner(name).mkdir(parents=True, exist_ok=True)
         (self.konfig.wurzel / ".clip-speicher").touch()

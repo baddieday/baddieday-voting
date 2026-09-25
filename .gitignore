@@ -27,3 +27,11 @@ tools/replay2json/obj/
 *.replay
 daten/
 logs/
+
+# Musik nie ins Repo (Größe, Lizenz) – liegt auf dem Mini in /var/lib/clip-pipeline/musik
+*.mp3
+*.m4a
+*.wav
+*.flac
+*.ogg
+*.opus

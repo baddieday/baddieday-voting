@@ -1,0 +1,21 @@
+# Morgenprüfung (E19, src/clip_pipeline/puffer.py): Platz im Puffer, Thin-Pool (/srv/big/lvm-status.txt), letzter
+# Abgleich, Gaming-PC (sitzungen/pc-status.json), Samba. Höchstens eine Meldung je Thema und Tag, montags ein
+# Lebenszeichen – verschickt werden sie vom Bot (nicht in der Ruhezeit). Weckt pve-big NIE, fasst das Lager nicht an.
+# Nur im getrennten Betrieb ([lager].wurzel gesetzt) – sonst Exit 2. Einführung: docs/PUFFER.md, R6.
+# Checkout: /opt/clip-pipeline auf main (nach dem Merge von E19).
+# Von Hand: sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline puffer pruefen
+[Unit]
+Description=Clip-Pipeline: Morgenprüfung von Puffer und Lager
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/opt/clip-pipeline
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline puffer pruefen
+TimeoutStartSec=5min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# schreibt nur Meldungen in die Datenbank; Puffer und lvm-status.txt werden nur gelesen
+ReadWritePaths=/var/lib/clip-pipeline

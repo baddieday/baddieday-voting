@@ -1,9 +1,14 @@
+import contextlib
+import io
+import json
 import os
 import time
 import unittest
 from datetime import datetime, timedelta
+from unittest import mock
 
-from clip_pipeline import aufraeumen, caption, db
+from clip_pipeline import aufraeumen, caption, cli, db
+from clip_pipeline.konfig import KonfigFehler
 from clip_pipeline.sperre import Gesperrt, sperre
 from clip_pipeline.zeit import UTC
 
@@ -64,6 +69,38 @@ class Aufraeumen(MitSpeicher):
     def test_loescht_nie_ausserhalb_des_papierkorbs(self):
         with self.assertRaises(RuntimeError):
             aufraeumen.fuehre_aus(self.con, self.konfig, [aufraeumen.Aktion(self.konfig.ordner("sessions"), "loeschen", "")])
+
+    def test_im_getrennten_betrieb_verweigert(self):
+        """E19: im Puffer wird nichts verschoben und kein DB-Pfad umgeschrieben – Klartext, Exit 2."""
+        einzel = self._datei("sessions/m1/clips/002_einzel_1k.mp4", 200)
+        self._datei("papierkorb/2026-01-01/sessions/alt.mp4", 1)
+        self.konfig.daten["lager"]["wurzel"] = str(self.tmp / "lager")
+        with self.assertRaises(KonfigFehler) as fehler:
+            aufraeumen.plane(self.con, self.konfig)
+        self.assertIn("getrennten Betrieb", str(fehler.exception))
+        with self.assertRaises(KonfigFehler):
+            aufraeumen.fuehre_aus(self.con, self.konfig, [aufraeumen.Aktion(einzel, "papierkorb", "alt")])
+        for argv in (["aufraeumen"], ["aufraeumen", "--ausfuehren", "--taeglich"]):
+            code, e = self._cli(argv)
+            self.assertEqual((code, e["fehler"]), (2, "konfig"))
+            self.assertIn("clip-aufraeumen ausschalten", e["hinweis"])
+        # Auch wenn gerade ein anderer Schritt die Pipeline-Sperre hält: sofort Exit 2 mit Klartext –
+        # nicht erst warten und dann „gesperrt“ (Exit 4, im Timer kein Fehler)
+        self.konfig.daten.setdefault("sperre", {})["warten_s"] = 0
+        with sperre(self.konfig.datenbank.with_suffix(".lock")):
+            code, e = self._cli(["aufraeumen", "--ausfuehren", "--taeglich"])
+        self.assertEqual((code, e["fehler"]), (2, "konfig"))
+        self.assertIn("clip-aufraeumen ausschalten", e["hinweis"])
+        self.assertTrue(einzel.exists())
+        self.assertTrue((self.konfig.ordner("papierkorb") / "2026-01-01").exists())
+        self.assertIsNone(self.con.execute("SELECT 1 FROM ereignisse WHERE art = 'aufraeumen'").fetchone())
+
+    def _cli(self, argv: list[str]) -> tuple[int, dict]:
+        ausgabe = io.StringIO()
+        with mock.patch("clip_pipeline.cli.lade", return_value=self.konfig), \
+                contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(argv)
+        return code, json.loads(ausgabe.getvalue().strip().splitlines()[-1])
 
 
 class Sperre(MitSpeicher):

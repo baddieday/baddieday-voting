@@ -45,10 +45,11 @@ def _clip_text(con, konfig: Konfig, clip_id: int) -> str:
 # --- Outbox: neue Clips verschicken -------------------------------------------
 
 async def sende_meldungen(app: Application) -> int:
-    """Kurze Hinweise (z. B. Kills ohne Aufnahme) – brauchen keinen Speicher, gehen also immer."""
-    con, chat = app.bot_data["con"], app.bot_data["erlaubt"]
+    """Kurze Hinweise (z. B. Kills ohne Aufnahme) – brauchen keinen Speicher, gehen also immer.
+    Meldungen aus Puffer/Lager (Morgenprüfung, Abgleich) warten die Ruhezeit ab ([telegram].leise_von/leise_bis)."""
+    con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     gesendet = 0
-    for m in con.execute("SELECT id, text FROM meldungen WHERE gesendet IS NULL ORDER BY id").fetchall():
+    for m in aktionen.faellige_meldungen(con, konfig):
         await app.bot.send_message(chat, m["text"])
         con.execute("UPDATE meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
         gesendet += 1
@@ -67,6 +68,7 @@ async def sende_outbox(app: Application) -> int:
         log.info("Outbox wartet: %s", e)
         return 0
     gesendet = 0
+    leise = aktionen.ruhezeit(konfig)  # nachts kommen Clips weiter sofort, aber ohne Ton (gilt auch ohne [lager])
     for z in zeilen:
         pfad = konfig.absolut(z["vorschau_pfad"]) if z["vorschau_pfad"] else None
         if pfad is None or not pfad.is_file():
@@ -76,7 +78,7 @@ async def sende_outbox(app: Application) -> int:
             nachricht = await app.bot.send_video(
                 chat_id=chat, video=datei, caption=_clip_text(con, konfig, z["id"]), parse_mode=ParseMode.HTML,
                 reply_markup=_markup(aktionen.knoepfe_neu(z["id"])), supports_streaming=True,
-                read_timeout=300, write_timeout=300, connect_timeout=30,
+                disable_notification=leise, read_timeout=300, write_timeout=300, connect_timeout=30,
             )
         aktionen.als_gesendet(con, z["id"], nachricht.message_id, nachricht.video.file_id if nachricht.video else None)
         gesendet += 1
@@ -89,7 +91,7 @@ async def sende_outbox(app: Application) -> int:
             nachricht = await app.bot.send_video(
                 chat_id=chat, video=datei, caption=texte.highlight_text(h), parse_mode=ParseMode.HTML,
                 reply_markup=_markup(aktionen.knoepfe_highlight(h["id"])), supports_streaming=True,
-                read_timeout=300, write_timeout=300, connect_timeout=30,
+                disable_notification=leise, read_timeout=300, write_timeout=300, connect_timeout=30,
             )
         aktionen.highlight_gesendet(con, h["id"], nachricht.message_id)
         gesendet += 1
@@ -149,8 +151,23 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except SpeicherOffline:
         speicher = "offline (großer Host schläft?)"
     letzte = con.execute("SELECT id, status FROM matches ORDER BY start_utc DESC LIMIT 1").fetchone()
-    text = texte.status_text(db.anzahl_je_status(con), speicher, f"{letzte['id']} ({letzte['status']})" if letzte else None)
+    text = texte.status_text(db.anzahl_je_status(con), speicher, f"{letzte['id']} ({letzte['status']})" if letzte else None,
+                             lager=_lager_zeile(con, konfig))
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+def _lager_zeile(con, konfig: Konfig) -> str | None:
+    """Im getrennten Betrieb (E19) eine Zeile zum Lager. Nur lesen: Tabelle + Puffer – weckt nie, fasst das Lager
+    nicht an. Ohne getrennten Betrieb None."""
+    if not konfig.getrennt:
+        return None
+    from .. import lager
+
+    try:
+        return lager.status(con, konfig)["zeile"]
+    except Exception as e:  # /status soll trotzdem antworten
+        log.warning("Lager-Status: %s", e)
+        return f"Lager: Stand nicht lesbar ({str(e)[:100]})"
 
 
 async def cmd_offen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -1,4 +1,12 @@
 ﻿# Kopiere diese Datei nach "uebertragung.psd1" und passe Ziel, ZielHost und MAC an.
+#
+# Puffer-Betrieb (E19): Der PC kopiert wie bisher alle 2 min, aber auf den Mini (läuft immer); pve-big holt sich
+# die Daten nachts selbst ab. Dafür nur diese drei Werte ändern, alles andere bleibt gleich (docs/PUFFER.md, R7):
+#     Ziel         = '\\192.168.178.93\clips'   # Samba-Freigabe im CT auf dem Mini (Puffer, mit .clip-speicher)
+#     ZielHost     = '192.168.178.93'
+#     WakeOnLanMac = ''                          # leer: der Mini ist immer an, der PC weckt nie
+# Zugang einmalig speichern: cmdkey /add:192.168.178.93 /user:gamingpc /pass   (fragt nach dem Passwort)
+# Nach jedem Lauf mit Arbeit schreibt der PC "sitzungen\pc-status.json" (Kopierfehler, was noch wartet).
 @{
     # Freigabe des großen Proxmox-Hosts (UNC-Pfad oder verbundenes Laufwerk, z. B. 'Z:\')
     Ziel                = '\\pve-gross\clips'
@@ -15,6 +23,10 @@
 
     # Datei gilt als fertig, wenn sie so lange nicht mehr verändert wurde
     RuhezeitSekunden    = 60
+    # "Session vorbei" an den Mini melden (Datei sitzungen\session_<zeit>.json auf dem Speicher):
+    # 0 = aus. Z. B. 20 = Fortnite zu und seit 20 Minuten kein neues Match. n8n bleibt davon unberührt.
+    SessionVorbeiMinuten = 0
+
     # Ältere Dateien ignorieren (begrenzt die allererste Übertragung; das Archiv ist ~430 GB groß)
     MaxAlterTage        = 30
 

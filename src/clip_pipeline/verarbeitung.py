@@ -78,9 +78,7 @@ def prepare(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
         raise SessionFehler(f"Kein Replay für Session {sid} in {konfig.ordner('replays')}")
     relativ = konfig.relativ(pfad)
     if db.match(con, sid) is None:
-        start = replay.startzeit_aus_name(pfad, konfig.wert("zeit.zeitzone", "Europe/Berlin"))
-        ende = jetzt()
-        start = start or ende - timedelta(minutes=30)
+        start, ende = erfassung.match_zeiten(pfad, konfig.wert("zeit.zeitzone", "Europe/Berlin"))  # wie scan
         zeit = iso(jetzt())
         con.execute(
             "INSERT OR IGNORE INTO matches (id, replay_pfad, start_utc, ende_utc, erstellt, geaendert) VALUES (?, ?, ?, ?, ?, ?)",

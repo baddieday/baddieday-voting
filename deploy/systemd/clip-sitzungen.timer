@@ -1,0 +1,12 @@
+# Alle 10 Minuten nach neuen "Session vorbei"-Dateien sehen (nur wenn pve-big ohnehin läuft).
+# Aktivieren: sudo systemctl enable --now clip-sitzungen.timer
+[Unit]
+Description=Clip-Pipeline: Session vorbei alle 10 Minuten prüfen
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
