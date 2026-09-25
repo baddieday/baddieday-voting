@@ -44,3 +44,26 @@ Legende: ✅ fertig und hier getestet · 🧪 gebaut, nur mit künstlichem Mater
 - Du: „Warum ist pve-big noch an?“ – clip-leerlauf war noch nicht installiert. Dabei zwei Fehler gefunden, die
   ihn auch danach wachgehalten hätten (eigene Statusdatei, Lesen über NFS) → leere Marke. Danach unabhängige
   Prüfung des ganzen Mechanismus: 9 bestätigte Befunde, alle behoben (E17).
+
+### 24.09. abends (neue Sitzung, am Handy mit dir)
+- **Zugang:** Diese Sitzung ist per Tailscale (flüchtiges Gerät „claude-cloud“, verschwindet nach Sitzungsende) im
+  Tailnet und hat root per Tailscale SSH auf pve-big und pve-mini. Dafür nötig waren: eine SSH-Regel in der Tailnet-Policy
+  (`check`-Modus: deine eigenen Geräte, Bestätigung per Link, 12 h gültig), `tailscale up --reset --ssh --accept-dns=false`
+  auf pve-big (war nie angemeldet – das alte `tag:heim` war in der Policy nicht definiert) und dasselbe mit
+  `--force-reauth` auf pve-mini (Schlüssel war seit 23.09. abgelaufen und ebenfalls mit `tag:heim` hängen geblieben).
+  Schlüssel-Ablauf ist für beide Server abgeschaltet.
+- **Warum pve-big seit Stunden lief:** Auf pve-big war die ALTE Fassung von clip-leerlauf (11:46) installiert, die jede
+  Minute `.leerlauf.json` schrieb und sich damit selbst wach hielt. Mit deinem OK ersetzt durch den Stand 22fe26c
+  (Prüfsumme gegen git geprüft, alte Fassung als `/usr/local/sbin/clip-leerlauf.alt`), alte Statusdatei gelöscht.
+  **Ergebnis: pve-big hat sich um ca. 20:30 selbst abgeschaltet.**
+- **Gemessen (für E18/E19):** Aufnahmen ~2 GB je Spieltag (max 5,9 GB), Replays ~0,07 GB; 2–5 Matches pro Abend,
+  Wochenende bis 17; Verarbeitung je Match Median 14 s, Schnitt 63 s, max 5 min (rueckstand.log, 82 Matches);
+  Mini: ~141 GB frei im Thin-Pool, CT 102 mit 8 Kernen/12 GB/iGPU, noch kein Samba.
+- **Stand auf dem Mini:** Produktion `/opt/clip-pipeline` = main (5ee5dec), `/opt/clip-regie` = 49f0608 (vor den
+  Leerlauf-Korrekturen; der Lern-Bot läuft von dort). In beiden lokal.toml steht `wol_mac` → die Produktion weckt
+  pve-big bei n8n-Schritten und /paket ohne Bedingung. Aktiv ist nur clip-aufraeumen.timer (weckt nicht).
+- **E18 Stufe 1 analysiert:** 6 Leser + Stolperfallen-Prüfer (19 Befunde), Rollen-Panel (Senior Dev, Betrieb, QS, CEO).
+- **Architekturvergleich** A (E18) gegen B (Mini-Puffer): einstimmig B → **E19**.
+- **E19 gebaut** in 4 Strängen, jeder Teil: Bau mit Tests → Prüfer (Korrektheit/Datenverlust, Tests, Einfachheit) →
+  Gegenprüfer je Befund → Nachbessern. Danach Schluss-QS über alles. Details siehe Commits und `docs/PUFFER.md`.
+- **Nicht angefasst:** Produktion, n8n, Gaming-PC, Host-Konfigurationen (außer clip-leerlauf auf pve-big, s. o.).

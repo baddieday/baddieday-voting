@@ -218,6 +218,8 @@ Verworfen (Gegenprüfer überzeugt, dass es auf diesem Aufbau nicht passiert), u
 `pipeline sitzungen` ohne Arbeit, pgrep sieht Prozesse in LXC-Gästen, scp/rsync ohne Terminal.
 
 ## E18 · Neuer Datenweg: einmal pro Abend wecken, VPS als Arbeits- und Backup-Kopie (entschieden 24.09., Umsetzung folgt)
+> **Stufe 1 ersetzt durch E19** (24./25.09.): Statt den Abend auf dem Gaming-PC zu erkennen, puffert der Mini;
+> pve-big wird nur noch nachts zum Abgleich geweckt. Die VPS-Kopie entfällt vorerst (siehe E19).
 Mit dir abgestimmt (Energie: pve-big nicht ständig an/aus):
 - **Nach jedem Spielabend weckt der Gaming-PC pve-big genau einmal** („Session vorbei“), alle neuen Aufnahmen
   kommen in einem Rutsch rüber, der Mini schneidet die Clips, danach geht pve-big aus. Kein Wecken alle 2 min.
@@ -231,3 +233,58 @@ Mit dir abgestimmt (Energie: pve-big nicht ständig an/aus):
 - Sprint-Regel „VPS nicht verändern“ hebst du dafür auf; n8n-Workflows bleiben, solange es geht, unverändert.
 - **Zugang:** du gibst mir root auf pve-mini, pve-big und dem VPS über Tailscale SSH (Tags `tag:claude` →
   `tag:heim`, kurzlebiger Schlüssel nur in den Umgebungs-Einstellungen, nie im Chat).
+
+## E19 · Puffer auf dem Mini, Lager auf pve-big – statt „Gaming-PC weckt einmal pro Abend“ (24.09., ersetzt E18 Stufe 1)
+Du hast erlaubt, von E18 abzuweichen, wenn eine Lösung klar besser ist. Verglichen wurden zwei ausgearbeitete Varianten,
+jede von zwei Gegenprüfern angegriffen (Betrieb, Datenverlust) und von drei Richtern unabhängig bewertet
+(0–10 je Ziel: kein Verlust, Energie, einfach/wartungsarm, freundlich, n8n unverändert, Umsetzungsrisiko):
+
+| Variante | CEO | Betrieb | Senior Dev |
+|---|---|---|---|
+| A: E18 wie beschlossen – PC sammelt, erkennt „Abend vorbei“, weckt pve-big 1×, kopiert alles | 29 | 29 | 29 |
+| **B: Mini als Puffer – PC kopiert wie bisher alle 2 min, aber auf den Mini; pve-big nur nachts zum Abgleich** | **47** | **46** | **48** |
+
+**Warum B:** Die meisten der 19 Stolperfallen von A entstehen, weil der PC erkennen muss, wann der Abend vorbei ist
+(PC gleich aus, Fortnite bleibt offen, Pausen, verpuffendes WoL, Rekorder-Apps räumen auf, bevor kopiert wurde,
+Nachrichtenflut in der Nacht, 12-h-Warnung, Match-Ende = jetzt). In B gibt es diese Frage nicht:
+- Aufnahmen verlassen den PC wie bisher Minuten nach dem Match – auf den Mini, der immer läuft.
+- Der Mini verarbeitet sofort (n8n und Produktionscode unverändert, `[speicher].host = ""` → nie Wecken).
+  Vorschauen, /paket, Highlight und Lern-Bot arbeiten lokal – kein „Outbox wartet“, kein Wecken tagsüber.
+- pve-big wird höchstens einmal pro Nacht (04:30) geweckt und nur, wenn es Neues gibt: Abgleich mit SHA-256 und
+  Zurücklesen, danach schaltet clip-leerlauf ab. Typisch ~2,6 GB/Spieltag ≈ 1–3 min Kopieren.
+- Die Logik sitzt in Python auf Linux (testbar), nicht in PowerShell auf dem am schlechtesten beobachtbaren Rechner.
+
+**Harte Regeln (aus den Bedingungen der Richter):**
+1. Puffer und Lager dürfen nie verwechselt werden: getrennte Marken (`.clip-puffer` nur im Puffer, `.clip-lager` nur im
+   Lager), verschiedene Dateisysteme (st_dev), kein `samefile` – sonst bricht jeder Abgleich mit Klartext ab.
+2. Rohdaten (`eingang/`, `replays/`) werden im Lager nie überschrieben oder gelöscht; Konflikte werden versioniert abgelegt.
+3. Im Puffer wird in dieser Stufe nichts automatisch gelöscht (`[puffer].freigeben = false`). Freigabe bestätigter
+   Rohdaten ist eine eigene spätere Stufe (B5) und braucht dein OK. 96 GB reichen für gut einen Monat.
+4. Samba im CT blendet nur `.aktiv` aus – `veto files` vergleicht jeden Ordnernamen auf jeder Ebene, sonst verschwände
+   `eingang\nvidia\highlights` still.
+5. Probleme meldet eine Morgenprüfung (09:30) höchstens einmal am Tag je Thema, nachts nichts; montags ein Lebenszeichen.
+6. Ohne `[lager].wurzel` verhält sich alles exakt wie vorher – das ist der eingebaute Rückweg.
+
+**Was von A übernommen wurde:** prepare nimmt das Match-Ende aus der Replay-Zeit; der PC notiert Match-IDs, bevor eine
+Datei als erledigt gilt; IDs als Text (PS 5.1); Sitzungsdatei nur ohne Kopierfehler; Statusdatei des PCs
+(`sitzungen/pc-status.json`) als Rückkanal; Ruhezeit im Bot.
+
+**Was entfällt / später:** Die VPS-Kopie aus E18 entfällt vorerst (CLAUDE.md: keine Videos auf den vServer); ein zweiter
+Standort bleibt offen. Fester Wochentermin für pve-big ist unnötig (Highlight läuft auf dem Mini). Später: B5 Freigabe,
+Rückgriff aufs Lager für sehr alte Dateien, Scrub-Nacht, LEERLAUF_MIN = 10.
+
+**Einführung:** `docs/PUFFER.md` (R0–R8), jeder Host-Schritt nur mit deinem OK. Bedingungen vorher: Sprint in main
+übernommen, `[big].frist` geleert, Übernahme der vorhandenen Daten mit ausdrücklichen Pfaden, Umschalten erst nach
+geprüftem Abgleich.
+
+## E20 · Zugang für Claude: flüchtiges Tailnet-Gerät statt Tags und Schlüssel (24.09., abweichend von E18)
+Am Handy waren Tags, Policy-Umbau und Schlüssel in den Umgebungs-Einstellungen nicht machbar. Stattdessen:
+- Die Cloud-Sitzung startet Tailscale **flüchtig** (`tailscaled --state=mem:`, Userspace-Netz) und meldet sich per
+  **Link** an, den du antippst. Das Gerät „claude-cloud“ verschwindet 30–60 min nach Sitzungsende von selbst.
+- Deine Policy hat eine SSH-Regel im **check-Modus**: deine eigenen Geräte → deine eigenen Geräte, `root` und
+  Nicht-root. Jede neue Verbindung muss per Link bestätigt werden; danach gilt sie 12 h.
+- Tailscale SSH ist nur auf **pve-big** und **pve-mini** (Host) an – nicht im LXC „clips“ (n8n nutzt dort normales SSH).
+- `tag:heim` ist aus beiden Hosts entfernt (war in der Policy nie definiert und hielt pve-big aus dem Tailnet und
+  pve-mini ohne SSH-Regel). Schlüssel-Ablauf für beide Server abgeschaltet.
+- Nachteil: Als „dein Gerät“ könnte der Container für die Dauer der Sitzung alle deine Tailnet-Geräte erreichen.
+  Später (am PC) enger machen: eigenes Tag für die Sitzung und eine Regel nur auf die zwei Hosts.
