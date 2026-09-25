@@ -9,12 +9,15 @@ Callback-Daten (Telegram erlaubt max. 64 Byte):
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from .. import db, elo
-from ..zeit import aus_iso, iso, jetzt, spielabend
+from ..zeit import aus_iso, iso, jetzt, spielabend, utc_zu_lokal
+
+log = logging.getLogger("clip-bot")
 
 Knoepfe = list[list[tuple[str, str]]]
 
@@ -72,6 +75,46 @@ def rueckgaengig(con: sqlite3.Connection, clip_id: int) -> Antwort:
         return Antwort("↩️ Zurückgeholt", "gesendet", knoepfe_neu(clip_id))
     zeile = db.clip(con, clip_id)
     return Antwort("Geht nicht mehr" if zeile else "Clip nicht gefunden", zeile["status"] if zeile else None, None)
+
+
+# --- Ruhezeit -------------------------------------------------------------------
+
+# Meldungen mit diesen Schlüssel-Anfängen (Morgenprüfung, Lager-Abgleich) warten die Ruhezeit ab
+LEISE_MELDUNGEN = ("puffer:", "lager:")
+
+
+def _uhrzeit(text: str) -> int:
+    """Minuten seit Mitternacht, z. B. "23:00" -> 1380."""
+    stunde, minute = (int(t) for t in text.strip().split(":"))
+    if not (0 <= stunde < 24 and 0 <= minute < 60):
+        raise ValueError(text)
+    return stunde * 60 + minute
+
+
+def ruhezeit(konfig, zeit: datetime | None = None) -> bool:
+    """Liegt zeit (Ortszeit) in [telegram].leise_von … leise_bis? Über Mitternacht erlaubt (23:00–08:00).
+    Leer oder von = bis: nie leise. Ein Tippfehler in der Konfig hält keine Nachricht auf (dann nie leise)."""
+    von, bis = (str(konfig.wert(f"telegram.leise_{n}", "") or "").strip() for n in ("von", "bis"))
+    if not von or not bis:
+        return False
+    try:
+        anfang, ende = _uhrzeit(von), _uhrzeit(bis)
+    except ValueError:
+        log.warning("[telegram] leise_von/leise_bis ungültig (%r/%r) – Ruhezeit aus", von, bis)
+        return False
+    lokal = utc_zu_lokal(zeit or jetzt(), konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+    minute = lokal.hour * 60 + lokal.minute
+    if anfang <= ende:
+        return anfang <= minute < ende
+    return minute >= anfang or minute < ende
+
+
+def faellige_meldungen(con: sqlite3.Connection, konfig, zeit: datetime | None = None) -> list[sqlite3.Row]:
+    """Ungesendete Meldungen; in der Ruhezeit ohne die aus Puffer/Lager – die bleiben bis leise_bis liegen."""
+    zeilen = con.execute("SELECT id, schluessel, text FROM meldungen WHERE gesendet IS NULL ORDER BY id").fetchall()
+    if not ruhezeit(konfig, zeit):
+        return zeilen
+    return [z for z in zeilen if not z["schluessel"].startswith(LEISE_MELDUNGEN)]
 
 
 # --- Outbox ---------------------------------------------------------------------

@@ -140,6 +140,12 @@ def _cmd_short(args, konfig, con) -> int:
 
 
 def _cmd_aufraeumen(args, konfig, con) -> int:
+    try:
+        aufraeumen.pruefe_erlaubt(konfig)  # im getrennten Betrieb (E19) gesperrt
+    except KonfigFehler as e:
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
     if args.taeglich and con.execute(
         "SELECT 1 FROM ereignisse WHERE art = 'aufraeumen' AND zeit >= ?", (utc_heute_iso(),)
     ).fetchone():
@@ -260,6 +266,25 @@ def _cmd_lager(args, konfig, con) -> int:
         return 0
     # zu_jung (Übernahme): im Lager wird evtl. noch geschrieben – noch nicht fertig, in ein paar Minuten wiederholen
     return 1 if ergebnis.get("fehler") or ergebnis.get("konflikte") or ergebnis.get("zu_jung") else 0
+
+
+def _cmd_puffer(args, konfig, con) -> int:
+    """Morgenprüfung (E19): pruefen legt Meldungen an (je Thema und Tag eine), status zeigt nur. Weckt nie.
+    Exit: 0 ok · 1 ein Thema ließ sich nicht prüfen · 2 kein getrennter Betrieb."""
+    from . import puffer
+
+    if not konfig.getrennt:
+        log.error("kein getrennter Betrieb: [lager].wurzel leer")
+        _json({"fehler": "kein getrennter Betrieb: [lager].wurzel leer"})
+        return 2
+    stand = puffer.status(con, konfig)
+    log.info("%s", stand["zeile"])
+    if args.aktion == "status":
+        _json(stand)
+    else:
+        neu = puffer.melde(con, konfig, stand)
+        _json({"neu": neu, "befunde": stand["befunde"], "zeile": stand["zeile"], "fehler": stand["fehler"]})
+    return 1 if stand["fehler"] else 0
 
 
 def _cmd_stimmung(args, konfig, con) -> int:
@@ -477,6 +502,10 @@ def baue_parser() -> argparse.ArgumentParser:
     a.add_argument("--eingang-tage", type=int, default=3, help="von eingang/ nur Dateien der letzten N Tage")
     a.add_argument("--probelauf", action="store_true", help="nur zählen (weckt nicht, kopiert nichts)")
     s.set_defaults(fn=_cmd_lager, sperren=False)  # eigene Lager-Sperre statt der Pipeline-Sperre
+
+    s = unter.add_parser("puffer", help="Puffer auf dem Mini (E19): pruefen (Morgenprüfung, Meldungen) | status")
+    s.add_argument("aktion", choices=["pruefen", "status"])
+    s.set_defaults(fn=_cmd_puffer, sperren=False)  # weckt nie, fasst das Lager nicht an
 
     s = unter.add_parser("stimmung", help="Stimmung je Moment (Whisper, Lautstärke, Kills, Tod; 1× claude -p)")
     s.add_argument("--dateien", action="store_true", help="auch kurze Rohvideos ohne Clip als Momente")

@@ -5,6 +5,8 @@ Regel (Wunsch vom 23.09.2026):
   - AUSSER Multikills ab [aufraeumen].archiv_ab_kills (3): die wandern für immer nach archiv/.
 Recyceln heißt: erst in papierkorb/<Datum>/ verschieben, nach papierkorb_tage endgültig löschen.
 Ohne --ausfuehren wird nur angezeigt, was passieren würde (Probelauf).
+
+Im getrennten Betrieb (E19: Puffer + Lager) gesperrt – siehe pruefe_erlaubt.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from .db import transaktion
-from .konfig import Konfig
+from .konfig import Konfig, KonfigFehler
 from .zeit import UTC, aus_iso, jetzt
 
 
@@ -26,6 +28,16 @@ class Aktion:
     pfad: Path
     ziel: str  # archiv | papierkorb | loeschen
     grund: str
+
+
+def pruefe_erlaubt(konfig: Konfig) -> None:
+    """Im getrennten Betrieb verweigern (KonfigFehler): aufraeumen würde Dateien im Puffer verschieben und die Pfade
+    in der Datenbank umschreiben – der Abgleich ins Lager sähe sie danach unter neuem Namen, und im Puffer wird in
+    dieser Stufe nichts gelöscht (Freigabe erst mit B5)."""
+    if konfig.getrennt:
+        raise KonfigFehler("aufraeumen ist im getrennten Betrieb (Puffer + Lager) gesperrt: es würde Dateien im Puffer "
+                           "verschieben und Pfade in der Datenbank umschreiben. Timer clip-aufraeumen ausschalten "
+                           "(docs/PUFFER.md, R6).")
 
 
 def _wertvolle_fenster(con: sqlite3.Connection, ab_kills: int) -> list[tuple[datetime, datetime]]:
@@ -49,6 +61,7 @@ def _wertvolle_dateien(con: sqlite3.Connection, ab_kills: int) -> set[str]:
 
 
 def plane(con: sqlite3.Connection, konfig: Konfig, heute: datetime | None = None) -> list[Aktion]:
+    pruefe_erlaubt(konfig)
     heute = heute or jetzt()
     grenze = heute - timedelta(days=int(konfig.wert("aufraeumen.nach_tagen", 182)))
     ab_kills = int(konfig.wert("aufraeumen.archiv_ab_kills", 3))
@@ -105,6 +118,7 @@ def _pfade_anpassen(con: sqlite3.Connection, alt: str, neu: str | None) -> None:
 
 
 def fuehre_aus(con: sqlite3.Connection, konfig: Konfig, aktionen: list[Aktion], heute: datetime | None = None) -> dict:
+    pruefe_erlaubt(konfig)
     heute = heute or jetzt()
     wurzel = konfig.wurzel.resolve()
     korb = konfig.ordner("papierkorb").resolve()
