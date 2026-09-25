@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from clip_pipeline import cli, db, erwartung, konfig as konfig_modul, merkmale, publikum
+from clip_pipeline import cli, db, erwartung, konfig as konfig_modul, merkmale
 from clip_pipeline.vorbewertung import MERKMALE, roh_score
 from clip_pipeline.zeit import UTC, iso
 
@@ -270,12 +270,13 @@ class Festschreiben(MitErwartung):
             self.clip("gesendet", punkte)
         self.clip("vorbewertet", 50.0, gesendet=False)  # nicht gesendet → nicht in der Basis
         self.konfig.daten["erwartung"]["referenz"] = 3
-        neu = self.clip("vorbewertet", 30.0, gesendet=False)
+        neu = self.clip("vorbewertet", 40.0, gesendet=False)
         erwartung.festschreiben(self.con, self.konfig, "clip", neu)
         grundlage = json.loads(self.zeile("clip", neu)["grundlage"])
-        self.assertEqual((grundlage["median"], grundlage["mad"], grundlage["z"]), (30.0, 10.0, 0.0))
-        z, _, _ = publikum.robust_z(40.0, [20.0, 30.0, 40.0], minimum=0.25)
-        self.assertAlmostEqual(z, 10 / (1.4826 * 10))
+        self.assertEqual((grundlage["median"], grundlage["mad"]), (30.0, 10.0))
+        # z = (40 − 30) / (1,4826 · 10) ≈ 0,67449 – nur mit der Basis 20/30/40 (mit 50 oder alten Clips wäre es anders)
+        self.assertAlmostEqual(grundlage["z"], 10 / (1.4826 * 10))
+        self.assertAlmostEqual(grundlage["z"], 0.67449, places=5)
 
     def test_mad_minimum_aus_der_konfig(self):
         self.urteile_clips()

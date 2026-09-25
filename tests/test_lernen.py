@@ -540,10 +540,11 @@ class BestehenderTestMitHalbemGewicht(MitPosts):
         self.assertGreaterEqual(e.trefferquote, e.trefferquote_start)
         self.assertEqual(lernen.aktualisiere(self.con, self.konfig)[0], 1)
         self.assertEqual(lernen.aktualisiere(self.con, self.konfig)[0], 1)
-        # Mit halbem Gewicht wandert das Gewicht halb so weit je Schritt wie mit vollem
+        # Mit vollem Freigabe-Gewicht wandert das Gewicht weiter als mit halbem – wegen Marge und Leine nicht genau
+        # doppelt so weit, aber echt weiter (würde gewicht_freigabe ignoriert, wären beide gleich)
         self.konfig.daten["lernen"]["gewicht_freigabe"] = 1.0
         voll = lernen.berechne(self.con, self.konfig)
-        self.assertGreaterEqual(voll.werte["lautstaerke"], e.werte["lautstaerke"])
+        self.assertGreater(voll.werte["lautstaerke"], e.werte["lautstaerke"])
 
 
 

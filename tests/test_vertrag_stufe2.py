@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 from clip_pipeline import cli, db, erwartung, merkmale, mikro, publikum
+from clip_pipeline import konfig as konfig_modul
 from clip_pipeline.vorbewertung import MERKMAL_NAMEN, MERKMALE
 
 WURZEL = Path(__file__).resolve().parent.parent
@@ -32,9 +33,11 @@ def _pipeline_toml() -> dict:
     return tomllib.loads((WURZEL / "config" / "pipeline.toml").read_text(encoding="utf-8"))
 
 
-def _importe(modul: str, *, nur_modulebene: bool) -> set[str]:
-    """Namen der clip_pipeline-Module, die `modul` importiert (relativ: `from . import x`, `from .x import y`)."""
-    baum = ast.parse((QUELLEN / f"{modul}.py").read_text(encoding="utf-8"))
+def _importe_aus(quelltext: str, *, nur_modulebene: bool) -> set[str]:
+    """Namen der clip_pipeline-Module, die `quelltext` importiert – alle vier Schreibweisen:
+    relativ (`from . import x`, `from .x import y`) und absolut (`from clip_pipeline import x`,
+    `from clip_pipeline.x import y`, `import clip_pipeline.x`)."""
+    baum = ast.parse(quelltext)
     knoten = baum.body if nur_modulebene else list(ast.walk(baum))
     namen: set[str] = set()
     for k in knoten:
@@ -43,9 +46,27 @@ def _importe(modul: str, *, nur_modulebene: bool) -> set[str]:
                 namen.add(k.module.split(".")[0])
             else:
                 namen.update(a.name for a in k.names)
-        elif isinstance(k, ast.ImportFrom) and (k.module or "").startswith("clip_pipeline."):
+        elif isinstance(k, ast.ImportFrom) and k.level == 0 and k.module == "clip_pipeline":
+            namen.update(a.name for a in k.names)
+        elif isinstance(k, ast.ImportFrom) and k.level == 0 and (k.module or "").startswith("clip_pipeline."):
             namen.add(k.module.split(".")[1])
+        elif isinstance(k, ast.Import):
+            namen.update(a.name.split(".")[1] for a in k.names if a.name.startswith("clip_pipeline."))
     return namen
+
+
+def _importe(modul: str, *, nur_modulebene: bool) -> set[str]:
+    """Wie _importe_aus, für die Datei src/clip_pipeline/<modul>.py."""
+    return _importe_aus((QUELLEN / f"{modul}.py").read_text(encoding="utf-8"), nur_modulebene=nur_modulebene)
+
+
+def _orte_des_imports(quelltext: str, ziel: str) -> set[str]:
+    """Wo `ziel` importiert wird: Namen der äußersten Funktionen bzw. "<modul>" für die Modulebene."""
+    orte: set[str] = set()
+    for k in ast.parse(quelltext).body:
+        if ziel in _importe_aus(ast.unparse(k), nur_modulebene=False):
+            orte.add(k.name if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) else "<modul>")
+    return orte
 
 
 class Merkmale(unittest.TestCase):
@@ -108,6 +129,43 @@ class ImportRegel(unittest.TestCase):
         self.assertNotIn("stimmung", _importe("mikro", nur_modulebene=True))
         self.assertFalse(_importe("mikro", nur_modulebene=False) & {"verarbeitung"})
 
+    def test_mikro_importiert_stimmung_nur_in_clips_nachziehen(self):
+        quelltext = (QUELLEN / "mikro.py").read_text(encoding="utf-8")
+        self.assertEqual(_orte_des_imports(quelltext, "stimmung"), {"clips_nachziehen"})
+
+
+class ImportHilfe(unittest.TestCase):
+    """Die AST-Hilfen selbst – sonst könnte eine Lücke dort die Import-Regel still grün machen."""
+
+    QUELLTEXT = (
+        "import os\n"
+        "import clip_pipeline.mikro\n"
+        "from clip_pipeline import lernen, db\n"
+        "from clip_pipeline.zeit import iso\n"
+        "from . import konfig\n"
+        "from .replay import lies\n"
+        "from .. import fremd\n"
+        "def f():\n"
+        "    from . import stimmung\n"
+        "class K:\n"
+        "    def g(self):\n"
+        "        import clip_pipeline.verarbeitung\n"
+    )
+
+    def test_alle_schreibweisen_auf_modulebene(self):
+        self.assertEqual(_importe_aus(self.QUELLTEXT, nur_modulebene=True),
+                         {"mikro", "lernen", "db", "zeit", "konfig", "replay"})
+
+    def test_auch_in_funktionen(self):
+        self.assertEqual(_importe_aus(self.QUELLTEXT, nur_modulebene=False) - _importe_aus(
+            self.QUELLTEXT, nur_modulebene=True), {"stimmung", "verarbeitung"})
+
+    def test_orte(self):
+        self.assertEqual(_orte_des_imports(self.QUELLTEXT, "stimmung"), {"f"})
+        self.assertEqual(_orte_des_imports(self.QUELLTEXT, "verarbeitung"), {"<modul>"})  # in einer Klasse
+        self.assertEqual(_orte_des_imports(self.QUELLTEXT, "db"), {"<modul>"})
+        self.assertEqual(_orte_des_imports(self.QUELLTEXT, "gibt_es_nicht"), set())
+
     def test_neue_module_sind_importierbar(self):
         for modul in (merkmale, mikro, erwartung):
             self.assertTrue(modul.__doc__)
@@ -147,6 +205,38 @@ class Verdrahtung(unittest.TestCase):
         code, daten = self._cli("stimmung", "--clips", "--session", "2026-09-23_20-15-33")
         self.assertEqual(code, 2)
         self.assertIn("stimmung --clips arbeitet nur im Puffer", daten["hinweis"])
+
+    def test_mic_kindprozess_argv_erreicht_clips_nachziehen(self):
+        """Der Weg argv → Parser → _cmd_stimmung → mikro.clips_nachziehen im Puffer-Betrieb (render startet ihn)."""
+        sid = "2026-09-23_20-15-33"
+        with tempfile.TemporaryDirectory() as tmp:
+            toml = Path(tmp) / "test.toml"
+            toml.write_text((WURZEL / "config" / "pipeline.toml").read_text(encoding="utf-8"), encoding="utf-8")
+            umgebung = {"CLIP_SPEICHER": str(Path(tmp) / "speicher"), "CLIP_DATENBANK": str(Path(tmp) / "t.db")}
+            ergebnis = {"geprueft": 1, "gemessen": 1, "fehler": 0, "offen": 0}
+            ausgabe = io.StringIO()
+            with mock.patch.dict(os.environ, umgebung), \
+                    mock.patch("clip_pipeline.konfig.Konfig.getrennt", new_callable=mock.PropertyMock,
+                               return_value=True), \
+                    mock.patch.object(mikro, "whisper_da", return_value=True), \
+                    mock.patch.object(mikro.subprocess, "Popen") as popen, \
+                    mock.patch.object(mikro, "clips_nachziehen", return_value=ergebnis) as nachziehen, \
+                    mock.patch("clip_pipeline.konfig.Konfig._host_erreichbar") as erreichbar, \
+                    mock.patch("clip_pipeline.konfig.sende_wake_on_lan") as wol, \
+                    contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
+                k = konfig_modul.lade(toml)
+                k.daten["merkmale"]["mic_je_lauf"] = 4
+                self.assertTrue(mikro.starte_im_hintergrund(k, sid))
+                argv = popen.call_args.args[0]
+                kind = argv[argv.index("--konfig"):]  # was `python -m clip_pipeline` an cli.main gibt
+                self.assertEqual(kind, ["--konfig", str(toml), "stimmung", "--clips", "--session", sid,
+                                        "--max", "4"])
+                code = cli.main(kind)
+        self.assertEqual(code, 0)
+        nachziehen.assert_called_once_with(mock.ANY, mock.ANY, session=sid, maximal=4)
+        self.assertEqual(json.loads(ausgabe.getvalue().strip().splitlines()[-1]), ergebnis)
+        erreichbar.assert_not_called()
+        wol.assert_not_called()
 
     def test_neue_befehle_wecken_nie(self):
         self.assertNotIn("merkmale", cli.WECKEN)
