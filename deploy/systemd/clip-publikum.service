@@ -1,0 +1,26 @@
+# Lernschleife „Publikum“ (Spec §6, §12; Bedienung und Einrichtung: docs/PUBLIKUM.md): einmal am Tag die
+# Publikums-Scores setzen – für jeden Post, der mindestens [publikum].alter_tage (7) alt ist, aus der Messung, die
+# Tag 7 am nächsten liegt. Jeder Post bekommt genau einmal einen Score, danach wird er nie überschrieben.
+# Reine Datenbank-Arbeit: keine Pipeline-Sperre, weckt pve-big NIE, fasst Puffer und Lager nicht an.
+# Neue Scores → eine Lern-Meldung („📊 2 Posts bewertet …“), die der Lern-Bot schickt (nicht in der Ruhezeit).
+# Exit 1 = mindestens ein Post nicht bewertbar (mit #Nummer im Log) – die anderen sind trotzdem bewertet;
+# Exit 2 = Konfiguration kaputt (fehlender [publikum]-Schlüssel). Beides soll in systemd rot sein.
+# Checkout: /opt/clip-pipeline auf main (nach dem Merge des Sprints „Lernschleife Publikum“).
+# Von Hand: sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline publikum bewerten
+# Log ansehen: journalctl -u clip-publikum -n 50
+[Unit]
+Description=Clip-Pipeline: Publikums-Scores setzen (Lernschleife)
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/opt/clip-pipeline
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline publikum bewerten
+# Rechnet ein paar Sekunden; hängt die Datenbank, soll der Lauf nicht ewig stehen
+TimeoutStartSec=5min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# schreibt nur in die Datenbank (Scores, eine Lern-Meldung)
+ReadWritePaths=/var/lib/clip-pipeline

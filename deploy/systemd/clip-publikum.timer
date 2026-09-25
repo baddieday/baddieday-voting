@@ -1,0 +1,16 @@
+# Jeden Tag um 10:00 (plus bis zu 10 min Zufall) die Publikums-Scores setzen (Lernschleife, docs/PUBLIKUM.md).
+# Die Uhrzeit steht nur hier – nicht zusätzlich in der Konfiguration (eine Wahrheit, wie bei clip-lager).
+# Tagsüber, damit die Meldung „📊 … bewertet“ gleich kommt; nachts hielte der Lern-Bot sie ohnehin bis 08:00 zurück.
+# Persistent: War der CT um 10:00 aus, läuft das Bewerten beim nächsten Start nach – das ist jederzeit harmlos
+# (Scores werden nie überschrieben, je Tag höchstens eine Meldung).
+# Aktivieren: sudo systemctl enable --now clip-publikum.timer   (docs/PUBLIKUM.md, Installation P3)
+[Unit]
+Description=Clip-Pipeline: Publikums-Scores täglich um 10:00 setzen
+
+[Timer]
+OnCalendar=*-*-* 10:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
