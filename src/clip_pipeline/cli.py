@@ -337,6 +337,10 @@ def _cmd_render_entwurf(args, konfig, con) -> int:
         except big.WeckenVerboten as e:
             _json({"fehler": "wecken_verboten", "hinweis": str(e)})
             return 3
+        except KonfigFehler as e:  # getrennter Betrieb: --final geht (noch) nicht, nichts geweckt
+            log.error("%s", e)
+            _json({"fehler": "konfig", "hinweis": str(e)})
+            return 2
         return 0
     _json(entwurf.entwurf(con, konfig, args.entwurf))
     return 0

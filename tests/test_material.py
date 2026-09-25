@@ -77,3 +77,28 @@ class Material(MitSpeicher):
         self.assertEqual(code, 3)
         self.assertEqual(json.loads(ausgabe.getvalue().splitlines()[-1])["fehler"], "wecken_verboten")
         wol.assert_not_called()
+
+    def test_getrennt_fehlender_puffer_weckt_pve_big_nicht(self):
+        # E19: [speicher] ist der Puffer auf dem Mini. Fehlt seine Marke, hülfe Wecken nichts – auch wenn es erlaubt wäre
+        from clip_pipeline import big
+        from clip_pipeline.zeit import iso, jetzt
+
+        (self.konfig.wurzel / ".clip-speicher").unlink()
+        self.konfig.daten["lager"]["wurzel"] = str(self.tmp / "lager")
+        self.konfig.daten["speicher"].update(wol_mac="aa:bb:cc:dd:ee:ff", wecken_warten_s=0)
+        self.konfig.daten["big"]["host"] = "pve-big"
+        big._schreibe_zustand(self.konfig, leerlauf_scharf=iso(jetzt()))
+        self.assertIsNone(big.darf_wecken(self.konfig))  # Wecken wäre erlaubt – es hülfe nur nichts
+        for argumente in (["material"], ["material", "--probelauf"]):
+            with self.subTest(argumente):
+                ausgabe = io.StringIO()
+                with mock.patch("clip_pipeline.cli.lade", return_value=self.konfig), \
+                        mock.patch("clip_pipeline.big.wach", return_value=False), \
+                        mock.patch("clip_pipeline.big.sende_wake_on_lan") as wol, \
+                        contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
+                    code = cli.main(argumente)
+                antwort = json.loads(ausgabe.getvalue().splitlines()[-1])
+                self.assertEqual((code, antwort["fehler"]), (3, "speicher_offline"))
+                self.assertIn("pve-big wurde nicht geweckt", antwort["hinweis"])
+                wol.assert_not_called()
+        self.assertFalse((self.tmp / "mini" / "replays").exists())

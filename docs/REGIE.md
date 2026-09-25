@@ -33,7 +33,7 @@ Musik (NCS / Lern-Bot) ─► pipeline musik ─► Tempo, Beats, Energie ─┤
 | `pipeline musik analysieren <datei>` · `pipeline musik liste` | Tempo/Energie ansehen |
 | `pipeline compose --format short\|zusammenschnitt` | Schnittliste erzeugen |
 | `pipeline render-entwurf <id>` | Entwurf rendern (VA-API, sonst CPU) |
-| `pipeline render-entwurf <id> --final` | volle Qualität auf pve-big (NVENC), danach sofort aus |
+| `pipeline render-entwurf <id> --final` | volle Qualität auf pve-big (NVENC), danach sofort aus – nicht im Puffer-Betrieb (Exit 2, weckt nicht; `docs/PUFFER.md` R5) |
 | `pipeline entwurf-neu --format short` | compose + Entwurf in einem Schritt |
 | `pipeline sitzungen` | „Session vorbei“ vom Gaming-PC: Short des Abends (Timer) |
 | `pipeline lernbot` | Lern-Bot (Dienst `clip-lernbot`) |

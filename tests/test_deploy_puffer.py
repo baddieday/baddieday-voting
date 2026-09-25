@@ -213,8 +213,51 @@ class Anleitung(unittest.TestCase):
             "Disable-ScheduledTask", "systemctl stop smbd", "systemctl stop clip-bot", "flock -n", "10 min warten",
             "pipeline lager abgleich", "pipeline lager status", "systemctl disable --now clip-lager.timer "
             "clip-puffer-pruefen.timer", "ln -sfn /srv/big/clips /srv/clips", "lokal.toml.vor-e19",
-            "Enable-ScheduledTask"])
+            "kein getrennter Betrieb", "read only = no", "reload smbd", "Enable-ScheduledTask"])
         self.assertIn("nur zusammen mit dem Rückweg R5", self.schritte["R7"])
+        # Nach R8 ist die Freigabe auf pve-big nur lesbar: ohne Rückweg R8 scheiterte jede Kopie des PCs still
+        r7 = self.schritte["R7"]
+        assertReihenfolge(self, r7[r7.index("**Rückweg:**"):], ["read only = no", "Rückweg R5"])
+        self.assertIn("Rückweg R5", self.schritte["R8"][self.schritte["R8"].index("**Rückweg:**"):])
+
+    def test_r5_erst_ruhezeit_dann_uebernahme_und_nur_bei_ok_weiter(self):
+        # Zu junge Lager-Dateien lässt die Übernahme aus (Exit 1, zu_jung) – nach dem Umschalten fiele das niemandem auf
+        r5 = self.schritte["R5"]
+        hin = r5[:r5.index("**Rückweg:**")]
+        assertReihenfolge(self, hin, ["Disable-ScheduledTask", "systemctl stop clip-bot", "flock -n", "10 min warten",
+                                      "lager uebernehmen", 'echo "Exit $?"', "Exit 0", '"ok": true', '"zu_jung"',
+                                      "Exit 3", "Exit 4", "lokal.toml.vor-e19", "ln -sfn /srv/puffer /srv/clips"])
+        self.assertIn("pausieren", hin)
+        self.assertNotIn("Gaming-PC aus oder", hin)  # PC aus lassen reicht nicht: beim Hochfahren kopierte er nach pve-big
+        self.assertIn('"ok": true', self.schritte["R4"])
+        self.assertIn("--final", hin)  # was im Puffer-Betrieb nicht mehr geht
+
+    def test_r7_holt_das_neue_skript_auf_den_pc(self):
+        r7 = self.schritte["R7"]
+        assertReihenfolge(self, r7, ["git pull --ff-only", "Schreibe-PcStatus", "Ziel         =", "-Probelauf",
+                                     "Enable-ScheduledTask", "pc-status.json"])
+        self.assertIn("Schreibe-PcStatus", (PROJEKT / "windows/Uebertragung.ps1").read_text(encoding="utf-8-sig"))
+
+    def test_sicherungen_nur_beim_ersten_mal(self):
+        # Ein wiederholter Block darf die Sicherung für den Rückweg nicht mit dem neuen Stand überschreiben
+        zeilen = [z.strip() for z in "\n".join(self.schritte.values()).splitlines()]
+        sichern = [z for z in zeilen if "vor-e19" in z and any(s in z for s in ("rev-parse", ".backup", "cp -a"))]
+        self.assertEqual(len(sichern), 4, sichern)  # R3: sha + db · R5: zwei lokal.toml
+        for zeile in sichern:
+            with self.subTest(zeile):
+                self.assertTrue(zeile.startswith("[ -e "), zeile)
+        # Die R5-Zeile wirklich zweimal ausführen: die erste Sicherung bleibt
+        befehl = next(z for z in sichern if "/opt/clip-pipeline/config" in z)
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            befehl = befehl.replace("/opt/clip-pipeline/config", tmp)
+            (t / "lokal.toml").write_text("alt\n")
+            subprocess.run(["bash", "-c", befehl], check=True, timeout=10)
+            (t / "lokal.toml").write_text("neu\n")
+            subprocess.run(["bash", "-c", befehl], check=True, timeout=10)
+            self.assertEqual((t / "lokal.toml.vor-e19").read_text(), "alt\n")
+        # Sichern vor jedem git pull – auch vor Schritt 1 im Abschlussbericht (der selbst git pull macht)
+        assertReihenfolge(self, self.schritte["R3"], ["vor-e19.sha", "Host-Schritte 1–12", "git pull --ff-only"])
 
     def test_r3_sagt_dass_der_ganze_sprint_kommt(self):
         r3 = self.schritte["R3"]
@@ -508,7 +551,8 @@ class PufferZurueck(MitStubs):
         self.assertEqual(r.returncode, 1)
         assertReihenfolge(self, r.stdout, ["Disable-ScheduledTask", "systemctl stop smbd", "clip-bot",
                                            "10 min warten", "pipeline lager abgleich", "clip-lager.timer",
-                                           "ln -sfn /srv/big/clips /srv/clips", "Gaming-PC zurück auf pve-big"])
+                                           "ln -sfn /srv/big/clips /srv/clips", "read only = no",
+                                           "Gaming-PC zurück auf pve-big"])
 
     def test_loeschhinweis_nennt_pc_und_lager_status(self):
         r = self.lauf("--probe")

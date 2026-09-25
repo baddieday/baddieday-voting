@@ -99,6 +99,36 @@ class FinalAufBig(MitRegieMaterial):
         self.assertEqual(falsch.aufrufe[-1], "aus")  # danach sofort aus
         self.assertTrue(ergebnis["final"].startswith("regie/final/"))
 
+    def test_getrennter_betrieb_weckt_nicht_und_sagt_warum(self):
+        # E19: pve-big rendert aus dem Lager, Auftrag und Clips lägen im Puffer – wecken hülfe nicht (Exit 2)
+        import contextlib
+        import io
+
+        from clip_pipeline import big, cli
+        from clip_pipeline.zeit import iso, jetzt
+
+        self.konfig.daten["material"] = {"ordner": str(self.tmp / "momente")}
+        self.momente_anlegen(MOMENTE[:6])
+        e = regie.erstelle(self.con, self.konfig, "short")
+        self.konfig.daten["lager"]["wurzel"] = str(self.tmp / "lager")
+        self.konfig.daten["speicher"].update(wol_mac="aa:bb:cc:dd:ee:ff", wecken_warten_s=0)
+        self.konfig.daten["big"]["host"] = "pve-big"
+        big._schreibe_zustand(self.konfig, leerlauf_scharf=iso(jetzt()))  # Wecken wäre sonst erlaubt
+        self.assertIsNone(big.darf_wecken(self.konfig))
+        ausgabe = io.StringIO()
+        with mock.patch("clip_pipeline.cli.lade", return_value=self.konfig), \
+                mock.patch.object(big, "wach", return_value=False), \
+                mock.patch.object(big, "sende_wake_on_lan") as wol, mock.patch.object(big, "_fern") as fern, \
+                contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(["render-entwurf", str(e["entwurf"]), "--final"])
+        antwort = json.loads(ausgabe.getvalue().splitlines()[-1])
+        self.assertEqual((code, antwort["fehler"]), (2, "konfig"))
+        self.assertIn("Puffer-Betrieb", antwort["hinweis"])
+        self.assertIn(f"pipeline render-entwurf {e['entwurf']}", antwort["hinweis"])
+        wol.assert_not_called()
+        fern.assert_not_called()
+        self.assertFalse((self.konfig.wurzel / "regie").exists())  # kein Auftrag im Puffer
+
 
 @unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
 class VaApi(MitRegieMaterial):

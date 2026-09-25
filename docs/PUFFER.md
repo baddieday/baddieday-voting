@@ -49,7 +49,7 @@ Gaming-PC ──SMB, alle 2 min──► MINI · CT "clips" · /srv/puffer  (= /
 | R2 Samba im CT | CT | **ja** – Paket samba, neuer Netzwerkdienst | `systemctl disable --now smbd` |
 | R3 Code einspielen | CT | **ja** – ganzer Sprint in die Produktion, Pakete installieren | alten Stand auschecken |
 | R4 Lager-Marke + Übernahme | pve-big, CT | **ja** – Datei auf pve-big, viele GB kopieren | Marke löschen; Kopien stören nicht |
-| R5 Umschalten | CT | **ja** – Konfig, Link, Frist leeren | PC + Samba still, abgleichen, dann zurück |
+| R5 Umschalten | CT | **ja** – Konfig, Link, Frist leeren | PC + Samba still, abgleichen, dann zurück (nach R8: erst R8 zurück) |
 | R6 Timer | CT | **ja** – neue Timer, clip-aufraeumen aus | Timer aus |
 | R7 Gaming-PC | Windows | **ja** – dein PC, du machst es selbst | psd1 zurück |
 | R8 später: Lager nur lesen | pve-big | **ja** | `read only = no` |
@@ -185,7 +185,18 @@ nicht nur E19 (der heutige Stand liegt gut zwei Dutzend Commits dahinter). Den S
 **Freigabe nötig?** Ja – Produktion ändern, Pakete installieren; liegt R3 nach der Frist, zusätzlich die Frist leeren
 (Sprint-Regel – nur mit deinem ausdrücklichen OK).
 
-**Vorher:** die Host-Schritte 1–12 aus `docs/ABSCHLUSSBERICHT.md` („Nötige Host-Änderungen“) – die Befehle unten
+**Zuerst sichern** – vor allem anderen, auch vor den Host-Schritten unten und vor jedem `git pull`. Nur beim ersten
+Mal (`[ -e … ] ||`): Wiederholst du den Block, bleibt die erste Sicherung stehen – sonst stünde dort schon der neue
+Stand, und der Rückweg stellte nichts zurück.
+```bash
+# im CT als root
+cd /opt/clip-pipeline
+[ -e /var/lib/clip-pipeline/vor-e19.sha ] || sudo -u pipeline git rev-parse HEAD | tee /var/lib/clip-pipeline/vor-e19.sha
+[ -e /var/lib/clip-pipeline/vor-e19.db ] || sudo -u pipeline sqlite3 /var/lib/clip-pipeline/pipeline.db ".backup /var/lib/clip-pipeline/vor-e19.db"
+cat /var/lib/clip-pipeline/vor-e19.sha                             # der Stand VOR R3 – für den Rückweg
+```
+
+**Dann:** die Host-Schritte 1–12 aus `docs/ABSCHLUSSBERICHT.md` („Nötige Host-Änderungen“) – die Befehle unten
 sind nur deren Schritt 1. Ohne die Schritte 3, 4 und 8–10 (SSH-Schlüssel, `lokal.toml`, `clip-big-steuer`,
 `pipeline big pruefen`) weckt die Produktion pve-big ab R3 gar nicht mehr. Schritt 5 bringt den Wächter-Timer, der
 pve-big nach getaner Arbeit wieder abschaltet.
@@ -195,8 +206,6 @@ hierher: in beiden `lokal.toml` unter `[big]` `frist = ""` (vorhandenen Abschnit
 ```bash
 # im CT als root
 cd /opt/clip-pipeline
-sudo -u pipeline git rev-parse HEAD | tee /var/lib/clip-pipeline/vor-e19.sha      # für den Rückweg
-sudo -u pipeline sqlite3 /var/lib/clip-pipeline/pipeline.db ".backup /var/lib/clip-pipeline/vor-e19.db"
 sudo -u pipeline git fetch -q origin && sudo -u pipeline git log --oneline HEAD..origin/main   # was alles mitkommt
 sudo -u pipeline git pull --ff-only
 sudo -u pipeline .venv/bin/pip install -q -e '.[whisper]'       # wie Schritt 1 im Abschlussbericht
@@ -213,7 +222,8 @@ sudo -u pipeline .venv/bin/pipeline lager status; echo $?     # Exit 2 "kein get
 systemctl list-timers 'clip-*'                                # clip-big-waechter.timer dabei (Schritt 5)?
 journalctl -u clip-bot -n 20
 ```
-**Rückweg:** `sudo -u pipeline git checkout -q "$(cat /var/lib/clip-pipeline/vor-e19.sha)"`,
+**Rückweg:** `sudo -u pipeline git checkout -q "$(cat /var/lib/clip-pipeline/vor-e19.sha)"` (stünde dort doch
+schon der neue Stand: `sudo -u pipeline git reflog` zeigt, wo HEAD vorher war),
 `sudo -u pipeline .venv/bin/pip install -q -e .`, die Sprint-Dienste ausschalten, die der alte Stand nicht kennt
 (`systemctl disable --now clip-big-waechter.timer clip-sitzungen.timer clip-lernbot`), `systemctl restart clip-bot`.
 Die Datenbank bekommt nur **neue Tabellen** – aus dem Sprint (`regie.sql`: `material`, `momente`, `entwuerfe`,
@@ -222,7 +232,8 @@ Code beachtet die neuen Tabellen nicht. Im Notfall `vor-e19.db` zurückkopieren 
 Timern, und alles, was seit R3 in der Datenbank passiert ist, ist dann weg.
 **Was du lernst:** `git log HEAD..origin/main` (was ein Update alles mitbringt – hier ein ganzer Sprint), `--ff-only`
 (nie ungewollt mergen), `sqlite3 .backup` (stimmige Kopie im laufenden Betrieb), editierbare Installation
-(`pip install -e`: der Code bleibt im Checkout, ein Neustart genügt; `[whisper]` holt die optionalen Pakete mit).
+(`pip install -e`: der Code bleibt im Checkout, ein Neustart genügt; `[whisper]` holt die optionalen Pakete mit),
+`[ -e datei ] || befehl` (nur, wenn es die Datei noch nicht gibt – ein Wiederholen überschreibt keine Sicherung).
 
 ---
 
@@ -257,7 +268,8 @@ kopiert (nur kopiert: im Lager ändert sich nichts).
    journalctl -u clip-uebernahme -f                  # Fortschritt; Strg+C beendet nur das Zuschauen
    ```
 
-**Prüfen:** Die letzte Zeile im Journal ist eine JSON-Zeile ohne Fehler; `du -sh /srv/puffer/*` zeigt die Ordner.
+**Prüfen:** Die letzte Zeile im Journal ist eine JSON-Zeile mit `"ok": true` – „ohne Fehler“ reicht nicht: Im Lager
+eben erst Geschriebenes zählt unter `"zu_jung"`, nicht unter `"fehler"`. `du -sh /srv/puffer/*` zeigt die Ordner.
 Wiederholen ist jederzeit möglich – Gleiches (Größe + Zeitstempel) wird übersprungen.
 **Rückweg:** Auf pve-big `rm /ZFS-Pool/clips/.clip-lager` (nur die Marke). Die Kopien im Puffer stören nicht; der
 Code nutzt sie erst ab R5.
@@ -273,57 +285,83 @@ Code nutzt sie erst ab R5.
 
 ## R5 · Umschalten
 
-**Was:** Dienste stoppen → Delta-Übernahme → `lokal.toml` beider Checkouts → `/srv/clips` auf den Puffer → prüfen →
-Dienste starten.
+**Was:** Dienste stoppen → 10 min warten → Delta-Übernahme (erst bei „ok“ weiter) → `lokal.toml` beider Checkouts →
+`/srv/clips` auf den Puffer → prüfen → Dienste starten.
 **Warum:** Ab jetzt arbeitet die Pipeline nur noch im Puffer und weckt pve-big nie (`[speicher].host` leer). Nur der
 nächtliche Abgleich darf wecken – über `[big].host` und `[speicher].wol_mac`.
-**Freigabe nötig?** Ja – Konfiguration der Produktion, Bot ca. 5 min aus. **Pflicht:** `[big].frist` leeren (siehe
+**Was dann nicht mehr geht:** `pipeline render-entwurf <id> --final` (Final-Render auf pve-big, `docs/REGIE.md`).
+pve-big rendert aus seinem Speicher – dem Lager –, Auftrag und neue Clips lägen aber im Puffer. Der Befehl bricht
+deshalb mit Exit 2 ab, ohne zu wecken; die Entwürfe vom Mini (`render-entwurf <id>` ohne `--final`) bleiben das
+Endprodukt. Alte Final-Renders (`regie/`) bleiben im Lager, die Übernahme holt sie nicht.
+**Freigabe nötig?** Ja – Konfiguration der Produktion, Bot ca. 15 min aus. **Pflicht:** `[big].frist` leeren (siehe
 „Bevor du anfängst“).
 
-**Vorher:** Gaming-PC aus oder die Übertragung pausieren
-(`Disable-ScheduledTask -TaskName 'Clip-Pipeline Übertragung'`), kein Spielabend. R7 direkt danach: Bis dahin kopiert
-der PC noch auf pve-big, und die Pipeline sähe neue Matches nicht.
-
-```bash
-# im CT als root
-systemctl stop clip-bot clip-lernbot clip-sitzungen.timer clip-aufraeumen.timer   # "not loaded" bei Fehlendem ist egal
-# Läuft noch ein Pipeline-Schritt? Erst weitermachen, wenn "frei" erscheint.
-if sudo -u pipeline flock -n /var/lib/clip-pipeline/pipeline.lock true; then echo frei
-else echo 'BELEGT – ein Schritt läuft noch: 1–2 min warten, dann diese zwei Zeilen nochmal'; fi
-
-# 1. Delta-Übernahme: was seit R4 auf pve-big dazugekommen ist
-sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 3
-
-# 2. Konfiguration sichern und ändern – in BEIDEN Checkouts (/opt/clip-regie nur, falls es ihn gibt)
-cp -a /opt/clip-pipeline/config/lokal.toml /opt/clip-pipeline/config/lokal.toml.vor-e19
-cp -a /opt/clip-regie/config/lokal.toml /opt/clip-regie/config/lokal.toml.vor-e19
-nano /opt/clip-pipeline/config/lokal.toml
-nano /opt/clip-regie/config/lokal.toml
+**Vorher:** Die Übertragung auf dem Gaming-PC **pausieren** – dafür den PC einschalten; ihn einfach aus zu lassen
+reicht nicht. Die Aufgabe liefe sonst beim nächsten Hochfahren innerhalb von 2 min wieder an, noch mit dem alten
+Ziel, und kopierte auf pve-big, bevor du in R7 die psd1 änderst. Diese Dateien kämen nie in den Puffer (der PC
+kopiert nichts zweimal). Kein Spielabend. R7 direkt nach R5.
+```powershell
+Disable-ScheduledTask -TaskName 'Clip-Pipeline Übertragung'
 ```
-In beiden `lokal.toml` soll danach stehen (vorhandene Abschnitte **ändern**, nicht ein zweites Mal anlegen – TOML
-erlaubt jeden Abschnitt nur einmal, sonst meldet `pipeline status` „Konfiguration … fehlerhaft“):
-```toml
-[speicher]
-host = ""                   # vorher "192.168.178.51": der Puffer ist lokal – nie pingen, nie wecken
-wol_mac = "…"               # UNVERÄNDERT lassen: damit weckt der nächtliche Abgleich pve-big
+Was dann noch auf dem PC wartet, bleibt dort und kommt nach R7 in den Puffer.
 
-[big]
-host = "192.168.178.51"     # pve-big (kam bisher aus [speicher].host)
-frist = ""                  # Pflicht: sonst weckt die Pipeline nach der Sprint-Frist nie mehr
+1. **Dienste stoppen** und warten, bis kein Schritt mehr läuft (erst bei „frei“ weiter):
+   ```bash
+   # im CT als root
+   systemctl stop clip-bot clip-lernbot clip-sitzungen.timer clip-aufraeumen.timer   # "not loaded" bei Fehlendem ist egal
+   # Läuft noch ein Pipeline-Schritt (auch ein eben gestarteter clip-sitzungen.service)? Er hält die Sperre.
+   if sudo -u pipeline flock -n /var/lib/clip-pipeline/pipeline.lock true; then echo frei
+   else echo 'BELEGT – ein Schritt läuft noch: 1–2 min warten, dann diese zwei Zeilen nochmal'; fi
+   ```
+2. **10 min warten** (`[lager].ruhe_min`), dann die **Delta-Übernahme** – sie holt, was seit R4 auf pve-big
+   dazugekommen ist. Was der letzte Schritt oder der PC eben erst ins Lager geschrieben hat, gilt vorher als „wird
+   noch geschrieben“ und bliebe aus:
+   ```bash
+   sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 3; echo "Exit $?"
+   ```
+   **Erst weiter bei `Exit 0` und `"ok": true`** in der JSON-Zeile darüber. Sonst:
+   - `Exit 1` mit `"zu_jung"` über 0: noch einmal 10 min warten, dann wiederholen (Gleiches wird übersprungen).
+   - `Exit 1` mit `"konflikte"` oder `"fehler"` über 0: nicht weitermachen, melden.
+   - `Exit 3` (pve-big nicht wach geworden, z. B. wegen `[big].frist`): pve-big von Hand einschalten wie in R4,
+     dann wiederholen.
+   - `Exit 4`: Ein anderer Lauf hält die Lager-Sperre (z. B. die Übernahme aus R4) – warten, dann wiederholen.
 
-[lager]
-wurzel = "/srv/big/clips"
-```
-```bash
-# 3. /srv/clips auf den Puffer umstellen
-ln -sfn /srv/puffer /srv/clips
-readlink /srv/clips                                                   # /srv/puffer
+   Nach dem Umschalten sieht `lager status` nur noch den Puffer – was hier fehlt, fiele später niemandem mehr auf.
+3. **Konfiguration sichern und ändern** – in BEIDEN Checkouts (`/opt/clip-regie` nur, falls es ihn gibt). Gesichert
+   wird nur beim ersten Mal: Wiederholst du den Block, bleibt die ursprüngliche Datei die Sicherung.
+   ```bash
+   [ -e /opt/clip-pipeline/config/lokal.toml.vor-e19 ] || cp -a /opt/clip-pipeline/config/lokal.toml /opt/clip-pipeline/config/lokal.toml.vor-e19
+   [ -e /opt/clip-regie/config/lokal.toml.vor-e19 ] || cp -a /opt/clip-regie/config/lokal.toml /opt/clip-regie/config/lokal.toml.vor-e19
+   nano /opt/clip-pipeline/config/lokal.toml
+   nano /opt/clip-regie/config/lokal.toml
+   ```
+   In beiden `lokal.toml` soll danach stehen (vorhandene Abschnitte **ändern**, nicht ein zweites Mal anlegen – TOML
+   erlaubt jeden Abschnitt nur einmal, sonst meldet `pipeline status` „Konfiguration … fehlerhaft“):
+   ```toml
+   [speicher]
+   host = ""                   # vorher "192.168.178.51": der Puffer ist lokal – nie pingen, nie wecken
+   wol_mac = "…"               # UNVERÄNDERT lassen: damit weckt der nächtliche Abgleich pve-big
 
-# 4. prüfen, dann die Dienste starten (clip-aufraeumen NICHT – siehe R6)
-sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager status   # getrennt: ja · Prüfung ok · offen: 0 oder wenige
-sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline status
-systemctl start clip-bot clip-lernbot clip-sitzungen.timer
-```
+   [big]
+   host = "192.168.178.51"     # pve-big (kam bisher aus [speicher].host)
+   frist = ""                  # Pflicht: sonst weckt die Pipeline nach der Sprint-Frist nie mehr
+
+   [lager]
+   wurzel = "/srv/big/clips"
+   ```
+4. **`/srv/clips` auf den Puffer umstellen:**
+   ```bash
+   ln -sfn /srv/puffer /srv/clips
+   readlink /srv/clips                                                   # /srv/puffer
+   ```
+5. **Prüfen, dann die Dienste starten** (clip-aufraeumen NICHT – siehe R6):
+   ```bash
+   sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager status   # getrennt: ja · Prüfung ok · offen: 0 oder wenige
+   sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline status
+   systemctl start clip-bot clip-lernbot clip-sitzungen.timer
+   ```
+   `lager status` zählt nur, was im Puffer liegt – ob die Übernahme vollständig war, hat allein Schritt 2 gezeigt.
+
 **Rückweg:** Die Reihenfolge ist wichtig: Erst darf nichts Neues mehr in den Puffer kommen, dann kommt alles ins
 Lager, erst danach wird umgestellt. Die Samba-Freigabe zeigt fest auf `/srv/puffer`, nicht auf den Link – der PC
 kopiert dorthin, bis du ihn umstellst. Was er nach dem letzten Abgleich noch kopiert, sähe die Pipeline nie, und der PC
@@ -347,8 +385,17 @@ kopiert es auch nie ein zweites Mal (er merkt sich, was schon übertragen ist).
    `systemctl disable --now clip-lager.timer clip-puffer-pruefen.timer`
 5. **Umstellen:** `ln -sfn /srv/big/clips /srv/clips`, dann `lokal.toml.vor-e19` in beiden Checkouts zurück nach
    `lokal.toml` kopieren. Ist der Sprint vorbei, muss `[big] frist = ""` dabei stehen bleiben (sonst weckt die
-   Produktion pve-big nicht mehr) – nachsehen und ggf. wieder eintragen.
-6. **Wieder an:** In der psd1 des PCs das Ziel zurück auf pve-big (Rückweg R7), **erst dann**
+   Produktion pve-big nicht mehr) – nachsehen und ggf. wieder eintragen. Prüfen:
+   `sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager status; echo $?` → Exit 2 „kein getrennter Betrieb“.
+6. **Wieder an:** Ist R8 schon gemacht, **zuerst** auf pve-big die Freigabe wieder beschreibbar machen (Rückweg R8):
+   ```bash
+   # pve-big-Shell
+   nano /etc/samba/smb.conf                           # im Abschnitt [clips]: read only = no
+   testparm -s >/dev/null && systemctl reload smbd
+   testparm -s --section-name=clips --parameter-name='read only' 2>/dev/null   # No
+   ```
+   Sonst scheitert jede Kopie des PCs (steht nur in seinem Log, n8n erfährt nichts), und er weckt pve-big alle
+   2 min. Dann in der psd1 des PCs das Ziel zurück auf pve-big (Rückweg R7), **erst dann**
    `Enable-ScheduledTask -TaskName 'Clip-Pipeline Übertragung'`. Im CT die Dienste starten und
    `clip-aufraeumen.timer` wieder einschalten, falls er vorher lief; smbd bleibt aus:
    ```bash
@@ -408,24 +455,43 @@ nach dem Zurückschalten (Rückweg R5) wieder einschalten.
 
 ## R7 · Gaming-PC
 
-**Was:** Das Ziel der Übertragung auf den Puffer umstellen, Anmeldedaten speichern, Probelauf, ein Test-Match.
+**Was:** Das Skript auf dem PC auf den Stand von main bringen, das Ziel der Übertragung auf den Puffer umstellen,
+Anmeldedaten speichern, Probelauf, ein Test-Match.
 **Warum:** Aufnahmen kommen weiter Minuten nach dem Match an – aber auf dem Mini, der immer läuft. pve-big wird
 tagsüber nie mehr geweckt.
 **Freigabe nötig?** Ja – dein PC, du machst es selbst.
 
-In `windows\uebertragung.psd1` (Vorlage: Block „Puffer-Betrieb (E19)“ in `uebertragung.beispiel.psd1`):
-```powershell
-Ziel         = '\\192.168.178.93\clips'
-ZielHost     = '192.168.178.93'
-WakeOnLanMac = ''                 # der Mini ist immer an – nie wecken
-```
-Als der Windows-Benutzer, unter dem die Aufgabe läuft:
-```powershell
-cmdkey /add:192.168.178.93 /user:gamingpc /pass                 # fragt nach dem Passwort aus R2
-Test-Path '\\192.168.178.93\clips\.clip-speicher'               # True
-powershell -ExecutionPolicy Bypass -File windows\Uebertragung.ps1 -Probelauf
-Enable-ScheduledTask -TaskName 'Clip-Pipeline Übertragung'      # falls in R5 pausiert
-```
+1. **Skript aktualisieren.** Die Aufgabe startet `windows\Uebertragung.ps1` aus dem Checkout auf dem PC – R3 hat
+   nur den CT aktualisiert. Das alte Skript kopiert zwar auch in den Puffer, schreibt aber kein `pc-status.json`
+   (die Morgenprüfung bliebe zum PC für immer still), und die Korrekturen aus E19 fehlen.
+   ```powershell
+   (Get-ScheduledTask -TaskName 'Clip-Pipeline Übertragung').Actions.Arguments   # zeigt den Pfad nach -File
+   cd E:\GIT\baddieday-voting                        # dieser Checkout (so angenommen)
+   git branch --show-current                          # main? Sonst erst: git switch main
+   git pull --ff-only                                 # Stand von main nach dem Merge
+   Select-String -Path windows\Uebertragung.ps1 -Pattern 'Schreibe-PcStatus' -Quiet   # True – sonst nicht weiter
+   ```
+   Deine `uebertragung.psd1` steht in `.gitignore` – `git pull` lässt sie in Ruhe.
+2. **Ziel umstellen** in `windows\uebertragung.psd1` (Vorlage: Block „Puffer-Betrieb (E19)“ in
+   `uebertragung.beispiel.psd1`):
+   ```powershell
+   Ziel         = '\\192.168.178.93\clips'
+   ZielHost     = '192.168.178.93'
+   WakeOnLanMac = ''                 # der Mini ist immer an – nie wecken
+   ```
+3. **Anmelden, Probelauf, Aufgabe wieder an** – als der Windows-Benutzer, unter dem die Aufgabe läuft, im Checkout
+   aus Schritt 1:
+   ```powershell
+   cmdkey /add:192.168.178.93 /user:gamingpc /pass                 # fragt nach dem Passwort aus R2
+   Test-Path '\\192.168.178.93\clips\.clip-speicher'               # True
+   powershell -ExecutionPolicy Bypass -File windows\Uebertragung.ps1 -Probelauf
+   Enable-ScheduledTask -TaskName 'Clip-Pipeline Übertragung'      # in R5 pausiert – erst jetzt, nach der neuen psd1
+   ```
+
+Lief die Aufgabe seit R5 doch noch mit dem alten Ziel (im PC-Log `%LOCALAPPDATA%\ClipPipeline\uebertragung.log`
+stehen Kopien nach dem R5-Zeitpunkt), liegen diese Dateien nur im Lager: melden. Eine weitere Delta-Übernahme wie in
+R5 (mit `--eingang-tage` bis zu diesem Tag) holt sie in den Puffer; die betroffenen Matches stoßen wir dann neu an.
+
 **Test-Match:** ein Match spielen, dann
 - im CT nach wenigen Minuten: `ls -lt /srv/puffer/replays | head -3`,
 - der Bot schickt die Clips wie gewohnt,
@@ -434,6 +500,8 @@ Enable-ScheduledTask -TaskName 'Clip-Pipeline Übertragung'      # falls in R5 p
   (`journalctl -u clip-lager`).
 
 **Rückweg:** In der psd1 wieder die Werte für pve-big eintragen (`Ziel`, `ZielHost`, `WakeOnLanMac` wie vorher).
+Ist R8 schon gemacht, vorher dessen Rückweg (`read only = no`) – sonst scheitert jede Kopie still. Das neue Skript
+bleibt: Es arbeitet mit pve-big als Ziel genauso.
 Der PC merkt sich je Quelldatei, was schon kopiert ist – nach dem Umstellen kopiert er nichts doppelt. Genau deshalb
 nur zusammen mit dem Rückweg R5 (dort Schritt 1 und 6): Was schon im Puffer liegt, kommt nur über den Abgleich nach
 pve-big, nie noch einmal vom PC.
@@ -457,7 +525,8 @@ nano /etc/samba/smb.conf                           # im Abschnitt [clips]: read 
 testparm -s >/dev/null && systemctl reload smbd
 ```
 Danach das Fenster schließen.
-**Rückweg:** `read only = no`, `systemctl reload smbd`.
+**Rückweg:** `read only = no`, `systemctl reload smbd`. Gehört auch in den Rückweg R5 bzw. R7 – **vor** dem
+Zurückstellen des PCs (Rückweg R5, Schritt 6), sonst kann der PC nicht mehr auf pve-big kopieren.
 **Was du lernst:** Mehrere Schutzschichten – Marken, Rohdaten-Regel, nur-lesen-Freigabe – fangen jeweils einen
 anderen Fehler ab.
 

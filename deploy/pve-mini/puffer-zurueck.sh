@@ -82,7 +82,8 @@ case "$LINK" in
     echo "  3. 10 min warten ([lager].ruhe_min), dann pipeline lager abgleich, bis 'pipeline lager status' 0 offen zeigt"
     echo "  4. clip-lager.timer und clip-puffer-pruefen.timer ausschalten"
     echo "  5. ln -sfn /srv/big/clips /srv/clips, lokal.toml zurück"
-    echo "  6. Gaming-PC zurück auf pve-big (psd1, Rückweg R7) und Übertragung wieder an, Dienste starten"
+    echo "  6. falls R8 gemacht: ZUERST auf pve-big [clips] read only = no, testparm -s, systemctl reload smbd;"
+    echo "     dann Gaming-PC zurück auf pve-big (psd1, Rückweg R7) und Übertragung wieder an, Dienste starten"
     echo "  7. dann dieses Skript nochmal"
     exit 1 ;;
 esac

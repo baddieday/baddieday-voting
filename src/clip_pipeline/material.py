@@ -202,6 +202,8 @@ def hole(konfig: Konfig, con: sqlite3.Connection, *, probelauf: bool = False) ->
         erreichbar = True
     except SpeicherOffline as e:
         erreichbar = False
+        if konfig.getrennt:  # E19: [speicher] ist der Puffer auf dem Mini – pve-big zu wecken hülfe nicht
+            raise SpeicherOffline(f"Puffer nicht bereit ({e}) – pve-big wurde nicht geweckt") from None
         if probelauf:
             return {"probelauf": True, "hinweis": f"pve-big schläft – der Probelauf weckt nicht ({e})"}
     if erreichbar:

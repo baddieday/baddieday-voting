@@ -22,7 +22,7 @@ import subprocess
 from pathlib import Path
 
 from . import musik, shorts
-from .konfig import Konfig
+from .konfig import Konfig, KonfigFehler
 from .medien import MedienFehler, fuehre_aus, probe
 
 ENTWURF_KURZE_SEITE = 720
@@ -290,6 +290,12 @@ def final_auf_big(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> d
     danach sofort herunterfahren. Weckt nur, wenn das Herunterfahren gesichert ist (big.wach_halten)."""
     from . import big
 
+    if konfig.getrennt:
+        # E19: Auftrag und neue Clips lägen im Puffer, pve-big rendert aber aus seinem Speicher (dem Lager) –
+        # dort kämen sie nie an. Also gar nicht erst wecken (Ziel 2: tagsüber weckt nur noch der Abgleich).
+        raise KonfigFehler("render-entwurf --final geht im Puffer-Betrieb ([lager].wurzel gesetzt) noch nicht: "
+                           "pve-big sieht nur das Lager, Auftrag und Clips liegen im Puffer. pve-big wurde nicht "
+                           f"geweckt. Den Entwurf auf dem Mini rendern: pipeline render-entwurf {entwurf_id}")
     minuten = float(konfig.wert("regie.final_halten_min", 60))
     with big.wach_halten(konfig, "final", f"Final-Render Entwurf {entwurf_id}", minuten=minuten):
         auftrag = final_auftrag(con, konfig, entwurf_id)
