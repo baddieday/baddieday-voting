@@ -34,7 +34,8 @@ def verbinde(pfad: Path | str) -> sqlite3.Connection:
         con.execute("PRAGMA busy_timeout = 30000")
         if str(pfad) != ":memory:":
             con.execute("PRAGMA journal_mode = WAL")
-        for datei in ("schema.sql", "regie.sql"):  # regie.sql: Tabellen des Regisseurs (Sprint 09/2026)
+        # regie.sql: Tabellen des Regisseurs (Sprint 09/2026) · lager.sql: Abgleich Puffer → Lager (E19)
+        for datei in ("schema.sql", "regie.sql", "lager.sql"):
             con.executescript(resources.files("clip_pipeline").joinpath(datei).read_text(encoding="utf-8"))
         for tabelle, spalte, typ in MIGRATIONEN:
             if spalte not in {z["name"] for z in con.execute(f"PRAGMA table_info({tabelle})")}:

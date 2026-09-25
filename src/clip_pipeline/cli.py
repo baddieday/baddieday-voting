@@ -224,6 +224,44 @@ def _cmd_material(args, konfig, con) -> int:
     return 1 if ergebnis.get("fehler") else 0
 
 
+def _cmd_lager(args, konfig, con) -> int:
+    """Puffer ↔ Lager (E19). Exit: 0 ok · 1 Datei-Fehler (Übernahme auch: Konflikt, zu jung) · 2 Aufruf/Konfig ·
+    3 Lager offline/nicht geweckt · 4 Lager-Sperre belegt (Gesperrt, in main). Der Probelauf endet ohne Abbruch mit 0.
+    Die Übernahme läuft vor dem Umschalten, also auch ohne [lager]."""
+    from . import lager
+
+    if args.aktion != "uebernehmen" and not konfig.getrennt:
+        log.error("kein getrennter Betrieb: [lager].wurzel leer")
+        _json({"fehler": "kein getrennter Betrieb: [lager].wurzel leer"})
+        return 2
+    try:
+        if args.aktion == "status":
+            stand = lager.status(con, konfig)
+            log.info("%s", stand["zeile"])
+            _json(stand)
+            return 0 if stand["pruefung"] == "ok" else 2
+        if args.aktion == "abgleich":
+            ergebnis = lager.abgleich(con, konfig, probelauf=args.probelauf)
+        else:
+            ergebnis = lager.uebernahme(con, konfig, Path(args.von), Path(args.nach), args.eingang_tage,
+                                        probelauf=args.probelauf)
+    except KonfigFehler as e:  # z. B. Puffer und Lager verwechselbar – dann wurde nichts kopiert
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
+    except big.BigFehler as e:  # auch WeckenVerboten
+        log.error("pve-big nicht geweckt: %s", e)
+        _json({"fehler": "nicht_geweckt", "hinweis": str(e)})
+        return 3
+    _json(ergebnis)
+    if ergebnis.get("abbruch"):
+        return 3
+    if ergebnis.get("probelauf"):  # zeigt nur, was geschähe
+        return 0
+    # zu_jung (Übernahme): im Lager wird evtl. noch geschrieben – noch nicht fertig, in ein paar Minuten wiederholen
+    return 1 if ergebnis.get("fehler") or ergebnis.get("konflikte") or ergebnis.get("zu_jung") else 0
+
+
 def _cmd_stimmung(args, konfig, con) -> int:
     _json(stimmung.analysiere(con, konfig, dateien=args.dateien, neu=args.neu, claude=not args.ohne_claude,
                               whisper=not args.ohne_whisper, maximal=args.max))
@@ -427,6 +465,18 @@ def baue_parser() -> argparse.ArgumentParser:
     s = unter.add_parser("material", help="Replays, Sessions und Videos von pve-big auf den Mini kopieren (1× wecken)")
     s.add_argument("--probelauf", action="store_true", help="nur zeigen, was kopiert würde (weckt nicht)")
     s.set_defaults(fn=_cmd_material, sperren=False)
+
+    s = unter.add_parser("lager", help="Puffer ↔ Lager auf pve-big (E19): abgleich | status | uebernehmen")
+    lager_befehle = s.add_subparsers(dest="aktion", required=True)
+    a = lager_befehle.add_parser("abgleich", help="Puffer → Lager mit SHA-256 (weckt pve-big nur, wenn etwas offen ist)")
+    a.add_argument("--probelauf", action="store_true", help="nur zeigen, was offen ist (weckt nicht, kopiert nichts)")
+    lager_befehle.add_parser("status", help="offene Dateien, letzter Abgleich, Puffer frei (weckt nie)")
+    a = lager_befehle.add_parser("uebernehmen", help="einmalig Lager → Puffer vor dem Umschalten (docs/PUFFER.md R4/R5)")
+    a.add_argument("--von", required=True, help="Lager, z. B. /srv/big/clips")
+    a.add_argument("--nach", required=True, help="Puffer, z. B. /srv/puffer")
+    a.add_argument("--eingang-tage", type=int, default=3, help="von eingang/ nur Dateien der letzten N Tage")
+    a.add_argument("--probelauf", action="store_true", help="nur zählen (weckt nicht, kopiert nichts)")
+    s.set_defaults(fn=_cmd_lager, sperren=False)  # eigene Lager-Sperre statt der Pipeline-Sperre
 
     s = unter.add_parser("stimmung", help="Stimmung je Moment (Whisper, Lautstärke, Kills, Tod; 1× claude -p)")
     s.add_argument("--dateien", action="store_true", help="auch kurze Rohvideos ohne Clip als Momente")
