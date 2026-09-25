@@ -89,6 +89,44 @@ Einstellbar: `[regie.vorgaben] abwechslung = 0.7` (0 = immer die besten, 1 = max
 Je mehr Clips eine Stimmung haben, desto mehr Auswahl: `regie-starten.sh` analysiert die nächsten 40, der
 Bot vor jedem Entwurf 10 weitere.
 
+## Multikills am Stück – Serie und Jump-Cut
+Bei einem Team-Wipe sterben alle umgehauenen Gegner im selben Augenblick. Die Kill-Zeiten liegen dann alle beim
+Wipe, die eigentliche Action (das Umhauen) aber oft 10–20 s davor. Deshalb kennt der Regisseur je Kill zusätzlich
+den **Aktions-Zeitpunkt** (`merkmale.aktion_sekunden`, parallel zu `kill_sekunden`, = mein Umhauen; ohne Umhauen
+der Kill selbst). Gezählt wird weiter wie bisher – ein Team-Wipe bleibt ein Triple, Punkte und Elo ändern sich nicht.
+
+| Regel | Wert |
+|---|---|
+| Anfang des Moments | `puffer_vor_s` vor der **frühesten Aktion** (nicht mehr vor dem ersten Kill) |
+| Muss-Zone (wird nie angeschnitten) | 1 s vor der ersten Aktion … 0,5 s nach dem letzten Kill |
+| **Serie** = Moment mit ≥ 2 Kills und Aktions-Zeiten | bleibt **ein Stück**, darf länger sein als `seg_max_s`: bis `serie_max_s` |
+| `serie_max_s` | Short **20 s**, Zusammenschnitt **30 s** |
+| **Jump-Cut**: Pause zwischen zwei Aktionen/Kills > `luecke_max_s` (Start **4 s**) | 1,5 s nach der vorigen Aktion raus, 2,0 s vor der nächsten wieder rein – harter Schnitt, gleiche Datei, Reihenfolge bleibt |
+| Serie passt selbst mit Jump-Cuts nicht in `serie_max_s` | im **Short nicht gewählt** (Hinweis „n Serie(n) zu lang für Short“), im **Zusammenschnitt ganz** – nie zerteilt |
+
+So sieht das in der Schnittliste aus: Ein Moment mit Jump-Cut wird zu mehreren Segmenten hintereinander, mit
+gleichem `moment` und gleicher `datei` und dem Feld `teil` = 1, 2, … Ab Teil 2 ist der Übergang ein harter Schnitt.
+Die Schnittpunkte zwischen den Teilen liegen fest an der Action; beweglich sind nur der Anfang von Teil 1 (Anlauf)
+und das Ende des letzten Teils – nur dieses rastet auf den Beat ein. Beispiel Team-Wipe (Sekunden im Clip):
+
+```
+Umhauen 8,0   Umhauen 11,8           ……… 17 s nichts ………           Wipe 28,7–28,9 (3 Kills)
+|--- Teil 1: 5,5 … 13,3 (Anlauf + beide Umhauen) ---|  ✂  |--- Teil 2: 26,7 … 30,4 (Wipe) ---|
+                                   im Video: 7,8 s + 3,7 s = 11,5 s am Stück
+```
+
+- Jump-Cuts gibt es für jeden Moment mit Aktions-Zeiten, auch für einen Einzelkill mit weit entferntem Umhauen
+  (der bleibt aber bei `seg_max_s`).
+- `luecke_max_s` wirkt mindestens mit 1,5 + 2,0 + 0,5 = 4 s, damit sich Teile nie überlappen. Eine Vorgabe in
+  `[regie.vorgaben]` ist dafür (noch) nicht vorgesehen. Genau 4,0 s ist noch keine Lücke (auf ms gerechnet).
+- Liegt ein Umhauen **vor dem Dateibeginn** (`aktion_sekunden` < 0: alter Bot-Clip, kurze Aufnahme, 60-s-Kappung),
+  gilt die Lücke dahinter wie jede andere: Was ganz vor der Datei liegt, fällt weg, der Moment beginnt 2,0 s vor
+  der nächsten Aktion in der Datei – kein Schnipsel vom Dateianfang.
+- „n Momente“ im Lern-Bot, der Bogen und „neu / schon gezeigt“ zählen **Momente**, nicht Segmente.
+- Alte Momente ohne `aktion_sekunden` verhalten sich exakt wie vorher (geprüft in `tests/test_regie_serie.py`).
+  Vorhandene Multikill-Momente bekommen die Aktions-Zeiten per `pipeline momente nachschneiden` (neu geschnitten
+  aus dem Rohvideo im Puffer) bzw. beim nächsten `pipeline stimmung`.
+
 ## Stimmungen und Übergänge
 | Stimmung | erkannt an (Punkte-Regeln in `stimmung.punkte`) | Übergang in den Moment |
 |---|---|---|

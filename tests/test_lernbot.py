@@ -219,5 +219,17 @@ class LernBot(MitRegieMaterial):
         self.assertTrue(all(len(t) <= lernbot.TEXT_MAX for _, t in self.bot.texte))
 
 
+@unittest.skipIf(lernbot is None, "python-telegram-bot fehlt")
+class EntwurfText(unittest.TestCase):
+    def test_zaehlt_momente_nicht_segmente(self):
+        # Ein Multikill mit Jump-Cut besteht aus mehreren Segmenten (Teilen), bleibt aber ein Moment
+        segmente = [{"moment": "clip:1", "teil": 1}, {"moment": "clip:1", "teil": 2}, {"moment": "datei:4"}]
+        liste = {"format": "short", "dauer_s": 32.0, "stimmung": "episch", "segmente": segmente, "bogen": [9.0, 4.0],
+                 "auswahl": {"neu": 2, "schon_gezeigt": 0, "kandidaten": 12}, "musik": None, "hinweise": []}
+        text = lernbot.entwurf_text({"id": 7}, liste)
+        self.assertIn("· 2 Momente", text)
+        self.assertIn("🆕 2 neue · 0 schon gezeigt · Auswahl aus 12 Momenten", text)
+
+
 if __name__ == "__main__":
     unittest.main()

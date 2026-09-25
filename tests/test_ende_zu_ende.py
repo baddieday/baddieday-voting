@@ -59,12 +59,16 @@ class Vertragsablauf(MitSpeicher):
             analyse = verarbeitung.analyze(self.con, self.konfig, SID)
         self.assertEqual((analyse["kills"], analyse["kandidaten"], analyse["kill_quelle"]), (2, 1, "replay"))
 
+        k = json.loads((verarbeitung.ordner(self.konfig, SID) / "analyse.json").read_text(encoding="utf-8"))["kandidaten"][0]
+        self.assertEqual((k["aktion_sekunden"], k["grenzen"]["spaetester_start_s"]), ([8.0, 11.0], 6.0))  # ohne Umhauen
+
         entschieden = verarbeitung.decide(self.con, self.konfig, SID)
         self.assertEqual((entschieden["clips"], entschieden["entschieden_von"]), (1, "regel"))
         liste = json.loads((verarbeitung.ordner(self.konfig, SID) / "schnittliste.json").read_text(encoding="utf-8"))
         self.assertEqual(schema.pruefe(liste, schema.lade("schnittliste")), [])
         self.assertEqual((liste["clips"][0]["kill_sekunden"], liste["clips"][0]["start_s"], liste["clips"][0]["ende_s"]),
                          ([8.0, 11.0], 0.0, 16.0))
+        self.assertEqual(liste["clips"][0]["aktion_sekunden"], [8.0, 11.0])
 
         ergebnis = verarbeitung.render(self.con, self.konfig, SID)
         self.assertEqual((ergebnis["clips"], ergebnis["top_label"]), (1, "Double Kill"))
@@ -108,22 +112,131 @@ class OhneVideo(MitSpeicher):
         self.assertIn("2 Kill(s) ohne Aufnahme", meldungen[0]["text"])
 
 
+class Anlauf(MitSpeicher):
+    """analyze mit Aktions-Zeitpunkten (Team-Wipe) – ohne FFmpeg: die Aufnahme steht nur in der Datenbank."""
+
+    T0 = datetime(2026, 9, 21, 19, 50, tzinfo=UTC)
+
+    def _sekunde(self, s: float) -> datetime:
+        return self.T0 + timedelta(seconds=s)
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["decide"]["claude"] = False
+        self.con.execute(
+            "INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, erstellt, geaendert) VALUES (?, 'replays/x.replay', ?, ?, 'x', 'x')",
+            (SID, iso(self.T0 - timedelta(minutes=5)), iso(self.T0 + timedelta(minutes=5))))
+        self.con.execute(
+            """INSERT INTO aufnahmen (pfad, groesse, geaendert, quelle, start_utc, ende_utc, dauer_s, tonspuren, fps, erfasst)
+               VALUES ('eingang/steelseries/a.mp4', 1, 0, 'steelseries', ?, ?, 120, 2, 30, 'x')""",
+            (iso(self.T0), iso(self._sekunde(120))))
+        e = self._sekunde
+        self.match = Match(SID, self.T0 - timedelta(minutes=5), self.T0 + timedelta(minutes=5), "Test", 3, 5, "argument", [
+            # Team-Wipe: drei Kills fast gleichzeitig, umgehauen habe ich 15 s, 4,6 s und 0 s vorher
+            MeinEreignis(e(60), "kill", aktion_utc=e(45)), MeinEreignis(e(60), "kill", aktion_utc=e(55.4)),
+            MeinEreignis(e(60.5), "kill", aktion_utc=e(60.5)),
+            # Double, erstes Umhauen 70 s vor dem Kill -> Anlauf wird auf 60 s begrenzt
+            MeinEreignis(e(100), "kill", aktion_utc=e(30)), MeinEreignis(e(104), "kill"),
+        ])
+
+    def test_analyse_und_schnittliste_mit_aktionen(self):
+        with mock.patch("clip_pipeline.replay.lies", return_value=(self.match, {"test": True})), \
+                self.assertLogs("pipeline", "WARNING"):
+            verarbeitung.analyze(self.con, self.konfig, SID)
+        analyse = json.loads((verarbeitung.ordner(self.konfig, SID) / "analyse.json").read_text(encoding="utf-8"))
+        wipe, double = analyse["kandidaten"]
+        self.assertEqual((wipe["titel"], wipe["kill_sekunden"], wipe["aktion_sekunden"]),
+                         ("Triple Kill", [60.0, 60.0, 60.5], [45.0, 55.4, 60.5]))
+        self.assertEqual((wipe["vorschlag"], wipe["grenzen"]["spaetester_start_s"]),
+                         ({"start_s": 37.0, "ende_s": 65.5}, 43.0))  # Beginn 8 s vor dem ersten Umhauen
+        self.assertEqual((wipe["merkmale"]["kill_punkte"], wipe["merkmale"]["laenge"]), (6.0, 0.0))
+        self.assertEqual((double["titel"], double["aktion_sekunden"], double["vorschlag"]),
+                         ("Double Kill", [30.0, 104.0], {"start_s": 49.0, "ende_s": 109.0}))  # auf 60 s begrenzt
+        self.assertEqual(double["grenzen"]["spaetester_start_s"], 49.0)
+        self.assertTrue(any("max. 60 s" in w for w in analyse["warnungen"]))
+
+        verarbeitung.decide(self.con, self.konfig, SID)
+        liste = json.loads((verarbeitung.ordner(self.konfig, SID) / "schnittliste.json").read_text(encoding="utf-8"))
+        self.assertEqual(schema.pruefe(liste, schema.lade("schnittliste")), [])
+        self.assertEqual([(c["start_s"], c["aktion_sekunden"]) for c in liste["clips"]],
+                         [(37.0, [45.0, 55.4, 60.5]), (49.0, [30.0, 104.0])])
+        self.assertEqual([c["merkmale"]["laenge"] for c in liste["clips"]], [0.0, 0.0])
+
+    def test_spaetester_start(self):
+        sp = verarbeitung.spaetester_start
+        self.assertEqual(sp(0.0, [60.0, 60.0, 60.5], [45.0, 55.4, 60.5], 37.0), 43.0)  # 2 s vor der ersten Aktion
+        self.assertEqual(sp(0.0, [5.0], [-10.0], 0.0), 0.0)                              # Aktion vor der Aufnahme
+        self.assertEqual(sp(0.0, [100.0, 104.0], [30.0, 104.0], 49.0), 49.0)             # auf 60 s gekappt
+        self.assertEqual(sp(0.0, [10.0, 80.0], [10.0, 80.0], 2.0), 8.0)                  # nie nach erstem Kill − 2
+
+
+class PruefeWahl(unittest.TestCase):
+    NEU = {"kill_sekunden": [30.0, 34.0], "aktion_sekunden": [18.0, 34.0],
+           "grenzen": {"min_start_s": 0.0, "max_ende_s": 120.0, "spaetester_start_s": 16.0}}
+    ALT = {"kill_sekunden": [30.0, 34.0], "grenzen": {"min_start_s": 0.0, "max_ende_s": 120.0}}
+
+    def test_neu_gegen_die_erste_aktion(self):
+        self.assertIsNone(verarbeitung.pruefe_wahl({"start_s": 12, "ende_s": 36}, self.NEU))  # vor der Aktion
+        self.assertIsNone(verarbeitung.pruefe_wahl({"start_s": 16, "ende_s": 36}, self.NEU))  # genau auf der Grenze
+        self.assertEqual(verarbeitung.pruefe_wahl({"start_s": 20, "ende_s": 36}, self.NEU), "schneidet einen Kill ab")
+        self.assertEqual(verarbeitung.pruefe_wahl({"start_s": 10, "ende_s": 34.5}, self.NEU), "schneidet einen Kill ab")
+        self.assertEqual(verarbeitung.pruefe_wahl({"start_s": 0, "ende_s": 61}, self.NEU), "Dauer nicht 5–60 s")
+
+    def test_alte_analyse_wie_bisher(self):
+        self.assertIsNone(verarbeitung.pruefe_wahl({"start_s": 20, "ende_s": 36}, self.ALT))  # 2 s vor dem Kill reicht
+        self.assertIsNone(verarbeitung.pruefe_wahl({"start_s": 28, "ende_s": 36}, self.ALT))
+        self.assertEqual(verarbeitung.pruefe_wahl({"start_s": 29, "ende_s": 36}, self.ALT), "schneidet einen Kill ab")
+
+
 class Entscheidung(MitSpeicher):
-    def _analyse(self) -> None:
+    def _analyse(self, mit_aktion: bool = False) -> None:
         verarbeitung.ordner(self.konfig, SID).mkdir(parents=True)
+        neu = {"aktion_sekunden": [18.0, 34.0]} if mit_aktion else {}
+        grenzen = {"min_start_s": 0.0, "max_ende_s": 120.0, **({"spaetester_start_s": 16.0} if mit_aktion else {})}
         (verarbeitung.ordner(self.konfig, SID) / "analyse.json").write_text(json.dumps({
             "version": 1, "session": SID, "warnungen": [], "ohne_video": [],
             "match": {"replay": None, "build": None, "platzierung": 3, "victory_royale": False, "kills": 5, "kill_quelle": "replay"},
             "kandidaten": [
                 {"nr": n, "titel": "Double Kill", "typ": "double", "kills": 2, "max_gruppe": 2, "victory_royale": False,
                  "kill_zeiten_utc": ["2026-09-21T19:53:24.974Z", "2026-09-21T19:53:29.453Z"], "kill_sekunden": [30.0, 34.0],
+                 **neu,
                  "aufnahme": "eingang/x.mp4", "quelle": "steelseries", "abdeckung": 1.0,
-                 "vorschlag": {"start_s": 22.0, "ende_s": 39.0}, "grenzen": {"min_start_s": 0.0, "max_ende_s": 120.0},
+                 "vorschlag": {"start_s": 10.0 if mit_aktion else 22.0, "ende_s": 39.0}, "grenzen": grenzen,
                  "merkmale": {"kill_punkte": 3.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0, "kommentar": 0.0},
                  "punkte": 3.0, "begruendung": "Double Kill 3,0"}
                 for n in (1, 2, 3)
             ],
         }), encoding="utf-8")
+
+    def _schnittliste(self) -> dict:
+        return json.loads((verarbeitung.ordner(self.konfig, SID) / "schnittliste.json").read_text(encoding="utf-8"))
+
+    def test_claude_schnitt_vor_der_aktion(self):
+        self._analyse(mit_aktion=True)
+        antwort = {
+            1: {"nr": 1, "start_s": 12.0, "ende_s": 37.0},  # vor dem ersten Umhauen -> gut
+            2: {"nr": 2, "start_s": 20.0, "ende_s": 37.0},  # zwischen Umhauen und Kill -> verworfen
+            3: {"nr": 3, "start_s": 0.0, "ende_s": 60.0},   # langer Anlauf: Länge zählt erst ab Kill − 8 s
+        }
+        with mock.patch.object(verarbeitung, "frage_claude", return_value=(antwort, None)):
+            ergebnis = verarbeitung.decide(self.con, self.konfig, SID)
+        c1, c2, c3 = self._schnittliste()["clips"]
+        self.assertEqual((c1["start_s"], c1["ende_s"], c1["aktion_sekunden"]), (12.0, 37.0, [18.0, 34.0]))
+        self.assertEqual((c2["start_s"], c2["ende_s"]), (10.0, 39.0))  # Vorschlag bleibt
+        self.assertIn("schneidet einen Kill ab", ergebnis["hinweise"][0])
+        self.assertEqual(c3["merkmale"]["laenge"], 0.8)  # 60 − 22 = 38 s -> 0,8 (nicht 3,0)
+        self.assertEqual(schema.pruefe(self._schnittliste(), schema.lade("schnittliste")), [])
+
+    def test_alte_analyse_ohne_aktion_wie_bisher(self):
+        self._analyse()
+        antwort = {1: {"nr": 1, "start_s": 20.0, "ende_s": 37.0}, 3: {"nr": 3, "start_s": 0.0, "ende_s": 60.0}}
+        with mock.patch.object(verarbeitung, "frage_claude", return_value=(antwort, None)):
+            ergebnis = verarbeitung.decide(self.con, self.konfig, SID)
+        c1, c2, c3 = self._schnittliste()["clips"]
+        self.assertEqual((c1["start_s"], "aktion_sekunden" in c1), (20.0, False))
+        self.assertEqual((c2["start_s"], c2["merkmale"]["laenge"]), (22.0, 0.0))
+        self.assertEqual(c3["merkmale"]["laenge"], 3.0)  # wie bisher: ganze Dauer zählt
+        self.assertEqual(ergebnis["hinweise"], [])
 
     def test_claude_wird_geprueft(self):
         self._analyse()

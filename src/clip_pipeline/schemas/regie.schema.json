@@ -53,6 +53,7 @@
         "properties": {
           "nr": {"type": "integer", "minimum": 1},
           "moment": {"type": "string", "minLength": 1},
+          "teil": {"type": "integer", "minimum": 1, "$comment": "Jump-Cut: n-ter Teil desselben Moments (fehlt = ein Stück)"},
           "clip_id": {"type": ["integer", "null"]},
           "match_id": {"type": ["string", "null"]},
           "datei": {"type": "string", "minLength": 1},

@@ -38,6 +38,8 @@
           "victory_royale": {"type": "boolean"},
           "kill_zeiten_utc": {"type": "array", "minItems": 1, "items": {"type": "string"}},
           "kill_sekunden": {"type": "array", "minItems": 1, "items": {"type": "number"}},
+          "aktion_sekunden": {"type": "array", "minItems": 1, "items": {"type": "number"},
+                              "$comment": "parallel zu kill_sekunden: mein Umhauen je Kill (Sekunde in der Aufnahme, darf < 0 sein)"},
           "aufnahme": {"type": "string", "minLength": 1},
           "quelle": {"type": "string"},
           "start_s": {"type": "number", "minimum": 0},

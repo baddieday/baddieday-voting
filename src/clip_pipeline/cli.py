@@ -1,6 +1,7 @@
 """Kommandozeile `pipeline ...` – Vertrag mit n8n (siehe CLAUDE.md, "Schnittstelle zu n8n"):
 
   prepare|analyze|decide|render --session ID     highlight --id ID --tage 14
+  (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe])
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -83,7 +84,12 @@ def _cmd_replay(args, konfig, con) -> int:
     print(f"Start {utc_zu_lokal(match.start_utc, zone):%d.%m.%Y %H:%M:%S} · Ende {utc_zu_lokal(match.ende_utc, zone):%H:%M:%S}")
     namen = {"kill": "Kill", "knock": "Knock", "tod": "gestorben", "knock_erlitten": "selbst am Boden"}
     for e in match.ereignisse:
-        print(f"  {utc_zu_lokal(e.zeit_utc, zone):%H:%M:%S.%f}"[:-3] + f"  {namen.get(e.art, e.art)}")
+        zeile = f"  {utc_zu_lokal(e.zeit_utc, zone):%H:%M:%S.%f}"[:-3] + f"  {namen.get(e.art, e.art)}"
+        if e.art == "kill" and e.aktion_utc is not None and e.aktion_utc != e.zeit_utc:
+            # Aktion = mein Umhauen: dort beginnt der Clip (beim Team-Wipe Sekunden vor dem Kill)
+            vorher = (e.zeit_utc - e.aktion_utc).total_seconds()
+            zeile += f"  (umgehauen {utc_zu_lokal(e.aktion_utc, zone):%H:%M:%S}, {vorher:.1f} s vorher)"
+        print(zeile)
     for w in match.warnungen:
         print(f"  ⚠️ {w}")
     return 0
@@ -288,6 +294,22 @@ def _cmd_stimmung(args, konfig, con) -> int:
     _json(stimmung.analysiere(con, konfig, dateien=args.dateien, neu=args.neu, claude=not args.ohne_claude,
                               whisper=not args.ohne_whisper, maximal=args.max))
     return 0
+
+
+def _cmd_momente(args, konfig, con) -> int:
+    """Vorhandene Multikill-Momente aus dem Puffer neu schneiden (Aktion drin). Nur getrennter Betrieb, weckt nie.
+    Exit: 0 ok · 1 mindestens ein Moment mit Fehler · 2 Konfig (kein getrennter Betrieb, Puffer-Marke fehlt)."""
+    from . import nachschnitt
+
+    tage = args.tage if args.tage is not None else int(konfig.wert("puffer.rohdaten_tage", 14))
+    try:
+        ergebnis = nachschnitt.nachschneiden(con, konfig, tage=tage, probe=args.probe)
+    except KonfigFehler as e:
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
+    _json(ergebnis)
+    return 1 if ergebnis["fehler"] else 0
 
 
 def _cmd_musik(args, konfig, con) -> int:
@@ -518,6 +540,15 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--max", type=int, help="höchstens so viele (die besten zuerst), Rest beim nächsten Lauf")
     s.set_defaults(fn=_cmd_stimmung, sperren=True)
 
+    s = unter.add_parser("momente", help="Momente pflegen: nachschneiden (Multikills ab der ersten Aktion, nur Puffer)")
+    momente_befehle = s.add_subparsers(dest="aktion", required=True)
+    a = momente_befehle.add_parser("nachschneiden", help="Momente mit ≥ 2 Kills neu aus der Quellaufnahme im Puffer "
+                                                         "schneiden (neue Dateien, weckt nie)")
+    a.add_argument("--tage", type=int, default=None,
+                   help="nur Clips der letzten N Tage (Standard: [puffer].rohdaten_tage = 14)")
+    a.add_argument("--probe", action="store_true", help="nur zeigen, was geschähe (schneidet und schreibt nichts)")
+    s.set_defaults(fn=_cmd_momente, sperren=True)  # rechenintensiv: Pipeline-Sperre; nicht in WECKEN
+
     s = unter.add_parser("musik", help="Musik: analysieren, hinzufügen (mit Quelle), NCS laden, Liste")
     s.add_argument("aktion", choices=["analysieren", "hinzufuegen", "ncs", "liste"])
     s.add_argument("datei", nargs="?")
@@ -588,6 +619,12 @@ def _vorab_ablehnen(args, konfig) -> int | None:
     """Befehle, die in dieser Konfig nicht laufen dürfen, sofort ablehnen (Exit 2) – vor der Pipeline-Sperre.
     Sonst wartete z. B. ein noch aktiver clip-aufraeumen-Timer bis zu [sperre].warten_s auf einen laufenden render
     und endete dann mit „gesperrt“ (Exit 4, im Timer kein Fehler) statt mit dem Hinweis, ihn auszuschalten."""
+    if args.befehl == "momente" and not konfig.getrennt:
+        # Ohne getrennten Betrieb wäre [speicher].wurzel pve-big selbst – der Nachschnitt arbeitet nur im Puffer
+        hinweis = "kein getrennter Betrieb: [lager].wurzel leer – momente nachschneiden arbeitet nur im Puffer (E19)"
+        log.error("%s", hinweis)
+        _json({"fehler": "konfig", "hinweis": hinweis})
+        return 2
     if args.befehl != "aufraeumen":
         return None
     try:

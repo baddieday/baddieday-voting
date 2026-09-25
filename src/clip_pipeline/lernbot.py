@@ -75,8 +75,9 @@ def _balken(werte: list[float]) -> str:
 
 def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None) -> str:
     m = liste.get("musik")
+    momente = len({s["moment"] for s in liste["segmente"]})  # ein Moment mit Jump-Cut hat mehrere Segmente
     teile = [f"🎬 <b>Entwurf #{zeile['id']}</b> · {FORMAT_NAMEN[liste['format']]} {liste['dauer_s']:.0f} s · "
-             f"Stimmung <b>{liste['stimmung']}</b> · {len(liste['segmente'])} Momente",
+             f"Stimmung <b>{liste['stimmung']}</b> · {momente} Momente",
              f"Bogen {_balken(liste['bogen'])}"]
     if a := liste.get("auswahl"):
         teile.append(f"🆕 {a['neu']} neue · {a['schon_gezeigt']} schon gezeigt · Auswahl aus {a['kandidaten']} Momenten")
