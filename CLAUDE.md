@@ -8,6 +8,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - Arbeite in **kleinen Stufen**. Jede Stufe muss für sich allein nutzbar und testbar sein.
 - **Vorher fragen** bei: Löschen/Überschreiben von Dateien, Pakete installieren, Systemeinstellungen ändern, git push, allem Irreversiblen.
 - Berechtigungsabfragen **niemals** global abschalten (kein `--dangerously-skip-permissions`, kein `bypassPermissions`).
+  **Einzige Ausnahme:** im LXC `claude-bau` auf pve-mini, und nur, wenn ich Claude selbst mit
+  `--dangerously-skip-permissions` starte. Auch dann gilt: vor `git push`, Löschen/Überschreiben,
+  Paketinstallation und Änderungen außerhalb des Repos trotzdem fragen; `.env` und `~/.ssh` nicht lesen.
 - **Keine Secrets** in Code oder Repo: Tokens gehören in `.env`, `.env` steht in `.gitignore`. Liefere eine `.env.example`.
 - Neue Entscheidungen, die wir treffen, ergänzt du nach Rückfrage in dieser Datei unter „Entscheidungen“.
 
@@ -125,6 +128,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - 2026-09-25: Der **Puffer hält 14 Tage Rohvideos** (`[puffer].rohdaten_tage`) – der Regisseur baut seine Momente daraus.
 - 2026-09-25 (E20): Zugang für Claude über ein flüchtiges Tailnet-Gerät (Anmeldung per Link) und Tailscale SSH im check-Modus
   auf pve-big und pve-mini (nicht im LXC clips – dort nutzt n8n normales SSH).
+- 2026-09-25 (E21): Im LXC `claude-bau` (pve-mini, kein Tailscale, kein Zugriff auf Server oder Clips) darf Claude
+  mit `--dangerously-skip-permissions` laufen; GitHub nur über einen Deploy-Key für dieses Repo. Die Fragepflicht
+  bei Irreversiblem bleibt als Regel bestehen. Voraussetzung: Branch-Schutz für `main` auf GitHub.
 - 2026-09-25: **Multikills am Stück.** Zählen bleibt wie bisher (ein Team-Wipe bleibt Triple usw., Punkte/Elo unverändert).
   Neu je Kill der Aktions-Zeitpunkt = mein Umhauen: Clips beginnen 8 s vor dem ersten Umhauen; im Short bleibt eine Serie
   bis 20 s am Stück, Pausen > 4 s zwischen zwei Aktionen per Jump-Cut. Vorhandene Multikill-Momente werden aus den
