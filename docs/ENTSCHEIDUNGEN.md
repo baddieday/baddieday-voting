@@ -340,7 +340,8 @@ Momente). Die neuen Dateien (grob 1–2 GB) sichert der tägliche Abgleich mit `
 
 ## L1–L6 · Lernschleife „Publikum“ (Spec §16 E21–E26, freigegeben im Startauftrag, 25.09.)
 Arbeitstitel L1–L6 statt E21–E26: E21 ist schon „Multikills am Stück“, und Regisseur 2.0 vergibt eigene Nummern.
-Beim Zusammenführen mit R2.0 bekommen L1–L6 fortlaufende E-Nummern hinter denen von R2.0 (Annahme A2).
+Geplant war, sie beim Zusammenführen mit R2.0 in fortlaufende E-Nummern umzubenennen (Annahme A2). **Florian 25.09.:
+„L1–L6 ok“** – die Nummern bleiben so, auch nach dem Merge mit main (bc314f5); kein Umnummerieren.
 Spec: `docs/superpowers/specs/2026-09-25-lernschleife-publikum-design.md`, Bedienung: `docs/PUBLIKUM.md`.
 - **L1** (Spec E21) Publikum ist das Hauptsignal; zwei Schleifen (dein Urteil täglich, Publikum wöchentlich) speisen
   dieselben Lerner.
@@ -366,15 +367,18 @@ Damit daraus nicht zwei Knöpfe, zwei Callback-Präfixe und zwei Dateien werden:
   tägliche Sicherung von `export/` ins Lager) und baut keinen zweiten Weg.
 
 ## Annahmen im Sprint Lernschleife
-Startauftrag §6 Regel 6: Wo eine Frage den Bau blockiert hätte, steht hier die getroffene Annahme. **Alle sind offen –
-Florian löst sie auf.** Die Nummern sind dieselben wie im Plan Stufe 1 (`docs/superpowers/plans/…-stufe-1.md`) und im
-Code („Annahme A11“ usw.); Stand nach der Nachbesserung durch das Prüfer-Panel (`docs/SPRINT-LOG-LERNSCHLEIFE.md`).
+Startauftrag §6 Regel 6: Wo eine Frage den Bau blockiert hätte, steht hier die getroffene Annahme. **Offen, bis
+Florian sie auflöst** – was er schon entschieden hat, ist mit „→ entschieden (Florian 25.09.)“ markiert (A2, A10,
+A27, A28, A40; Rückfragen R3–R5 unten). Die Nummern sind dieselben wie im Plan Stufe 1
+(`docs/superpowers/plans/…-stufe-1.md`) und im Code („Annahme A11“ usw.); Stand nach der Nachbesserung durch das
+Prüfer-Panel und nach Florians Antworten (`docs/SPRINT-LOG-LERNSCHLEIFE.md`).
 
 ### Stufe 1 – Plan (A1–A34) und Panel (A35–A40)
 - **A1 Score-Zeitpunkt:** `bewerten` setzt den Score erst, wenn der Post ≥ `alter_tage` (7) alt ist, mit der Messung am
   nächsten an Tag 7 (nur Messungen ≥ 3 Tage) – sonst fröre ein täglicher Lauf den Score an Tag 3 ein (Spec §5 vs.
   §6.1/§14). Abnahme mit `alter_tage = 3`: Score 0 („Basis zu klein“), diese Posts behalten ihre Tag-3-Messung.
-- **A2 Entscheidungsnummern:** Arbeitstitel L1–L6 (= Spec E21–E26), fortlaufende E-Nummern beim Merge mit R2.0.
+- **A2 Entscheidungsnummern:** Arbeitstitel L1–L6 (= Spec E21–E26), ~~fortlaufende E-Nummern beim Merge mit R2.0~~
+  → entschieden (Florian 25.09.): „L1–L6 ok“, die Nummern bleiben.
 - **A3 /link im Lern-Bot** nimmt `41` und `e41`.
 - **A4 Ein 📦-Knopf** (Export-Vertrag oben); die Sicherung von `export/` ins Lager kommt mit R2.0 Stufe 3.
 - **A5 Nur 👍-Entwürfe** bekommen Paket, Häkchen und Post („kein Short ohne deine Freigabe“).
@@ -385,7 +389,8 @@ Code („Annahme A11“ usw.); Stand nach der Nachbesserung durch das Prüfer-Pa
 - **A9 Plattformen:** Posts nur für `[publikum].plattformen = ["tiktok"]` (Spec §3); YouTube per Konfig zuschaltbar;
   clip-battle.de nie.
 - **A10 Fehlende Zähler** zählen im Engagement als 0 (Vermerk „Engagement unvollständig“); Messungen ohne Views zählen
-  nicht für den Score (Folge für Hand-Posts: R4).
+  nicht für den Score. Für Hand-Posts → entschieden (Florian 25.09., R4): Die Hand-Eingabe kann Kommentare, Shares,
+  Saves mitliefern; nur wo sie fehlen, gilt weiter die 0 mit Vermerk.
 - **A11 Basis** = die jüngsten 20 bewerteten Posts derselben Plattform, die **vor** dem Post gepostet wurden; unter 5
   Posts Score 0 („Basis zu klein“), genug Posts, aber unter 5 r-Werten → wie „ohne Wiedergabe“ (0,6/0,4, „Basis ohne
   Wiedergabe“).
@@ -415,8 +420,11 @@ Code („Annahme A11“ usw.); Stand nach der Nachbesserung durch das Prüfer-Pa
 - **A25 Schema-Ort** `src/clip_pipeline/schemas/publikum.schema.json`, tolerant (Zusatzfelder erlaubt); die
   100-%-Regel steht nur in `pruefe_plausibel` (Rückfrage statt Ablehnung).
 - **A26 Nur Shorts** bekommen Paket, Häkchen und Post (ein Zusammenschnitt hätte ≈ 1 Mbit/s, kein Publikumssignal).
-- **A27 Entwurfs-Checkliste** nur für Post-Plattformen, ohne clip-battle.de (R5).
-- **A28 Hand-Eingabe** wird wie ein Screenshot gegen die letzte Messung geprüft; `#17 1240 61 6.8 34` geht ohne Bild.
+- **A27 Entwurfs-Checkliste** nur für Post-Plattformen, ohne clip-battle.de → entschieden (Florian 25.09., R5): keine
+  clip-battle.de-Checkliste für Entwürfe; bleibt, wie gebaut.
+- **A28 Hand-Eingabe** wird wie ein Screenshot gegen die letzte Messung geprüft; `#17 1240 61 6.8 34` geht ohne Bild
+  – seit Florians Antwort (R4) auch mit sieben Werten `#17 1240 61 6.8 34 3 5 2`, geprüft werden dann alle fünf
+  Zähler.
 - **A29 Ein offener Vorgang** im Lern-Bot (nach dem Panel präzisiert): Ein neues Foto bzw. ein neuer „#17 …“-Text
   ersetzt ihn, ein altes Bild wird sofort gelöscht, und der Bot sagt, was verworfen wurde (Bild, Rückfrage – „NICHT
   gespeichert“ – oder Hand-Eingabe); kein Hinweis bei einer Korrektur desselben Posts. Klicks, die nicht passen →
@@ -443,6 +451,38 @@ Code („Annahme A11“ usw.); Stand nach der Nachbesserung durch das Prüfer-Pa
   Programm startet nicht (OSError), Schema/Programm nicht eingestellt → zählt nicht; ein Timeout zählt (claude lief).
 - **A40 Hand-Eingabe mit Einheiten:** Bitte und Fehlertexte nennen `Views Likes Ø-Wiedergabe-in-Sekunden
   Ganz-angesehen-in-%` (`publikum.HAND_FORM`); „0:07“ oder „7s“ → „bitte in Sekunden“; „34%“ wird als 34 gelesen.
+  Seit R4 ergänzt um „optional dahinter Kommentare Shares Saves“ – Bitte und Fehlertext sind jetzt EIN Text
+  (`publikum.HAND_HINWEIS`, mit beiden Beispielen).
+
+### Stufe 1 – Florians Antworten (25.09.) und was dabei neu angenommen wurde
+- **R3 → MAD-Minimum je Komponente** (entschieden ist das Prinzip „je Komponente“; die drei Werte sind Annahme A44):
+  neue Tabelle `[publikum.mad_minimum]`. Die Formel steht weiter genau einmal (`publikum.robust_z`, Minimum als
+  Parameter); `score_fuer` gibt je Teil sein Minimum mit und schreibt die benutzten Minima in `score_teile`
+  (`"mad_minimum": {"r", "e", "v"}`). Fehlt die Tabelle oder ein Teil, oder ist ein Wert keine Zahl bzw. ≤ 0 →
+  KonfigFehler (CLI Exit 2), wie bei den anderen `[publikum]`-Schlüsseln.
+- **R4 → Hand-Eingabe erweitert:** `views likes wiedergabe voll%` bleibt gültig; optional dahinter
+  `kommentare shares saves` (je Zahl oder „–“). Gilt für die Antwort nach ✏️, den Text „#17 …“ ohne Bild, `/hilfe` und
+  die Bitte um Hand-Eingabe; die Plausibilität (nicht sinken) gilt auch für die drei neuen Felder.
+- **R5 → keine clip-battle.de-Checkliste** für Entwürfe (A27 bleibt).
+- **L1–L6 ok** → die Arbeitstitel bleiben (A2).
+- **Stufe 1 kommt jetzt über einen PR nach `main`** (Florian will sie sofort einspielen): `docs/PUBLIKUM.md`,
+  Installation, geht davon aus – `git pull` aus `main` wie bisher, nicht erst nach Stufe 5.
+- **A41 Hand-Eingabe: genau 4 oder 7 Werte.** 5 oder 6 Werte werden abgelehnt (mit der Erklärung), statt die fehlenden
+  hinten als unbekannt zu nehmen: Sonst landete z. B. eine Shares-Zahl still bei den Kommentaren, wenn man die
+  Reihenfolge verwechselt. Wer nur einen der drei kennt, schreibt „–“ für die anderen (`… 34 3 – 2`).
+- **A42 Dieselbe Konfig-Prüfung für `[publikum.gewichte]`:** Gewichte und MAD-Minima liest eine Hilfsfunktion
+  (`publikum._je_teil`). Folge: Fehlt ein Gewicht, gibt es jetzt KonfigFehler (Exit 2) statt eines KeyError, der als
+  Fehler EINES Posts zählte (Exit 1) – eine kaputte Konfig betrifft ja jeden Post.
+- **A43 Minima auch bei „Basis zu klein“ in `score_teile`:** so hat jeder gespeicherte Score dieselben Felder, und man
+  sieht auch dort, mit welcher Konfig gerechnet worden wäre.
+- **A44 Werte der MAD-Minima** (offen, bis Florian sie bestätigt – R3 hat nur „je Komponente“ entschieden):
+  `wiedergabe = 0.05` (wie die Spec), `engagement = 0.005`, `reichweite = 0.1`; Gründe je Wert in
+  `config/pipeline.toml`. Engagement: e liegt um 0,05 mit Streuung ~0,01 – das pauschale 0,05 der Spec machte einen
+  Ausreißer fast wirkungslos (e 0,09 gegen 0,05 … 0,09: z 0,27 statt 1,35). **Achtung Reichweite:** 0,1 ist
+  *größer* als das 0,05 der Spec, dämpft also kleine Reichweiten-Unterschiede (1 100 gegen um 1 000 Views: z 0,64
+  statt 1,28, `tests.test_publikum`) – das ist eine eigene Wahl des Bauers, nicht Teil der Frage R3. Begründung:
+  v = ln(1 + Views) streut in ganzen Einheiten, 0,1 ≈ 10 % mehr Views gilt als Zufall der TikTok-Verteilung.
+  Bestätigt Florian 0,05 für die Reichweite, ändert sich nur `config/pipeline.toml` (und der Test).
 
 ### Stufe 1 – Annahmen der Bauer (Pakete a–g, kurz)
 - **a1** Merkmale eines Entwurf-Moments: mit clip_id aus `clips.merkmale`, sonst aus `momente.merkmale`, sonst {}; ein
@@ -481,16 +521,20 @@ Code („Annahme A11“ usw.); Stand nach der Nachbesserung durch das Prüfer-Pa
   Getrennter Betrieb wie auf dem Mini, Wecken/Netz gepatcht. **g4** Eine feste Uhr für alle Module (auch `db.jetzt`).
   **g5** Alter DB-Stand aus `schema.sql`, `regie.sql`, `lager.sql`. **g6** Zweiter Lauf = Timer am nächsten Tag.
 
-### Offene Rückfragen an Florian (Stufe 1, nach Wichtigkeit – ohne darauf zu warten)
+### Rückfragen an Florian (Stufe 1, nach Wichtigkeit) – R3–R5 entschieden am 25.09., R1, R2, A35 und A44 offen
 - **R1 Öffentliches Repo – persönliche Daten:** Epic-ID, MAC, Heimnetz-IPs durch Platzhalter ersetzen? (R2.0 hat
   Epic-ID und MAC inzwischen als Variable – beim Merge prüfen.) Historie umschreiben nur mit ausdrücklichem OK.
 - **R2 Zweite claude-Anmeldung für den Lern-Bot-Dienst** in `/var/lib/clip-pipeline/claude` (A17) – ok? Die frühere
   Variante „Dienst darf ins Home schreiben“ ist nach dem Panel verworfen.
-- **R3 MAD-Minimum 0,05** gilt für alle Komponenten gleich und dämpft das Engagement (typischer MAD 0,01–0,02) um
-  Faktor 2,5–5. Ein Minimum je Komponente in `[publikum]`?
-- **R4 Hand-Eingabe** kennt nur Views/Likes/Wiedergabe/voll%; Kommentare, Shares, Saves zählen dann 0 (A10). Optional
-  hinten anhängen – oder e ohne diese Zähler rechnen?
-- **R5 clip-battle.de für Entwürfe** als Merker in der Checkliste (ohne Post)? Bis dahin nur TikTok (A27).
+- ~~**R3 MAD-Minimum 0,05** gilt für alle Komponenten gleich und dämpft das Engagement (typischer MAD 0,01–0,02) um
+  Faktor 2,5–5. Ein Minimum je Komponente in `[publikum]`?~~ → **entschieden (Florian 25.09.): ja, je Komponente**
+  (`[publikum.mad_minimum]`). Die Werte wiedergabe 0,05 · engagement 0,005 · reichweite 0,1 sind **Annahme A44** –
+  bitte bestätigen, vor allem reichweite 0,1 (dämpft stärker als die Spec).
+- ~~**R4 Hand-Eingabe** kennt nur Views/Likes/Wiedergabe/voll%; Kommentare, Shares, Saves zählen dann 0 (A10).
+  Optional hinten anhängen – oder e ohne diese Zähler rechnen?~~ → **entschieden (Florian 25.09.): optional hinten
+  anhängen** (`… 34 3 5 2`, A41).
+- ~~**R5 clip-battle.de für Entwürfe** als Merker in der Checkliste (ohne Post)?~~ → **entschieden (Florian 25.09.):
+  nein**, keine clip-battle.de-Checkliste für Entwürfe (A27).
 - Niedrig: **A35** „kein Häkchen ohne Post“ im Clip-Bot so gewollt?
 
 ### Stufe 2 – Plan (S2-A1–S2-A19, Plan `docs/superpowers/plans/2026-09-25-lernschleife-stufe-2.md`)

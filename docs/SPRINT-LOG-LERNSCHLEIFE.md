@@ -29,6 +29,9 @@ Annahmen stehen **nicht** hier, sondern einmal in `docs/ENTSCHEIDUNGEN.md`, „A
     Ende an – beim Merge beide Blöcke behalten, R2.0 zuerst.
   - Drop-in mit nachgebautem `e19-puffer.conf` daneben: `systemd-analyze security --offline=true` meldet „read-only
     access to home directories“ (🧪).
+- Gesamtläufe (`python -m unittest discover -s tests -t .`):
+  - **Vor dem Sprint:** 495 Tests auf `main` nach Regisseur 2.0 (grün, 3 übersprungen – `docs/SPRINT-LOG.md`).
+  - **Nach ddec0d8** (Stufe 1 mit Nachbesserung, vor dem Merge mit main): `Ran 733 tests` / `OK (skipped=2)`.
 
 ### Befunde des Panels – bestätigt und behoben
 Wichtig:
@@ -129,8 +132,10 @@ begründet:
 - **„gestartet erst nach subprocess.run“:** korrigiert – bei einem Timeout lief claude wirklich, das zählt.
 
 ### Annahmen
-A1–A40 und die Annahmen der Bauer: `docs/ENTSCHEIDUNGEN.md`, „Annahmen im Sprint Lernschleife“. Neu in der
-Nachbesserung: A17 geändert (CLAUDE_CONFIG_DIR), A29 präzisiert, A35–A40. Rückfragen R1–R5 ebenda.
+A1–A44 und die Annahmen der Bauer: `docs/ENTSCHEIDUNGEN.md`, „Annahmen im Sprint Lernschleife“. Neu in der
+Nachbesserung: A17 geändert (CLAUDE_CONFIG_DIR), A29 präzisiert, A35–A40. Nach Florians Antworten (unten): A41–A43
+neu; A2, A10, A27, A28, A40 und die Rückfragen R3–R5 als entschieden markiert. Nach dem Merge-Prüfer: A44 (Werte der
+MAD-Minima). Weiter offen: R1, R2, A35, A44.
 
 ### 🏠 Braucht das echte System
 - Installation P1–P3 aus `docs/PUBLIKUM.md` (Code einspielen, beide Bots neu starten, Drop-in, zweite claude-Anmeldung,
@@ -144,6 +149,73 @@ Nachbesserung: A17 geändert (CLAUDE_CONFIG_DIR), A29 präzisiert, A35–A40. R�
 - Abnahme „Fertig, wenn“: ein echter TikTok-Post per Screenshot gemessen und bewertet (Score 0, „Basis zu klein“).
 - Wie die echte TikTok-Statistik aussieht (Prompt, Zeitangaben „0:07“) – hier nur mit gefälschten Claude-Antworten.
 
+### Merge mit main und Florians Antworten (25.09.)
+- **Merge:** bc314f5 holt `main` (Regisseur 2.0, Epic-ID/MAC als Variable) ohne Textkonflikte in den Branch;
+  eb43c53 Nacharbeit: Upload-Fassung nutzt die R2.0-Helfer `_zeile`/`_max_bytes`, neuer Test „Upload-Fassung mit
+  Effekten“, zwei Tests an R2.0 angepasst (`schema.pruefe` lehnt NaN ab; Hintergrund auf Viertelgröße).
+- **Florians Antworten – erledigt** (Commit „Stufe 1: Florians Antworten – MAD je Komponente, Hand-Eingabe erweitert,
+  Installation aus main“):
+  - ✅ **R3 MAD-Minimum je Komponente:** neue Tabelle `[publikum.mad_minimum]` (wiedergabe 0,05 · engagement 0,005 ·
+    reichweite 0,1 – die Werte sind Annahme A44, siehe „Befunde nach dem Merge“) mit Begründung in `config/pipeline.toml`, Beispiel in `config/lokal.beispiel.toml`.
+    `publikum.robust_z` bekommt das Minimum als Parameter (Formel weiter genau einmal), `score_fuer` gibt je Teil
+    sein Minimum mit und schreibt die benutzten in `score_teile.mad_minimum`. Fehlt die Tabelle oder ein Teil, oder
+    ist ein Wert keine Zahl bzw. ≤ 0 → KonfigFehler (CLI Exit 2). Tests mit dem Zahlenbeispiel der Begründung
+    (e 0,09 gegen 0,05 … 0,09: z ≈ 1,35 mit 0,005, ≈ 0,27 mit dem pauschalen 0,05), Reichweite (10 % mehr Views:
+    z ≈ 0,64 statt 1,28), Konfig-Fehler, `lokal.toml` überschreibt nur einen Teil.
+  - ✅ **R4 Hand-Eingabe erweitert:** `views likes wiedergabe voll%` bleibt; optional dahinter
+    `kommentare shares saves` (je Zahl oder „–“) – genau 4 oder 7 Werte (A41). Gilt für `lies_hand_eingabe`, den Text
+    „#17 …“ ohne Bild, die Bitte nach ✏️ und `/hilfe`; Bitte und Fehlertext sind ein Text (`publikum.HAND_HINWEIS`).
+    Die Plausibilität gilt auch für die drei neuen Felder. Tests: sieben Werte, „–“ dazwischen, vollständiges
+    Engagement, gesunkene Kommentare → Rückfrage, zu viele Felder, „1.240“ und negative Werte in den neuen Feldern.
+  - ✅ **L1–L6 ok:** die Arbeitstitel bleiben (A2 entschieden, kein Umnummerieren).
+  - ✅ **Keine clip-battle.de-Checkliste** für Entwürfe (R5): nichts zu bauen, A27 bleibt.
+  - ✅ **Installation aus main:** Stufe 1 kommt jetzt über einen eigenen PR nach `main` (Florian will sie sofort
+    einspielen). `docs/PUBLIKUM.md` „Bevor du anfängst“ geht davon aus – `git pull` aus `main` wie bisher, nicht erst
+    nach Stufe 5; Test `test_stufe_1_kommt_jetzt_aus_main`. README-Dateibaum um `screenshot` und `claude_aufruf`
+    ergänzt.
+  - Nebenbei (A42): `[publikum.gewichte]` wird mit derselben Hilfe gelesen – ein fehlendes Gewicht ist jetzt
+    KonfigFehler (Exit 2) statt eines KeyError, der als Fehler eines einzelnen Posts zählte.
+- **Testläufe** (`PYTHONPATH=src`):
+  - Vorher, `tests.test_publikum tests.test_publikum_cli tests.test_lernbot_zahlen tests.test_deploy_publikum
+    tests.test_ende_zu_ende_publikum` → `Ran 196 tests` / `OK`.
+  - Nachher, betroffene Module `tests.test_publikum tests.test_publikum_cli tests.test_lernbot_zahlen
+    tests.test_deploy_publikum tests.test_ende_zu_ende_publikum tests.test_lernbot_paket tests.test_screenshot
+    tests.test_bot_app tests.test_lernbot tests.test_secrets_dateien tests.test_keine_secrets tests.test_deploy_puffer`
+    → `Ran 406 tests in 244.966s` / `OK` (27 Tests neu); dieselben fünf Module wie „vorher“ nach den letzten
+    Doku-Änderungen → `Ran 223 tests` / `OK` (196 + 27).
+  - Gesamtlauf `python -m unittest discover -s tests -t .` → `Ran 853 tests in 1253.147s` / `OK (skipped=3)` (vorher
+    495 auf main, 733 nach ddec0d8; neu übersprungen ist der Leistungstest aus Regisseur 2.0,
+    `test_effekte_render`, der nur mit `CLIP_LEISTUNG=1` läuft).
+
+### Befunde nach dem Merge (Prüfer, 25.09.) – jeder selbst nachgeprüft
+1. **CLAUDE.md, Zeile unter L6, ist veraltet** (wichtig) – **bestätigt, aber nicht geändert:** Dort steht weiter
+   „bekommen beim Merge mit Regisseur 2.0 fortlaufende E-Nummern“ und „A1–A40, R1–R5 offen“; `git log -- CLAUDE.md`
+   endet bei ddec0d8, ea88402 hat nur ENTSCHEIDUNGEN.md, PUBLIKUM.md und dieses Log angepasst. CLAUDE.md ändern wir
+   nur nach Rückfrage (CLAUDE.md, „Wie wir zusammenarbeiten“) – **wartet auf Florians OK** für den Ersatz: „L1–L6
+   bleiben als Nummern (Florian 25.09.). Annahmen A1–A44 und Rückfragen (R3–R5 entschieden; R1, R2, A35, A44 offen):
+   `docs/ENTSCHEIDUNGEN.md`, ‚Annahmen im Sprint Lernschleife‘.“ Bis dahin sagt ENTSCHEIDUNGEN.md (L1–L6, A2)
+   ausdrücklich „kein Umnummerieren“. **Muss vor dem PR nach main erledigt sein.**
+   **Erledigt (b4e8d3e):** Florian hat „L1–L6 ok“ geantwortet; die Zeile in CLAUDE.md ist angepasst.
+2. **MAD-Minima als „entschieden (Florian)“ geführt, obwohl R3 nur nach „je Komponente“ fragte** (klein) –
+   **bestätigt:** Florians Wortlaut liegt weder im Repo noch in den Uploads; der Commit ea88402 nennt die Werte nur als
+   Umsetzung. Also nicht geraten: R3 ist nur als Prinzip „je Komponente“ entschieden, die Werte sind neu **A44** (mit
+   dem Hinweis, dass reichweite 0,1 *stärker* dämpft als die Spec: z 0,64 statt 1,28). `config/pipeline.toml` verweist
+   auf A44; Code und Werte unverändert.
+3. **Unterpunkt „Drop-in … systemd-analyze“ hing unter „Gesamtläufe“** (klein) – **bestätigt** (ea88402 hatte
+   „Gesamtläufe“ davor eingefügt) und behoben: wieder unter „Testläufe der Nachbesserung“.
+4. **Spec §6.3/§7.1 ohne Hinweis auf R3/R4** (klein) – **bestätigt** und behoben: je ein Vermerk „Geändert 25.09.“
+   mit Verweis auf ENTSCHEIDUNGEN.md (R3/A44, R4/A41); der Spec-Text bleibt sonst stehen.
+5. **/hilfe erklärte 💬 ↗️ 🔖 nicht** (klein) – **bestätigt** und behoben: `lernbot_publikum.ZEICHEN_ZEILE` wird aus
+   `publikum.SYMBOLE` in der Reihenfolge von `publikum.FELDER` erzeugt (eine Stelle; ein neues Feld erscheint von
+   selbst). Test zuerst: `tests.test_publikum_cli.Befehle.test_hilfe_mit_publikum_zusatz` prüft jedes Zeichen aus
+   `SYMBOLE` – vorher `FAILED (failures=4)`, nachher `Ran 42 tests` / `OK` (ganzes Modul).
+
+Verworfen: keiner.
+
+### Gesamtlauf nach den Befunden (3f48a49)
+- `PYTHONPATH=src python -m unittest $(ls tests/test_*.py | grep -v rette | sed …)` → `Ran 847 tests in 1247.011s` /
+  `OK (skipped=3)`. Ohne `tests.test_rette_skript` (6 Tests, bewusst ausgelassen) – mit ihm also dieselben 853 wie
+  beim `discover`-Lauf oben; die Befunde haben nur Subtests in einem vorhandenen Test ergänzt.
 ## Stufe 2 · Merkmale und eine Bewertung
 
 ### Stand

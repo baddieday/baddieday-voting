@@ -59,6 +59,13 @@ ANZEIGE_STELLEN = 1
 # /publikum-Zeile ❤️ und 👁 daneben zeigt und der Name sonst den eigenen Zahlen widerspräche (Annahme A36).
 TEIL_NAMEN = {"r": "Wiedergabe", "e": "Reaktionen je View", "v": "Views"}
 
+# Kurzname je Zeichen für die Legende in /hilfe: die Zähler wie in der TikTok-Statistik (publikum.ZAEHLER_NAMEN),
+# dazu die zwei Werte aus der App-Auswertung – so knapp, wie sie in der Hand-Eingabe-Zeile darüber heißen
+ZEICHEN_NAMEN = {**publikum.ZAEHLER_NAMEN, "wiedergabe_s": "Ø Wiedergabe", "voll_prozent": "ganz angesehen"}
+# Legende aus publikum.SYMBOLE erzeugt, in der Reihenfolge der Felder (publikum.FELDER): So erklärt /hilfe jedes
+# Zeichen, das Rückfrage und Bestätigung zeigen – auch 💬 ↗️ 🔖, seit du Kommentare, Shares, Saves selbst eintippst (R4)
+ZEICHEN_ZEILE = "Zeichen: " + " · ".join(f"{publikum.SYMBOLE[feld]} {ZEICHEN_NAMEN[feld]}" for feld in publikum.FELDER)
+
 # Anhang an lernbot.HILFE (HTML wie dort)
 HILFE_ZUSATZ = """
 📊 <b>Publikum (TikTok-Zahlen):</b>
@@ -66,8 +73,9 @@ HILFE_ZUSATZ = """
 🔗 /link <code>41 https://www.tiktok.com/@…/video/…</code> – Post zu Entwurf 41 anlegen, der Bot nennt die Post-Nummer.
 📸 Screenshot der TikTok-Statistik mit Bildunterschrift <code>#17</code> (Post-Nummer) – Claude liest die Zahlen.
 ✏️ Von Hand: <code>#17 1240 61 6.8 34</code> = Views, Likes, Ø Wiedergabe (s), ganz angesehen (%), „–“ = unbekannt.
+➕ Optional dahinter Kommentare, Shares, Saves: <code>#17 1240 61 6.8 34 3 5 2</code>
 /publikum – letzte Posts mit Zahlen und Score (sobald der Post alt genug ist – /publikum zeigt, ab wann).
-Zeichen: 👁 Views · ❤️ Likes · ⏱ Ø Wiedergabe · 🏁 ganz angesehen"""
+""" + ZEICHEN_ZEILE
 
 
 # --- Ruhezeit ----------------------------------------------------------------------------

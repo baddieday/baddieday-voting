@@ -23,6 +23,11 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # überschrieben: Posts, die in dieser Zeit bewertet werden, behalten ihre Tag-3-Messung.
 # [publikum]
 # alter_tage = 3
+# Scores reagieren dir zu stark oder zu schwach auf einen Teil? Kleinste Streuung je Teil (Standard und Begründung in
+# config/pipeline.toml, [publikum.mad_minimum]: wiedergabe 0.05, engagement 0.005, reichweite 0.1). Nur eintragen,
+# was du ändern willst; gilt nur für Scores, die danach gesetzt werden. Beispiel: Engagement-Ausreißer dämpfen:
+# [publikum.mad_minimum]
+# engagement = 0.01
 # Stufe 2 (docs/PUBLIKUM.md, S3/S4). Waffen-Nummern aus `pipeline replay <datei>` – GunType-ZAHLEN, keine Namen:
 # [merkmale.waffen]
 # sniper = [12]

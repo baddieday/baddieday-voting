@@ -70,10 +70,15 @@ Alles läuft auf dem Mini, im Puffer-Betrieb; **nichts davon weckt pve-big**. Ze
 - Geht immer, auch ohne Bild: `#17 1240 61 6.8 34` = Views, Likes, Ø Wiedergabe **in Sekunden**, „vollständig
   angesehen“ in Prozent. `–` (oder `-`) für unbekannt, Komma geht auch (`6,8`), `34%` auch. Zeigt TikTok die
   Wiedergabe als `0:07`, tippst du `7` – der Bot sagt es dir auch, wenn du `0:07` schickst.
-- Nach ✏️ oder wenn Claude nichts lesen konnte, reichen die vier Zahlen ohne `#17`: `1240 61 6.8 34`.
-- Views und Likes sind ganze Zahlen – `1.240` (mit Tausenderpunkt) lehnt der Bot ab, statt 1,24 daraus zu machen.
-- Kommentare, Shares und Saves kennt die Hand-Eingabe nicht; sie zählen dann als 0 (Vermerk „Engagement
-  unvollständig“). Wo es geht, lieber den Screenshot.
+- **Optional dahinter Kommentare, Shares, Saves:** `#17 1240 61 6.8 34 3 5 2`. Es sind also **4 oder 7** Zahlen –
+  kennst du nur einen der drei, die anderen mit `–` (`… 34 3 – 2`). Mit den dreien ist das Engagement vollständig;
+  ohne sie zählen sie als 0 (Vermerk „Engagement unvollständig“). 5, 6 oder mehr als 7 Zahlen lehnt der Bot ab,
+  damit keine Zahl still im falschen Feld landet.
+- Nach ✏️ oder wenn Claude nichts lesen konnte, reichen die Zahlen ohne `#17`: `1240 61 6.8 34` (oder mit
+  `3 5 2` dahinter).
+- Alle Zähler (Views, Likes, Kommentare, Shares, Saves) sind ganze Zahlen – `1.240` (mit Tausenderpunkt) lehnt der
+  Bot ab, statt 1,24 daraus zu machen. Auch die drei Zusatz-Zähler prüft er gegen die letzte Messung (sinken sie,
+  fragt er nach).
 - `[lernbot].screenshot_claude = false` schaltet Claude ganz ab – dann fragt der Bot gleich nach den Zahlen.
 
 ### 4. Der Publikums-Score – was die Zahl bedeutet
@@ -83,6 +88,13 @@ Drei Teile, jeweils gegen deinen **Median** der Vergleichsbasis (robust: ein Aus
 - **Reaktionen je View** (Engagement, 0,3): (Likes + 2 · Shares + Saves + Kommentare) / Views. Nicht nur die
   Likes – deshalb heißt es im Bot „Reaktionen“ (Annahme A36).
 - **Views** (Reichweite, 0,2): als Logarithmus – 10 000 statt 1 000 ist ein ähnlicher Schritt wie 1 000 statt 100.
+
+„Über“ oder „unter“ misst der Score in deiner **üblichen Streuung** (MAD = typischer Abstand zum Median, genauer:
+der Median aller Abstände – auch den wirft ein Ausreißer nicht um). Sind deine letzten Posts fast gleich, wäre sie
+fast 0 und jeder winzige Unterschied riesig – deshalb hat sie je Teil ein Minimum (`[publikum.mad_minimum]`:
+Wiedergabe 0,05 · Reaktionen je View 0,005 · Views 0,1). Je Teil, weil die Teile ganz verschieden streuen:
+Reaktionen je View liegen um 0,05 und streuen nur um 0,01 – mit einem Minimum von 0,05 wie bei der Wiedergabe
+hätte ein Post mit 0,09 statt z ≈ 1,35 nur 0,27 bekommen, fast wirkungslos.
 
 Ohne Wiedergabe werden Reaktionen je View und Views auf 0,6/0,4 hochgerechnet („ohne Wiedergabe“). Solange weniger als
 **5** bewertete Posts zum Vergleich da sind, ist der Score **0** mit Vermerk „Basis zu klein“ – aus dem Nichts wird
@@ -116,15 +128,16 @@ Ende der Ruhezeit (08:00) zurück; andere Lern-Bot-Meldungen (Abendstand, Fehler
 | CT | `pipeline publikum bewerten` | Scores aller fälligen Posts setzen (Timer `clip-publikum`, 10:00); weckt nie, keine Pipeline-Sperre |
 | Lern-Bot | `/publikum [anzahl]` | letzte Posts mit Zahlen und Score |
 | Lern-Bot | `/link <entwurf> <url>` | Post zu einem Entwurf anlegen bzw. Link korrigieren |
-| Lern-Bot | Foto mit `#17` · Text `#17 1240 61 6.8 34` | Zahlen per Screenshot bzw. von Hand |
+| Lern-Bot | Foto mit `#17` · Text `#17 1240 61 6.8 34` (optional `3 5 2` dahinter) | Zahlen per Screenshot bzw. von Hand |
 | Lern-Bot | `/hilfe` | alles oben in Kurzform |
 | Clip-Bot | Häkchen TikTok · `/link <clip> <url>` | wie bisher – legt zusätzlich den Post an (scheitert der Post, bleibt das Häkchen weg, Meldung mit Grund) |
 
 `pipeline publikum bewerten` hält den Vertrag aller Befehle ein: Logs auf stderr, letzte Zeile auf stdout = eine
 JSON-Zeile, z. B. `{"bewertet": 1, "ohne_messung": 0, "noch_zu_jung": 3, "fehler": 0, "posts": [{"id": 17,
 "score": 0.0}], "meldung": true}`. Exit 0 ok (auch: nichts fällig) · 1 mindestens ein Post nicht bewertbar (die
-anderen sind trotzdem bewertet) · 2 ein `[publikum]`-Schlüssel fehlt ganz. Beliebig oft aufrufbar – ein zweiter
-Lauf ändert nichts.
+anderen sind trotzdem bewertet) · 2 ein `[publikum]`-Schlüssel fehlt ganz, oder ein Wert in `[publikum.gewichte]`
+bzw. `[publikum.mad_minimum]` ist unbrauchbar (keine Zahl; ein Minimum nicht größer als 0). Beliebig oft
+aufrufbar – ein zweiter Lauf ändert nichts.
 
 ## Konfig-Schlüssel
 
@@ -144,6 +157,9 @@ Beispiel in `config/lokal.beispiel.toml`). `pipeline …` liest die Konfig bei j
 | `[publikum.gewichte].wiedergabe` | `0.5` | Gewicht der Wiedergabe im Score |
 | `[publikum.gewichte].engagement` | `0.3` | Gewicht der Reaktionen je View (Engagement) |
 | `[publikum.gewichte].reichweite` | `0.2` | Gewicht der Views |
+| `[publikum.mad_minimum].wiedergabe` | `0.05` | kleinste Streuung der Wiedergabe (Anteil des Videos) beim Vergleich – 5 Prozentpunkte |
+| `[publikum.mad_minimum].engagement` | `0.005` | kleinste Streuung der Reaktionen je View – die liegen um 0,05 und streuen um 0,01; größer = Ausreißer zählen weniger |
+| `[publikum.mad_minimum].reichweite` | `0.1` | kleinste Streuung der Views (als ln(1 + Views)) – 0,1 ≈ 10 % mehr Views. Alle drei müssen größer als 0 sein; gelten nur für Scores, die danach gesetzt werden |
 | `[lernbot].screenshot_claude` | `true` | Screenshots per `claude -p` lesen; `false` = gleich Hand-Eingabe |
 | `[lernbot].screenshot_prompt` | `"templates/screenshot-prompt.txt"` | fester Auftrag an Claude (was lesen, wie antworten); relativ zum Projektordner, nicht zu `[speicher].wurzel` |
 | `[lernbot].screenshot_timeout_s` | `120` | danach wird `claude` abgebrochen → Hand-Eingabe (der Aufruf zählt trotzdem, claude lief ja) |
@@ -162,8 +178,11 @@ das Drop-in lassen sich von `systemd-analyze verify` lesen, und mit einem nachge
 meldet `systemd-analyze security --offline=true` für den Lern-Bot „read-only access to home directories“ (🧪).
 
 **Bevor du anfängst:**
-- Der Sprint „Lernschleife Publikum“ ist in `main` (Draft-PR gemergt), und der Puffer-Betrieb aus
-  `docs/PUFFER.md` läuft (`[lager].wurzel` gesetzt) – die Upload-Fassung wird nur im Puffer gebaut.
+- **Stufe 1 kommt jetzt nach `main`** – über einen eigenen PR (Branch `lernschleife-publikum` → `main`), nicht erst
+  mit dem ganzen Sprint nach Stufe 5. Erst wenn du diesen PR gemergt hast, holst du `main` hier wie gewohnt mit
+  `git pull` (P1). Spätere Stufen kommen genauso: PR nach `main`, dann die Schritte, die ihre Anleitung nennt.
+- Der Puffer-Betrieb aus `docs/PUFFER.md` läuft (`[lager].wurzel` gesetzt) – die Upload-Fassung wird nur im Puffer
+  gebaut.
 - Keine neuen Pakete, keine neuen Secrets (`.env` bleibt, wie sie ist).
 - Nicht während eines Spielabends (Bots werden kurz neu gestartet).
 - **Aus welchem Checkout läuft der Lern-Bot?** `systemctl cat clip-lernbot | grep -E 'WorkingDirectory|ExecStart'`.
@@ -452,14 +471,15 @@ einmal `pipeline stimmung --clips --max 5` von Hand.
   alt ist → Meldung im Lern-Bot.
 - **Nachsehen:** `/publikum` im Lern-Bot. Genauer, im CT:
   `sudo -u pipeline sqlite3 /var/lib/clip-pipeline/pipeline.db "SELECT id, ziel, score, score_teile FROM posts ORDER BY id DESC LIMIT 5"`
-  – `score_teile` enthält alle Zwischenwerte (r, e, v, z-Werte, Median und MAD der Basis, welche Messung).
+  – `score_teile` enthält alle Zwischenwerte (r, e, v, z-Werte, Median und MAD der Basis, die benutzten Gewichte
+  und MAD-Minima, welche Messung).
 - **Kosten:** ein `claude -p` je Screenshot; die Wochenzahl steht in der letzten Zeile von `/publikum`.
 - **Nichts wird gelöscht:** Posts und Messungen bleiben; nur die Screenshots selbst verschwinden nach der Auswertung.
 
 ## Was tun, wenn …
 
-- **… Claude die Zahlen nicht lesen konnte?** Der Bot fragt dann gleich nach der Hand-Eingabe – die vier Zahlen
-  schicken. Passiert es immer:
+- **… Claude die Zahlen nicht lesen konnte?** Der Bot fragt dann gleich nach der Hand-Eingabe – die 4 (oder 7)
+  Zahlen schicken. Passiert es immer:
   P2 prüfen (`journalctl -u clip-lernbot -n 50`, Probe mit `systemd-run`), Anmeldung in
   `/var/lib/clip-pipeline/claude` abgelaufen? Übergangsweise `[lernbot].screenshot_claude = false`.
 - **… der Bot „🗑 Rückfrage zu #17 verworfen – NICHT gespeichert“ sagt?** Du hast etwas Neues geschickt, während er
@@ -478,7 +498,9 @@ einmal `pipeline stimmung --clips --max 5` von Hand.
   float“, ist ein `[publikum]`-Wert in `lokal.toml` keine Zahl (z. B. `alter_tage = "drei"`) – korrigieren, dann
   nochmal laufen lassen.
 - **… Exit 2 kommt?** Ein `[publikum]`-Schlüssel fehlt ganz (meist nach einem Update: `pipeline.toml` des Checkouts
-  prüfen) – die JSON-Zeile nennt ihn. Achtung: Ein **vertippter** Name oder Abschnitt in `lokal.toml` (z. B.
+  prüfen) – die JSON-Zeile nennt ihn. Ebenso, wenn in `[publikum.gewichte]` oder `[publikum.mad_minimum]` ein Wert
+  keine Zahl ist (z. B. `engagement = "0,005"` mit Anführungszeichen und Komma) oder ein Minimum 0 bzw. negativ ist –
+  die JSON-Zeile nennt den Schlüssel, z. B. `[publikum.mad_minimum].engagement`. Achtung: Ein **vertippter** Name oder Abschnitt in `lokal.toml` (z. B.
   `alter_tag`, `[publkum]`) gibt **keinen** Fehler – er wird still ignoriert, und der Standard aus `pipeline.toml`
   gilt weiter.
 - **… `/publikum` „Score kommt beim nächsten Lauf“ sagt, aber nach 10:00 nichts passiert?** Meist steht

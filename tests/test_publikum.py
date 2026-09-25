@@ -20,6 +20,10 @@ from tests.hilfen import MitSpeicher
 
 T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 TIKTOK_LINK = "https://www.tiktok.com/@baddieday/video/7300123456789012345"
+# [publikum.mad_minimum] der Tests – ausgeschrieben (nicht aus pipeline.toml gelesen), damit eine Änderung der
+# Standardwerte nicht still die erwarteten Zahlen verschiebt; dass pipeline.toml genau diese Werte hat, prüft
+# MadMinimumKonfig.test_standardwerte_in_pipeline_toml
+MAD_MINIMUM = {"wiedergabe": 0.05, "engagement": 0.005, "reichweite": 0.1}
 
 
 def tag(n: float) -> datetime:
@@ -34,6 +38,7 @@ class MitPublikum(MitSpeicher):
         super().setUp()
         self.konfig.daten["publikum"].update(plattformen=["tiktok"], alter_tage=7, mindest_alter_tage=3, fenster=20)
         self.konfig.daten["publikum"]["gewichte"] = {"wiedergabe": 0.5, "engagement": 0.3, "reichweite": 0.2}
+        self.konfig.daten["publikum"]["mad_minimum"] = dict(MAD_MINIMUM)
         self.konfig.daten["shorts"].update(endcard=True, endcard_s=2.5)
         self._naechstes_ziel = 1000
 
@@ -128,30 +133,60 @@ class Komponenten(MitPublikum):
 
 
 class RobustZ(MitPublikum):
+    # Engagement-Werte wie in der Begründung von [publikum.mad_minimum]: 0,05 … 0,09, echter MAD 0,01
+    ENGAGEMENT = [0.05, 0.06, 0.07, 0.08, 0.09]
+
     def test_median_mad_beispiel(self):
-        z, median, mad = publikum.robust_z(5, [1, 2, 3, 4, 5])
+        z, median, mad = publikum.robust_z(5, [1, 2, 3, 4, 5], 0.1)
         self.assertEqual((median, mad), (3, 1))
         self.assertAlmostEqual(z, 2 / 1.4826)
         self.assertAlmostEqual(z, 1.349, places=3)
 
-    def test_mad_minimum_bei_realistischem_engagement(self):
-        # Engagement 5–9 %: echter MAD 0,01 – gerechnet wird mit 0,05, das dämpft z um Faktor 5
-        z, median, mad = publikum.robust_z(0.09, [0.05, 0.06, 0.07, 0.08, 0.09])
+    def test_engagement_minimum_laesst_den_echten_mad_zaehlen(self):
+        """Zahlenbeispiel aus der Begründung (Florian 25.09.): Mit dem Engagement-Minimum 0,005 zählt der echte MAD
+        0,01 – ein Ausreißer mit e 0,09 bekommt z ≈ 1,35."""
+        z, median, mad = publikum.robust_z(0.09, self.ENGAGEMENT, MAD_MINIMUM["engagement"])
         self.assertAlmostEqual(median, 0.07)
-        self.assertAlmostEqual(mad, 0.01)                       # ehrlich: der gemessene MAD, nicht 0,05
+        self.assertAlmostEqual(mad, 0.01)
+        self.assertAlmostEqual(z, 0.02 / (1.4826 * 0.01))
+        self.assertAlmostEqual(z, 1.35, places=2)
+
+    def test_pauschales_minimum_der_spec_haette_gedaempft(self):
+        """Dasselbe mit dem pauschalen 0,05 aus Spec §6.3: z nur ≈ 0,27 – der Grund für das Minimum je Teil."""
+        z, _, mad = publikum.robust_z(0.09, self.ENGAGEMENT, 0.05)
+        self.assertAlmostEqual(mad, 0.01)                       # ehrlich: der gemessene MAD, nicht das Minimum
         self.assertAlmostEqual(z, 0.02 / (1.4826 * 0.05))
-        self.assertAlmostEqual(z, 0.27, places=2)               # ohne Minimum wären es 1,35
+        self.assertAlmostEqual(z, 0.27, places=2)
+
+    def test_minimum_greift_bei_fast_gleichen_posts(self):
+        # Engagement fast gleich (MAD 0,001 < 0,005): gerechnet wird mit dem Minimum – mit dem echten MAD wäre z
+        # schon bei 0,008 Unterschied 5,4 (und damit auf 2,5 begrenzt)
+        z, median, mad = publikum.robust_z(0.060, [0.050, 0.051, 0.052, 0.053, 0.054], MAD_MINIMUM["engagement"])
+        self.assertAlmostEqual(median, 0.052)
+        self.assertAlmostEqual(mad, 0.001)
+        self.assertAlmostEqual(z, 0.008 / (1.4826 * 0.005))
+        self.assertAlmostEqual(z, 1.08, places=2)
+
+    def test_reichweite_streut_in_ganzen_einheiten(self):
+        # Fünf Posts mit genau 1 000 Views (MAD 0), der neue hat 10 % mehr: v-Abstand ln(1101/1001) ≈ 0,095.
+        # Mit dem Reichweiten-Minimum 0,1 ergibt das z ≈ 0,64 – mit 0,05 wären es schon 1,28.
+        basis = [math.log1p(1000)] * 5
+        z, _, mad = publikum.robust_z(math.log1p(1100), basis, MAD_MINIMUM["reichweite"])
+        self.assertEqual(mad, 0.0)
+        self.assertAlmostEqual(z, math.log(1101 / 1001) / (1.4826 * 0.1))
+        self.assertAlmostEqual(z, 0.64, places=2)
+        self.assertAlmostEqual(publikum.robust_z(math.log1p(1100), basis, 0.05)[0], 1.28, places=2)
 
     def test_begrenzung_auf_plus_minus_2_5(self):
-        self.assertEqual(publikum.robust_z(100, [1, 2, 3, 4, 5])[0], 2.5)
-        self.assertEqual(publikum.robust_z(-100, [1, 2, 3, 4, 5])[0], -2.5)
+        self.assertEqual(publikum.robust_z(100, [1, 2, 3, 4, 5], 0.1)[0], 2.5)
+        self.assertEqual(publikum.robust_z(-100, [1, 2, 3, 4, 5], 0.1)[0], -2.5)
 
     def test_gleiche_werte_ergeben_null(self):
-        self.assertEqual(publikum.robust_z(3, [3, 3, 3, 3, 3])[0], 0.0)
+        self.assertEqual(publikum.robust_z(3, [3, 3, 3, 3, 3], 0.1)[0], 0.0)
 
     def test_leere_basis_ist_ein_fehler(self):
         with self.assertRaises(ValueError):
-            publikum.robust_z(1.0, [])
+            publikum.robust_z(1.0, [], 0.1)
 
 
 # --- Messung wählen, Fälligkeit, Vergleichsbasis --------------------------------------------------------
@@ -292,11 +327,12 @@ class Score(MitPublikum):
             self.assertAlmostEqual(teile["gewichte"][teil], gewicht)
 
     def test_normaler_score_zahlenbeispiel(self):
-        # Basis r 0,1…0,5 (Median 0,3, MAD 0,1), e 0,01…0,05 (Median 0,03, MAD 0,01 → Minimum 0,05), v 1…5
+        # Basis r 0,1…0,5 (Median 0,3, MAD 0,1), e 0,01…0,05 (Median 0,03, MAD 0,01), v 1…5 (Median 3, MAD 1) –
+        # alle drei MADs liegen über ihrem Minimum (0,05 / 0,005 / 0,1), es zählt also der echte MAD
         score, teile = self.score(self.basis(5), views=math.e ** 5 - 1, likes=0.05 * (math.e ** 5 - 1),
                                   kommentare=0, shares=0, saves=0, wiedergabe_s=10.0)
         z_r = (0.5 - 0.3) / (1.4826 * 0.1)
-        z_e = (0.05 - 0.03) / (1.4826 * 0.05)
+        z_e = (0.05 - 0.03) / (1.4826 * 0.01)
         z_v = (5 - 3) / (1.4826 * 1)
         self.assertAlmostEqual(teile["z_r"], z_r)
         self.assertAlmostEqual(teile["z_e"], z_e)
@@ -332,10 +368,46 @@ class Score(MitPublikum):
         self.assertEqual(teile["basis_n_r"], 5)
         self.assertAlmostEqual(score, 0.5 * teile["z_r"] + 0.3 * teile["z_e"] + 0.2 * teile["z_v"], places=4)
 
+    def test_jeder_teil_mit_seinem_minimum(self):
+        """Florian 25.09.: MAD-Minimum je Teil. Fünf gleiche Vergleichsposts (jeder MAD 0) – jeder Teil wird mit
+        SEINEM Minimum gerechnet, und score_teile nennt die benutzten Minima."""
+        basis = [{"post_id": i, "r": 0.30, "e": 0.05, "v": 7.0} for i in range(5)]
+        views = math.e ** 7.2 - 1                                     # v = ln(1 + views) = 7,2
+        score, teile = self.score(basis, views=views, likes=0.06 * views, kommentare=0, shares=0, saves=0,
+                                  wiedergabe_s=7.0)                   # r = 7 / 20 = 0,35 · e = 0,06
+        self.assertEqual(teile["mad_minimum"], {"r": 0.05, "e": 0.005, "v": 0.1})
+        self.assertEqual((teile["mad_r"], teile["mad_e"], teile["mad_v"]), (0.0, 0.0, 0.0))  # gemessen, ehrlich
+        z_r = 0.05 / (1.4826 * 0.05)     # ≈ 0,67
+        z_e = 0.01 / (1.4826 * 0.005)    # ≈ 1,35
+        z_v = 0.2 / (1.4826 * 0.1)       # ≈ 1,35
+        for teil, erwartet in (("z_r", z_r), ("z_e", z_e), ("z_v", z_v)):
+            with self.subTest(teil):
+                self.assertAlmostEqual(teile[teil], erwartet)
+        self.assertAlmostEqual(score, 0.5 * z_r + 0.3 * z_e + 0.2 * z_v, places=4)
+        self.assertAlmostEqual(score, 1.01, places=2)
+
+    def test_minimum_kommt_aus_der_konfig(self):
+        # Ein größeres Engagement-Minimum in lokal.toml dämpft nur z_e – r und v bleiben, wie sie sind
+        basis = [{"post_id": i, "r": 0.30, "e": 0.05, "v": 7.0} for i in range(5)]
+        views = math.e ** 7.2 - 1
+        werte = dict(views=views, likes=0.06 * views, kommentare=0, shares=0, saves=0, wiedergabe_s=7.0)
+        _, vorher = self.score(basis, **werte)
+        self.konfig.daten["publikum"]["mad_minimum"]["engagement"] = 0.01
+        _, nachher = self.score(basis, **werte)
+        self.assertAlmostEqual(nachher["z_e"], 0.01 / (1.4826 * 0.01))   # ≈ 0,67 statt 1,35
+        self.assertAlmostEqual(nachher["z_e"], vorher["z_e"] / 2)
+        self.assertEqual((nachher["z_r"], nachher["z_v"]), (vorher["z_r"], vorher["z_v"]))
+        self.assertEqual(nachher["mad_minimum"]["e"], 0.01)
+
+    def test_basis_zu_klein_nennt_die_minima_auch(self):
+        # Auch ein Score 0 („Basis zu klein“) trägt die Minima, mit denen gerechnet worden wäre (eine Form für alle)
+        _, teile = self.score(self.basis(2), views=100, likes=5, wiedergabe_s=10.0)
+        self.assertEqual(teile["mad_minimum"], {"r": 0.05, "e": 0.005, "v": 0.1})
+
     def test_score_teile_vollstaendig(self):
         _, teile = self.score(self.basis(6), views=100, likes=5, wiedergabe_s=10.0)
         for feld in ("r", "e", "v", "z_r", "z_e", "z_v", "median_r", "mad_r", "median_e", "mad_e", "median_v",
-                     "mad_v", "messung_id", "messung_alter_tage", "basis_n", "basis_n_r", "vermerke"):
+                     "mad_v", "mad_minimum", "messung_id", "messung_alter_tage", "basis_n", "basis_n_r", "vermerke"):
             self.assertIn(feld, teile)
         self.assertEqual(teile["messung_id"], 7)
         self.assertAlmostEqual(teile["messung_alter_tage"], 7.1)
@@ -641,11 +713,40 @@ class HandEingabe(MitPublikum):
         self.assertEqual(publikum.lies_hand_eingabe("1240 - 6,8 -")["likes"], None)
         self.assertIsInstance(publikum.lies_hand_eingabe("1240 61 6,8 34")["views"], int)
 
+    def test_sieben_zahlen_mit_kommentaren_shares_saves(self):
+        # Florian 25.09. (R4): optional dahinter Kommentare, Shares, Saves
+        self.assertEqual(publikum.lies_hand_eingabe("1240 61 6,8 34 3 5 2"),
+                         {"views": 1240, "likes": 61, "kommentare": 3, "shares": 5, "saves": 2,
+                          "wiedergabe_s": 6.8, "voll_prozent": 34.0})
+        werte = publikum.lies_hand_eingabe("1240 61 6,8 34 3 – 2")          # Shares unbekannt
+        self.assertEqual((werte["kommentare"], werte["shares"], werte["saves"]), (3, None, 2))
+        self.assertIsInstance(werte["kommentare"], int)
+
+    def test_mit_zusatz_ist_das_engagement_vollstaendig(self):
+        # Wozu die drei Zahlen gut sind: e = (61 + 2·5 + 2 + 3) / 1240 statt nur 61 / 1240 mit Vermerk (A10)
+        kurz = publikum.komponenten(publikum.lies_hand_eingabe("1240 61 6,8 34"), 20.0)
+        lang = publikum.komponenten(publikum.lies_hand_eingabe("1240 61 6,8 34 3 5 2"), 20.0)
+        self.assertAlmostEqual(kurz["e"], 61 / 1240)
+        self.assertIn("Engagement unvollständig", kurz["vermerke"])
+        self.assertAlmostEqual(lang["e"], 76 / 1240)
+        self.assertEqual(lang["vermerke"], [])
+
+    def test_plausibilitaet_gilt_auch_fuer_die_zusatz_zaehler(self):
+        werte = publikum.lies_hand_eingabe("1240 61 6,8 34 3 5 2")
+        letzte = {"views": 1000, "likes": 50, "kommentare": 10, "shares": 5, "saves": 4}
+        self.assertEqual(publikum.pruefe_plausibel(werte, letzte, 20.0),
+                         ["Kommentare gesunken: 10 → 3", "Saves gesunken: 4 → 2"])
+
     def test_fehler_mit_text(self):
-        for text, stichwort in (("1240 61 6.8", "vier"), ("1240 61 6.8 34 5", "vier"), ("", "vier"),
+        for text, stichwort in (("1240 61 6.8", "4 oder 7 werte, nicht 3"), ("1240 61 6.8 34 5", "nicht 5"),
+                                ("1240 61 6.8 34 3 5", "nicht 6"), ("", "nicht 0"),
+                                ("1240 61 6.8 34 3 5 2 9", "4 oder 7 werte, nicht 8"),   # zu viele Felder
                                 ("1240 viele 6.8 34", "viele"), ("1240 -61 6.8 34", "negativ"),
                                 ("12.5 61 6.8 34", "ganze"), ("1240 61 nan 34", "nan"),
-                                ("1240 61 inf 34", "inf")):
+                                ("1240 61 inf 34", "inf"),
+                                # dieselben Regeln für die drei Zusatz-Zähler
+                                ("1240 61 6,8 34 1.240 5 2", "kommentare müssen eine ganze zahl sein"),
+                                ("1240 61 6,8 34 3 -5 2", "negativ"), ("1240 61 6,8 34 3 5 x", "keine zahl")):
             with self.subTest(text=text):
                 with self.assertRaises(ValueError) as fehler:
                     publikum.lies_hand_eingabe(text)
@@ -664,8 +765,23 @@ class HandEingabe(MitPublikum):
     def test_falsche_anzahl_nennt_die_form_mit_einheiten(self):
         with self.assertRaises(ValueError) as fehler:
             publikum.lies_hand_eingabe("1240 61")
-        self.assertIn(publikum.HAND_FORM, str(fehler.exception))
+        self.assertIn(publikum.HAND_HINWEIS, str(fehler.exception))
+        self.assertIn(publikum.HAND_FORM, publikum.HAND_HINWEIS)
+        self.assertIn(publikum.HAND_FORM_ZUSATZ, publikum.HAND_HINWEIS)   # die Zusatz-Zähler sind erklärt
         self.assertIn("Sekunden", publikum.HAND_FORM)
+        self.assertNotIn("{", publikum.HAND_HINWEIS)  # geht durch str.format (lernbot_zahlen.HAND_BITTE)
+
+    def test_beispiele_im_hinweis_sind_gueltig(self):
+        # Was die Erklärung als Beispiel nennt, muss der Bot auch annehmen
+        for beispiel in ("1240 61 6,8 34", "1240 61 6,8 34 3 5 2"):
+            with self.subTest(beispiel):
+                self.assertIn(f"„{beispiel}“", publikum.HAND_HINWEIS)
+                publikum.lies_hand_eingabe(beispiel)
+
+    def test_erlaubte_formen(self):
+        self.assertEqual(publikum.HAND_FORMEN,
+                         {4: ("views", "likes", "wiedergabe_s", "voll_prozent"),
+                          7: ("views", "likes", "wiedergabe_s", "voll_prozent", "kommentare", "shares", "saves")})
 
 
 class Anzeige(MitPublikum):
@@ -706,6 +822,74 @@ class Einstellung(MitPublikum):
                                7 + 2 / 24)
         self.assertAlmostEqual(publikum.alter_in_tagen(gepostet, iso(datetime(2026, 9, 19, 10, 0, tzinfo=UTC))),
                                1.0)
+
+
+class MadMinimumKonfig(MitPublikum):
+    """[publikum.mad_minimum] (Florian 25.09.): fehlt die Tabelle oder ein Teil, oder ist ein Wert unbrauchbar, ist
+    die Konfiguration kaputt → KonfigFehler, wie bei jedem anderen [publikum]-Schlüssel (CLI: Exit 2)."""
+
+    def score(self):
+        basis = [{"post_id": i, "r": 0.3, "e": 0.05, "v": 7.0} for i in range(5)]
+        post_zeile = {"id": 99, "gepostet_utc": iso(T0), "dauer_s": 20.0}
+        messung = {"id": 7, "gemessen_utc": iso(tag(7)), "views": 1000, "likes": 50, "wiedergabe_s": 6.0}
+        return publikum.score_fuer(post_zeile, [messung], basis, self.konfig)
+
+    def test_standardwerte_in_pipeline_toml(self):
+        import tomllib
+
+        standard = tomllib.loads(konfig.STANDARD_KONFIG.read_text(encoding="utf-8"))
+        self.assertEqual(standard["publikum"]["mad_minimum"], MAD_MINIMUM)
+
+    def test_tabelle_fehlt(self):
+        del self.konfig.daten["publikum"]["mad_minimum"]
+        with self.assertRaisesRegex(konfig.KonfigFehler, r"\[publikum\]\.mad_minimum fehlt"):
+            self.score()
+
+    def test_teil_fehlt(self):
+        del self.konfig.daten["publikum"]["mad_minimum"]["engagement"]
+        with self.assertRaisesRegex(konfig.KonfigFehler, r"\[publikum\.mad_minimum\]\.engagement fehlt"):
+            self.score()
+
+    def test_unbrauchbare_werte(self):
+        # 0 und negativ: robust_z teilte bei gleichen Posts durch 0 bzw. drehte das Vorzeichen um; nan/inf sind
+        # keine Streuung; "0,005" (Text mit Komma) und true sind keine Zahlen
+        for wert, stichwort in ((0, "größer als 0"), (-0.1, "größer als 0"), (float("nan"), "größer als 0"),
+                                (float("inf"), "größer als 0"), ("0,005", "keine Zahl"), (True, "keine Zahl")):
+            with self.subTest(wert=wert):
+                self.konfig.daten["publikum"]["mad_minimum"] = {**MAD_MINIMUM, "engagement": wert}
+                with self.assertRaisesRegex(konfig.KonfigFehler, stichwort):
+                    self.score()
+
+    def test_keine_tabelle(self):
+        self.konfig.daten["publikum"]["mad_minimum"] = 0.05   # alte Form „ein Wert für alle“
+        with self.assertRaisesRegex(konfig.KonfigFehler, "Tabelle"):
+            self.score()
+
+    def test_bewerte_alle_bricht_ab_statt_den_post_als_fehler_zu_zaehlen(self):
+        # Eine kaputte Konfig betrifft jeden Post – das ist kein Fehler EINES Posts (Exit 1), sondern Exit 2
+        p = self.post(gepostet=tag(0))
+        self.messung(p, tag(7), views=500, likes=20, wiedergabe_s=6.0)
+        del self.konfig.daten["publikum"]["mad_minimum"]
+        with self.assertRaises(konfig.KonfigFehler):
+            publikum.bewerte_alle(self.con, self.konfig, tag(8))
+        self.assertIsNone(publikum.post(self.con, p)["bewertet_utc"])    # nichts halb gespeichert
+
+    def test_gewichte_werden_genauso_geprueft(self):
+        # Dieselbe Prüfung (publikum._je_teil) für [publikum.gewichte]: vorher wurde ein fehlender Teil ein KeyError
+        # und zählte als Fehler EINES Posts
+        del self.konfig.daten["publikum"]["gewichte"]["reichweite"]
+        with self.assertRaisesRegex(konfig.KonfigFehler, r"\[publikum\.gewichte\]\.reichweite fehlt"):
+            self.score()
+
+    def test_lokal_toml_ueberschreibt_nur_den_einen_teil(self):
+        """Wie in config/lokal.beispiel.toml beschrieben: nur engagement eintragen – die anderen Minima bleiben
+        (lokal.toml wird Abschnitt für Abschnitt in pipeline.toml gemischt, konfig._mische)."""
+        ordner = self.tmp / "config"
+        ordner.mkdir()
+        (ordner / "pipeline.toml").write_text(konfig.STANDARD_KONFIG.read_text(encoding="utf-8"), encoding="utf-8")
+        (ordner / "lokal.toml").write_text("[publikum.mad_minimum]\nengagement = 0.01\n", encoding="utf-8")
+        geladen = konfig.lade(ordner / "pipeline.toml")
+        self.assertEqual(publikum._mad_minima(geladen), {"r": 0.05, "e": 0.01, "v": 0.1})
 
 
 # --- Rezept und Post-Daten -----------------------------------------------------------------------------

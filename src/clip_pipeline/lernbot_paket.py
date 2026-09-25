@@ -15,7 +15,7 @@ Regeln (Annahmen A5, A26, A27 – docs/ENTSCHEIDUNGEN.md, „Annahmen im Sprint 
   - Nur 👍-Entwürfe im Format "short" bekommen Paket, Häkchen und Post („kein Short ohne deine Freigabe“; ein
     Zusammenschnitt 16:9 liefert kein Publikumssignal, Spec §9.1). Andere → kurzer Hinweis, kein Post.
   - Die Checkliste nennt nur die Post-Plattformen ([publikum].plattformen); clip-battle.de bekommt für Entwürfe
-    (noch) keinen Punkt (offene Rückfrage R5, docs/ENTSCHEIDUNGEN.md).
+    keinen Punkt (Florian 25.09., Rückfrage R5 in docs/ENTSCHEIDUNGEN.md: keine clip-battle.de-Checkliste).
   - Der Stand je Plattform liegt in `posts` (veroeffentlichungen bleibt Clip-Sache), nachgesehen mit
     publikum.post_zu – kein eigenes SQL gegen posts.
   - Links erkennt bot.aktionen.plattform_aus_url (nur https, bekannte Domains) – dieselbe Regel wie im Clip-Bot.

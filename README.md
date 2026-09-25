@@ -129,6 +129,7 @@ src/clip_pipeline/       verarbeitung (prepare/analyze/decide/render) · quellen
                          caption · elo · lernen · aufraeumen · erfassung · schema + schemas/ · db + schema.sql
                          sperre (flock) · cli · bot/ (texte, aktionen, app)
                          Lernschleife: publikum (+ publikum.sql) · lernbot_zahlen · lernbot_paket · lernbot_publikum
+                         · screenshot (Zahlen aus dem Bild lesen) · claude_aufruf (claude -p mit Schema, gezählt)
                          · merkmale (Replay-/Mic-Merkmale) · mikro (Mic-Schritt) · erwartung
 tools/replay2json/       Replay -> JSON (C#)
 windows/                 Übertragung Gaming-PC -> großer Host (+ Meldung an n8n)

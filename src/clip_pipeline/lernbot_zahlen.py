@@ -10,10 +10,11 @@ So läuft es für dich:
      sie gespeichert und der Bot bestätigt sie. Sonst zeigt er die gelesenen Zahlen, nennt den Verstoß und fragt
      „Stimmt das? ✅ / ✏️ von Hand“ (`pm:<post_id>:ok` / `pm:<post_id>:hand`).
   3. Hand-Eingabe (wenn [lernbot].screenshot_claude = false, Claude nichts lesen konnte oder du ✏️ tippst): du
-     antwortest mit `views likes wiedergabe voll%` (Wiedergabe in Sekunden, publikum.HAND_FORM), z. B.
-     `1240 61 6.8 34` („–“ für unbekannt). Ganz ohne Bild
-     geht es auch: `#17 1240 61 6.8 34` als Text. Auch Hand-Zahlen prüft der Bot gegen die letzte Messung (ein
-     Tippfehler lässt sonst die Views „sinken“) und fragt bei einem Verstoß mit denselben Knöpfen nach.
+     antwortest mit `views likes wiedergabe voll%` (Wiedergabe in Sekunden), z. B. `1240 61 6.8 34`, und wenn du
+     sie hast, dahinter `kommentare shares saves`: `1240 61 6.8 34 3 5 2` („–“ für unbekannt; die ganze
+     Erklärung steht in publikum.HAND_HINWEIS). Ganz ohne Bild geht es auch: `#17 1240 61 6.8 34` als Text (ebenso
+     mit sieben Werten). Auch Hand-Zahlen prüft der Bot gegen die letzte Messung (ein Tippfehler lässt sonst die
+     Views „sinken“) und fragt bei einem Verstoß mit denselben Knöpfen nach.
      Wartet der Bot auf eine Antwort zu gelesenen Zahlen, darfst du statt ✏️ auch gleich die richtigen Zahlen
      schicken.
 
@@ -82,7 +83,8 @@ ZUSTAND = "publikum"
 RUECKFRAGE_ANTWORTEN = ("ok", "hand")
 # „#17“ irgendwo in einer Bildunterschrift; \b: „#17abc“ ist keine Nummer
 POST_NUMMER = re.compile(r"#(\d+)\b")
-# Messungs-Text „#17 1240 61 6.8 34“: die Nummer ganz vorn, der Rest geht an publikum.lies_hand_eingabe
+# Messungs-Text „#17 1240 61 6.8 34“ (oder mit sieben Werten): die Nummer ganz vorn, der Rest geht an
+# publikum.lies_hand_eingabe
 MESSUNGS_TEXT = re.compile(r"^\s*#(\d+)\b(.*)$", re.DOTALL)
 
 # Telegram liefert Fotos immer als JPEG, in mehreren Größen – die letzte ist die größte (Zahlen am besten lesbar)
@@ -95,8 +97,9 @@ EINGANG_STAMM = "eingang"
 
 # Anzeige in Knöpfen und Meldungen (Art-Namen, Symbole und Zahlformat kommen aus publikum – eine Stelle)
 QUELLEN_NAMEN = {"screenshot": "Screenshot", "hand": "von Hand"}
-HAND_BITTE = ("✏️ Bitte die Zahlen für #{nr} von Hand: " + publikum.HAND_FORM + " – z. B. „1240 61 6,8 34“, "
-              "„–“ für unbekannt.")
+# Bitte um die Hand-Eingabe: Form und Beispiele aus publikum.HAND_HINWEIS – derselbe Text wie in jeder Fehlermeldung
+# von lies_hand_eingabe, damit du nie zwei verschiedene Erklärungen siehst
+HAND_BITTE = "✏️ Bitte die Zahlen für #{nr} von Hand: " + publikum.HAND_HINWEIS
 UNVERSTANDEN = ("🤔 Das verstehe ich nicht. Zahlen für einen Post: Screenshot mit #Nummer in der Bildunterschrift "
                 "oder Text „#17 1240 61 6,8 34“. Mehr unter /hilfe.")
 
@@ -110,8 +113,9 @@ def post_nummer_aus_text(text: str | None) -> int | None:
 
 
 def lies_text_eingabe(text: str) -> tuple[int, dict] | None:
-    """Hand-Eingabe ohne Bild: „#17 1240 61 6.8 34“ → (17, Werte wie publikum.lies_hand_eingabe). Fehlt die
-    #Nummer am Anfang → None (dann ist es kein Messungs-Text). ValueError aus lies_hand_eingabe bei kaputten Zahlen
+    """Hand-Eingabe ohne Bild: „#17 1240 61 6.8 34“ → (17, Werte wie publikum.lies_hand_eingabe); mit sieben
+    Werten „#17 1240 61 6.8 34 3 5 2“ kommen Kommentare, Shares und Saves dazu. Fehlt die #Nummer am Anfang → None
+    (dann ist es kein Messungs-Text). ValueError aus lies_hand_eingabe bei kaputten Zahlen oder falscher Anzahl
     (auch bei „#17“ ganz ohne Zahlen – dann nennt der Fehlertext die erwartete Form)."""
     treffer = MESSUNGS_TEXT.match(text)
     if treffer is None:
@@ -357,8 +361,9 @@ async def bei_foto(update, context) -> None:
 
 
 async def bei_text(update, context) -> None:
-    """Freier Text: offene Hand-Eingabe (`1240 61 6.8 34`) oder ein ganzer Messungs-Text (`#17 1240 61 6.8 34`,
-    lies_text_eingabe). Beides wird mit pruefe_plausibel geprüft; bei einem Verstoß Rückfrage mit pm:-Knöpfen.
+    """Freier Text: offene Hand-Eingabe (`1240 61 6.8 34`, optional mit `3 5 2` für Kommentare/Shares/Saves
+    dahinter) oder ein ganzer Messungs-Text (`#17 1240 61 6.8 34`, lies_text_eingabe). Beides wird mit
+    pruefe_plausibel geprüft (alle fünf Zähler); bei einem Verstoß Rückfrage mit pm:-Knöpfen.
     Sonst ein kurzer Hinweis auf /hilfe. Kaputte Zahlen → der Fehlertext aus lies_hand_eingabe, Vorgang bleibt offen.
     Wartet eine Rückfrage, gelten geschickte Zahlen als Korrektur von Hand (wie ✏️ und dann die Zahlen). Ein
     „#17 …“-Text ersetzt einen offenen Vorgang zu einem anderen Post mit Hinweis (_alten_vorgang_ersetzen)."""

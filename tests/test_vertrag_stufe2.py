@@ -173,9 +173,12 @@ class ImportHilfe(unittest.TestCase):
 
 
 class PublikumRobustZ(unittest.TestCase):
-    def test_standard_wie_bisher_und_eigenes_minimum(self):
+    def test_minimum_ist_pflicht_und_wirkt(self):
+        # Seit Florians Antwort (25.09.) gibt es kein pauschales MAD-Minimum mehr: jeder Aufrufer nennt seins
+        # ([publikum.mad_minimum] je Score-Teil, [erwartung].mad_minimum) – keine versteckte Konstante.
         basis = [0.05, 0.06, 0.07, 0.08, 0.09]
-        self.assertEqual(publikum.robust_z(0.09, basis), publikum.robust_z(0.09, basis, publikum.MAD_MINIMUM))
+        with self.assertRaises(TypeError):
+            publikum.robust_z(0.09, basis)
         z, _, mad = publikum.robust_z(0.09, basis, minimum=0.005)
         self.assertAlmostEqual(mad, 0.01)
         self.assertAlmostEqual(z, 0.02 / (1.4826 * 0.01), places=6)  # das Minimum greift nicht mehr
