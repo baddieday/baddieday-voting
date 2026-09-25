@@ -492,3 +492,38 @@ Code („Annahme A11“ usw.); Stand nach der Nachbesserung durch das Prüfer-Pa
   hinten anhängen – oder e ohne diese Zähler rechnen?
 - **R5 clip-battle.de für Entwürfe** als Merker in der Checkliste (ohne Post)? Bis dahin nur TikTok (A27).
 - Niedrig: **A35** „kein Häkchen ohne Post“ im Clip-Bot so gewollt?
+
+### Stufe 2 – Plan (S2-A1–S2-A19, Plan `docs/superpowers/plans/2026-09-25-lernschleife-stufe-2.md`)
+Stand beim Vertrag (25.09.). Die Bauer-Annahmen und die Befunde des Panels kommen am Ende der Stufe dazu.
+- **S2-A1** `kommentar` und `lautstaerke` bleiben in MERKMALE → 17 Merkmale; `kommentar` ist weiter immer 0.
+- **S2-A2** `verbleibend` aus `eliminierungen` (knock = false) statt aus dem Killfeed (der hat kein `t_ms`).
+- **S2-A3** `phase` bezieht sich auf die erste Aktion des Moments und die Länge MEINES Replays.
+- **S2-A4** `[merkmale.waffen]` startet leer: alles zählt als `sonstige`. Grund: In FortniteReplayReader 3.1.0 ist
+  `GunType` nur ein gelesenes Byte ohne Namen (`elim.GunType = archive.ReadByte()`, am 25.09. im Quellcode
+  nachgesehen) – es gibt keine Enum zum Vorbelegen. Neue Zahlen kommen als eine Sammelmeldung je Session (Vermerk je
+  Zahl, nie verschickt), die die Ruhezeit abwartet; kalibriert wird am echten System mit `pipeline replay` (🏠).
+- **S2-A5** Neue Merkmale ändern `punkte`/`begruendung` nur bei Clips im Status `vorbewertet`.
+- **S2-A6** `mic_stand` wird gesetzt, wenn Whisper lief (`lachen` vorhanden) oder die Aufnahme sicher kein Mikro hat
+  (`mikro_spur` None, kein `fehler`); Messfehler zählen nicht als vollständig.
+- **S2-A7** Mic-Schritt als losgelöster Kindprozess aus `render` (nice 15, `--konfig` der render-Konfig, Log
+  `mikro.log` neben der Datenbank, `mic_je_lauf = 3`); Rückfall ist der Timer `clip-sitzungen`.
+- **S2-A8** Der Mic-Schritt legt neue momente-Zeilen ohne Claude an; sie bekommen keine spätere Claude-Nachprüfung.
+- **S2-A9** Abweichung von Spec §8.1: Datei-Momente (ohne Clip) bekommen keine Replay-Merkmale, kein `laenge`, kein
+  `lautstaerke` – sie haben weder Match noch Kills (`stimmung.momente_aus_dateien`).
+- **S2-A10** Publikums-Quote wird ab dem ersten Paar angezeigt; die Schranke prüft sie erst ab
+  `[lernen].mindest_publikum_paare` (10).
+- **S2-A11** „Du magst X, das Publikum Y“ über das Vorzeichen des mittleren Merkmals-Unterschieds je Quelle.
+- **S2-A12** Nach `pipeline publikum bewerten` mit neuen Scores wird neu gelernt (`lernen.aktualisiere`). Die eine
+  Zeile in `cli._cmd_publikum` wandert mit Paket G nach Paket D (Stufe 2 braucht sie für die Publikums-Paare).
+- **S2-A13** „Letzte 50 gesendete“ = nach id (kein Sende-Zeitstempel); Standardisierung robust wie der
+  Publikums-Score (`publikum.robust_z`, eine Formel, eigenes Minimum `[erwartung].mad_minimum`).
+- **S2-A14** Zusammenschnitt-Entwürfe bekommen auch eine Erwartung und zählen bei den Entwürfen mit.
+- **S2-A15** Erwartungs-Treffer „letzte 20“ nach `erwartungen.erstellt`.
+- **S2-A16** MAD-Minimum je Komponente des Publikums-Scores: **nicht in dieser Sitzung** – Paket G (MAD-Minimum,
+  erweiterte Hand-Eingabe) baut eine andere Sitzung in Stufe 1 ein. Stufe 2 fügt nur den Parameter `minimum` an
+  `publikum.robust_z` hinzu (Standard wie bisher).
+- **S2-A17** „Fehlt = unbekannt“: beim Lernen wird ein neues Merkmal, das auf einer Seite eines Paars fehlt, nicht
+  verglichen; beim Bewerten zählt es 0. Ohne Mikro gelten die Mic-Werte als gemessen = 0.
+- **S2-A18** Fehlt einer momente-Zeile die Mic-Analyse, holt der Mic-Schritt nur die Mic-Werte nach; Stimmung,
+  Sicherheit und Quelle bleiben. Zeilen mit Messfehler werden nicht wiederholt.
+- **S2-A19** Neue Testdateien je Paket statt Erweiterung von `test_ende_zu_ende.py`/`test_publikum.py`.
