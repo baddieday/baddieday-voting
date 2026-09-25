@@ -184,7 +184,9 @@ tageswechsel_stunde = 6
 # Bauen: siehe README, Abschnitt "Replay-Parser".
 programm = ["tools/replay2json/bin/linux-x64/replay2json", "tools/replay2json/bin/out/replay2json"]
 # Deine Epic-ID (zeigt `pipeline replay <datei>` an). Leer = automatische Erkennung.
-ich = "956D01EA3E7B43A0AD41096BAA0B6B9E"
+# Der echte Wert steht bewusst NICHT hier (das Repo ist öffentlich), sondern in .env als CLIP_EPIC_ID=…
+# oder in config/lokal.toml unter [replay] ich = "…" (beide in .gitignore).
+ich = ""
 # Ein Replay gilt als fertig, wenn es so lange nicht mehr verändert wurde.
 ruhezeit_s = 120
 # Höchstdauer für das Auslesen eines Replays

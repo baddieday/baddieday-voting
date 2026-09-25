@@ -5,7 +5,7 @@
 [speicher]
 # großer Proxmox-Host (pve-big): Erreichbarkeit prüfen und bei Bedarf per Wake-on-LAN wecken
 host = "192.168.178.51"
-wol_mac = "40:61:86:2e:9a:ff"
+wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 
 # --- Regisseur steuern (optional) ---------------------------------------------------------
 # Startwerte, von denen aus der Regisseur mit deinen Bewertungen weiterlernt. Nur eintragen, was du ändern willst.
