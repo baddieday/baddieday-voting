@@ -291,7 +291,11 @@ erinnerung_h = 24
 
 [telegram]
 outbox_intervall_s = 30
-# Ruhezeit (Ortszeit): Meldungen aus Puffer/Lager werden dann nicht verschickt, sie bleiben bis leise_bis liegen.
+# Ruhezeit (Ortszeit, über Mitternacht erlaubt). Gilt IMMER – auch ohne getrennten Betrieb ([lager] leer):
+#  - Meldungen aus Puffer/Lager werden dann nicht verschickt, sie bleiben bis leise_bis liegen;
+#  - Clip- und Highlight-Videos kommen weiter sofort, aber ohne Ton (disable_notification);
+#  - andere Meldungen (z. B. Kills ohne Aufnahme) wie bisher.
+# Abschalten: leise_von = "" (leer lassen), z. B. in config/lokal.toml.
 leise_von = "23:00"
 leise_bis = "08:00"
 

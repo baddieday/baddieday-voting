@@ -21,6 +21,11 @@ except ImportError:  # python-telegram-bot nicht installiert
 
 @unittest.skipIf(bot_app is None, "python-telegram-bot fehlt")
 class BotApp(MitSpeicher):
+    def setUp(self):
+        super().setUp()
+        # Ruhezeit ausdrücklich setzen – die Tests sollen nicht von pipeline.toml oder lokal.toml abhängen
+        self.konfig.daten.setdefault("telegram", {}).update(leise_von="23:00", leise_bis="08:00")
+
     def test_aufbau(self):
         app = bot_app.baue_app(self.konfig, "123456:TEST", 42)
         befehle = {c for h in app.handlers[0] for c in getattr(h, "commands", ())}
@@ -111,6 +116,8 @@ class BotApp(MitSpeicher):
         self.assertEqual(gesendet[1:], ["💾 Puffer wird knapp", "🗄️ Lager-Abgleich: 1 Datei noch nicht im Lager"])
 
     def test_clip_videos_nachts_ohne_ton(self):
+        """Gilt absichtlich immer, auch ohne getrennten Betrieb ([lager] leer) – abschalten: leise_von = ""."""
+        self.assertFalse(self.konfig.getrennt)
         vorschau = self.konfig.ordner("sessions") / "m1" / "vorschau" / "v.mp4"
         vorschau.parent.mkdir(parents=True)
         vorschau.write_bytes(b"video")
@@ -125,6 +132,25 @@ class BotApp(MitSpeicher):
         for stunde in (2, 14):
             cid = self.clip_anlegen(status="vorbewertet", file_id=None)
             self.con.execute("UPDATE clips SET vorschau_pfad = 'sessions/m1/vorschau/v.mp4' WHERE id = ?", (cid,))
+            with mock.patch.object(aktionen, "jetzt", return_value=_um(stunde)):
+                self.assertEqual(asyncio.run(bot_app.sende_outbox(fake)), 1)  # sofort, auch nachts
+        self.assertEqual([k["disable_notification"] for k in gesendet], [True, False])
+
+    def test_highlight_videos_nachts_ohne_ton(self):
+        (self.konfig.ordner("highlights") / "h.vorschau.mp4").write_bytes(b"video")
+        gesendet = []
+
+        async def send_video(**kwargs):
+            gesendet.append(kwargs)
+            return SimpleNamespace(message_id=9, video=None)
+
+        fake = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                               bot=SimpleNamespace(send_video=send_video))
+        for stunde in (2, 14):
+            self.con.execute(
+                "INSERT INTO highlights (name, datei, vorschau, clips, dauer, erstellt) VALUES "
+                "(?, 'highlights/h.mp4', 'highlights/h.vorschau.mp4', 5, '02:10', 'x')", (f"highlight-{stunde}",)
+            )
             with mock.patch.object(aktionen, "jetzt", return_value=_um(stunde)):
                 self.assertEqual(asyncio.run(bot_app.sende_outbox(fake)), 1)  # sofort, auch nachts
         self.assertEqual([k["disable_notification"] for k in gesendet], [True, False])

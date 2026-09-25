@@ -28,7 +28,9 @@ log = logging.getLogger("pipeline")
 
 THEMEN = ("lager", "platz", "pool", "pc", "samba")
 POOL_ALT_H = 2       # ältere Pool-Datei: Host-Timer steht o. Ä. – still übergehen, kein Fehlalarm
-PC_FRISCH_H = 26     # ältere pc-status.json (PC aus): schon gemeldet – nicht jeden Morgen wiederholen
+# Ältere pc-status.json (PC aus): schon geprüft – nicht jeden Morgen wiederholen. 26 statt 24 h: 2 h Spielraum
+# für den Timer. Ein Bericht kurz vor der Prüfung kommt so an höchstens zwei Morgen, aber nie gar nicht.
+PC_FRISCH_H = 26
 
 Befund = tuple[dict | None, str | None]  # (Stand fürs JSON, Meldungstext oder None = alles gut)
 
@@ -146,7 +148,10 @@ def _pool(konfig: Konfig, zeit: datetime) -> Befund:
 
 def _pc(konfig: Konfig, zeit: datetime) -> Befund:
     """pc-status.json vom Gaming-PC: Kopierfehler oder Stau (älteste wartende Datei älter als pc_stau_h, gemessen
-    zur Zeit des Berichts). Datei fehlt → nichts. Älter als PC_FRISCH_H (PC aus) → schon gemeldet, nichts."""
+    zur Zeit des Berichts). Datei fehlt → nichts. Älter als PC_FRISCH_H (PC aus) → schon geprüft, nichts.
+    Warum zur Zeit des Berichts: Geht der PC gleich nach dem Spielen aus, stehen oft noch junge oder offene Dateien
+    im Bericht – sie kommen beim nächsten Einschalten. An der aktuellen Uhrzeit gemessen käme nach jeder Pause über
+    pc_stau_h eine Meldung. Eine Datei, die wirklich hängt, zeigt der nächste Bericht (nächster Spielabend) als Stau."""
     pfad = konfig.wurzel / str(konfig.wert("puffer.pc_status_datei", "sitzungen/pc-status.json"))
     try:
         daten = json.loads(pfad.read_text(encoding="utf-8-sig"))
@@ -165,7 +170,7 @@ def _pc(konfig: Konfig, zeit: datetime) -> Befund:
     stand = {"zeit_utc": daten["zeit_utc"], "rechner": daten.get("rechner"), "fehler": fehler,
              "offen": sum(anzahl for _q, anzahl, _a in offen), "stau": sum(anzahl for _q, anzahl, _a in stau)}
     if zeit - bericht > timedelta(hours=PC_FRISCH_H):
-        return {**stand, "hinweis": f"älter als {PC_FRISCH_H} h (PC aus?) – schon gemeldet"}, None
+        return {**stand, "hinweis": f"älter als {PC_FRISCH_H} h (PC aus?) – schon geprüft"}, None
     teile = []
     if fehler:
         text = f"beim letzten Lauf ({_wann(konfig, daten['zeit_utc'])}) {fehler} Datei(en) nicht übertragen"
@@ -245,15 +250,27 @@ def status(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None
     return stand
 
 
+def _abgleich_hat_gemeldet(con: sqlite3.Connection, stand: dict, tag: date) -> bool:
+    """Hat sich der Abgleich heute schon selbst gemeldet (lager:<Datum>), meldet das Thema lager nicht dasselbe noch
+    einmal. Eine fehlgeschlagene Puffer-Prüfung ist nur dann „dasselbe“, wenn der letzte Abgleich an genau ihr
+    abgebrochen ist – sonst (z. B. Meldung nur wegen Rohdaten-Konflikten, danach Puffer nicht eingehängt) käme die
+    Warnung erst mit dem nächsten Abgleich, fast einen Tag später."""
+    if not con.execute("SELECT 1 FROM meldungen WHERE schluessel = ?", (f"lager:{tag.isoformat()}",)).fetchone():
+        return False
+    lager_stand = stand.get("lager") or {}
+    pruefung = lager_stand.get("pruefung")
+    if pruefung == "ok":  # Befund zum Abgleich selbst (Datei-Fehler, Abbruch): hat er schon gemeldet
+        return True
+    return pruefung is not None and (lager_stand.get("letzter_lauf") or {}).get("abbruch") == pruefung
+
+
 def melde(con: sqlite3.Connection, konfig: Konfig, stand: dict, zeit: datetime | None = None) -> list[str]:
     """Befunde aus status() als Meldungen – je Thema und Tag höchstens eine; montags das Lebenszeichen.
     Liefert die Schlüssel der neu angelegten Meldungen."""
     tag = _datum(konfig, zeit or jetzt())
     neu = []
     for thema, text in stand["befunde"].items():
-        # Hat sich der Abgleich heute schon selbst gemeldet (lager:<Datum>), nicht dasselbe noch einmal
-        if thema == "lager" and con.execute("SELECT 1 FROM meldungen WHERE schluessel = ?",
-                                            (f"lager:{tag.isoformat()}",)).fetchone():
+        if thema == "lager" and _abgleich_hat_gemeldet(con, stand, tag):
             continue
         schluessel = f"puffer:{thema}:{tag.isoformat()}"
         if db.meldung(con, schluessel, text):

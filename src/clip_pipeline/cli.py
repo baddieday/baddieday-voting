@@ -140,12 +140,7 @@ def _cmd_short(args, konfig, con) -> int:
 
 
 def _cmd_aufraeumen(args, konfig, con) -> int:
-    try:
-        aufraeumen.pruefe_erlaubt(konfig)  # im getrennten Betrieb (E19) gesperrt
-    except KonfigFehler as e:
-        log.error("%s", e)
-        _json({"fehler": "konfig", "hinweis": str(e)})
-        return 2
+    # Im getrennten Betrieb (E19) lehnt schon main ab – vor der Pipeline-Sperre, siehe _vorab_ablehnen
     if args.taeglich and con.execute(
         "SELECT 1 FROM ereignisse WHERE art = 'aufraeumen' AND zeit >= ?", (utc_heute_iso(),)
     ).fetchone():
@@ -581,6 +576,21 @@ def baue_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _vorab_ablehnen(args, konfig) -> int | None:
+    """Befehle, die in dieser Konfig nicht laufen dürfen, sofort ablehnen (Exit 2) – vor der Pipeline-Sperre.
+    Sonst wartete z. B. ein noch aktiver clip-aufraeumen-Timer bis zu [sperre].warten_s auf einen laufenden render
+    und endete dann mit „gesperrt“ (Exit 4, im Timer kein Fehler) statt mit dem Hinweis, ihn auszuschalten."""
+    if args.befehl != "aufraeumen":
+        return None
+    try:
+        aufraeumen.pruefe_erlaubt(konfig)  # im getrennten Betrieb (E19) gesperrt
+    except KonfigFehler as e:
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = baue_parser().parse_args(argv)
@@ -589,6 +599,8 @@ def main(argv: list[str] | None = None) -> int:
     except KonfigFehler as e:
         _json({"fehler": str(e)})
         return 2
+    if (code := _vorab_ablehnen(args, konfig)) is not None:
+        return code
     con = db.verbinde(konfig.datenbank)
     try:
         if args.sperren:

@@ -68,7 +68,7 @@ async def sende_outbox(app: Application) -> int:
         log.info("Outbox wartet: %s", e)
         return 0
     gesendet = 0
-    leise = aktionen.ruhezeit(konfig)  # nachts kommen Clips weiter sofort, aber ohne Ton
+    leise = aktionen.ruhezeit(konfig)  # nachts kommen Clips weiter sofort, aber ohne Ton (gilt auch ohne [lager])
     for z in zeilen:
         pfad = konfig.absolut(z["vorschau_pfad"]) if z["vorschau_pfad"] else None
         if pfad is None or not pfad.is_file():

@@ -119,12 +119,18 @@ class Morgenpruefung(MitPuffer):
             text = self.text(schluessel)
             self.assertIn("Nächster Schritt", text)
             self.assertRegex(text, r"[Nn]ichts verloren")
-        # nächster Tag: wieder je eine (Pool/PC-Bericht sind dann veraltet – still)
+        # nächster Tag: wieder je eine. Der Pool-Stand ist dann veraltet (älter als 2 h) – still. Der PC-Bericht
+        # (24,1 h alt) zählt noch: PC_FRISCH_H = 26 h lässt 2 h Spielraum für den Timer – ein Bericht kurz vor der
+        # Prüfung kommt so an höchstens zwei Morgen, aber nie gar nicht
         morgen = self.zeit + timedelta(days=1)
         neu = self.pruefe(morgen)
         self.assertIn(f"puffer:platz:{self.tag(morgen)}", neu)
         self.assertIn(f"puffer:samba:{self.tag(morgen)}", neu)
+        self.assertIn(f"puffer:pc:{self.tag(morgen)}", neu)
         self.assertNotIn(f"puffer:pool:{self.tag(morgen)}", neu)
+        # übermorgen ist der PC-Bericht älter als 26 h (PC aus): still
+        uebermorgen = self.zeit + timedelta(days=2)
+        self.assertNotIn(f"puffer:pc:{self.tag(uebermorgen)}", self.pruefe(uebermorgen))
 
     def test_platz(self):
         self.frei(15)
@@ -151,6 +157,18 @@ class Morgenpruefung(MitPuffer):
         self.assertIn("🚨", befund)
         self.assertIn("lvs pve/data", befund)
         self.assertEqual(self.pruefe(), [f"puffer:pool:{self.tag()}"])
+
+    def test_pool_grenzen(self):
+        """Gemeldet wird ab der Schwelle (≥), knapp darunter nicht – Daten und Metadaten gleich."""
+        def befund(daten: float, meta: float) -> str:
+            self.pool(daten, meta)
+            return puffer.status(self.con, self.konfig, self.zeit)["befunde"].get("pool") or ""
+
+        self.assertEqual(befund(84.9, 84.9), "")
+        for daten, meta in ((85, 10), (10, 85), (89.9, 10)):
+            self.assertIn("wird voll", befund(daten, meta), (daten, meta))
+        for daten, meta in ((90, 10), (10, 90)):
+            self.assertIn("fast voll", befund(daten, meta), (daten, meta))
 
     def test_pool_datei_fehlt_alt_oder_kaputt_still(self):
         self.assertEqual(self.pruefe(), [])  # fehlt
@@ -188,7 +206,7 @@ class Morgenpruefung(MitPuffer):
         self.pc(fehler=1, aelteste_h=30, alter_h=40)
         stand = puffer.status(self.con, self.konfig, self.zeit)
         self.assertNotIn("pc", stand["befunde"])
-        self.assertIn("schon gemeldet", stand["pc"]["hinweis"])
+        self.assertIn("schon geprüft", stand["pc"]["hinweis"])
         (self.puffer / "sitzungen" / "pc-status.json").write_text("{kaputt", encoding="utf-8")
         stand = puffer.status(self.con, self.konfig, self.zeit)
         self.assertNotIn("pc", stand["befunde"])
@@ -235,6 +253,15 @@ class LagerThema(MitPuffer):
         self.assertIn("pve-big schläft", text)
         self.assertIn("Nichts verloren", text)
 
+    def test_einzelner_weck_fehlschlag_still(self):
+        """Ein Abbruch (pve-big nicht geweckt) ist meist vorübergehend: keine Meldung, solange der letzte Erfolg
+        jünger als lager_spaetestens_h ist – sonst käme nach jeder schlechten Nacht ein Fehlalarm."""
+        self.datei(self.puffer, "eingang/a.mp4", b"x" * 1000)
+        self.con.execute("DELETE FROM lager_laeufe")
+        self.lauf_eintragen(20)
+        self.lauf_eintragen(3, ok=False, abbruch="SpeicherOffline: Lager-Host pve-big schläft")
+        self.assertEqual(self.pruefe(), [])
+
     def test_nichts_offen_keine_meldung(self):
         self.lauf_eintragen(100)  # lange her, aber nichts wartet
         self.assertEqual(self.pruefe(), [])
@@ -264,6 +291,23 @@ class LagerThema(MitPuffer):
         text = self.text(f"puffer:lager:{self.tag()}")
         self.assertIn("Puffer-Prüfung fehlgeschlagen", text)
         self.assertIn("fehlt .clip-puffer", text)
+
+    def test_konflikt_meldung_verschluckt_puffer_pruefung_nicht(self):
+        """Hat der Abgleich heute nur Rohdaten-Konflikte gemeldet, kommt eine danach fehlgeschlagene Puffer-Prüfung
+        trotzdem gleich – nicht erst mit dem nächsten Abgleich."""
+        db.meldung(self.con, f"lager:{self.tag()}", "🗄️ Lager-Abgleich: 1 Rohdatei(en) lagen im Lager schon …")
+        (self.puffer / ".clip-puffer").unlink()
+        self.assertEqual(self.pruefe(), [f"puffer:lager:{self.tag()}"])
+        self.assertIn("Puffer-Prüfung fehlgeschlagen", self.text(f"puffer:lager:{self.tag()}"))
+
+    def test_puffer_pruefung_nicht_doppelt(self):
+        """Ist der Abgleich heute an derselben Puffer-Prüfung gescheitert, hat er es schon selbst gemeldet."""
+        self.zeit = jetzt()  # der echte Abgleich meldet unter dem heutigen Datum
+        (self.puffer / ".clip-puffer").unlink()
+        self.assertEqual(self.lauf("lager", "abgleich")[0], 2)
+        self.assertIn("nichts kopiert", self.text(f"lager:{self.tag()}"))
+        ohne_woche = lambda neu: [s for s in neu if not s.startswith("puffer:woche:")]  # heute evtl. Montag
+        self.assertEqual(ohne_woche(self.pruefe()), [])
 
 
 class Lebenszeichen(MitPuffer):
