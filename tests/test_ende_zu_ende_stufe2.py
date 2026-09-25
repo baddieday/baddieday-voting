@@ -492,7 +492,10 @@ class MicKindprozess(unittest.TestCase):
         self.assertLess(befehl.index("--konfig"), befehl.index("stimmung"))
         self.assertEqual(befehl[befehl.index("stimmung"):],
                          ["stimmung", "--clips", "--session", SID, "--max", "3"])
-        self.assertEqual((kwargs["stdout"], kwargs["start_new_session"]), (subprocess.DEVNULL, True))
+        # Befund B-4: stdout und stderr des Kindes gehen ins selbe Log (nie an den render-Prozess, n8n-Vertrag)
+        self.assertIs(kwargs["stdout"], kwargs["stderr"])
+        self.assertEqual(kwargs["stdout"].name, str(welt.tmp / mikro.LOG_NAME))
+        self.assertTrue(kwargs["start_new_session"])
         self.assertTrue((welt.tmp / mikro.LOG_NAME).is_file())  # Log neben der Test-DB
         wol.assert_not_called()
 

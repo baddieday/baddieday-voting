@@ -54,7 +54,7 @@ MIC_JE_LAUF = 3          # Rückfall, falls [merkmale].mic_je_lauf fehlt (Whispe
 def whisper_da() -> bool:
     """True, wenn faster-whisper installiert ist – geprüft mit importlib.util.find_spec, OHNE es zu importieren.
 
-    Der Import (ctranslate2, Modelle) kostet Sekunden und RAM; im render-Prozess soll er nie passieren. Paket B.
+    Der Import (ctranslate2, Modelle) kostet Sekunden und RAM; im render-Prozess soll er nie passieren.
 
     Rückgabe: bool. Fehler: keine – ein kaputter Eintrag in sys.modules (ValueError) zählt als „nicht da“.
     Beispiel: ohne `pip install faster-whisper` → False; danach → True (ohne dass das Paket geladen wird).
@@ -71,7 +71,7 @@ def in_clip_uebernehmen(con: sqlite3.Connection, clip_id: int, moment_merkmale: 
     """Mic-Werte eines Clip-Moments in clips.merkmale übernehmen, bei vollständiger Analyse mic_stand setzen.
 
     Über merkmale.aktualisiere_clip(…, aus_momente(moment_merkmale), gewichte, version); mic_stand = jetzt, wenn
-    merkmale.mic_vollstaendig(moment_merkmale). Rückgabe: True, wenn sich etwas geändert hat. Paket B.
+    merkmale.mic_vollstaendig(moment_merkmale). Rückgabe: True, wenn sich etwas geändert hat.
 
     Parameter: con – offene Verbindung (läuft in der Transaktion des Aufrufers); clip_id – clips.id;
     moment_merkmale – momente.merkmale dieses Clips; gewichte, version – vom äußersten Aufrufer (lernen.aktuelle).
@@ -139,7 +139,7 @@ def clips_nachziehen(con: sqlite3.Connection, konfig: Konfig, *, session: str | 
     Holt Gewichte einmal (lernen.aktuelle). (1) Clips mit momente-Zeile → nur übernehmen. (2) Clips ohne Zeile oder
     mit unvollständiger Zeile ohne `fehler` (Letztere nur mit Whisper) → stimmung.analysiere(claude=False,
     nur_clips=…, nur_mic=True, maximal=maximal or [merkmale].mic_je_lauf), Session zuerst, dann nach punkte absteigend.
-    Rückgabe {"uebernommen", "analysiert", "mit_fehler", "offen"}. Paket B.
+    Rückgabe {"uebernommen", "analysiert", "mit_fehler", "offen"}.
 
     Parameter: session – diese Session zuerst (kein Filter: Übrige kommen danach dran); maximal – höchstens so viele
     Messungen in diesem Lauf (--max), sonst [merkmale].mic_je_lauf – damit die Pipeline-Sperre nicht lange belegt ist
@@ -177,7 +177,7 @@ def clips_nachziehen(con: sqlite3.Connection, konfig: Konfig, *, session: str | 
 
 def nachtragen(con: sqlite3.Connection, konfig: Konfig, gewichte: dict[str, float], version: int, *,
                session: str | None = None) -> dict:
-    """Nur Schritt (1) von clips_nachziehen, ohne Whisper – Teil von `pipeline merkmale nachtragen`. Paket B.
+    """Nur Schritt (1) von clips_nachziehen, ohne Whisper – Teil von `pipeline merkmale nachtragen`.
 
     Parameter: gewichte, version – holt cli._cmd_merkmale einmal (lernen.aktuelle); session – nur diese Session
     (Filter). konfig wird nicht gebraucht (Signatur wie nachtragen_replay, damit cli beide gleich aufruft).
@@ -195,7 +195,7 @@ def starte_im_hintergrund(konfig: Konfig, sid: str) -> bool:
     subprocess.Popen(["nice", "-n", "15", sys.executable, "-m", "clip_pipeline", "--konfig", str(konfig.quelle),
     "stimmung", "--clips", "--session", sid, "--max", str(n)], stdin=DEVNULL, stdout und stderr = Log neben der DB
     (angehängt), start_new_session=True). Nur wenn [merkmale].mic, getrennter Betrieb und whisper_da().
-    Fehler beim Start → nur Log-Warnung, Rückgabe False; render bleibt unverändert. Paket B.
+    Fehler beim Start → nur Log-Warnung, Rückgabe False; render bleibt unverändert.
 
     Warum so: `--konfig` sorgt dafür, dass das Kind dieselbe Konfig und damit dieselbe Datenbank nutzt wie render
     (die Umgebung erbt es ohnehin). stdout und stderr des Kinds gehen in eine eigene Datei, nie an den
