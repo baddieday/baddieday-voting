@@ -5,6 +5,7 @@ Callback-Daten (Telegram erlaubt max. 64 Byte):
   b:<battle>:a|b|s  Battle entscheiden                     n:0       nächstes Battle
   p:<clip>   Upload-Paket     y:/t:/c:<clip>  YouTube / TikTok / clip-battle.de erledigt
   hf:<highlight> / hv:<highlight>  Highlight-Video freigeben / verwerfen
+  hu:<highlight>  Highlight-Video hochgeladen (danach keine Erinnerung mehr)
 
 Lernschleife „Publikum“ (Spec §10.4, letzter Punkt): Das Häkchen (y:/t:) und /link legen zusätzlich den Post an
 (Tabelle posts, publikum.post_anlegen) – für die Plattformen aus [publikum].plattformen, nie für clip-battle.de.
@@ -40,7 +41,7 @@ PLATTFORM_NAMEN = {"youtube": "YouTube Shorts", "tiktok": "TikTok", "clipbattle"
 
 def parse(daten: str) -> tuple[str, int, str]:
     teile = (daten or "").split(":")
-    if len(teile) < 2 or teile[0] not in ("f", "v", "u", "b", "n", "p", "hf", "hv", *PLATTFORM_KUERZEL):
+    if len(teile) < 2 or teile[0] not in ("f", "v", "u", "b", "n", "p", "hf", "hv", "hu", *PLATTFORM_KUERZEL):
         raise ValueError(f"Unbekannte Callback-Daten {daten!r}")
     return teile[0], int(teile[1]), teile[2] if len(teile) > 2 else ""
 
@@ -129,6 +130,10 @@ def highlight_gesendet(con: sqlite3.Connection, highlight_id: int, nachricht_id:
 
 def knoepfe_highlight(highlight_id: int) -> Knoepfe:
     return [[("✅ Freigeben", f"hf:{highlight_id}"), ("🗑️ Verwerfen", f"hv:{highlight_id}")]]
+
+
+def knoepfe_highlight_freigegeben(highlight_id: int) -> Knoepfe:
+    return [[("✅ Hochgeladen", f"hu:{highlight_id}")]]
 
 
 def als_gesendet(con: sqlite3.Connection, clip_id: int, nachricht_id: int, file_id: str | None) -> None:
@@ -366,11 +371,22 @@ def link_speichern(con: sqlite3.Connection, clip_id: int, url: str, konfig, *,
     return antwort, stand
 
 
+def ist_highlight_clip(clip: sqlite3.Row, konfig) -> bool:
+    """Lohnt ein eigener Upload? Ab [veroeffentlichung].highlight_ab_kills Kills am Stück (Standard 3 = Triple Kill)
+    oder mit Victory Royale (highlight_victory_royale). Alle anderen Freigaben dienen Bewertung, Lernen und dem
+    Highlight-Video – hochladen geht trotzdem (📦), nur erinnert wird daran nicht (Entscheidung 25.09.)."""
+    ab = int(konfig.wert("veroeffentlichung.highlight_ab_kills", 3))
+    mit_vr = bool(konfig.wert("veroeffentlichung.highlight_victory_royale", True))
+    return (clip["max_gruppe"] or 0) >= ab or (mit_vr and bool(clip["victory_royale"]))
+
+
 def offene_uploads(con: sqlite3.Connection, konfig) -> list[tuple[sqlite3.Row, list[str]]]:
-    """Freigegebene Clips, denen noch eine Pflicht-Plattform fehlt – das darf nicht liegen bleiben."""
+    """Freigegebene Highlight-Clips (ist_highlight_clip), denen noch eine Pflicht-Plattform fehlt."""
     pflicht, _ = plattformen(konfig)
     ergebnis = []
     for clip in con.execute("SELECT * FROM clips WHERE status = 'freigegeben' ORDER BY id").fetchall():
+        if not ist_highlight_clip(clip, konfig):
+            continue
         erledigt = {
             z["plattform"] for z in con.execute(
                 "SELECT plattform FROM veroeffentlichungen WHERE clip_id = ? AND erledigt IS NOT NULL", (clip["id"],)
@@ -380,6 +396,13 @@ def offene_uploads(con: sqlite3.Connection, konfig) -> list[tuple[sqlite3.Row, l
         if fehlt:
             ergebnis.append((clip, fehlt))
     return ergebnis
+
+
+def offene_highlight_videos(con: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Freigegebene Highlight-Videos ohne Häkchen „✅ Hochgeladen“ (highlight.hochgeladen)."""
+    return con.execute(
+        "SELECT * FROM highlights WHERE status = 'freigegeben' AND hochgeladen IS NULL ORDER BY id"
+    ).fetchall()
 
 
 # --- Rangliste ------------------------------------------------------------------

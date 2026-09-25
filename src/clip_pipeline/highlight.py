@@ -129,6 +129,14 @@ def entscheide(con: sqlite3.Connection, highlight_id: int, freigeben: bool) -> s
     return con.execute("SELECT * FROM highlights WHERE id = ?", (highlight_id,)).fetchone()
 
 
+def hochgeladen(con: sqlite3.Connection, highlight_id: int) -> sqlite3.Row | None:
+    """Häkchen „✅ Hochgeladen“ am freigegebenen Highlight-Video – danach erinnert der Bot nicht mehr daran.
+    Nur für freigegebene Videos; ein Doppelklick behält den ersten Zeitpunkt. None = Video nicht gefunden."""
+    con.execute("UPDATE highlights SET hochgeladen = COALESCE(hochgeladen, ?) WHERE id = ? AND status = 'freigegeben'",
+                (iso(jetzt()), highlight_id))
+    return con.execute("SELECT * FROM highlights WHERE id = ?", (highlight_id,)).fetchone()
+
+
 def _mmss(sekunden: float) -> str:
     s = int(round(sekunden))
     return f"{s // 60:02d}:{s % 60:02d}"

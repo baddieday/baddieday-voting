@@ -144,8 +144,11 @@ def highlight_text(h) -> str:
         f"{h['clips']} Clips · {h['dauer']} · Musik: {escape(h['musik']) if h['musik'] else 'keine'}",
         "(Vorschau in kleiner Auflösung – das volle Video liegt auf dem Speicher)",
     ]
-    if h["status"] == "freigegeben":
+    if h["status"] == "freigegeben" and h["hochgeladen"]:
+        zeilen.append("✅ <b>Hochgeladen</b>")
+    elif h["status"] == "freigegeben":
         zeilen.append(f"✅ <b>Freigegeben</b> – zum Hochladen: <code>{escape(h['datei'])}</code>")
+        zeilen.append("Danach „✅ Hochgeladen“ tippen, dann erinnere ich nicht mehr daran.")
     elif h["status"] == "verworfen":
         zeilen.append("🗑️ <b>Verworfen</b> – die Clips sind wieder frei für das nächste Highlight")
     return "\n".join(zeilen)
@@ -164,15 +167,20 @@ def upload_text(clip, stand: dict[str, bool]) -> str:
     return "\n".join(zeilen)
 
 
-def offene_uploads_text(eintraege: list) -> str:
+def offene_uploads_text(eintraege: list, videos: list = ()) -> str:
+    """Nur Highlights: Clips ab Triple Kill oder mit Victory Royale (aktionen.offene_uploads) und freigegebene
+    Highlight-Videos ohne Häkchen (aktionen.offene_highlight_videos)."""
     from .aktionen import PLATTFORM_NAMEN
 
-    if not eintraege:
-        return "📦 Alle freigegebenen Clips sind überall hochgeladen 👍"
-    zeilen = ["📦 <b>Noch nicht überall hochgeladen:</b>"]
+    if not eintraege and not videos:
+        return "📦 Alle Highlights sind hochgeladen 👍"
+    zeilen = ["📦 <b>Highlights noch nicht hochgeladen:</b>"]
+    for h in videos:
+        zeilen.append(f"🏆 Highlight-Video {escape(h['name'])} ({escape(h['dauer'])}) – am Video „✅ Hochgeladen“ tippen")
     for clip, fehlt in eintraege:
         zeilen.append(f"#{clip['id']} {escape(clip['titel'])} – fehlt: {', '.join(PLATTFORM_NAMEN.get(p, p) for p in fehlt)}")
-    zeilen.append("Paket erneut holen: /paket &lt;nummer&gt;")
+    if eintraege:
+        zeilen.append("Paket erneut holen: /paket &lt;nummer&gt;")
     return "\n".join(zeilen)
 
 
@@ -183,8 +191,8 @@ HILFE = (
     "/rangliste – Top 10 der aktuellen Saison\n"
     "/gewichte – was die Vorbewertung gelernt hat\n"
     "/offen – unentschiedene Clips erneut zeigen\n"
-    "/uploads – freigegebene Clips, die noch auf YouTube/TikTok fehlen\n"
-    "/paket &lt;nummer&gt; – Upload-Paket (Short + Caption) für einen Clip\n"
+    "/uploads – Highlights (ab Triple Kill, Victory Royale, Highlight-Video), die noch nicht hochgeladen sind\n"
+    "/paket &lt;nummer&gt; – Upload-Paket (Short + Caption) für jeden freigegebenen Clip\n"
     "/link &lt;nummer&gt; &lt;url&gt; – YouTube-/TikTok-Link eintragen (hakt die Plattform ab)\n"
     "/status – Überblick"
 )
