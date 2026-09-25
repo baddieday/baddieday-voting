@@ -728,7 +728,7 @@ class Uebernahme(MitAbgleich):
         super().setUp()
         self.konfig.daten["lager"]["wurzel"] = ""
         tag = 86400
-        self.datei(self.lager, "eingang/alt.mp4", b"alt", alter_s=10 * tag)
+        self.datei(self.lager, "eingang/alt.mp4", b"alt", alter_s=20 * tag)  # älter als [puffer].rohdaten_tage (14)
         self.datei(self.lager, "eingang/neu.mp4", b"neu" * 100, alter_s=3600)
         self.datei(self.lager, "replays/r.replay", b"replay", alter_s=100 * tag)
         self.datei(self.lager, "sessions/s/analyse.json", b"{}", alter_s=50 * tag)
@@ -741,6 +741,15 @@ class Uebernahme(MitAbgleich):
 
     def stand_lager(self) -> dict:
         return {p: (p.stat().st_mtime_ns, p.read_bytes()) for p in self.lager.rglob("*") if p.is_file()}
+
+    def test_eingang_tage_standard_aus_der_konfig(self):
+        # ohne --eingang-tage gilt [puffer].rohdaten_tage (14): alt.mp4 (20 Tage) bleibt im Lager
+        code, e = self.uebernehmen("--probelauf")
+        self.assertEqual((code, e["eingang_tage"], e["eingang_alt"]), (0, 14, 1))
+        # mehr Tage in der Konfig: dann kommt auch alt.mp4 mit
+        self.konfig.daten["puffer"]["rohdaten_tage"] = 30
+        code, e = self.uebernehmen("--probelauf")
+        self.assertEqual((code, e["eingang_tage"], e["eingang_alt"]), (0, 30, 0))
 
     def test_eingang_tage_und_delta(self):
         vorher = self.stand_lager()

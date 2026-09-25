@@ -67,6 +67,7 @@ nachtruhe_bis = "08:00"
 # Puffer auf dem Mini (E19, nur im getrennten Betrieb): hier arbeitet die Pipeline, einmal am Tag (10:00) geht alles
 # ins Lager. Die Morgenprüfung läuft um 11:00 (deploy/systemd/clip-puffer-pruefen.timer).
 markierung = ".clip-puffer"    # liegt NUR im Puffer
+rohdaten_tage = 14             # so viele Tage Rohvideos (eingang/) hält der Puffer; die Übernahme holt so viele (25.09.)
 freigeben = false              # Stufe B5 (später, nur mit OK): bestätigte Rohdaten im Puffer löschen
 warnung_frei_gb = 20           # Morgenprüfung: Meldung, wenn weniger frei
 alarm_frei_gb = 8

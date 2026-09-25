@@ -251,7 +251,8 @@ Timern, und alles, was seit R3 in der Datenbank passiert ist, ist dann weg.
 ## R4 · Lager markieren + Übernahme
 
 **Was:** Auf pve-big `.clip-lager` anlegen. Dann die vorhandenen Daten einmal Lager → Puffer kopieren: alle
-Ordner aus `[lager].ordner` außer `eingang/` ganz, von `eingang/` nur die letzten 3 Tage.
+Ordner aus `[lager].ordner` außer `eingang/` ganz, von `eingang/` die letzten 14 Tage (`[puffer].rohdaten_tage`: so
+lange hält der Puffer Rohvideos – der Regisseur braucht sie für seine Momente).
 **Warum:** Nach dem Umschalten arbeitet die Pipeline nur im Puffer – Sessions, Replays, Highlights, Musik usw. müssen
 dort schon liegen. Die Marken machen eine Verwechslung unmöglich: `.clip-lager` nur im Lager, `.clip-puffer` nur im
 Puffer, dazu verschiedene Dateisysteme – sonst bricht jeder Abgleich mit Klartext ab und kopiert nichts.
@@ -268,14 +269,14 @@ kopiert (nur kopiert: im Lager ändert sich nichts).
 2. Im CT erst der Probelauf – er zeigt Anzahl und GB:
    ```bash
    sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen \
-     --von /srv/big/clips --nach /srv/puffer --eingang-tage 3 --probelauf
+     --von /srv/big/clips --nach /srv/puffer --eingang-tage 14 --probelauf
    ```
    Passt es nicht bequem (Faustregel: mehr als die Hälfte des Puffers, also über 48 GB): **nicht weitermachen,
    melden.** Dann entscheiden wir gemeinsam (weniger eingang-Tage, größerer Puffer oder alte Sessions im Lager lassen).
 3. Dann echt, als eigener Dienst (läuft weiter, auch wenn du das Fenster schließt):
    ```bash
    systemd-run --unit=clip-uebernahme --uid=pipeline --gid=pipeline -p WorkingDirectory=/opt/clip-pipeline --collect \
-     /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 3
+     /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 14
    journalctl -u clip-uebernahme -f                  # Fortschritt; Strg+C beendet nur das Zuschauen
    ```
 
@@ -328,7 +329,7 @@ Was dann noch auf dem PC wartet, bleibt dort und kommt nach R7 in den Puffer.
    dazugekommen ist. Was der letzte Schritt oder der PC eben erst ins Lager geschrieben hat, gilt vorher als „wird
    noch geschrieben“ und bliebe aus:
    ```bash
-   sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 3; echo "Exit $?"
+   sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline lager uebernehmen --von /srv/big/clips --nach /srv/puffer --eingang-tage 14; echo "Exit $?"
    ```
    **Erst weiter bei `Exit 0` und `"ok": true`** in der JSON-Zeile darüber. Sonst:
    - `Exit 1` mit `"zu_jung"` über 0: noch einmal 10 min warten, dann wiederholen (Gleiches wird übersprungen).

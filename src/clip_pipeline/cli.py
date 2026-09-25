@@ -245,7 +245,8 @@ def _cmd_lager(args, konfig, con) -> int:
         if args.aktion == "abgleich":
             ergebnis = lager.abgleich(con, konfig, probelauf=args.probelauf)
         else:
-            ergebnis = lager.uebernahme(con, konfig, Path(args.von), Path(args.nach), args.eingang_tage,
+            tage = args.eingang_tage if args.eingang_tage is not None else int(konfig.wert("puffer.rohdaten_tage", 14))
+            ergebnis = lager.uebernahme(con, konfig, Path(args.von), Path(args.nach), tage,
                                         probelauf=args.probelauf)
     except KonfigFehler as e:  # z. B. Puffer und Lager verwechselbar – dann wurde nichts kopiert
         log.error("%s", e)
@@ -500,7 +501,8 @@ def baue_parser() -> argparse.ArgumentParser:
     a = lager_befehle.add_parser("uebernehmen", help="einmalig Lager → Puffer vor dem Umschalten (docs/PUFFER.md R4/R5)")
     a.add_argument("--von", required=True, help="Lager, z. B. /srv/big/clips")
     a.add_argument("--nach", required=True, help="Puffer, z. B. /srv/puffer")
-    a.add_argument("--eingang-tage", type=int, default=3, help="von eingang/ nur Dateien der letzten N Tage")
+    a.add_argument("--eingang-tage", type=int, default=None,
+                   help="von eingang/ nur Dateien der letzten N Tage (Standard: [puffer].rohdaten_tage = 14)")
     a.add_argument("--probelauf", action="store_true", help="nur zählen (weckt nicht, kopiert nichts)")
     s.set_defaults(fn=_cmd_lager, sperren=False)  # eigene Lager-Sperre statt der Pipeline-Sperre
 

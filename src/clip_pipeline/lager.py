@@ -564,7 +564,7 @@ def _hinweis_zu_jung(k: Konfig, anzahl: int) -> str:
             "geschrieben) – noch nicht im Puffer. In ein paar Minuten wiederholen; Gleiches wird übersprungen.")
 
 
-def uebernahme(con: sqlite3.Connection, konfig: Konfig, von: Path, nach: Path, eingang_tage: int = 3,
+def uebernahme(con: sqlite3.Connection, konfig: Konfig, von: Path, nach: Path, eingang_tage: int = 14,
                probelauf: bool = False) -> dict:
     """Einmalig vor dem Umschalten (docs/PUFFER.md R4/R5): Lager → Puffer mit AUSDRÜCKLICHEN Pfaden, unabhängig von
     [lager].wurzel. Alle [lager].ordner außer eingang/ ganz, von eingang/ nur Dateien der letzten eingang_tage.
