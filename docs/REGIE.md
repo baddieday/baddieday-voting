@@ -53,6 +53,10 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 - Unter jedem Entwurf steht „🆕 3 neue · 2 schon gezeigt · Auswahl aus 40 Momenten“.
 - `/lernstand` zeigt, was der Regisseur gelernt hat, `/musik` die Titel, `/stand` einen Satz zum Stand.
 - Abends um 21:00 kommt ein Satz zum Stand (`[lernbot].abend_uhrzeit`).
+- **Publikum (TikTok-Zahlen, Lernschleife):** nach 👍 auf einen Short „📦 Upload-Paket“, nach dem Posten
+  `/link <entwurf> <url>` → Post-Nummer; Screenshot der TikTok-Statistik mit `#<post>` (oder von Hand
+  `#17 1240 61 6.8 34`); `/publikum` zeigt Zahlen und Score (ab 7 Tagen, Timer `clip-publikum` um 10:00).
+  Bedienung, Konfig-Schlüssel und Installation: `docs/PUBLIKUM.md`.
 
 ## Selbst steuern – auch ohne Bot
 - **Vorgaben** in `config/lokal.toml` (Beispiel mit allen Schlüsseln: `config/lokal.beispiel.toml`):
