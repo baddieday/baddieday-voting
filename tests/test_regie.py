@@ -213,6 +213,18 @@ class Abwechslung(MitRegieMaterial):
         self.assertEqual(self.momente(self.compose()), self.momente(self.compose()))
         self.assertIn("deine Vorgabe", regie_lernen.lernstand_text(self.con, self.konfig))
 
+    def test_auswahl_zaehlt_alle_momente(self):
+        # Passt beim Auffüllen kein Moment mehr hinein, bleibt die Auswahl trotzdem vollständig
+        # (Entwurf #17: nach „abgeschnitten“ Vorlauf 3,5 s -> meldete „nur 6 Momente“ statt 128)
+        # Nachgestellt mit fester Testmusik: nach drei Entwürfen passt bei 3,5 s Vorlauf beim Auffüllen nichts mehr
+        self.momente_anlegen(MOMENTE)
+        self.musik_anlegen(150, "episch")
+        p, ziel = regie_lernen.aktuelle(self.con, self.konfig)
+        for vor in (1.0, 2.0, 3.0, 3.5, 4.5):
+            liste = lies(regie.erstelle(self.con, self.konfig, "short", parameter={**p, "puffer_vor_s": vor}, ziel=ziel))
+            self.assertEqual(liste["auswahl"]["kandidaten"], len(MOMENTE), vor)
+            self.assertFalse([h for h in liste["hinweise"] if h.startswith("nur ") and f"nur {len(MOMENTE)} " not in h])
+
     def test_lernen_je_moment(self):
         self.momente_anlegen(MOMENTE)
         self.konfig.daten["regie"]["vorgaben"] = {"abwechslung": 0}

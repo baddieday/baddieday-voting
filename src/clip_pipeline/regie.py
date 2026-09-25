@@ -375,12 +375,13 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
 
     segmente = plane_zeitleiste(reihe, raster, fmt, p, fps)
     # Beat-Raster kürzt Segmente -> bis zum Ziel nachlegen: erst mit Match-Grenze, notfalls ohne
+    passt_nicht: list[Kandidat] = []  # eigene Liste: `alle` bleibt die ganze Auswahl (für Zählung und Hinweis)
     for mit_grenze in (True, False):
         while segmente and segmente[-1]["zeit_ende"] < ziel_s - 1e-6:
             je_match: dict[str, int] = {}
             for k in reihe:
                 je_match[k.match_id or ""] = je_match.get(k.match_id or "", 0) + 1
-            rest = [k for k in alle if k not in gewaehlt
+            rest = [k for k in alle if k not in gewaehlt and k not in passt_nicht
                     and (not mit_grenze or not k.match_id or je_match.get(k.match_id, 0) < int(p["max_je_match"]))]
             if not rest:
                 break
@@ -388,7 +389,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             neue_reihe = bogen([*gewaehlt, naechster_], fmt_name)
             neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps)
             if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
-                alle = [k for k in alle if k is not naechster_]  # passt nicht mehr hinein
+                passt_nicht.append(naechster_)
                 continue
             gewaehlt.append(naechster_)
             reihe, segmente = neue_reihe, neue_segmente

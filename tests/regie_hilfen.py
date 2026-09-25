@@ -53,7 +53,7 @@ def klick_musik(ziel: Path, bpm: float, dauer: float) -> Path:
     ziel.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                     "-f", "lavfi", "-i", f"sine=f=880:d={dauer},volume='if(lt(mod(t\\,{60 / bpm})\\,0.03)\\,1\\,0)':eval=frame",
-                    "-f", "lavfi", "-i", f"anoisesrc=a=0.01:d={dauer}", "-filter_complex", "amix=inputs=2",
+                    "-f", "lavfi", "-i", f"anoisesrc=a=0.01:d={dauer}:seed=1", "-filter_complex", "amix=inputs=2",
                     "-c:a", "libmp3lame", "-q:a", "6", str(ziel)], check=True)
     return ziel
 
