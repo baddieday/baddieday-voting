@@ -137,8 +137,34 @@ class AusReplay(unittest.TestCase):
         self.assertEqual((r["sniper"], r["nahkampf"], r["bot_opfer"]), (0.25, 0.5, 0.5))  # None = kein Bot
 
     def test_null_kills(self):
-        r = self.rechne(match([elim(100, ICH, "A", waffe=SNIPER, bot=True)]), [t(500)])
+        # Befund K-5: Ohne Kill-Zeiten gibt es nichts zuzuordnen – gemessen 0. (Kill-Zeiten OHNE Ereignis sind
+        # unbekannt, siehe test_kill_zeiten_ohne_ereignis.)
+        r = self.rechne(match([elim(100, ICH, "A", waffe=SNIPER, bot=True)]), [])
         self.assertEqual((r["sniper"], r["nahkampf"], r["bot_opfer"], r["endgame"], r["clutch"]), (0, 0, 0, 0, 0))
+
+    def test_kill_zeiten_ohne_ereignis(self):
+        # Befund K-5: Clip von vor der Kill-Regel vom 24.09. – seine Kill-Zeit findet kein Ereignis. Nur, was je
+        # Match bzw. aus der Zeit bekannt ist: platzierung und phase; der Rest bleibt unbekannt (fehlt).
+        m = match([elim(100, ICH, "A", waffe=SNIPER, bot=True)], platz=4, laenge_s=1000)
+        with self.assertLogs("pipeline", "WARNING"):
+            r = self.rechne(m, [t(500)])
+        self.assertEqual(r, {"platzierung": 0.25, "phase": 0.5})
+        with self.assertLogs("pipeline", "WARNING"):
+            r = self.rechne(match([elim(100, ICH, "A")], platz=None, laenge_s=1000), [t(500)])
+        self.assertEqual(r, {"phase": 0.5})
+
+    def test_leere_waffenlisten_lassen_sniper_und_nahkampf_weg(self):
+        # Befund S-3: Solange [merkmale.waffen] nicht kalibriert ist, sind sniper/nahkampf unbekannt, nicht 0
+        leer = test_konfig(waffen={"sniper": [], "nahkampf": [], "sonstige": []})
+        r = merkmale.aus_replay(match([elim(100, ICH, "A", waffe=SNIPER, bot=True)]), [t(100)], leer)
+        self.assertEqual(set(r), set(REPLAY_MERKMALE) - {"sniper", "nahkampf"})
+        self.assertEqual(r["bot_opfer"], 1.0)
+        ohne_abschnitt = merkmale.aus_replay(match([elim(100, ICH, "A")]), [t(100)], Konfig({}, Path("x")))
+        self.assertNotIn("sniper", ohne_abschnitt)
+        # eine Liste gefüllt → gemessen (auch 0)
+        teil = test_konfig(waffen={"sniper": [SNIPER], "nahkampf": [], "sonstige": []})
+        r = merkmale.aus_replay(match([elim(100, ICH, "A", waffe=AR)]), [t(100)], teil)
+        self.assertEqual((r["sniper"], r["nahkampf"]), (0.0, 0.0))
 
     def test_phase_ab_erster_aktion(self):
         # Umgehauen bei 200 s, Teammate erledigt bei 250 s: Kill-Zeit ist das Umhauen, die Phase auch
@@ -203,12 +229,17 @@ class AusReplay(unittest.TestCase):
         m = match([elim(100.25, ICH, "A", bot=True)])
         genau = aus_iso(iso(t(100.25)))
         self.assertEqual(self.rechne(m, [genau + timedelta(microseconds=900)])["bot_opfer"], 1.0)
-        self.assertEqual(self.rechne(m, [genau + timedelta(milliseconds=2)])["bot_opfer"], 0.0)
+        # Befund K-5: 2 ms daneben = kein Ereignis zugeordnet → bot_opfer unbekannt (fehlt), nicht 0
+        with self.assertLogs("pipeline", "WARNING"):
+            self.assertNotIn("bot_opfer", self.rechne(m, [genau + timedelta(milliseconds=2)]))
 
     def test_rekorder_rueckfall_und_ohne_match(self):
+        # Befund K-1: Unbekanntes fehlt (Leitplanke 4, S2-A17) statt als erfundene 0 dazustehen
         m = match([elim(100, ICH, "A", bot=True, waffe=SNIPER)], quelle=None, platz=2)
-        self.assertEqual(self.rechne(m, [t(100)]), dict(dict.fromkeys(REPLAY_MERKMALE, 0.0), platzierung=0.5))
-        self.assertEqual(merkmale.aus_replay(None, [t(100)], self.K), dict.fromkeys(REPLAY_MERKMALE, 0.0))
+        self.assertEqual(self.rechne(m, [t(100)]), {"platzierung": 0.5})
+        ohne_platz = match([elim(100, ICH, "A", bot=True, waffe=SNIPER)], quelle=None, platz=None)
+        self.assertEqual(self.rechne(ohne_platz, [t(100)]), {})
+        self.assertEqual(merkmale.aus_replay(None, [t(100)], self.K), {})
 
     def test_konfig_standardwerte(self):
         # Ohne [merkmale] gelten die Werte aus config/pipeline.toml als Rückfall (10 Spieler, 30 s, 10 s)
@@ -242,12 +273,12 @@ class UnbekannteWaffen(MitSpeicher):
         self.assertEqual(self.melde("s3", [27, 12]), [])  # nichts Neues → keine Meldung
         z = self.meldungen()
         self.assertEqual(sorted(z), ["merkmale:waffe:12", "merkmale:waffe:27", "merkmale:waffe:31",
-                                     "merkmale:waffen:s1", "merkmale:waffen:s2"])
-        self.assertEqual(z["merkmale:waffen:s1"]["text"],
+                                     "merkmale:waffen:s1:12-27", "merkmale:waffen:s2:31"])  # Befund K-6
+        self.assertEqual(z["merkmale:waffen:s1:12-27"]["text"],
                          "Neue Waffen-Nummern in Match s1: 12, 27 – zählen als sonstige. Eintragen in "
                          "config/lokal.toml [merkmale.waffen]; bestimmen mit `pipeline replay <datei>`, "
                          "docs/PUBLIKUM.md")
-        self.assertIn("Match s2: 31 –", z["merkmale:waffen:s2"]["text"])
+        self.assertIn("Match s2: 31 –", z["merkmale:waffen:s2:31"]["text"])
         for n in (12, 27, 31):  # Vermerke: gleich beim Anlegen als gesendet markiert
             vermerk = z[f"merkmale:waffe:{n}"]
             self.assertEqual(vermerk["gesendet"], vermerk["erstellt"])
@@ -255,7 +286,7 @@ class UnbekannteWaffen(MitSpeicher):
     def test_vermerke_nie_faellig_sammelmeldung_wartet_die_ruhezeit(self):
         self.melde("s1", [12])
         tags = [z["schluessel"] for z in aktionen.faellige_meldungen(self.con, self.konfig, _um(9))]
-        self.assertEqual(tags, ["merkmale:waffen:s1"])
+        self.assertEqual(tags, ["merkmale:waffen:s1:12"])  # Befund K-6: Schlüssel mit den neuen Zahlen
         nachts = [z["schluessel"] for z in aktionen.faellige_meldungen(self.con, self.konfig, _um(1))]
         self.assertEqual(nachts, [])
 
@@ -263,6 +294,15 @@ class UnbekannteWaffen(MitSpeicher):
         self.assertEqual(self.melde("s1", [12]), [12])
         self.assertEqual(self.melde("s1", [12]), [])
         self.assertEqual(len(self.meldungen()), 2)
+
+    def test_neue_zahl_derselben_session_wird_gemeldet(self):
+        # Befund K-6: replay.json derselben Session neu erzeugt, jetzt mit einer weiteren Zahl → zweite Meldung
+        self.assertEqual(self.melde("s1", [12]), [12])
+        self.assertEqual(self.melde("s1", [12, 31]), [31])
+        z = self.meldungen()
+        self.assertEqual(sorted(k for k in z if k.startswith("merkmale:waffen:")),
+                         ["merkmale:waffen:s1:12", "merkmale:waffen:s1:31"])
+        self.assertIn("Match s1: 31 –", z["merkmale:waffen:s1:31"]["text"])
 
     def test_nur_meine_kills_und_ohne_replay(self):
         m = match([elim(100, "X", "Y", waffe=55), elim(110, ICH, "A", knock=True, waffe=66)])  # fremd, nur Knock
@@ -308,6 +348,21 @@ class Nachtragen(MitSpeicher):
         self.assertEqual(zeile["gewichte_version"], 3)
         self.assertIn("Bot-Opfer", zeile["begruendung"])
         self.assertEqual(self.trage_nach(), {"clips": 0, "geaendert": 0, "ohne_replay": 0, "waffen_gemeldet": []})
+
+    def test_waffen_erst_nach_kalibrierung(self):
+        # Befund S-3: leere [merkmale.waffen] → sniper/nahkampf fehlen; nach dem Eintragen holt nachtragen sie nach
+        self.konfig.daten["merkmale"]["waffen"] = {"sniper": [], "nahkampf": [], "sonstige": []}
+        self.replay("s1", [elim(110, ICH, "A", waffe=SNIPER), elim(113, ICH, "B", waffe=SHOTGUN)])
+        cid = self.clip_anlegen(status="vorbewertet", start=CLIP_START, max_gruppe=2, match_id="s1")
+        self.assertEqual(self.trage_nach()["geaendert"], 1)
+        mk = json.loads(db.clip(self.con, cid)["merkmale"])
+        self.assertNotIn("sniper", mk)
+        self.assertNotIn("nahkampf", mk)
+        self.assertIn("bot_opfer", mk)
+        self.konfig.daten["merkmale"]["waffen"] = dict(WAFFEN)
+        self.assertEqual(self.trage_nach()["clips"], 1)  # fehlt noch → wird wieder versucht
+        mk = json.loads(db.clip(self.con, cid)["merkmale"])
+        self.assertEqual((mk["sniper"], mk["nahkampf"]), (0.5, 0.5))
 
     def test_ohne_replay_zaehlen_nicht_abbrechen(self):
         self.replay("s1", [elim(110, ICH, "A", bot=True)])
@@ -382,7 +437,7 @@ class Analyze(MitSpeicher):
         self.assertIn("Bot-Opfer", bot["begruendung"])
         # unbekannte Waffe 42: genau eine Sammelmeldung, auch nach dem zweiten analyze
         schluessel = [z[0] for z in self.con.execute("SELECT schluessel FROM meldungen ORDER BY id")]
-        self.assertEqual(schluessel, ["merkmale:waffe:42", f"merkmale:waffen:{self.SID}"])
+        self.assertEqual(schluessel, ["merkmale:waffe:42", f"merkmale:waffen:{self.SID}:42"])  # Befund K-6
 
     def test_decide_reicht_durch(self):
         self.konfig.daten["decide"]["claude"] = False
@@ -402,7 +457,8 @@ class Analyze(MitSpeicher):
         self.assertEqual((ergebnis["kill_quelle"], ergebnis["kandidaten"]), ("steelseries", 1))
         analyse = json.loads((verarbeitung.ordner(self.konfig, self.SID) / "analyse.json").read_text("utf-8"))
         mk = analyse["kandidaten"][0]["merkmale"]
-        self.assertEqual({m: mk[m] for m in REPLAY_MERKMALE}, dict(dict.fromkeys(REPLAY_MERKMALE, 0.0), platzierung=0.5))
+        # Befund K-1: nur platzierung ist bekannt, die übrigen Replay-Merkmale fehlen (unbekannt, nicht 0)
+        self.assertEqual({m: mk[m] for m in REPLAY_MERKMALE if m in mk}, {"platzierung": 0.5})
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM meldungen").fetchone()[0], 0)  # Waffe 42 nicht gemeldet
 
 
