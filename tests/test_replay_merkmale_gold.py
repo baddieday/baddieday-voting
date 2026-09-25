@@ -14,13 +14,17 @@ from clip_pipeline.konfig import lade
 from clip_pipeline.merkmale import REPLAY_MERKMALE, MIC_MERKMALE
 from clip_pipeline.replay import match_aus_json
 from clip_pipeline.zeit import iso
-from tests.test_replay_vorbewertung import EINSTELLUNGEN, ICH, Replay, elim
+# Modul statt Klasse importieren: sonst sammelt unittest die Testklasse Replay hier ein zweites Mal ein
+from tests import test_replay_vorbewertung as alt
+
+EINSTELLUNGEN, ICH, elim = alt.EINSTELLUNGEN, alt.ICH, alt.elim
+GRUND = alt.Replay.DATEN
 
 ALTE_FUENF = ("kill_punkte", "victory_royale", "laenge", "lautstaerke", "kommentar")
 
 
 def _mit(eliminierungen, **mehr) -> dict:
-    return dict(Replay.DATEN, eliminierungen=eliminierungen, **mehr)
+    return dict(GRUND, eliminierungen=eliminierungen, **mehr)
 
 
 def _nachschnitt_wipe() -> dict:
@@ -42,9 +46,9 @@ def _st(t, opfer, knock=False):
     return {"t_ms": round(t * 1000), "eliminator": "ICH", "eliminiert": opfer, "knock": knock}
 
 
-# Alle Replay-Vorlagen der bestehenden Tests (Kopien, damit dieser Test nicht an fremden Testdateien hängt)
+# Alle Replay-Vorlagen der bestehenden Tests (die Grundvorlage direkt, die übrigen als Kopie der Inline-Vorlagen)
 VORLAGEN = {
-    "grund": Replay.DATEN,
+    "grund": GRUND,
     "umhaut": _mit([
         elim(100, ICH, "A", knock=True), elim(104, "TEAM", "A"),
         elim(200, "TEAM", "B", knock=True), elim(203, ICH, "B"),
@@ -64,7 +68,7 @@ VORLAGEN = {
         elim(400, ICH, "OPFER-2", knock=True), elim(495, ICH, "OPFER-2"),
         elim(600, ICH, "OPFER-3"),
     ], stats_eliminierungen=3),
-    "sieg": _mit(Replay.DATEN["eliminierungen"][:4], ich={"epic_id": ICH, "player_id": ICH, "platzierung": 1}),
+    "sieg": _mit(GRUND["eliminierungen"][:4], ich={"epic_id": ICH, "player_id": ICH, "platzierung": 1}),
     "nachschnitt_wipe": _nachschnitt_wipe(),
     "stimmung_tod": _stimmung([{"t_ms": 304000, "eliminator": "GEGNER", "eliminiert": "ICH", "knock": False}], 12),
     "stimmung_wipe": _stimmung([_st(297, "OPFER-1", True), _st(302, "OPFER-2", True), _st(304, "OPFER-3", True),
