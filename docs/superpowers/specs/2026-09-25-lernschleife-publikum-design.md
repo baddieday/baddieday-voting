@@ -167,6 +167,8 @@ Berechnung in `publikum.py`, `score_fuer(post, messungen, vergleichsbasis)`, det
    Komponente wird robust standardisiert: `z = (x − Median) / (1,4826 · MAD)`, MAD mindestens 0,05, `z` auf
    ±2,5 begrenzt. Unter 5 Posts in der Basis: `z = 0` für alle (kein Lernen aus dem Nichts, Score bleibt 0 mit
    Vermerk „Basis zu klein“).
+   *Geändert 25.09. (Florian, R3):* Minimum **je Teil** aus `[publikum.mad_minimum]` statt pauschal 0,05; die
+   benutzten Minima stehen in `score_teile.mad_minimum` – siehe `docs/ENTSCHEIDUNGEN.md` (R3, A44).
 4. **Score** `= 0,5·z_r + 0,3·z_e + 0,2·z_v`; ohne Wiedergabe: `0,6·z_e + 0,4·z_v` und Vermerk „ohne Wiedergabe“.
 5. `score_teile` speichert `r, e, v, z_r, z_e, z_v, Median/MAD der Basis, Messungs-ID, Vermerke`.
 
@@ -193,6 +195,8 @@ unverändert (`bewertet_utc`). Das hält Paare und Rezept-Stände stabil.
   und fragt „Stimmt das? ✅ / ✏️ von Hand“. Nichts wird ungeprüft gespeichert.
 - **Fallback Hand:** Antwort `views likes wiedergabe voll%` (Leerzeichen-getrennt, „–“ für unbekannt), z. B.
   `1240 61 6.8 34`. Quelle `hand`.
+  *Geändert 25.09. (Florian, R4):* optional dahinter `kommentare shares saves`, also 4 oder 7 Werte
+  (`1240 61 6.8 34 3 5 2`) – siehe `docs/ENTSCHEIDUNGEN.md` (R4, A41).
 - Kosten: ein Aufruf je Screenshot. `[lernbot].screenshot_claude = false` schaltet auf Hand-Eingabe um.
 - Das Bild wird nach der Auswertung gelöscht (kein Bildarchiv – nur die Zahlen und das JSON).
 

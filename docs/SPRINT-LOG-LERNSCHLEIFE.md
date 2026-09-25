@@ -27,11 +27,11 @@ Annahmen stehen **nicht** hier, sondern einmal in `docs/ENTSCHEIDUNGEN.md`, „A
     `entwurf.py`, `cli.py`, `lernbot.py`, `README.md`, `config/pipeline.toml`, `config/lokal.beispiel.toml`:
     0 Konflikte, `entwurf.py`/`cli.py` kompilieren. `CLAUDE.md` und `docs/ENTSCHEIDUNGEN.md` hängen wie geplant am
     Ende an – beim Merge beide Blöcke behalten, R2.0 zuerst.
+  - Drop-in mit nachgebautem `e19-puffer.conf` daneben: `systemd-analyze security --offline=true` meldet „read-only
+    access to home directories“ (🧪).
 - Gesamtläufe (`python -m unittest discover -s tests -t .`):
   - **Vor dem Sprint:** 495 Tests auf `main` nach Regisseur 2.0 (grün, 3 übersprungen – `docs/SPRINT-LOG.md`).
   - **Nach ddec0d8** (Stufe 1 mit Nachbesserung, vor dem Merge mit main): `Ran 733 tests` / `OK (skipped=2)`.
-  - Drop-in mit nachgebautem `e19-puffer.conf` daneben: `systemd-analyze security --offline=true` meldet „read-only
-    access to home directories“ (🧪).
 
 ### Befunde des Panels – bestätigt und behoben
 Wichtig:
@@ -132,9 +132,10 @@ begründet:
 - **„gestartet erst nach subprocess.run“:** korrigiert – bei einem Timeout lief claude wirklich, das zählt.
 
 ### Annahmen
-A1–A43 und die Annahmen der Bauer: `docs/ENTSCHEIDUNGEN.md`, „Annahmen im Sprint Lernschleife“. Neu in der
+A1–A44 und die Annahmen der Bauer: `docs/ENTSCHEIDUNGEN.md`, „Annahmen im Sprint Lernschleife“. Neu in der
 Nachbesserung: A17 geändert (CLAUDE_CONFIG_DIR), A29 präzisiert, A35–A40. Nach Florians Antworten (unten): A41–A43
-neu; A2, A10, A27, A28, A40 und die Rückfragen R3–R5 als entschieden markiert. Weiter offen: R1, R2, A35.
+neu; A2, A10, A27, A28, A40 und die Rückfragen R3–R5 als entschieden markiert. Nach dem Merge-Prüfer: A44 (Werte der
+MAD-Minima). Weiter offen: R1, R2, A35, A44.
 
 ### 🏠 Braucht das echte System
 - Installation P1–P3 aus `docs/PUBLIKUM.md` (Code einspielen, beide Bots neu starten, Drop-in, zweite claude-Anmeldung,
@@ -155,7 +156,7 @@ neu; A2, A10, A27, A28, A40 und die Rückfragen R3–R5 als entschieden markiert
 - **Florians Antworten – erledigt** (Commit „Stufe 1: Florians Antworten – MAD je Komponente, Hand-Eingabe erweitert,
   Installation aus main“):
   - ✅ **R3 MAD-Minimum je Komponente:** neue Tabelle `[publikum.mad_minimum]` (wiedergabe 0,05 · engagement 0,005 ·
-    reichweite 0,1) mit Begründung in `config/pipeline.toml`, Beispiel in `config/lokal.beispiel.toml`.
+    reichweite 0,1 – die Werte sind Annahme A44, siehe „Befunde nach dem Merge“) mit Begründung in `config/pipeline.toml`, Beispiel in `config/lokal.beispiel.toml`.
     `publikum.robust_z` bekommt das Minimum als Parameter (Formel weiter genau einmal), `score_fuer` gibt je Teil
     sein Minimum mit und schreibt die benutzten in `score_teile.mad_minimum`. Fehlt die Tabelle oder ein Teil, oder
     ist ein Wert keine Zahl bzw. ≤ 0 → KonfigFehler (CLI Exit 2). Tests mit dem Zahlenbeispiel der Begründung
@@ -185,3 +186,27 @@ neu; A2, A10, A27, A28, A40 und die Rückfragen R3–R5 als entschieden markiert
   - Gesamtlauf `python -m unittest discover -s tests -t .` → `Ran 853 tests in 1253.147s` / `OK (skipped=3)` (vorher
     495 auf main, 733 nach ddec0d8; neu übersprungen ist der Leistungstest aus Regisseur 2.0,
     `test_effekte_render`, der nur mit `CLIP_LEISTUNG=1` läuft).
+
+### Befunde nach dem Merge (Prüfer, 25.09.) – jeder selbst nachgeprüft
+1. **CLAUDE.md, Zeile unter L6, ist veraltet** (wichtig) – **bestätigt, aber nicht geändert:** Dort steht weiter
+   „bekommen beim Merge mit Regisseur 2.0 fortlaufende E-Nummern“ und „A1–A40, R1–R5 offen“; `git log -- CLAUDE.md`
+   endet bei ddec0d8, ea88402 hat nur ENTSCHEIDUNGEN.md, PUBLIKUM.md und dieses Log angepasst. CLAUDE.md ändern wir
+   nur nach Rückfrage (CLAUDE.md, „Wie wir zusammenarbeiten“) – **wartet auf Florians OK** für den Ersatz: „L1–L6
+   bleiben als Nummern (Florian 25.09.). Annahmen A1–A44 und Rückfragen (R3–R5 entschieden; R1, R2, A35, A44 offen):
+   `docs/ENTSCHEIDUNGEN.md`, ‚Annahmen im Sprint Lernschleife‘.“ Bis dahin sagt ENTSCHEIDUNGEN.md (L1–L6, A2)
+   ausdrücklich „kein Umnummerieren“. **Muss vor dem PR nach main erledigt sein.**
+2. **MAD-Minima als „entschieden (Florian)“ geführt, obwohl R3 nur nach „je Komponente“ fragte** (klein) –
+   **bestätigt:** Florians Wortlaut liegt weder im Repo noch in den Uploads; der Commit ea88402 nennt die Werte nur als
+   Umsetzung. Also nicht geraten: R3 ist nur als Prinzip „je Komponente“ entschieden, die Werte sind neu **A44** (mit
+   dem Hinweis, dass reichweite 0,1 *stärker* dämpft als die Spec: z 0,64 statt 1,28). `config/pipeline.toml` verweist
+   auf A44; Code und Werte unverändert.
+3. **Unterpunkt „Drop-in … systemd-analyze“ hing unter „Gesamtläufe“** (klein) – **bestätigt** (ea88402 hatte
+   „Gesamtläufe“ davor eingefügt) und behoben: wieder unter „Testläufe der Nachbesserung“.
+4. **Spec §6.3/§7.1 ohne Hinweis auf R3/R4** (klein) – **bestätigt** und behoben: je ein Vermerk „Geändert 25.09.“
+   mit Verweis auf ENTSCHEIDUNGEN.md (R3/A44, R4/A41); der Spec-Text bleibt sonst stehen.
+5. **/hilfe erklärte 💬 ↗️ 🔖 nicht** (klein) – **bestätigt** und behoben: `lernbot_publikum.ZEICHEN_ZEILE` wird aus
+   `publikum.SYMBOLE` in der Reihenfolge von `publikum.FELDER` erzeugt (eine Stelle; ein neues Feld erscheint von
+   selbst). Test zuerst: `tests.test_publikum_cli.Befehle.test_hilfe_mit_publikum_zusatz` prüft jedes Zeichen aus
+   `SYMBOLE` – vorher `FAILED (failures=4)`, nachher `Ran 42 tests` / `OK` (ganzes Modul).
+
+Verworfen: keiner.

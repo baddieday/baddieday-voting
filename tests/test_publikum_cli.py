@@ -496,6 +496,12 @@ class Befehle(MitBewertung):
         # Das Alter kommt aus [publikum].alter_tage (Abnahme: 3) – /publikum nennt es, die Hilfe keine feste Zahl
         self.assertNotRegex(lernbot_publikum.HILFE_ZUSATZ, r"\d+ Tag")
         self.assertIn("⏱ Ø Wiedergabe · 🏁 ganz angesehen", lernbot_publikum.HILFE_ZUSATZ)  # die Zeichen erklärt
+        # JEDES Zeichen, das Rückfrage und Bestätigung zeigen (publikum.SYMBOLE), steht in der Hilfe – seit R4 tippst
+        # du 💬 ↗️ 🔖 selbst ein und musst prüfen können, ob deine Zahl im richtigen Feld gelandet ist (A41)
+        for feld, zeichen in publikum.SYMBOLE.items():
+            with self.subTest(feld=feld):
+                self.assertIn(zeichen, lernbot_publikum.HILFE_ZUSATZ)
+        self.assertIn("💬 Kommentare · ↗️ Shares · 🔖 Saves", lernbot_publikum.HILFE_ZUSATZ)
         # Hand-Eingabe mit den drei Zusatz-Zählern (Florian 25.09.) – und das Beispiel nimmt der Bot auch an
         self.assertIn("Kommentare, Shares, Saves: <code>#17 1240 61 6.8 34 3 5 2</code>", lernbot_publikum.HILFE_ZUSATZ)
         publikum.lies_hand_eingabe("1240 61 6.8 34 3 5 2")

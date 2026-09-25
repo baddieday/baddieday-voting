@@ -455,10 +455,8 @@ Prüfer-Panel und nach Florians Antworten (`docs/SPRINT-LOG-LERNSCHLEIFE.md`).
   (`publikum.HAND_HINWEIS`, mit beiden Beispielen).
 
 ### Stufe 1 – Florians Antworten (25.09.) und was dabei neu angenommen wurde
-- **R3 → `[publikum.mad_minimum]` je Komponente:** `wiedergabe = 0.05` (wie die Spec), `engagement = 0.005`,
-  `reichweite = 0.1`. Warum: e liegt um 0,05 mit Streuung ~0,01 – das pauschale 0,05 der Spec machte einen
-  Engagement-Ausreißer fast wirkungslos (e 0,09 gegen 0,05 … 0,09: z 0,27 statt 1,35); v = ln(1 + Views) streut in
-  ganzen Einheiten, 0,1 ≈ 10 % mehr Views. Die Formel steht weiter genau einmal (`publikum.robust_z`, Minimum als
+- **R3 → MAD-Minimum je Komponente** (entschieden ist das Prinzip „je Komponente“; die drei Werte sind Annahme A44):
+  neue Tabelle `[publikum.mad_minimum]`. Die Formel steht weiter genau einmal (`publikum.robust_z`, Minimum als
   Parameter); `score_fuer` gibt je Teil sein Minimum mit und schreibt die benutzten Minima in `score_teile`
   (`"mad_minimum": {"r", "e", "v"}`). Fehlt die Tabelle oder ein Teil, oder ist ein Wert keine Zahl bzw. ≤ 0 →
   KonfigFehler (CLI Exit 2), wie bei den anderen `[publikum]`-Schlüsseln.
@@ -477,6 +475,14 @@ Prüfer-Panel und nach Florians Antworten (`docs/SPRINT-LOG-LERNSCHLEIFE.md`).
   Fehler EINES Posts zählte (Exit 1) – eine kaputte Konfig betrifft ja jeden Post.
 - **A43 Minima auch bei „Basis zu klein“ in `score_teile`:** so hat jeder gespeicherte Score dieselben Felder, und man
   sieht auch dort, mit welcher Konfig gerechnet worden wäre.
+- **A44 Werte der MAD-Minima** (offen, bis Florian sie bestätigt – R3 hat nur „je Komponente“ entschieden):
+  `wiedergabe = 0.05` (wie die Spec), `engagement = 0.005`, `reichweite = 0.1`; Gründe je Wert in
+  `config/pipeline.toml`. Engagement: e liegt um 0,05 mit Streuung ~0,01 – das pauschale 0,05 der Spec machte einen
+  Ausreißer fast wirkungslos (e 0,09 gegen 0,05 … 0,09: z 0,27 statt 1,35). **Achtung Reichweite:** 0,1 ist
+  *größer* als das 0,05 der Spec, dämpft also kleine Reichweiten-Unterschiede (1 100 gegen um 1 000 Views: z 0,64
+  statt 1,28, `tests.test_publikum`) – das ist eine eigene Wahl des Bauers, nicht Teil der Frage R3. Begründung:
+  v = ln(1 + Views) streut in ganzen Einheiten, 0,1 ≈ 10 % mehr Views gilt als Zufall der TikTok-Verteilung.
+  Bestätigt Florian 0,05 für die Reichweite, ändert sich nur `config/pipeline.toml` (und der Test).
 
 ### Stufe 1 – Annahmen der Bauer (Pakete a–g, kurz)
 - **a1** Merkmale eines Entwurf-Moments: mit clip_id aus `clips.merkmale`, sonst aus `momente.merkmale`, sonst {}; ein
@@ -515,14 +521,15 @@ Prüfer-Panel und nach Florians Antworten (`docs/SPRINT-LOG-LERNSCHLEIFE.md`).
   Getrennter Betrieb wie auf dem Mini, Wecken/Netz gepatcht. **g4** Eine feste Uhr für alle Module (auch `db.jetzt`).
   **g5** Alter DB-Stand aus `schema.sql`, `regie.sql`, `lager.sql`. **g6** Zweiter Lauf = Timer am nächsten Tag.
 
-### Rückfragen an Florian (Stufe 1, nach Wichtigkeit) – R3–R5 entschieden am 25.09., R1, R2 und A35 offen
+### Rückfragen an Florian (Stufe 1, nach Wichtigkeit) – R3–R5 entschieden am 25.09., R1, R2, A35 und A44 offen
 - **R1 Öffentliches Repo – persönliche Daten:** Epic-ID, MAC, Heimnetz-IPs durch Platzhalter ersetzen? (R2.0 hat
   Epic-ID und MAC inzwischen als Variable – beim Merge prüfen.) Historie umschreiben nur mit ausdrücklichem OK.
 - **R2 Zweite claude-Anmeldung für den Lern-Bot-Dienst** in `/var/lib/clip-pipeline/claude` (A17) – ok? Die frühere
   Variante „Dienst darf ins Home schreiben“ ist nach dem Panel verworfen.
 - ~~**R3 MAD-Minimum 0,05** gilt für alle Komponenten gleich und dämpft das Engagement (typischer MAD 0,01–0,02) um
-  Faktor 2,5–5. Ein Minimum je Komponente in `[publikum]`?~~ → **entschieden (Florian 25.09.): ja, je Komponente** –
-  `[publikum.mad_minimum]` wiedergabe 0,05 · engagement 0,005 · reichweite 0,1 (Abschnitt „Florians Antworten“ oben).
+  Faktor 2,5–5. Ein Minimum je Komponente in `[publikum]`?~~ → **entschieden (Florian 25.09.): ja, je Komponente**
+  (`[publikum.mad_minimum]`). Die Werte wiedergabe 0,05 · engagement 0,005 · reichweite 0,1 sind **Annahme A44** –
+  bitte bestätigen, vor allem reichweite 0,1 (dämpft stärker als die Spec).
 - ~~**R4 Hand-Eingabe** kennt nur Views/Likes/Wiedergabe/voll%; Kommentare, Shares, Saves zählen dann 0 (A10).
   Optional hinten anhängen – oder e ohne diese Zähler rechnen?~~ → **entschieden (Florian 25.09.): optional hinten
   anhängen** (`… 34 3 5 2`, A41).

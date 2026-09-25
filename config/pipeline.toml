@@ -208,6 +208,7 @@ reichweite = 0.2
 # Warum ein Minimum: Liegen deine letzten Posts fast gleich, wäre der MAD fast 0 und schon ein winziger Unterschied
 # gäbe einen riesigen z-Wert. Warum je Teil (Florian 25.09.; Spec §6.3 sagt pauschal 0,05): Die drei Teile haben
 # ganz verschiedene Größenordnungen. Scores werden nie überschrieben – eine Änderung gilt nur für neue Scores.
+# Die drei Werte selbst sind Annahme A44 (docs/ENTSCHEIDUNGEN.md), bis Florian sie bestätigt.
 # Wiedergabe r = gesehener Anteil des Videos (0 … 1,2) – 0,05 = 5 Prozentpunkte, wie in der Spec
 wiedergabe = 0.05
 # Engagement e = Reaktionen je View, liegt um 0,05 und streut nur um ~0,01. Mit 0,05 als Minimum wäre ein
