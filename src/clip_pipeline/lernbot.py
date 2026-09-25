@@ -68,11 +68,22 @@ def parse(daten: str) -> tuple[str, int, str]:
 
 
 def _balken(werte: list[float]) -> str:
+    """Mini-Diagramm des Spannungsbogens: je Wert ein Block von ▁ (kleinster) bis █ (größter).
+
+    Min-Max-Normierung, weil die Momentstärke seit Stufe 2 negativ sein kann (Bot-Opfer, Länge; Spec §8.2) –
+    vorher teilte die Funktion durch das Maximum, und [1, -10] warf einen IndexError. Sind alle Werte gleich, gibt
+    es nichts zu unterscheiden: jeder bekommt den mittleren Block ▄.
+    Parameter: werte – Zahlen (liste["bogen"]). Rückgabe: Text, ein Zeichen je Wert; leere Liste → "".
+    Fehler: keine. Beispiel: [2, -3, 1] → "█▁▇" (−3 ist der kleinste, 2 der größte, 1 liegt bei 80 %).
+    """
     zeichen = "▁▂▃▄▅▆▇█"
     if not werte:
         return ""
-    hoch = max(werte) or 1
-    return "".join(zeichen[min(7, int(w / hoch * 7))] for w in werte)
+    tief, hoch = min(werte), max(werte)
+    if hoch == tief:
+        return "▄" * len(werte)
+    stufen = len(zeichen) - 1
+    return "".join(zeichen[round((w - tief) / (hoch - tief) * stufen)] for w in werte)
 
 
 def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None,
