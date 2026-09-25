@@ -2,17 +2,23 @@
 Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Veröffentlichung mit Werbung für clip-battle.de
 
 ## Wie wir zusammenarbeiten (wichtig, immer beachten)
-- Das ist ein privates **Lernprojekt**. Ich habe Linux-Grundlagen und will verstehen, was passiert – nicht nur fertigen Code bekommen.
-- Kommuniziere auf **Deutsch**. Erkläre jeden Schritt kurz, **bevor** du ihn ausführst (was, warum, was ich dabei lerne).
-- **Frag nach, statt zu raten.** Wenn etwas in dieser Datei dem Code in `clips_voter` widerspricht oder unklar ist: nachfragen.
-- Arbeite in **kleinen Stufen**. Jede Stufe muss für sich allein nutzbar und testbar sein.
-- **Vorher fragen** bei: Löschen/Überschreiben von Dateien, Pakete installieren, Systemeinstellungen ändern, git push, allem Irreversiblen.
+- **Ziel vor allem anderen:** ein selbst lernendes System, das sich durch meine künftigen Eingaben (und das Publikum)
+  verbessert – im besten Fall autonom. Es soll **funktionieren**; 50-mal geprüft oder perfekt dokumentiert muss es nicht sein.
+- Kommuniziere auf **Deutsch** und erkläre kurz, was du tust und warum (Lernprojekt) – ohne dafür auf mein OK zu warten.
+- **Selbstständig arbeiten.** Bei Unklarheit eine sinnvolle Annahme treffen, kurz vermerken (Commit oder Sprint-Log) und
+  weitermachen. Fehler dürfen passieren – sie werden behoben.
+- **Nur fragen, wenn etwas gelöscht würde oder Datenverlust droht** (Rohdaten, Clips, Datenbank, Lager). Alles andere –
+  Code ändern, committen, pushen, mergen, einspielen, Pakete, Dienste – ohne Rückfrage.
+- **Schlank arbeiten:** Tests je Funktion nur für den normalen Weg und den wichtigsten Fehlerfall (keine
+  Randfall-Sammlungen). Ein Prüfer auf echte Fehler (Absturz, falsche Rechnung, Datenverlust); Gegenprüfung nur bei
+  blockierenden Befunden. Volle Testsuite einmal am Ende einer Stufe. Doku kurz.
+- Arbeite in **Stufen**; jede Stufe ist für sich nutzbar.
 - Berechtigungsabfragen **niemals** global abschalten (kein `--dangerously-skip-permissions`, kein `bypassPermissions`).
   **Einzige Ausnahme:** im LXC `claude-bau` auf pve-mini, und nur, wenn ich Claude selbst mit
-  `--dangerously-skip-permissions` starte. Auch dann gilt: vor `git push`, Löschen/Überschreiben,
-  Paketinstallation und Änderungen außerhalb des Repos trotzdem fragen; `.env` und `~/.ssh` nicht lesen.
+  `--dangerously-skip-permissions` starte. Auch dann gilt: vor Löschen oder drohendem Datenverlust fragen; `.env` und
+  `~/.ssh` nicht lesen.
 - **Keine Secrets** in Code oder Repo: Tokens gehören in `.env`, `.env` steht in `.gitignore`. Liefere eine `.env.example`.
-- Neue Entscheidungen, die wir treffen, ergänzt du nach Rückfrage in dieser Datei unter „Entscheidungen“.
+- Neue Entscheidungen trägst du selbst kurz unter „Entscheidungen“ ein.
 
 ## Ziel
 1. Sobald ein Fortnite-Match vorbei ist, werden die Aufnahmen **im Hintergrund** verarbeitet.
@@ -149,3 +155,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - 2026-09-25 (L5, Spec E25): Der **Wochen-Analyst schlägt nur vor** (Schema-geprüft), entscheidet nie; jede Hypothese wird per Knopf getestet.
 - 2026-09-25 (L6, Spec E26): **Clip-Bot minimal angefasst** (`posts` aus `/link`, Erwartungs-Zeile, Battle-Paarung nach Unsicherheit); n8n-Vertrag und Session-Schnittliste unverändert.
   L1–L6 sind die Nummern dieser Entscheidungen (E21 war schon vergeben); sie bleiben so (Florian 25.09.: „L1–L6 ok“). Die offenen Annahmen des Sprints (A1–A40) und Rückfragen R1–R5: `docs/ENTSCHEIDUNGEN.md`, „Annahmen im Sprint Lernschleife“.
+- 2026-09-25: **Schlank und selbstständig** (Florian): Nachfragen nur bei Löschen oder drohendem Datenverlust, sonst
+  selbstständig mit vermerkten Annahmen. Tests schlank (normaler Weg + wichtigster Fehlerfall), ein Prüfer, Gegenprüfung
+  nur bei Blockierendem, volle Suite einmal je Stufe, Doku kurz. Gilt auch für den Sprint „Lernschleife“ und ersetzt
+  dort das 5er-Panel und die Gegenprüfung je Befund aus dem Startauftrag. Ziel: ein selbst lernendes System.
