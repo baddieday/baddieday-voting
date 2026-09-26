@@ -10,12 +10,29 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 
 class MedienFehler(RuntimeError):
     pass
+
+
+# Hänger-Wächter (26.09.): Ein ffmpeg, das so lange keine CPU-Zeit mehr verbraucht, hängt (gesehen: VA-API-Render
+# eines Zusammenschnitts, 40 min ohne Fortschritt, hielt die Pipeline-Sperre). Es wird beendet – dann greift der
+# Rückfall des Aufrufers (VA-API → CPU) bzw. es gibt einen sichtbaren Fehler statt eines ewigen Wartens.
+STILLSTAND_S = 180.0
+PRUEF_S = 5.0
+
+
+def _cpu_ticks(pid: int) -> int | None:
+    """utime + stime des Prozesses (alle Threads) aus /proc; None, wo es kein /proc gibt (dann kein Wächter)."""
+    try:
+        felder = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
+        return int(felder[11]) + int(felder[12])
+    except (OSError, IndexError, ValueError):
+        return None
 
 
 @dataclass
@@ -36,26 +53,41 @@ def _bruch(text: str | None) -> float:
     return float(zaehler) / float(nenner or 1)
 
 
-def fuehre_aus(befehl: list[str], was: str, timeout: float | None = None) -> str:
-    """Führt einen Befehl aus und gibt stderr zurück (FFmpeg schreibt seine Infos dorthin)."""
+def fuehre_aus(befehl: list[str], was: str, timeout: float | None = None, *,
+               stillstand_s: float | None = STILLSTAND_S, pruef_s: float = PRUEF_S) -> str:
+    """Führt einen Befehl aus und gibt stdout + stderr zurück (FFmpeg schreibt seine Infos nach stderr).
+
+    Wächter: Alle pruef_s Sekunden wird die CPU-Zeit des Prozesses gelesen; bleibt sie stillstand_s lang gleich,
+    hängt er → beenden, MedienFehler „hängt“. stillstand_s=None schaltet den Wächter ab. timeout: harte Grenze.
+    Fehler: MedienFehler (Programm fehlt, Zeitlimit, Hänger, Exit ≠ 0 mit den letzten 8 Zeilen von stderr)."""
     try:
-        ergebnis = subprocess.run(
-            befehl,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            check=False,
-        )
+        prozess = subprocess.Popen(befehl, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                   encoding="utf-8", errors="replace")
     except FileNotFoundError:
         raise MedienFehler(f"{was}: Programm {befehl[0]!r} nicht gefunden") from None
-    except subprocess.TimeoutExpired:
-        raise MedienFehler(f"{was}: Zeitlimit überschritten") from None
-    if ergebnis.returncode != 0:
-        rest = "\n".join(ergebnis.stderr.strip().splitlines()[-8:])
-        raise MedienFehler(f"{was} fehlgeschlagen (Exit {ergebnis.returncode}):\n{rest}")
-    return ergebnis.stdout + ergebnis.stderr
+    beginn = time.monotonic()
+    ticks, seit = _cpu_ticks(prozess.pid), beginn
+    while True:
+        try:
+            # communicate darf nach TimeoutExpired erneut gerufen werden, ohne Ausgabe zu verlieren
+            stdout, stderr = prozess.communicate(timeout=pruef_s)
+            break
+        except subprocess.TimeoutExpired:
+            jetzt_ = time.monotonic()
+            neu = _cpu_ticks(prozess.pid)
+            if neu is None or neu != ticks:
+                ticks, seit = neu, jetzt_
+            grund = ("Zeitlimit überschritten" if timeout is not None and jetzt_ - beginn > timeout else
+                     f"hängt – {stillstand_s:.0f} s ohne Fortschritt, abgebrochen"
+                     if stillstand_s is not None and ticks is not None and jetzt_ - seit > stillstand_s else None)
+            if grund:
+                prozess.kill()
+                prozess.communicate()
+                raise MedienFehler(f"{was}: {grund}") from None
+    if prozess.returncode != 0:
+        rest = "\n".join(stderr.strip().splitlines()[-8:])
+        raise MedienFehler(f"{was} fehlgeschlagen (Exit {prozess.returncode}):\n{rest}")
+    return stdout + stderr
 
 
 def probe(pfad: Path) -> Probe:

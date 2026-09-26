@@ -365,7 +365,8 @@ async def cmd_entwurf(update, context) -> None:
     if fmt not in regie.FORMATE:
         await update.effective_message.reply_text("Aufruf: /entwurf short oder /entwurf zusammenschnitt")
         return
-    await neuer_entwurf(context.application, fmt)
+    # Im Hintergrund wie nach einer Bewertung: sonst stehen alle anderen Knöpfe, bis der Entwurf fertig ist
+    context.application.create_task(neuer_entwurf(context.application, fmt))
 
 
 async def bei_audio(update, context) -> None:
