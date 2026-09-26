@@ -291,6 +291,17 @@ def _cmd_lager(args, konfig, con) -> int:
     return 1 if ergebnis.get("fehler") or ergebnis.get("konflikte") or ergebnis.get("zu_jung") else 0
 
 
+def _cmd_sicherung(args, konfig, con) -> int:
+    """Datenbank sichern (sqlite3-Backup, B1): läuft unabhängig vom Betriebsmodus, auch ohne [lager] – anders als
+    der tägliche Lager-Abgleich, der die DB nur im getrennten Betrieb sichert (lager.sichere_datenbank). Reine
+    Datenbank-/Speicher-Arbeit: keine Pipeline-Sperre (sperren=False), nicht in WECKEN – weckt pve-big nie."""
+    from . import lager
+
+    pfad = lager.sichere_datenbank(con, konfig)
+    _json({"sicherung": pfad})
+    return 0
+
+
 def _cmd_puffer(args, konfig, con) -> int:
     """Morgenprüfung (E19): pruefen legt Meldungen an (je Thema und Tag eine), status zeigt nur. Weckt nie.
     Exit: 0 ok · 1 ein Thema ließ sich nicht prüfen · 2 kein getrennter Betrieb."""
@@ -612,6 +623,10 @@ def baue_parser() -> argparse.ArgumentParser:
                    help="von eingang/ nur Dateien der letzten N Tage (Standard: [puffer].rohdaten_tage = 14)")
     a.add_argument("--probelauf", action="store_true", help="nur zählen (weckt nicht, kopiert nichts)")
     s.set_defaults(fn=_cmd_lager, sperren=False)  # eigene Lager-Sperre statt der Pipeline-Sperre
+
+    s = unter.add_parser("sicherung", help="Datenbank sichern (sqlite3-Backup nach <speicher>/sicherung/, Rotation "
+                                            "[lager].sicherungen_behalten) – auch ohne getrennten Betrieb (B1)")
+    s.set_defaults(fn=_cmd_sicherung, sperren=False)  # reine DB-/Speicher-Arbeit: keine Pipeline-Sperre, nicht in WECKEN
 
     s = unter.add_parser("puffer", help="Puffer auf dem Mini (E19): pruefen (Morgenprüfung, Meldungen) | status")
     s.add_argument("aktion", choices=["pruefen", "status"])

@@ -6,7 +6,8 @@ Regel (Wunsch vom 23.09.2026):
 Recyceln heißt: erst in papierkorb/<Datum>/ verschieben, nach papierkorb_tage endgültig löschen.
 Ohne --ausfuehren wird nur angezeigt, was passieren würde (Probelauf).
 
-Im getrennten Betrieb (E19: Puffer + Lager) gesperrt – siehe pruefe_erlaubt.
+Standardmäßig aus (Entscheidung 25.09.: nie automatisch löschen) und im getrennten Betrieb (E19: Puffer + Lager)
+immer gesperrt, egal was [aufraeumen].aktiv sagt – siehe pruefe_erlaubt.
 """
 
 from __future__ import annotations
@@ -31,13 +32,20 @@ class Aktion:
 
 
 def pruefe_erlaubt(konfig: Konfig) -> None:
-    """Im getrennten Betrieb verweigern (KonfigFehler): aufraeumen würde Dateien im Puffer verschieben und die Pfade
-    in der Datenbank umschreiben – der Abgleich ins Lager sähe sie danach unter neuem Namen, und im Puffer wird in
-    dieser Stufe nichts gelöscht (Freigabe erst mit B5)."""
+    """Verweigert (KonfigFehler), wenn aufraeumen in dieser Konfig nicht laufen darf:
+      1. Getrennter Betrieb (E19): aufraeumen würde Dateien im Puffer verschieben und die Pfade in der Datenbank
+         umschreiben – der Abgleich ins Lager sähe sie danach unter neuem Namen, und im Puffer wird in dieser
+         Stufe nichts gelöscht (Freigabe erst mit B5). Gilt immer, unabhängig von [aufraeumen].aktiv.
+      2. [aufraeumen].aktiv nicht gesetzt: Standard ist aus (Entscheidung 25.09., „nie automatisch löschen“) –
+         betrifft vor allem künftige Betriebsarten ohne [lager]-Abgleich (Front C: lokal/portabel/andere Spiele),
+         wo Punkt 1 nicht greift und der Löschweg (papierkorb_tage) sonst unbemerkt scharf wäre."""
     if konfig.getrennt:
         raise KonfigFehler("aufraeumen ist im getrennten Betrieb (Puffer + Lager) gesperrt: es würde Dateien im Puffer "
                            "verschieben und Pfade in der Datenbank umschreiben. Timer clip-aufraeumen ausschalten "
                            "(docs/PUFFER.md, R6).")
+    if not konfig.wert("aufraeumen.aktiv", False):
+        raise KonfigFehler("aufraeumen ist standardmäßig aus (nie automatisch löschen, Entscheidung 25.09.) – "
+                           "erst mit [aufraeumen].aktiv = true erlaubt (z. B. config/lokal.toml).")
 
 
 def _wertvolle_fenster(con: sqlite3.Connection, ab_kills: int) -> list[tuple[datetime, datetime]]:
