@@ -16,14 +16,12 @@ class Uploads(MitSpeicher):
         self.assertEqual(aktionen.upload_stand(self.con, cid, self.konfig), {"youtube": False, "tiktok": False, "clipbattle": False})
         knoepfe = aktionen.knoepfe_upload(cid, {"youtube": True, "tiktok": False, "clipbattle": False})
         self.assertEqual([d for reihe in knoepfe for _, d in reihe], [f"t:{cid}", f"c:{cid}"])  # nur Offenes
-        self.assertEqual([f for _, f in aktionen.offene_uploads(self.con, self.konfig)], [["youtube", "tiktok"]])
 
         antwort, _ = aktionen.plattform_erledigt(self.con, cid, "youtube", self.konfig)
         self.assertEqual(db.clip(self.con, cid)["status"], "freigegeben")
         antwort, stand = aktionen.plattform_erledigt(self.con, cid, "tiktok", self.konfig)
         self.assertIn("veröffentlicht", antwort.hinweis)
         self.assertEqual(db.clip(self.con, cid)["status"], "veroeffentlicht")
-        self.assertEqual(aktionen.offene_uploads(self.con, self.konfig), [])
         self.assertEqual(stand["clipbattle"], False)  # optional, blockiert nichts
 
     def test_link_erkennt_plattform(self):
@@ -37,16 +35,32 @@ class Uploads(MitSpeicher):
         url = self.con.execute("SELECT url FROM veroeffentlichungen WHERE plattform = 'youtube'").fetchone()[0]
         self.assertEqual(url, "https://youtu.be/abc")
 
-    def test_nach_freigabe_gibt_es_den_paket_knopf(self):
+    def test_nach_freigabe_kein_paket_knopf(self):
         cid = self.clip_anlegen()
         antwort = aktionen.entscheide(self.con, cid, "freigegeben")
-        self.assertIn(f"p:{cid}", [d for reihe in antwort.knoepfe for _, d in reihe])
+        self.assertEqual([d for reihe in antwort.knoepfe for _, d in reihe], [f"u:{cid}"])  # einzelne Momente: kein 📦
+
+    def _highlights_anlegen(self):
+        zeit = iso(jetzt() - timedelta(hours=30))
+        for name, status in (("hl-1", "freigegeben"), ("hl-2", "verworfen")):
+            self.con.execute("INSERT INTO highlights (name, datei, clips, dauer, status, erstellt, entschieden)"
+                             " VALUES (?, 'x.mp4', 5, '01:40', ?, ?, ?)", (name, status, zeit, zeit))
+
+    def test_highlight_video_bis_zum_haekchen(self):
+        from clip_pipeline import highlight
+
+        self._highlights_anlegen()
+        self.assertEqual([h["name"] for h in aktionen.offene_highlight_videos(self.con)], ["hl-1"])
+        self.assertIsNone(highlight.hochgeladen(self.con, 2)["hochgeladen"])  # verworfen: kein Häkchen
+        self.assertIsNotNone(highlight.hochgeladen(self.con, 1)["hochgeladen"])
+        self.assertEqual(aktionen.offene_highlight_videos(self.con), [])
 
     def test_erinnerung_nur_einmal_pro_tag(self):
         from clip_pipeline.bot import app as bot_app
 
-        cid = self.clip_anlegen(status="freigegeben")
+        cid = self.clip_anlegen(status="freigegeben", max_gruppe=3)  # auch ein Triple Kill kommt nicht in die Erinnerung
         self.con.execute("UPDATE clips SET entschieden = ? WHERE id = ?", (iso(jetzt() - timedelta(hours=30)), cid))
+        self._highlights_anlegen()
         nachrichten = []
 
         async def send_message(chat, text, **_):
@@ -56,7 +70,8 @@ class Uploads(MitSpeicher):
                                bot=SimpleNamespace(send_message=send_message))
         self.assertTrue(asyncio.run(bot_app.erinnere(fake)))
         self.assertFalse(asyncio.run(bot_app.erinnere(fake)))
-        self.assertIn("YouTube Shorts, TikTok", nachrichten[0])
+        self.assertIn("hl-1", nachrichten[0])
+        self.assertNotIn(f"#{cid}", nachrichten[0])
 
 
 class Migration(MitSpeicher):

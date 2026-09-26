@@ -127,18 +127,19 @@ async def sende_outbox(app: Application) -> int:
 
 
 async def erinnere(app: Application) -> bool:
-    """Erinnert an Clips, die seit über erinnerung_h freigegeben, aber nicht überall hochgeladen sind."""
+    """Erinnert an Highlight-Videos, die seit über erinnerung_h freigegeben, aber noch nicht hochgeladen sind –
+    höchstens einmal je erinnerung_h. Einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.)."""
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     stunden = float(konfig.wert("veroeffentlichung.erinnerung_h", 24))
     grenze = jetzt() - timedelta(hours=stunden)
     letzte = con.execute("SELECT zeit FROM ereignisse WHERE art = 'erinnerung' ORDER BY id DESC LIMIT 1").fetchone()
     if letzte and aus_iso(letzte["zeit"]) > grenze:
         return False
-    offen = [(c, f) for c, f in aktionen.offene_uploads(con, konfig) if c["entschieden"] and aus_iso(c["entschieden"]) < grenze]
-    if not offen:
+    videos = [h for h in aktionen.offene_highlight_videos(con) if h["entschieden"] and aus_iso(h["entschieden"]) < grenze]
+    if not videos:
         return False
-    await app.bot.send_message(chat, "⏰ " + texte.offene_uploads_text(offen), parse_mode=ParseMode.HTML)
-    db.protokoll(con, "erinnerung", f"{len(offen)} Clip(s) noch nicht überall hochgeladen")
+    await app.bot.send_message(chat, "⏰ " + texte.offene_uploads_text(videos), parse_mode=ParseMode.HTML)
+    db.protokoll(con, "erinnerung", f"{len(videos)} Highlight-Video(s) nicht hochgeladen")
     return True
 
 
@@ -322,7 +323,7 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_uploads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     con, konfig, _ = _daten(context)
-    text = texte.offene_uploads_text(aktionen.offene_uploads(con, konfig))
+    text = texte.offene_uploads_text(aktionen.offene_highlight_videos(con))
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
@@ -353,6 +354,16 @@ async def bei_klick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if aktion in ("hf", "hv"):
         h = highlight.entscheide(con, nummer, freigeben=aktion == "hf")
         await query.answer("Highlight nicht gefunden" if h is None else ("✅ Freigegeben" if aktion == "hf" else "🗑️ Verworfen"))
+        if h is not None:
+            knoepfe = aktionen.knoepfe_highlight_freigegeben(h["id"]) if h["status"] == "freigegeben" else None
+            with contextlib.suppress(BadRequest):
+                await query.edit_message_caption(caption=texte.highlight_text(h), parse_mode=ParseMode.HTML,
+                                                 reply_markup=_markup(knoepfe))
+        return
+
+    if aktion == "hu":
+        h = highlight.hochgeladen(con, nummer)
+        await query.answer("Highlight nicht gefunden" if h is None else "✅ Hochgeladen")
         if h is not None:
             with contextlib.suppress(BadRequest):
                 await query.edit_message_caption(caption=texte.highlight_text(h), parse_mode=ParseMode.HTML, reply_markup=None)

@@ -5,6 +5,7 @@ Callback-Daten (Telegram erlaubt max. 64 Byte):
   b:<battle>:a|b|s  Battle entscheiden                     n:0       nächstes Battle
   p:<clip>   Upload-Paket     y:/t:/c:<clip>  YouTube / TikTok / clip-battle.de erledigt
   hf:<highlight> / hv:<highlight>  Highlight-Video freigeben / verwerfen
+  hu:<highlight>  Highlight-Video hochgeladen (danach keine Erinnerung mehr)
 
 Lernschleife „Publikum“ (Spec §10.4, letzter Punkt): Das Häkchen (y:/t:) und /link legen zusätzlich den Post an
 (Tabelle posts, publikum.post_anlegen) – für die Plattformen aus [publikum].plattformen, nie für clip-battle.de.
@@ -40,7 +41,7 @@ PLATTFORM_NAMEN = {"youtube": "YouTube Shorts", "tiktok": "TikTok", "clipbattle"
 
 def parse(daten: str) -> tuple[str, int, str]:
     teile = (daten or "").split(":")
-    if len(teile) < 2 or teile[0] not in ("f", "v", "u", "b", "n", "p", "hf", "hv", *PLATTFORM_KUERZEL):
+    if len(teile) < 2 or teile[0] not in ("f", "v", "u", "b", "n", "p", "hf", "hv", "hu", *PLATTFORM_KUERZEL):
         raise ValueError(f"Unbekannte Callback-Daten {daten!r}")
     return teile[0], int(teile[1]), teile[2] if len(teile) > 2 else ""
 
@@ -50,8 +51,7 @@ def knoepfe_neu(clip_id: int) -> Knoepfe:
 
 
 def knoepfe_entschieden(clip_id: int, status: str = "verworfen") -> Knoepfe:
-    if status == "freigegeben":
-        return [[("↩️ Rückgängig", f"u:{clip_id}"), ("📦 Upload-Paket", f"p:{clip_id}")]]
+    # Kein 📦 nach der Freigabe: einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.) – /paket geht noch
     return [[("↩️ Rückgängig", f"u:{clip_id}")]]
 
 
@@ -129,6 +129,10 @@ def highlight_gesendet(con: sqlite3.Connection, highlight_id: int, nachricht_id:
 
 def knoepfe_highlight(highlight_id: int) -> Knoepfe:
     return [[("✅ Freigeben", f"hf:{highlight_id}"), ("🗑️ Verwerfen", f"hv:{highlight_id}")]]
+
+
+def knoepfe_highlight_freigegeben(highlight_id: int) -> Knoepfe:
+    return [[("✅ Hochgeladen", f"hu:{highlight_id}")]]
 
 
 def als_gesendet(con: sqlite3.Connection, clip_id: int, nachricht_id: int, file_id: str | None) -> None:
@@ -366,20 +370,12 @@ def link_speichern(con: sqlite3.Connection, clip_id: int, url: str, konfig, *,
     return antwort, stand
 
 
-def offene_uploads(con: sqlite3.Connection, konfig) -> list[tuple[sqlite3.Row, list[str]]]:
-    """Freigegebene Clips, denen noch eine Pflicht-Plattform fehlt – das darf nicht liegen bleiben."""
-    pflicht, _ = plattformen(konfig)
-    ergebnis = []
-    for clip in con.execute("SELECT * FROM clips WHERE status = 'freigegeben' ORDER BY id").fetchall():
-        erledigt = {
-            z["plattform"] for z in con.execute(
-                "SELECT plattform FROM veroeffentlichungen WHERE clip_id = ? AND erledigt IS NOT NULL", (clip["id"],)
-            )
-        }
-        fehlt = [p for p in pflicht if p not in erledigt]
-        if fehlt:
-            ergebnis.append((clip, fehlt))
-    return ergebnis
+def offene_highlight_videos(con: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Freigegebene Highlight-Videos ohne Häkchen „✅ Hochgeladen“ (highlight.hochgeladen) – das Einzige, woran der
+    Bot erinnert. Einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.)."""
+    return con.execute(
+        "SELECT * FROM highlights WHERE status = 'freigegeben' AND hochgeladen IS NULL ORDER BY id"
+    ).fetchall()
 
 
 # --- Rangliste ------------------------------------------------------------------
