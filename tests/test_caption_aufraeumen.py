@@ -37,6 +37,12 @@ class Caption(MitSpeicher):
 
 
 class Aufraeumen(MitSpeicher):
+    def setUp(self):
+        super().setUp()
+        # Diese Klasse testet die alte Regel selbst (182 Tage recyceln) – die braucht seit B1 (26.09.) das
+        # ausdrückliche Opt-in; Standard ist aus (Entscheidung 25.09., "nie automatisch löschen").
+        self.konfig.daten.setdefault("aufraeumen", {})["aktiv"] = True
+
     def _datei(self, relativ: str, alter_tage: float):
         pfad = self.konfig.wurzel / relativ
         pfad.parent.mkdir(parents=True, exist_ok=True)
@@ -69,6 +75,18 @@ class Aufraeumen(MitSpeicher):
     def test_loescht_nie_ausserhalb_des_papierkorbs(self):
         with self.assertRaises(RuntimeError):
             aufraeumen.fuehre_aus(self.con, self.konfig, [aufraeumen.Aktion(self.konfig.ordner("sessions"), "loeschen", "")])
+
+    def test_ohne_aktiv_verweigert(self):
+        """B1 (26.09.): Standard ist aus (Entscheidung 25.09., „nie automatisch löschen“) – auch ohne getrennten
+        Betrieb bleibt aufraeumen gesperrt, bis [aufraeumen].aktiv = true ausdrücklich gesetzt ist."""
+        self._datei("sessions/m1/clips/002_einzel_1k.mp4", 200)
+        self.konfig.daten["aufraeumen"]["aktiv"] = False
+        with self.assertRaises(KonfigFehler) as fehler:
+            aufraeumen.plane(self.con, self.konfig)
+        self.assertIn("aktiv", str(fehler.exception))
+        code, e = self._cli(["aufraeumen"])
+        self.assertEqual((code, e["fehler"]), (2, "konfig"))
+        self.assertIn("aktiv", e["hinweis"])
 
     def test_im_getrennten_betrieb_verweigert(self):
         """E19: im Puffer wird nichts verschoben und kein DB-Pfad umgeschrieben – Klartext, Exit 2."""
