@@ -167,20 +167,13 @@ def upload_text(clip, stand: dict[str, bool]) -> str:
     return "\n".join(zeilen)
 
 
-def offene_uploads_text(eintraege: list, videos: list = ()) -> str:
-    """Nur Highlights: Clips ab Triple Kill oder mit Victory Royale (aktionen.offene_uploads) und freigegebene
-    Highlight-Videos ohne Häkchen (aktionen.offene_highlight_videos)."""
-    from .aktionen import PLATTFORM_NAMEN
-
-    if not eintraege and not videos:
-        return "📦 Alle Highlights sind hochgeladen 👍"
-    zeilen = ["📦 <b>Highlights noch nicht hochgeladen:</b>"]
+def offene_uploads_text(videos: list) -> str:
+    """Freigegebene Highlight-Videos ohne Häkchen (aktionen.offene_highlight_videos); einzelne Momente nie."""
+    if not videos:
+        return "📦 Kein Highlight-Video wartet aufs Hochladen 👍"
+    zeilen = ["📦 <b>Noch nicht hochgeladen:</b>"]
     for h in videos:
         zeilen.append(f"🏆 Highlight-Video {escape(h['name'])} ({escape(h['dauer'])}) – am Video „✅ Hochgeladen“ tippen")
-    for clip, fehlt in eintraege:
-        zeilen.append(f"#{clip['id']} {escape(clip['titel'])} – fehlt: {', '.join(PLATTFORM_NAMEN.get(p, p) for p in fehlt)}")
-    if eintraege:
-        zeilen.append("Paket erneut holen: /paket &lt;nummer&gt;")
     return "\n".join(zeilen)
 
 
@@ -191,8 +184,6 @@ HILFE = (
     "/rangliste – Top 10 der aktuellen Saison\n"
     "/gewichte – was die Vorbewertung gelernt hat\n"
     "/offen – unentschiedene Clips erneut zeigen\n"
-    "/uploads – Highlights (ab Triple Kill, Victory Royale, Highlight-Video), die noch nicht hochgeladen sind\n"
-    "/paket &lt;nummer&gt; – Upload-Paket (Short + Caption) für jeden freigegebenen Clip\n"
-    "/link &lt;nummer&gt; &lt;url&gt; – YouTube-/TikTok-Link eintragen (hakt die Plattform ab)\n"
+    "/uploads – freigegebene Highlight-Videos, die noch nicht hochgeladen sind\n"
     "/status – Überblick"
 )

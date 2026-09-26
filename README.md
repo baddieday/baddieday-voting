@@ -20,10 +20,9 @@ YouTube Shorts **und** TikTok → alle 2 Wochen ein Highlight-Video. Die Vorbewe
    - `render` – framegenau schneiden (feste Bildrate für CapCut), Lautstärke messen, Punkte, Vorschau < 50 MB
 4. Der Telegram-Bot schickt dir jeden Clip: **✅ Freigeben / 🗑️ Verwerfen** – ab 10 Urteilen mit der Zeile
    „Erwartung: ✅ 78 %“ (was der Bot erwartet, festgeschrieben beim Senden).
-5. **📦 Upload-Paket**: Short 1080×1920 (Overlay + Endcard „Stimm ab auf clip-battle.de“) als Datei +
-   Caption zum Kopieren + Checkliste YouTube / TikTok / clip-battle.de. Erst wenn YouTube **und** TikTok
-   abgehakt sind (Knopf oder `/link <nr> <url>`), gilt der Clip als veröffentlicht; offene Uploads meldet der
-   Bot täglich. Das Häkchen TikTok legt zusätzlich einen **Post** für die Lernschleife an (siehe unten).
+5. **Einzelne Momente werden nicht hochgeladen** (26.09.) – Freigaben dienen Bewertung, Lernen und dem
+   Highlight-Video. Hochgeladen werden die Shorts aus dem Lern-Bot und das Highlight-Video (Erinnerung täglich,
+   bis du am Video „✅ Hochgeladen“ tippst). Für Ausnahmen gibt es noch `/paket <nr>` und `/link <nr> <url>`.
 6. `/battle`: zwei freigegebene Clips, du wählst den besseren → Elo. Freigaben, Battles und die Publikums-Scores
    der Posts justieren die Gewichte der Vorbewertung (`/gewichte` zeigt beide Sortier-Quoten: du und Publikum).
 7. Alle 14 Tage: `highlight` baut ein Video aus den besten Clips (Überblendungen, lizenzierte Musik mit Ducking)
@@ -68,7 +67,7 @@ misst ein Hintergrundschritt nach `render` (n8n wartet nicht). Installation: `do
 | `pipeline stimmung --clips [--session ID] [--max n]` | Mic-Schritt von Hand (Whisper, ohne Claude, nur Puffer) |
 | `pipeline publikum bewerten` | Publikums-Scores aller Posts setzen, die `[publikum].alter_tage` (Standard 7) Tage alt sind (Timer, weckt nie) |
 
-Telegram: `/battle` `/rangliste` `/gewichte` `/uploads` `/paket <nr>` `/link <nr> <url>` `/offen` `/status` `/hilfe`
+Telegram: `/battle` `/rangliste` `/gewichte` `/uploads` `/offen` `/status` `/hilfe`
 Lern-Bot: `/entwurf` `/musik` `/lernstand` `/stand` `/publikum` `/link <entwurf> <url>` `/hilfe` · Screenshot mit `#<post>`
 
 Ausgabe: Logs auf stderr, letzte Zeile auf stdout = eine JSON-Zeile.
