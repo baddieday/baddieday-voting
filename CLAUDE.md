@@ -159,3 +159,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   selbstständig mit vermerkten Annahmen. Tests schlank (normaler Weg + wichtigster Fehlerfall), ein Prüfer, Gegenprüfung
   nur bei Blockierendem, volle Suite einmal je Stufe, Doku kurz. Gilt auch für den Sprint „Lernschleife“ und ersetzt
   dort das 5er-Panel und die Gegenprüfung je Befund aus dem Startauftrag. Ziel: ein selbst lernendes System.
+- 2026-09-26: **Stimmen im Upload nur, wenn der Moment sie braucht** (Lachen, Jubel, laute Mikro-Spitzen oder Stimmung
+  „lustig“ = Gag; `merkmale.stimmen_gebraucht`). Sonst nur Spur 0 (Spielton) – gilt für Entwürfe/Upload-Fassung,
+  Clip-Shorts und Highlight-Video. Für die Bewertung zählen alle Stimmen; Vorschauen zum Bewerten behalten alle Spuren.
+- 2026-09-26: **Mic-Schritt als systemd-Dienst** `clip-mikro` (path + timer) statt Kindprozess von render; render schreibt
+  nur `/var/lib/clip-pipeline/mikro.anstoss`.

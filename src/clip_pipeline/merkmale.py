@@ -129,6 +129,39 @@ def mic_nachholen(moment_merkmale: dict) -> bool:
     return not mic_vollstaendig(moment_merkmale) and "fehler" not in moment_merkmale
 
 
+# Wann gehören Stimmen (Mikro, Chat der Mitspieler) ins hochgeladene Video? Nur, wenn der Moment von ihnen lebt:
+# Lachen, Jubel, laute Mikro-Spitzen oder ein Gag. Frust allein zählt nicht (Florian, 26.09.). Für die Bewertung
+# zählen weiter alle Stimmen; die Vorschau zum Bewerten behält alle Spuren.
+STIMMEN_MERKMALE = ("mic_lachen", "mic_jubel", "mic_laut")
+STIMMEN_STIMMUNG = "lustig"
+
+
+def stimmen_gebraucht(moment_merkmale: dict | None, stimmung: str | None) -> bool:
+    """Braucht dieser Moment im Upload die Stimmen-Spuren (ab Spur 1)? Sonst nur Spielton (Spur 0).
+
+    moment_merkmale: momente.merkmale (Schlüssel lachen/jubel/jubel_laut) – oder schon Mic-Merkmale (mic_*).
+    Rückgabe: True bei Lachen, Jubel oder lauten Mikro-Spitzen > 0 oder Stimmung „lustig“; unbekannt → False.
+    Beispiel: ({"lachen": 1}, "spannend") → True · ({"frust": 3}, "frustriert") → False · ({}, "lustig") → True.
+    """
+    mic = dict(nur_zahlen(moment_merkmale or {}))
+    mic.update(aus_momente(moment_merkmale or {}))
+    return stimmung == STIMMEN_STIMMUNG or any(mic.get(m, 0.0) > 0 for m in STIMMEN_MERKMALE)
+
+
+def stimmen_fuer_clip(con: sqlite3.Connection, clip_id: int) -> bool:
+    """stimmen_gebraucht für einen Bot-Clip (Upload-Paket, `pipeline short`): Merkmale und Stimmung aus seiner
+    momente-Zeile („clip:<id>“), Mic-Werte ersatzweise aus clips.merkmale. Unbekannter Clip → False.
+    Beispiel: keine momente-Zeile, clips.merkmale {"mic_jubel": 1} → True."""
+    zeile = db.clip(con, clip_id)
+    if zeile is None:
+        return False
+    werte = nur_zahlen(json.loads(zeile["merkmale"]))
+    moment = con.execute("SELECT merkmale, stimmung FROM momente WHERE schluessel = ?", (f"clip:{clip_id}",)).fetchone()
+    if moment is None:
+        return stimmen_gebraucht(werte, None)
+    return stimmen_gebraucht({**werte, **json.loads(moment["merkmale"])}, moment["stimmung"])
+
+
 def fuer_moment(clip_merkmale: dict | None, moment_merkmale: dict | None,
                 kill_tabelle: list[float]) -> dict[str, float]:
     """Merkmale eines Regisseur-Moments für roh_score (Spec §8.2).

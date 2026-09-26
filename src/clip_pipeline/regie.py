@@ -41,7 +41,7 @@ from pathlib import Path
 from . import effekte, entwurf, lernen, schema
 from .db import BEWERTET
 from .konfig import Konfig
-from .merkmale import fuer_moment
+from .merkmale import fuer_moment, stimmen_gebraucht
 from .musik import ZIEL
 from .vorbewertung import roh_score
 from .zeit import iso, jetzt
@@ -492,6 +492,8 @@ def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: d
             segment = {
                 "nr": nr, "moment": k.schluessel, "clip_id": k.clip_id, "match_id": k.match_id, "datei": k.datei,
                 "stimmung": k.stimmung, "intensitaet": k.intensitaet, "grund": k.grund,
+                # Mikro/Chat im Video nur bei Lachen, Jubel oder Gags (Florian 26.09.) – entwurf._ton liest das
+                "stimmen": stimmen_gebraucht(k.merkmale, k.stimmung),
                 "punkte": k.punkte, "abzug": k.abzug, "gezeigt": k.gezeigt,
                 "quelle_start_s": round(von, 3), "quelle_ende_s": round(bis, 3),
                 "quelle_dauer_s": round(k.dauer_s, 3), "muss": [round(muss[0], 3), round(muss[1], 3)],

@@ -73,6 +73,7 @@
           "match_id": {"type": ["string", "null"]},
           "datei": {"type": "string", "minLength": 1},
           "stimmung": {"type": "string", "enum": ["episch", "lustig", "spannend", "frustriert", "chill"]},
+          "stimmen": {"type": "boolean"},
           "intensitaet": {"type": "number"},
           "grund": {"type": "string"},
           "punkte": {"type": "number"},

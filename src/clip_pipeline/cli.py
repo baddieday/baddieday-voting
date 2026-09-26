@@ -158,7 +158,8 @@ def _cmd_short(args, konfig, con) -> int:
     if zeile is None:
         raise KeyError(f"Clip {args.clip} unbekannt")
     ziel = shorts.ziel_fuer(konfig, zeile)
-    groesse = shorts.rendere(konfig.absolut(zeile["clip_pfad"]), ziel, konfig, layout=args.layout)
+    groesse = shorts.rendere(konfig.absolut(zeile["clip_pfad"]), ziel, konfig, layout=args.layout,
+                             stimmen=merkmale.stimmen_fuer_clip(con, args.clip))
     con.execute("UPDATE clips SET short_pfad = ? WHERE id = ?", (konfig.relativ(ziel), args.clip))
     _json({"clip": args.clip, "short": konfig.relativ(ziel), "mb": round(groesse / 1e6, 1)})
     return 0

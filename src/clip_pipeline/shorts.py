@@ -5,7 +5,8 @@ Aufbau des FFmpeg-Filtergraphen:
      oder "mit-cam" (Cam-Ausschnitt oben, Gameplay unten)
   2. Overlay "clip-battle.de" (Links sind in Shorts/TikTok nicht klickbar -> im Bild zeigen)
   3. Endcard: 2,5 s "Wer gewinnt das Battle? Stimm ab auf clip-battle.de", weich überblendet
-Alle Tonspuren (Spiel + Mikro) werden gemischt und am Ende ausgeblendet.
+Tonspuren: Spielton immer, Mikro/Chat nur bei Lachen, Jubel oder Gags (merkmale.stimmen_gebraucht); am Ende
+ausgeblendet.
 """
 
 from __future__ import annotations
@@ -80,8 +81,12 @@ def _layout(layout: str, konfig: Konfig) -> str:
     )
 
 
-def filtergraph(*, dauer: float, fps: int, tonspuren: int, layout: str, konfig: Konfig) -> tuple[str, float]:
-    """Baut den kompletten Filtergraphen. Gibt (Graph, Gesamtdauer) zurück."""
+def filtergraph(*, dauer: float, fps: int, tonspuren: int, layout: str, konfig: Konfig,
+                stimmen: bool = True) -> tuple[str, float]:
+    """Baut den kompletten Filtergraphen. Gibt (Graph, Gesamtdauer) zurück.
+    stimmen=False: nur Spur 0 (Spielton) – Mikro/Chat nur, wenn der Moment sie braucht (merkmale.stimmen_gebraucht)."""
+    if not stimmen:
+        tonspuren = min(tonspuren, 1)
     s = konfig.abschnitt("shorts")
     font = _filterpfad(schrift(konfig))
     teile = [_layout(layout, konfig)]
@@ -119,13 +124,15 @@ def ziel_fuer(konfig: Konfig, clip) -> Path:
     return konfig.ordner("sessions") / clip["match_id"] / "shorts" / f"{int(clip['nr']):03d}_short.mp4"
 
 
-def rendere(clip: Path, ziel: Path, konfig: Konfig, *, layout: str | None = None, max_bytes: int = 49_000_000) -> int:
-    """Rendert den Short und bleibt unter max_bytes (Telegram-Grenze für Bots). Gibt die Größe zurück."""
+def rendere(clip: Path, ziel: Path, konfig: Konfig, *, layout: str | None = None, max_bytes: int = 49_000_000,
+            stimmen: bool = True) -> int:
+    """Rendert den Short und bleibt unter max_bytes (Telegram-Grenze für Bots). Gibt die Größe zurück.
+    stimmen: siehe filtergraph (Aufrufer: merkmale.stimmen_fuer_clip)."""
     info = probe(clip)
     fps = max(1, min(60, round(info.fps or 30)))
     graph, gesamt = filtergraph(
         dauer=info.dauer_s, fps=fps, tonspuren=len(info.tonspuren),
-        layout=layout or str(konfig.wert("shorts.layout", "unschaerfe")), konfig=konfig,
+        layout=layout or str(konfig.wert("shorts.layout", "unschaerfe")), konfig=konfig, stimmen=stimmen,
     )
     ton = ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"] if info.tonspuren else ["-an"]
     # Obergrenze der Bitrate so, dass die Datei sicher unter max_bytes bleibt

@@ -15,7 +15,7 @@ import zlib
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import db, elo
+from . import db, elo, merkmale
 from .konfig import Konfig
 from .medien import MedienFehler, fuehre_aus, probe, vorschau
 from .verarbeitung import SessionFehler, pruefe_id
@@ -153,7 +153,10 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, hid: str, tage: int) -> di
         raise MedienFehler(f"Clip-Dateien fehlen: {fehlend[:3]}")
     infos = [probe(d) for d in dateien]
     musik = musik_waehlen(konfig, hid)
-    graph, gesamt = filtergraph([(i.dauer_s, len(i.tonspuren)) for i in infos], musik=musik is not None, konfig=konfig)
+    # Mikro/Chat nur bei Lachen, Jubel oder Gags (merkmale.stimmen_fuer_clip) – sonst nur Spur 0 (Spielton)
+    spuren = [len(i.tonspuren) if merkmale.stimmen_fuer_clip(con, c["id"]) else min(len(i.tonspuren), 1)
+              for i, c in zip(infos, clips)]
+    graph, gesamt = filtergraph([(i.dauer_s, s) for i, s in zip(infos, spuren)], musik=musik is not None, konfig=konfig)
 
     befehl = ["ffmpeg", "-hide_banner", "-nostdin", "-y"]
     for d in dateien:

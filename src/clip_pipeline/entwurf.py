@@ -83,8 +83,12 @@ def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", lo
             f"format=yuv420p,setsar=1,settb=AVTB[v{i}]")
 
 
-def _ton(i: int, spuren: int, dauer: float) -> str:
+def _ton(i: int, spuren: int, dauer: float, stimmen: bool = True) -> str:
+    """Ton von Eingang i. stimmen=False: nur Spur 0 (Spielton) – Mikro/Chat ab Spur 1 nur, wenn der Moment sie
+    braucht (merkmale.stimmen_gebraucht, im Segment als „stimmen“; fehlt der Schlüssel, alte Liste → alle Spuren)."""
     einheit = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+    if not stimmen:
+        spuren = min(spuren, 1)
     if spuren == 0:
         return f"anullsrc=r=48000:cl=stereo,atrim=0:{dauer:.3f},{einheit}[a{i}]"
     if spuren == 1:
@@ -113,7 +117,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
         laenge = (s["zeit_ende"] - s["zeit_start"]) + vorne + hinten
         laengen.append(laenge)
         teile.append(_bild(i, b, h, fps, hoch, effekt_filter.zoom(i, zooms[i]) if i in zooms else "", look))
-        teile.append(_ton(i, spuren[i], laenge))
+        teile.append(_ton(i, spuren[i], laenge, bool(s.get("stimmen", True))))
     # Verketten: offset_i = bisherige Länge − Übergangsdauer (siehe Herleitung in docs/ENTSCHEIDUNGEN.md E8)
     v, a, gesamt = "[v0]", "[a0]", laengen[0]
     for i in range(1, len(segmente)):

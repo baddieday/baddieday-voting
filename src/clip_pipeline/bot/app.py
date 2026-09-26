@@ -18,7 +18,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
 
-from .. import caption, db, erwartung, highlight, lernen, publikum, shorts
+from .. import caption, db, erwartung, highlight, lernen, merkmale, publikum, shorts
 from ..konfig import Konfig, SpeicherOffline
 from ..medien import MedienFehler
 from ..zeit import aus_iso, iso, jetzt
@@ -277,7 +277,9 @@ async def sende_paket(context: ContextTypes.DEFAULT_TYPE, clip_id: int) -> None:
         await context.bot.send_message(chat, f"🎬 Rendere Short für Clip #{clip_id} …")
         try:
             # Rendern dauert: in einem eigenen Thread, damit der Bot weiter reagiert (DB bleibt im Haupt-Thread)
-            await asyncio.to_thread(shorts.rendere, konfig.absolut(clip["clip_pfad"]), ziel, konfig)
+            # Mikro/Chat nur bei Lachen, Jubel oder Gags (merkmale.stimmen_fuer_clip)
+            await asyncio.to_thread(shorts.rendere, konfig.absolut(clip["clip_pfad"]), ziel, konfig,
+                                    stimmen=merkmale.stimmen_fuer_clip(con, clip_id))
         except MedienFehler as e:
             await context.bot.send_message(chat, f"⚠️ Short fehlgeschlagen: {escape(str(e)[:300])}")
             return
