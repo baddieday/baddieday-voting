@@ -51,8 +51,7 @@ def knoepfe_neu(clip_id: int) -> Knoepfe:
 
 
 def knoepfe_entschieden(clip_id: int, status: str = "verworfen") -> Knoepfe:
-    if status == "freigegeben":
-        return [[("↩️ Rückgängig", f"u:{clip_id}"), ("📦 Upload-Paket", f"p:{clip_id}")]]
+    # Kein 📦 nach der Freigabe: einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.) – /paket geht noch
     return [[("↩️ Rückgängig", f"u:{clip_id}")]]
 
 
@@ -371,35 +370,9 @@ def link_speichern(con: sqlite3.Connection, clip_id: int, url: str, konfig, *,
     return antwort, stand
 
 
-def ist_highlight_clip(clip: sqlite3.Row, konfig) -> bool:
-    """Lohnt ein eigener Upload? Ab [veroeffentlichung].highlight_ab_kills Kills am Stück (Standard 3 = Triple Kill)
-    oder mit Victory Royale (highlight_victory_royale). Alle anderen Freigaben dienen Bewertung, Lernen und dem
-    Highlight-Video – hochladen geht trotzdem (📦), nur erinnert wird daran nicht (Entscheidung 25.09.)."""
-    ab = int(konfig.wert("veroeffentlichung.highlight_ab_kills", 3))
-    mit_vr = bool(konfig.wert("veroeffentlichung.highlight_victory_royale", True))
-    return (clip["max_gruppe"] or 0) >= ab or (mit_vr and bool(clip["victory_royale"]))
-
-
-def offene_uploads(con: sqlite3.Connection, konfig) -> list[tuple[sqlite3.Row, list[str]]]:
-    """Freigegebene Highlight-Clips (ist_highlight_clip), denen noch eine Pflicht-Plattform fehlt."""
-    pflicht, _ = plattformen(konfig)
-    ergebnis = []
-    for clip in con.execute("SELECT * FROM clips WHERE status = 'freigegeben' ORDER BY id").fetchall():
-        if not ist_highlight_clip(clip, konfig):
-            continue
-        erledigt = {
-            z["plattform"] for z in con.execute(
-                "SELECT plattform FROM veroeffentlichungen WHERE clip_id = ? AND erledigt IS NOT NULL", (clip["id"],)
-            )
-        }
-        fehlt = [p for p in pflicht if p not in erledigt]
-        if fehlt:
-            ergebnis.append((clip, fehlt))
-    return ergebnis
-
-
 def offene_highlight_videos(con: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Freigegebene Highlight-Videos ohne Häkchen „✅ Hochgeladen“ (highlight.hochgeladen)."""
+    """Freigegebene Highlight-Videos ohne Häkchen „✅ Hochgeladen“ (highlight.hochgeladen) – das Einzige, woran der
+    Bot erinnert. Einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.)."""
     return con.execute(
         "SELECT * FROM highlights WHERE status = 'freigegeben' AND hochgeladen IS NULL ORDER BY id"
     ).fetchall()

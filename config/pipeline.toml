@@ -412,13 +412,10 @@ schriften = [
 # h = 300
 
 [veroeffentlichung]
-# Auf diese Plattformen kommt ein Highlight-Clip. Erst wenn alle erledigt sind: "veröffentlicht".
+# Einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.): kein 📦-Knopf, keine Erinnerung. Hochgeladen werden
+# die Shorts aus dem Lern-Bot und das Highlight-Video (Erinnerung bis „✅ Hochgeladen“). pflicht/zusatz gelten nur noch,
+# wenn du einen Clip doch per /paket bzw. /link einträgst – erst wenn alle Pflicht-Plattformen erledigt sind: "veröffentlicht".
 pflicht = ["youtube", "tiktok"]
-# Hochgeladen (und daran erinnert) werden nur Highlights: Clips ab so vielen Kills am Stück (3 = Triple Kill) oder mit
-# Victory Royale – dazu das freigegebene Highlight-Video. Alle anderen Freigaben dienen Bewertung, Lernen und dem
-# Highlight-Video; ein Upload-Paket (📦, /paket) gibt es trotzdem für jeden freigegebenen Clip.
-highlight_ab_kills = 3
-highlight_victory_royale = true
 # Zusätzlich nachverfolgt (optional): Einreichen des YouTube-Links auf clip-battle.de
 zusatz = ["clipbattle"]
 # Erinnerung an offene Uploads (Stunden)

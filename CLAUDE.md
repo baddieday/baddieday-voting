@@ -116,7 +116,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - 2026-09-23: Elo = Variante A aus clips_voter (Start 1500, K 48/32/24); Saison = 14 Tage ohne Elo-Reset.
 - 2026-09-23: Multikill = Kette (≤ 10 s zum vorherigen Kill), nur finale Eliminierungen; Victory-Royale-Bonus an die letzte Gruppe.
 - 2026-09-23: Status `gesendet` statt „bewertet“.
-- 2026-09-23: ~~Jeder freigegebene Clip muss auf YouTube Shorts **und** TikTok (eigene Kanäle)~~ – seit 25.09. nur Highlights; danach Link auf clip-battle.de einreichen. Der Bot verfolgt das je Plattform nach und erinnert täglich.
+- 2026-09-23: ~~Jeder freigegebene Clip muss auf YouTube Shorts **und** TikTok (eigene Kanäle); danach Link auf clip-battle.de einreichen. Der Bot verfolgt das je Plattform nach und erinnert täglich.~~ – ersetzt am 26.09.
 - 2026-09-23: Python + sqlite3 + python-telegram-bot, schlanke Tests mit `unittest` (kein Test-Branch).
 - 2026-09-23: n8n-Vertrag umgesetzt und gegen `1-match-verarbeiten.json`, `2-highlight-video.json`, `3-fehler-alarm.json` geprüft. Kein KI-Agent in n8n.
 - 2026-09-23: ~~Die Pipeline weckt den großen Host selbst per Wake-on-LAN, wenn ein Schritt den Speicher braucht~~ – seit E19 weckt nur noch der tägliche Abgleich.
@@ -159,7 +159,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   selbstständig mit vermerkten Annahmen. Tests schlank (normaler Weg + wichtigster Fehlerfall), ein Prüfer, Gegenprüfung
   nur bei Blockierendem, volle Suite einmal je Stufe, Doku kurz. Gilt auch für den Sprint „Lernschleife“ und ersetzt
   dort das 5er-Panel und die Gegenprüfung je Befund aus dem Startauftrag. Ziel: ein selbst lernendes System.
-- 2026-09-25: **Hochladen nur Highlights** (Florian): Upload-Erinnerung und `/uploads` nur noch für Clips ab Triple Kill
-  am Stück oder mit Victory Royale (`[veroeffentlichung].highlight_ab_kills`, `highlight_victory_royale`) und für das
-  freigegebene Highlight-Video (Knopf „✅ Hochgeladen“). Alle anderen Freigaben dienen Bewertung, Lernen und dem
-  Highlight-Video; ein Upload-Paket (📦) gibt es weiter für jeden Clip. Annahme: Grenze fest statt gelernt, bis genug Battles da sind.
+- 2026-09-26: **Einzelne Momente werden nicht hochgeladen** (Florian) – auch kein Triple Kill. Hochgeladen werden nur
+  die Shorts aus dem Lern-Bot und das Highlight-Video (1–2 Wochen). Der Clip-Bot zeigt nach der Freigabe keinen 📦-Knopf
+  mehr und erinnert nur noch an freigegebene Highlight-Videos, bis „✅ Hochgeladen“ getippt ist. Freigaben dienen
+  Bewertung, Lernen und der Highlight-Auswahl. `/paket` und `/link` bleiben für Ausnahmen (nicht mehr in der Hilfe).

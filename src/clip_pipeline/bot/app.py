@@ -127,20 +127,19 @@ async def sende_outbox(app: Application) -> int:
 
 
 async def erinnere(app: Application) -> bool:
-    """Erinnert an Highlights (Clips ab Triple Kill oder mit Victory Royale, Highlight-Videos), die seit über
-    erinnerung_h freigegeben, aber noch nicht hochgeladen sind – höchstens einmal je erinnerung_h."""
+    """Erinnert an Highlight-Videos, die seit über erinnerung_h freigegeben, aber noch nicht hochgeladen sind –
+    höchstens einmal je erinnerung_h. Einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.)."""
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     stunden = float(konfig.wert("veroeffentlichung.erinnerung_h", 24))
     grenze = jetzt() - timedelta(hours=stunden)
     letzte = con.execute("SELECT zeit FROM ereignisse WHERE art = 'erinnerung' ORDER BY id DESC LIMIT 1").fetchone()
     if letzte and aus_iso(letzte["zeit"]) > grenze:
         return False
-    offen = [(c, f) for c, f in aktionen.offene_uploads(con, konfig) if c["entschieden"] and aus_iso(c["entschieden"]) < grenze]
     videos = [h for h in aktionen.offene_highlight_videos(con) if h["entschieden"] and aus_iso(h["entschieden"]) < grenze]
-    if not offen and not videos:
+    if not videos:
         return False
-    await app.bot.send_message(chat, "⏰ " + texte.offene_uploads_text(offen, videos), parse_mode=ParseMode.HTML)
-    db.protokoll(con, "erinnerung", f"{len(offen)} Highlight-Clip(s), {len(videos)} Highlight-Video(s) nicht hochgeladen")
+    await app.bot.send_message(chat, "⏰ " + texte.offene_uploads_text(videos), parse_mode=ParseMode.HTML)
+    db.protokoll(con, "erinnerung", f"{len(videos)} Highlight-Video(s) nicht hochgeladen")
     return True
 
 
@@ -322,7 +321,7 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_uploads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     con, konfig, _ = _daten(context)
-    text = texte.offene_uploads_text(aktionen.offene_uploads(con, konfig), aktionen.offene_highlight_videos(con))
+    text = texte.offene_uploads_text(aktionen.offene_highlight_videos(con))
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
