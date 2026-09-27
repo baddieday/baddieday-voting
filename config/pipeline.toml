@@ -37,8 +37,10 @@ ssh_schluessel = "/var/lib/clip-pipeline/.ssh/pve-big"
 mindest_wach_min = 20
 aus_warten_s = 180
 # Ab dieser Zeit wird pve-big nicht mehr geweckt; läuft er, fährt der Wächter ihn einmal herunter.
-# Sprint-Regel bis Mo 28.09., 20:00. NACH DEM SPRINT LEEREN (frist = ""), sonst weckt die Pipeline nie mehr.
-frist = "2026-09-28T20:00:00+02:00"
+# Leer = keine Frist (Standard). Eine befristete Sprint-Regel gehört NICHT hierher (Repo-Standard, öffentlich für
+# jede Betriebsart) – sondern ins gitignorte config/lokal.toml auf der jeweiligen Maschine (B1, 26.09.: der letzte
+# Sprint-Wert hier hätte die Pipeline nach Ablauf für immer am Wecken gehindert, ohne dass es jemand gemerkt hätte).
+frist = ""
 # Auch der bisherige Weckweg (n8n-Schritte, /paket, highlight) weckt nur, wenn das Herunterfahren gesichert ist.
 # Bis die SSH-Steuerung eingerichtet ist, enden diese Schritte bei schlafendem pve-big mit Exit 3 (Alarm).
 alter_weckweg_nur_mit_aus = true
@@ -432,6 +434,10 @@ leise_von = "23:00"
 leise_bis = "08:00"
 
 [aufraeumen]
+# Nie automatisch löschen ist der Standard (Entscheidung 25.09.) – aus, bis ausdrücklich auf true gesetzt
+# (z. B. in config/lokal.toml, für Betriebsarten ohne [lager]-Abgleich). Im getrennten Betrieb (E19) bleibt
+# aufraeumen unabhängig davon immer gesperrt (siehe aufraeumen.pruefe_erlaubt).
+aktiv = false
 # Nach so vielen Tagen wird recycelt (erst Papierkorb, dann endgültig) ...
 nach_tagen = 182
 papierkorb_tage = 14
