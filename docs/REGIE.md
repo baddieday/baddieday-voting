@@ -115,7 +115,7 @@ verschiedene** Momente kamen vor, die Top-10 belegten zwei Drittel aller Plätze
 | Regel | Wert | Wirkung |
 |---|---|---|
 | **Cooldown** `cooldown_entwuerfe` | 3 (0 … 12) | Ein Moment aus einem der letzten 3 Entwürfe ist gesperrt – Reserve, falls das freie Material nicht für einen Entwurf reicht (Hinweis „Cooldown aufgehoben“) |
-| **Frische-Quote** `frische_quote` | 0,5 (0 … 1) | Mindestens die Hälfte der Momente eines Entwurfs war in keinem Entwurf des Fensters; fehlt etwas, tauscht der schwächste alte gegen den stärksten frischen Moment |
+| **Frische-Quote** `frische_quote` | 0,5 (0 … 1) | Mindestens die Hälfte der Momente eines Entwurfs war in keinem Entwurf des Fensters; fehlt etwas, tauscht der schwächste alte gegen den stärksten frischen Moment. Kürzen und Nachlegen halten die Quote ebenfalls (streichen zuerst alte, legen zuerst frische nach) |
 
 Simulation damit: **83 verschiedene** Momente in 20 Shorts statt 18 – und die Top-10 kommen trotzdem regelmäßig
 (je 5× in 20 Shorts). Der Entwurf zeigt die Bilanz („Auswahl aus 120 Momenten · 14 im Cooldown“), `/lernstand`

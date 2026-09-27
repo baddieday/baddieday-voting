@@ -320,13 +320,14 @@ def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None
 
 
 def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None = None, *,
-                           gewichte: dict[str, float], kill_tabelle: list[float], konfig: Konfig | None = None
-                           ) -> tuple[list[Kandidat], dict[str, int]]:
+                           gewichte: dict[str, float], kill_tabelle: list[float], konfig: Konfig | None = None,
+                           nur_matches: set[str] | None = None) -> tuple[list[Kandidat], dict[str, int]]:
     """Alle Momente mit Stimmung als Kandidaten: Stärke, Punkte für die Auswahl, Kern und Teile für den Schnitt.
 
     Bericht (zweiter Wert): {"ohne_datei": übersprungen, weil weder Moment-Datei noch Bot-Clip da sind;
     "ersetzt": Moment-Datei fehlte, der Bot-Clip springt ein (nur mit konfig, nie nach Nachschnitt);
-    "gesperrt": im Cooldown (in einem der letzten p["cooldown_entwuerfe"] Entwürfe, nur bei abwechslung > 0)}.
+    "gesperrt": im Cooldown (in einem der letzten p["cooldown_entwuerfe"] Entwürfe, nur bei abwechslung > 0)};
+    mit nur_matches zählt die Bilanz nur diese Matches (Spielabend).
     Bis 27.09. fielen Momente ohne Datei still weg – der Bot zeigte dann „Auswahl aus 20 Momenten“ statt 128.
 
     Stärke (`intensitaet`, für Bogen, Hook und Kürzen) = der Moment-Score, dieselbe Bewertung wie im Clip-Bot
@@ -359,6 +360,8 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     for z in zeilen:
         if z["clip_status"] == "verworfen":
             continue
+        if nur_matches is not None and z["match_id"] not in nur_matches:
+            continue  # Spielabend: fremde Matches zählen auch in der Bilanz nicht mit
         mk = json.loads(z["merkmale"])
         datei = z["datei"]
         if not Path(datei).is_file():
@@ -427,6 +430,12 @@ def frei_von_cooldown(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[
     return list(kandidaten_), f"{COOLDOWN_AUFGEHOBEN} – nur {len(frei)} frische Momente"
 
 
+def frische_soll(n: int, p: dict) -> int:
+    """Wie viele von n gewählten Momenten frisch sein sollen (gezeigt 0) – 0, wenn Abwechslung aus ist."""
+    quote = float(p.get("frische_quote", 0.0)) if float(p.get("abwechslung", 0.0)) > 0 else 0.0
+    return math.ceil(quote * n - 1e-9) if quote > 0 and n > 0 else 0
+
+
 def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandidat], float, list[str]]:
     """Beste Momente, bis die Ziel-Dauer erreicht ist. Ziel richtet sich nach dem Material.
 
@@ -456,9 +465,8 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandid
         summe += laenge(k)
         if k.match_id:
             je_match[k.match_id] = je_match.get(k.match_id, 0) + 1
-    quote = float(p.get("frische_quote", 0.0)) if float(p.get("abwechslung", 0.0)) > 0 else 0.0
-    if quote > 0 and gewaehlt:
-        soll = math.ceil(quote * len(gewaehlt) - 1e-9)
+    soll = frische_soll(len(gewaehlt), p)
+    if soll > 0:
         frische = [k for k in nach_punkten if k.gezeigt == 0 and k not in gewaehlt]
         while sum(1 for k in gewaehlt if k.gezeigt == 0) < soll and frische:
             alte = [k for k in gewaehlt if k.gezeigt > 0]
@@ -738,8 +746,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     # Gewichte einmal holen und durchreichen (Leitplanke 7); die Kill-Tabelle ist dieselbe wie im Clip-Bot
     _version, gewichte = lernen.aktuelle(con, konfig)
     kill_tabelle = [float(x) for x in konfig.wert("vorbewertung.kill_punkte")]
-    alle, bericht = kandidaten_mit_bericht(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle, konfig=konfig)
-    alle = [k for k in alle if nur_matches is None or k.match_id in nur_matches]
+    alle, bericht = kandidaten_mit_bericht(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle, konfig=konfig,
+                                           nur_matches=nur_matches)
     if bericht["ohne_datei"]:
         hinweise.append(f"{bericht['ohne_datei']} Momente ohne Datei übersprungen"
                         + (f" ({bericht['ersetzt']} weitere: Bot-Clip statt Moment-Datei)" if bericht["ersetzt"] else ""))
@@ -802,6 +810,10 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                         and (not mit_grenze or not k.match_id or je_match.get(k.match_id, 0) < int(p["max_je_match"]))]
                 if not rest:
                     break
+                # Frische-Quote (Review 27.09.): fehlt noch ein frischer Moment, kommt er vor den punktstärkeren alten
+                frische = [k for k in rest if k.gezeigt == 0]
+                if frische and sum(1 for k in gewaehlt if k.gezeigt == 0) < frische_soll(len(gewaehlt) + 1, p):
+                    rest = frische
                 naechster_ = max(rest, key=lambda k: (k.punkte, k.schluessel))
                 neue_reihe = bogen([*gewaehlt, naechster_], fmt_name)
                 neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
@@ -821,7 +833,13 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     # hier gestrichen, blieb die Lücke, und die Shorts endeten bei 30–38 s mit 2–3 Momenten statt bei 45 s.
     gekuerzt = False
     while segmente and segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6 and len(reihe) > 1:
-        raus = min(reihe[:-1], key=lambda k: (k.punkte, k.intensitaet, k.schluessel))
+        # Frische-Quote (Review 27.09.): frische Momente sind meist die punktschwächsten – das Kürzen warf sie
+        # als Erste wieder raus. Solange die Quote sonst fiele, wird unter den alten gestrichen.
+        zur_wahl = reihe[:-1]
+        alte = [k for k in zur_wahl if k.gezeigt > 0]
+        if alte and sum(1 for k in reihe if k.gezeigt == 0) <= frische_soll(len(reihe) - 1, p):
+            zur_wahl = alte
+        raus = min(zur_wahl, key=lambda k: (k.punkte, k.intensitaet, k.schluessel))
         reihe.remove(raus)
         gewaehlt.remove(raus)
         passt_nicht.append(raus)

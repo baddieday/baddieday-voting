@@ -2,6 +2,7 @@
 
 import json
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from clip_pipeline import regie, regie_lernen
@@ -227,6 +228,28 @@ class Abwechslung(MitRegieMaterial):
         self.assertIn("deine Vorgabe", text)
         self.assertIn("Abwechslung aus (0)", text)
 
+    def test_frische_ueberleben_kuerzen_und_nachlegen(self):
+        """Review 27.09.: waehle hielt die Frische-Quote, aber Kürzen (min Punkte) und Nachlegen (max Punkte) warfen
+        die frischen – meist punktschwächsten – Momente danach wieder raus (Entwurf 7: 0 frische trotz Vorrat)."""
+        self.momente_anlegen(MOMENTE * 2)
+        self.musik_anlegen(150, "episch")
+        frisch_gewaehlt = []
+        original = regie.waehle
+
+        def waehle(ks, fmt, p):
+            gewaehlt, ziel, hinweise = original(ks, fmt, p)
+            frisch_gewaehlt.append(sum(1 for k in gewaehlt if k.gezeigt == 0))
+            return gewaehlt, ziel, hinweise
+
+        with unittest.mock.patch.object(regie, "waehle", waehle):
+            listen = [self.compose() for _ in range(6)]
+        for liste, frisch in zip(listen, frisch_gewaehlt):
+            n = liste["auswahl"]["neu"] + liste["auswahl"]["schon_gezeigt"]
+            soll = regie.frische_soll(n, liste["parameter"])
+            self.assertGreaterEqual(liste["auswahl"]["neu"], min(frisch, soll), (liste["name"], frisch, soll))
+        alle = {z[0] for z in self.con.execute("SELECT schluessel FROM momente")}
+        self.assertEqual(set.union(*(self.momente(liste) for liste in listen)), alle)  # vorher fehlte nach 6 einer
+
     def test_nach_dem_kuerzen_wird_nachgelegt(self):
         """27.09.: Serien (bis 20 s) lassen die Auswahl über 45 s schießen; das Kürzen streicht dann einen ganzen
         Moment – vorher blieb die Lücke (Shorts 30–38 s mit 2–3 Momenten). Jetzt füllen kleinere Momente nach."""
@@ -358,6 +381,28 @@ class KandidatenDateien(MitRegieMaterial):
         self.assertEqual(bericht, {"ohne_datei": 2, "ersetzt": 1, "gesperrt": 0})
         # Ohne konfig (alte Aufrufer, Tests): wie bisher nur überspringen
         self.assertEqual(regie.kandidaten(self.con, dict(regie.PARAMETER), gewichte=gewichte, kill_tabelle=tabelle), [])
+
+    def test_bilanz_nur_fuer_die_matches(self):
+        # Spielabend (nur_matches): die Bilanz zählt fremde Matches nicht mit – vorher stand „30 im Cooldown“ im Short
+        # eines Abends, zu dem keiner davon gehörte
+        mk = {"kills": 1, "max_gruppe": 1, "kill_sekunden": [8.0], "spitzen": 1, "jubel_laut": 0}
+        for schluessel, match in (("datei:1", "m1"), ("datei:2", "m2"), ("datei:3", "m2")):
+            datei = self.tmp / f"{schluessel.replace(':', '-')}.mp4"
+            datei.write_bytes(b"x")
+            self.con.execute(
+                """INSERT INTO momente (schluessel, clip_id, match_id, datei, start_s, ende_s, kills, stimmung,
+                                        sicherheit, quelle, merkmale, erstellt, geaendert)
+                   VALUES (?, NULL, ?, ?, 0, 20, 1, 'episch', 0.8, 'regel', ?, 'x', 'x')""",
+                (schluessel, match, str(datei), json.dumps(mk)))
+        frueher = [["datei:1", "datei:2", "datei:3"]]  # alle drei im letzten Entwurf -> alle im Cooldown
+        p = {**regie.PARAMETER, "abwechslung": 0.7, "cooldown_entwuerfe": 3}
+        ks, bericht = regie.kandidaten_mit_bericht(self.con, p, frueher, gewichte={"kill_punkte": 1.0},
+                                                   kill_tabelle=[0, 1, 3, 6, 10], nur_matches={"m1"})
+        self.assertEqual([k.schluessel for k in ks], ["datei:1"])
+        self.assertEqual(bericht["gesperrt"], 1)
+        _, alles = regie.kandidaten_mit_bericht(self.con, p, frueher, gewichte={"kill_punkte": 1.0},
+                                                kill_tabelle=[0, 1, 3, 6, 10])
+        self.assertEqual(alles["gesperrt"], 3)
 
 
 class EffekteLernen(MitRegieMaterial):
