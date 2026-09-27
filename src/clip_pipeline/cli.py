@@ -377,7 +377,11 @@ def _cmd_musik(args, konfig, con) -> int:
                               kuenstler=args.kuenstler, quelle=args.quelle)
         _json({"id": t["id"], "datei": t["datei"], "bpm": t["bpm"], "energie": t["energie"]})
     elif args.aktion == "ncs":
-        neu = musik.ncs_laden(con, konfig, args.stimmung, args.anzahl)
+        if args.genre:  # 27.09.: nach Genre statt nach Stimmung, z. B. --genre techno,electronic-rock
+            genres = musik.HART if args.genre == "hart" else [g.strip() for g in args.genre.split(",") if g.strip()]
+            neu = musik.ncs_genres_laden(con, konfig, genres, args.anzahl)
+        else:
+            neu = musik.ncs_laden(con, konfig, args.stimmung, args.anzahl)
         _json({"neu": [{"titel": t["titel"], "kuenstler": t["kuenstler"], "bpm": t["bpm"], "energie": t["energie"]}
                        for t in neu]})
     else:
@@ -669,6 +673,8 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--quelle", help="Quellenangabe/Lizenz – Pflicht beim Hinzufügen")
     s.add_argument("--stimmung", choices=["episch", "spannend", "lustig", "frustriert", "chill"], default="episch")
     s.add_argument("--anzahl", type=int, default=3)
+    s.add_argument("--genre", help="NCS-Genres, Komma-getrennt (techno, hardcore, electronic-rock, dance-rock, "
+                                   "midtempo-bass, phonk) oder „hart“ = alle außer phonk")
     s.set_defaults(fn=_cmd_musik, sperren=False)
 
     s = unter.add_parser("compose", help="Regisseur: Schnittliste mit Bogen, Musik, Schnitten auf dem Beat")

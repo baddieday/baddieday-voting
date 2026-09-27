@@ -42,12 +42,13 @@ HILFE = """<b>Lern-Bot des Regisseurs</b>
 🎬 /entwurf <code>short</code> oder /entwurf <code>zusammenschnitt</code> – neuen Entwurf bauen
 👍/👎 unter jedem Entwurf, danach Gründe antippen und ✅ fertig. Ohne Grund lernt nur die Moment-Auswahl.
 /musik – Titel · /lernstand – was der Regisseur gelernt hat · /stand – kurzer Stand
-⌨️ Unten die Kurzbefehle: 🎬 Short · 🎞️ Zusammenschnitt · 🧠 Lernstand · 📋 Stand · 📊 Publikum · 🎵 Musik"""
+Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 
-# Kurzbefehl-Tastatur (27.09.): Text der Taste -> Befehl. Die Tasten schicken genau diesen Text.
+# Kurzbefehle (27.09.): Knöpfe im Chat wie beim Bewerten (Florian: „nicht die Tastatur ersetzen“). Callback k:0:<ziel>.
+# KURZBEFEHLE bleibt für Taps auf die alte Ersatz-Tastatur, bis sie weg ist (ReplyKeyboardRemove).
 KURZBEFEHLE = {"🎬 Short": "short", "🎞️ Zusammenschnitt": "zusammenschnitt", "🧠 Lernstand": "lernstand",
                "📋 Stand": "stand", "📊 Publikum": "publikum", "🎵 Musik": "musik"}
-TASTATUR = [["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"], ["📊 Publikum", "🎵 Musik"]]
+KURZ_REIHEN = [["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"], ["📊 Publikum", "🎵 Musik"]]
 KREISE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"
 
 
@@ -229,9 +230,12 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
     con = db.verbinde(konfig.datenbank)
     try:
         # Rendern ist ein rechenintensiver Schritt: gleiche Sperre wie die Pipeline (nur einer gleichzeitig)
+        t0 = time.monotonic()
         with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
                 big.herzschlag(konfig, "lernbot"):
+            t1 = time.monotonic()
             nachgezogen = stimmung_nachziehen(con, konfig)
+            t2 = time.monotonic()
             parameter, ziel = regie_lernen.aktuelle(con, konfig, fmt)
             try:  # nur eine Anzeige – ein Fehler hier darf den Entwurf nicht kosten
                 gelernt = regie_lernen.wirkung(con, konfig, fmt)
@@ -240,7 +244,12 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
                 gelernt = None
             e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel, hinweise_vorab=nachgezogen["hinweise"],
                                gelernt=gelernt)
+            t3 = time.monotonic()
             entwurf.entwurf(con, konfig, e["entwurf"])
+        # Wo die Wartezeit nach ✅ fertig bleibt (27.09.) – journalctl -u clip-lernbot | grep "gebaut in"
+        log.info("Entwurf #%s gebaut in %.0f s: Sperre %.0f s · Stimmung %.0f s (%s Clips) · Schnitt %.0f s · Render %.0f s",
+                 e["entwurf"], time.monotonic() - t0, t1 - t0, t2 - t1, nachgezogen["analysiert"], t3 - t2,
+                 time.monotonic() - t3)
         return int(e["entwurf"])
     finally:
         con.close()
@@ -265,12 +274,16 @@ def _markup(knoepfe):
     return InlineKeyboardMarkup([[InlineKeyboardButton(t, callback_data=d) for t, d in reihe] for reihe in knoepfe])
 
 
-def tastatur():
-    """Kurzbefehle unten im Chat (bleibt stehen)."""
-    from telegram import ReplyKeyboardMarkup
+def knoepfe_kurzbefehle() -> list[list[tuple[str, str]]]:
+    """Kurzbefehle als Knöpfe im Chat (unter /hilfe und nach ✅ fertig)."""
+    return [[(text, f"k:0:{KURZBEFEHLE[text]}") for text in reihe] for reihe in KURZ_REIHEN]
 
-    return ReplyKeyboardMarkup(TASTATUR, resize_keyboard=True, is_persistent=True,
-                               input_field_placeholder="Kurzbefehl – oder Musik/Screenshot schicken")
+
+def ohne_tastatur():
+    """Nimmt die Ersatz-Tastatur vom 27.09. wieder weg (Telegram behält sie sonst)."""
+    from telegram import ReplyKeyboardRemove
+
+    return ReplyKeyboardRemove()
 
 
 def _liste(zeile: sqlite3.Row) -> dict:
@@ -373,7 +386,7 @@ async def cmd_hilfe(update, context) -> None:
 
     # HILFE bleibt unverändert; der Teil zur Lernschleife „Publikum“ kommt als Zusatz dahinter
     await update.effective_message.reply_text(HILFE + lernbot_publikum.HILFE_ZUSATZ, parse_mode="HTML",
-                                              reply_markup=tastatur())
+                                              reply_markup=_markup(knoepfe_kurzbefehle()))
 
 
 async def cmd_stand(update, context) -> None:
@@ -413,10 +426,11 @@ async def neuer_entwurf(app, fmt: str) -> int | None:
         wach = await asyncio.to_thread(speicher_da, konfig)
         await app.bot.send_message(chat, f"🎬 Baue einen {FORMAT_NAMEN[fmt]} …"
                                    + ("" if wach else " 💤 pve-big schläft – ich wecke ihn (bis zu 3 min)."),
-                                   reply_markup=tastatur())
+                                   reply_markup=ohne_tastatur())
         eid = await asyncio.to_thread(baue_entwurf, konfig, fmt)
+        t = time.monotonic()
         await sende_entwuerfe(app)
-        log.info("Entwurf #%s gebaut", eid)
+        log.info("Entwurf #%s gesendet in %.0f s", eid, time.monotonic() - t)
         return eid
     except Exception as e:  # dir kurz sagen, was los ist – Details ins Log
         log.exception("Entwurf fehlgeschlagen")
@@ -435,9 +449,29 @@ async def cmd_entwurf(update, context) -> None:
     context.application.create_task(neuer_entwurf(context.application, fmt))
 
 
+async def bei_kurzknopf(update, context) -> None:
+    """Kurzbefehl-Knopf im Chat (k:0:<ziel>): sofort antworten, dann Entwurf im Hintergrund oder Befehl."""
+    query = update.callback_query
+    if query.from_user is None or query.from_user.id != context.bot_data["erlaubt"]:
+        await query.answer("Nicht erlaubt.")
+        return
+    ziel = (query.data or "").split(":", 2)[-1]
+    if ziel not in KURZBEFEHLE.values():
+        await query.answer("Unbekannter Knopf.")
+        return
+    await query.answer(f"🎬 {FORMAT_NAMEN[ziel]} kommt …" if ziel in regie.FORMATE else None)
+    await _kurzbefehl(ziel, update, context)
+
+
 async def bei_kurzbefehl(update, context) -> None:
-    """Taste der Kurzbefehl-Tastatur: Entwurf im Hintergrund bauen oder Befehl ausführen."""
+    """Tap auf die alte Ersatz-Tastatur: Tastatur wegnehmen, dann wie der Knopf."""
     ziel = KURZBEFEHLE.get((update.effective_message.text or "").strip())
+    await update.effective_message.reply_text("Die Kurzbefehle sind jetzt Knöpfe im Chat (/hilfe).",
+                                              reply_markup=ohne_tastatur())
+    await _kurzbefehl(ziel, update, context)
+
+
+async def _kurzbefehl(ziel: str | None, update, context) -> None:
     if ziel in regie.FORMATE:
         context.application.create_task(neuer_entwurf(context.application, ziel))
     elif ziel == "lernstand":
@@ -521,6 +555,7 @@ async def bei_klick(update, context) -> None:
         from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
 
         knoepfe = lernbot_paket.knoepfe_nach_fertig(eid, bewertung, zeile["format"])  # 👍-Short: „📦 Upload-Paket“
+        knoepfe = [*(knoepfe or []), *knoepfe_kurzbefehle()]  # 27.09.: Kurzbefehle nach dem Bewerten
         if weiter:  # Lernschleife: sofort der nächste Entwurf, schon mit dieser Bewertung eingerechnet
             context.application.create_task(neuer_entwurf(context.application, zeile["format"]))
     gespeichert = time.monotonic()
@@ -573,6 +608,7 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     app.add_handler(MessageHandler(nur_ich & (filters.AUDIO | filters.Document.AUDIO), bei_audio))
     # Kurzbefehle VOR dem freien Text der Zahlen-Eingabe (lernbot_zahlen.bei_text nimmt sonst jeden Text)
     app.add_handler(MessageHandler(nur_ich & filters.Text(list(KURZBEFEHLE)), bei_kurzbefehl))
+    app.add_handler(CallbackQueryHandler(bei_kurzknopf, pattern=r"^k:"))  # vor bei_klick (liest sonst k: als Entwurf)
     # Lernschleife „Publikum“ (Spec §7.1, §10.4, §14 Stufe 1): Screenshots/Hand-Eingabe, Upload-Paket und /link,
     # /publikum – eigene Module, hier nur eingehängt. VOR dem allgemeinen Klick-Handler: der liest jeden Knopf als
     # Entwurfs-Knopf; die Module melden ihre Knöpfe (pl/pm, pk/pt) mit eigenem Muster an.

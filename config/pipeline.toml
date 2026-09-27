@@ -113,6 +113,10 @@ claude_timeout_s = 180
 [musik]
 # Musik für den Regisseur liegt auf dem Mini (pve-big darf schlafen). Je Titel <name>.lizenz.txt daneben.
 ordner = "/var/lib/clip-pipeline/musik"
+# 27.09. (Florian: „Techno/Industrial oder Rock/Metal, kein EDM“): Titel aus diesen NCS-Genres bekommen bei der
+# Musikwahl genre_bonus Punkte dazu (Stimmung passt = 2, Energie ≤ 1, Tempo ≤ 0,6). Laden: pipeline musik ncs --genre hart
+genres_bevorzugt = ["techno", "hardcore", "electronic-rock", "dance-rock", "midtempo-bass"]
+genre_bonus = 1.5
 
 [musik.ncs_stimmungen]
 # `pipeline musik ncs --stimmung X` sucht auf ncs.io mit diesen Mood-Filtern (IDs aus der NCS-Suche)

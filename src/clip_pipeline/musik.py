@@ -270,9 +270,68 @@ def _hole(url: str, timeout: float = 30) -> bytes:
         return antwort.read()
 
 
-def ncs_suche(stimmung_id: int) -> list[dict]:
-    seite = _hole(f"{NCS}/music-search?q=&genre=&mood={int(stimmung_id)}").decode("utf-8", "replace")
-    return [{k: html.unescape(v) for k, v in t.groupdict().items()} for t in _ZEILE.finditer(seite)]
+def ncs_suche(stimmung_id: int | None = None, *, genre_id: int | None = None, seite: int = 1) -> list[dict]:
+    mood = "" if stimmung_id is None else int(stimmung_id)
+    genre = "" if genre_id is None else int(genre_id)
+    text = _hole(f"{NCS}/music-search?q=&genre={genre}&mood={mood}&page={int(seite)}").decode("utf-8", "replace")
+    return [{k: html.unescape(v) for k, v in t.groupdict().items()} for t in _ZEILE.finditer(text)]
+
+
+# NCS-Genre-Filter (IDs aus der Suche auf ncs.io, Stand 27.09.) und die Stimmung, als die ein Titel startet.
+# Florian 27.09.: „eher Richtung Techno/Industrial oder Rock/Metal, kein EDM“ – Metal führt NCS nicht, Electronic
+# Rock kommt dem am nächsten; Midtempo Bass ist die dunkle, industrielle Ecke.
+NCS_GENRES = {"techno": (80, "spannend"), "hardcore": (82, "frustriert"), "electronic-rock": (83, "episch"),
+              "dance-rock": (38, "episch"), "midtempo-bass": (22, "spannend"), "phonk": (16, "frustriert")}
+HART = ["techno", "hardcore", "electronic-rock", "dance-rock", "midtempo-bass"]
+
+
+def ncs_genre_titel(genre: str, seiten: int = 5) -> list[dict]:
+    """Alle Titel eines NCS-Genres über bis zu `seiten` Ergebnisseiten (ohne Doppelte)."""
+    gid, _ = NCS_GENRES[genre]
+    titel: list[dict] = []
+    for seite in range(1, seiten + 1):
+        neu = [t for t in ncs_suche(genre_id=gid, seite=seite) if t["slug"] not in {g["slug"] for g in titel}]
+        if not neu:
+            break
+        titel += neu
+    return titel
+
+
+def ncs_genres_laden(con: sqlite3.Connection, konfig: Konfig, genres: list[str], anzahl: int = 40) -> list[sqlite3.Row]:
+    """Lädt bis zu `anzahl` neue NCS-Titel aus diesen Genres, abwechselnd je Genre (gemischt statt 13× Rock am
+    Stück), und merkt sich das Genre am Titel. Ein Titel, der nicht lädt, wird übersprungen (Log), nicht der Rest."""
+    unbekannt = [g for g in genres if g not in NCS_GENRES]
+    if unbekannt:
+        raise ValueError(f"Unbekannte Genres {unbekannt} – bekannt: {', '.join(NCS_GENRES)}")
+    vorhanden = {(z["kuenstler"], z["titel"]) for z in con.execute("SELECT kuenstler, titel FROM tracks")}
+    je_genre = {g: [t for t in ncs_genre_titel(g) if (t["kuenstler"], t["titel"]) not in vorhanden] for g in genres}
+    reihe: list[tuple[str, dict]] = []
+    while any(je_genre.values()):
+        for g in genres:
+            if je_genre[g]:
+                reihe.append((g, je_genre[g].pop(0)))
+    tmp = ordner(konfig) / ".laden"
+    tmp.mkdir(parents=True, exist_ok=True)
+    neu: list[sqlite3.Row] = []
+    for genre, t in reihe:
+        if len(neu) >= anzahl:
+            break
+        if (t["kuenstler"], t["titel"]) in vorhanden:  # derselbe Titel in zwei Genres
+            continue
+        datei = tmp / f"{t['slug']}.mp3"
+        try:
+            datei.write_bytes(_hole(t["url"], timeout=120))
+            track = hinzufuegen(con, konfig, datei, titel=t["titel"], kuenstler=t["kuenstler"],
+                                quelle=ncs_quelle(t["slug"], t["kuenstler"], t["titel"]), stimmung=NCS_GENRES[genre][1])
+        except (OSError, ValueError) as fehler:
+            log.warning("NCS %s – %s übersprungen: %s", t["kuenstler"], t["titel"], fehler)
+            continue
+        finally:
+            datei.unlink(missing_ok=True)
+        con.execute("UPDATE tracks SET genre = ? WHERE id = ?", (genre, track["id"]))
+        neu.append(con.execute("SELECT * FROM tracks WHERE id = ?", (track["id"],)).fetchone())
+        vorhanden.add((t["kuenstler"], t["titel"]))
+    return neu
 
 
 def ncs_quelle(slug: str, kuenstler: str, titel: str) -> str:
