@@ -581,6 +581,22 @@ async def bei_fehler(update, context) -> None:
     log.error("Fehler im Lern-Bot", exc_info=context.error)
 
 
+def anfragen(konfig: Konfig):
+    """(Bot-Anfragen, getUpdates-Anfragen) für Telegram. [lernbot].nur_ipv4 (Standard an, 27.09.): Auf dem Mini lief
+    der Bot über IPv6 (Fritz!Box, Telekom, Route-MTU 1492), und die lange Warteabfrage blieb hängen – Klicks kamen
+    gebündelt 15–20 s später an (Journal: vier Gründe in 70 ms). Über IPv4 antwortet Telegram in unter 0,1 s."""
+    import httpx
+    from telegram.request import HTTPXRequest
+
+    def transport():
+        if not bool(konfig.wert("lernbot.nur_ipv4", True)):
+            return {}
+        return {"httpx_kwargs": {"transport": httpx.AsyncHTTPTransport(local_address="0.0.0.0")}}
+
+    return (HTTPXRequest(connection_pool_size=256, **transport()),
+            HTTPXRequest(connection_pool_size=1, read_timeout=5.0, **transport()))
+
+
 def baue_app(konfig: Konfig, token: str, erlaubt: int):
     from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
@@ -598,7 +614,9 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     # vorigen (je zwei Telegram-Roundtrips) und auf Handler, die länger awaiten (Musik, Screenshot) – „Buttons laden
     # lange“. Alle Handler teilen eine SQLite-Verbindung; sie rufen sie nur synchron zwischen zwei awaits, das ist im
     # Event-Loop unkritisch. Doppelklicks fangen die Handler selbst ab (arbeitet, paket_arbeitet, message not modified).
+    bot_anfragen, update_anfragen = anfragen(konfig)
     app = (Application.builder().token(token).concurrent_updates(True)
+           .request(bot_anfragen).get_updates_request(update_anfragen)
            .post_init(nach_start).post_stop(vor_ende).build())
     app.bot_data.update(con=db.verbinde(konfig.datenbank), konfig=konfig, erlaubt=erlaubt)
     nur_ich = filters.User(user_id=erlaubt)
@@ -630,5 +648,7 @@ def starte(konfig: Konfig) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # würde sonst URLs mit Token loggen
     app = baue_app(konfig, token, int(erlaubt))
-    app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False)
+    # Warteabfrage 5 s statt 10: Hängt eine doch einmal, gibt der Bot sie nach ~10 s auf statt nach ~15–20 s
+    app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False,
+                    timeout=int(konfig.wert("lernbot.poll_timeout_s", 5)))
     return 0

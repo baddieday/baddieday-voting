@@ -73,6 +73,9 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
   `NCS_GENRES=hart NCS_ANZAHL=40` vor `bash` in der Einspiel-Zeile.
 - Journal: „Entwurf #n gebaut in 95 s: Sperre 0 s · Stimmung 50 s (10 Clips) · Schnitt 4 s · Render 41 s“ zeigt,
   wo die Wartezeit nach ✅ fertig bleibt.
+- **Telegram über IPv4** (`[lernbot].nur_ipv4 = true`, 27.09.): Über IPv6 blieb die Warteabfrage auf dem Mini hängen,
+  Klicks kamen gebündelt 15–20 s später an, obwohl der Bot jeden in unter 0,3 s erledigt. Die Warteabfrage dauert
+  jetzt 5 s (`[lernbot].poll_timeout_s`), hängt sie doch einmal, ist sie nach ~10 s neu aufgebaut.
 - Das Journal zeigt je Klick, wo die Zeit bleibt: `journalctl -u clip-lernbot | grep Knopf`
   („Antwort 0.21 s · Speichern 0.01 s · Bildunterschrift 0.35 s“).
 - `/lernstand` zeigt, was der Regisseur gelernt hat, `/musik` die Titel, `/stand` einen Satz zum Stand.

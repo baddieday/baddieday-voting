@@ -105,6 +105,15 @@ class LernBot(MitRegieMaterial):
         self.assertEqual(muster, ["^k:"])
         app.bot_data["con"].close()
 
+    def test_telegram_ueber_ipv4(self):
+        # 27.09.: über IPv6 blieb die Warteabfrage auf dem Mini hängen – Standard ist IPv4, abschaltbar
+        bot, updates = lernbot.anfragen(self.konfig)
+        self.assertIsNotNone(bot._client_kwargs["transport"])
+        self.assertIsNotNone(updates._client_kwargs["transport"])
+        self.konfig.daten.setdefault("lernbot", {})["nur_ipv4"] = False
+        bot, _ = lernbot.anfragen(self.konfig)
+        self.assertIsNone(bot._client_kwargs["transport"])
+
     def test_knopf_antwortet_vor_der_datenbank(self):
         # 27.09. („Buttons laden lange“): answerCallbackQuery geht raus, bevor Bewertung und Caption gebaut werden
         from unittest import mock
