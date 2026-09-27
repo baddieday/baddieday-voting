@@ -175,3 +175,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   **Nachlegen nach dem Kürzen** (Ursache der kurzen Shorts seit „Multikills am Stück“), Grund **„⏱️ zu kurz“**
   (dauer_faktor konnte nur fallen), Format-Dauern über `[regie.formate.<format>]`, Rückfall auf den Bot-Clip statt
   stillem Wegfall bei fehlender Moment-Datei. Ursachenprüfung mit Gegenprüfern; Diagnose für den Mini: `docs/DIAGNOSE-SHORTS.md`.
+- 2026-09-27: **Lern-Bot: Schnitt lernt je Format, Lernen wird sichtbar** (Florian: „ich bewerte gefühlt ins Leere“).
+  Schnitt-Gründe wirken nur auf das bewertete Format, Inhalt (Momente, Stimmung, Musik) auf beide. Unter jedem Entwurf
+  „🔁 Schon bewertet“ je Moment und „🧠 Aus #n“ mit der Wirkung der letzten Bewertung; Kurzbefehl-Tastatur. Knöpfe werden
+  sofort beantwortet, Updates laufen nebenläufig (vorher strikt nacheinander – Ursache der trägen Knöpfe).

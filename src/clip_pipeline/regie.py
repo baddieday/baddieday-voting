@@ -283,6 +283,21 @@ def gezeigte_momente(con: sqlite3.Connection, fenster: int = ABWECHSLUNG_FENSTER
     return ergebnis
 
 
+def bewertet_je_moment(con: sqlite3.Connection) -> dict[str, int]:
+    """Moment -> in wie vielen bewerteten Entwürfen er schon war (alle Formate, ohne Fenster). Für die Zeile
+    „🔁 Schon bewertet“ im Lern-Bot (27.09.: „damit ich ein Gefühl bekomme, was schon doppelt da war“)."""
+    zaehler: dict[str, int] = {}
+    for z in con.execute("SELECT e.schnittliste FROM entwurf_bewertungen b JOIN entwuerfe e ON e.id = b.entwurf_id"):
+        try:
+            with open(z["schnittliste"], encoding="utf-8") as f:
+                momente = {s["moment"] for s in json.load(f).get("segmente", [])}
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            continue  # Datei fehlt: dieser Entwurf zählt nicht mit
+        for m in momente:
+            zaehler[m] = zaehler.get(m, 0) + 1
+    return zaehler
+
+
 def zuletzt_gezeigt(frueher: list[list[str]]) -> dict[str, int]:
     """Moment -> Alter seines jüngsten Auftritts (0 = im letzten Entwurf, 1 = im vorletzten …)."""
     alter: dict[str, int] = {}
@@ -731,7 +746,7 @@ def ordner(konfig: Konfig) -> Path:
 
 def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, parameter: dict | None = None,
              name: str | None = None, ziel: dict | None = None, nur_matches: set[str] | None = None,
-             hinweise_vorab: list[str] | None = None) -> dict:
+             hinweise_vorab: list[str] | None = None, gelernt: dict | None = None) -> dict:
     """nur_matches: nur Momente aus diesen Matches (z. B. ein Spielabend).
     hinweise_vorab: Hinweise des Aufrufers (z. B. Lern-Bot: Stimmung nachziehen fehlgeschlagen) – kommen vorn in
     die Schnittliste, damit der Bot sie zeigt (er zeigt die ersten drei)."""
@@ -847,6 +862,9 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         gekuerzt = True
     if gekuerzt:
         reihe, segmente = nachlegen(reihe, segmente)
+    schon_bewertet = bewertet_je_moment(con)   # 27.09.: je Segment, wie oft der Moment schon bewertet wurde
+    for s in segmente:
+        s["bewertet"] = schon_bewertet.get(s["moment"], 0)
     gesamt = segmente[-1]["zeit_ende"] if segmente else 0.0
     if gesamt < fmt["min_s"] - 1e-6:
         hinweise.append(f"Dauer {gesamt:.1f} s unter {fmt['min_s']:.0f} s – zu wenig Material")
@@ -892,6 +910,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         "hinweise": hinweise,
         "erstellt": iso(jetzt()),
     }
+    if gelernt:  # 27.09.: was deine letzte Bewertung an diesem Entwurf geändert hat (regie_lernen.wirkung)
+        liste["gelernt"] = gelernt
     if fehler := pruefe_liste(liste, max_lupen=int(konfig.wert("regie.effekte.max_lupen", MAX_LUPEN))):
         raise RegieFehler("Schnittliste ungültig: " + "; ".join(fehler[:3]))
     # Passt der Filtergraph samt Effekten auf die Befehlszeile? Sonst scheiterte erst das Rendern.

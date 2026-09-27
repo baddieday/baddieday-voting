@@ -56,7 +56,19 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 - Unter jedem Entwurf steht „🆕 3 neue · 2 schon gezeigt · Auswahl aus 40 Momenten“ und mit Effekten
   „✨ Look cinematic · 23 Impacts“ (Impacts = Ereignisse im Effekt-Plan: Zooms, Titel, Zähler, Klänge;
   später dazu „Hook ✓ · Zeitlupe ✓“). „n Momente“ zählt Momente, nicht Segmente.
-- Gründe: 8 Knöpfe in 4 Reihen zu je 2, darunter ✅ fertig.
+- Gründe: 9 Knöpfe (5 Reihen, ✅ fertig neben „⏱️ zu kurz“). Ohne Grund lernt nur die Moment-Auswahl, nicht der Schnitt.
+- Seit 27.09. zusätzlich unter jedem Entwurf:
+  - „🔁 Schon bewertet: ① neu ② 2× ③ neu …“ – je Moment in Video-Reihenfolge, in wie vielen bewerteten Entwürfen
+    er schon war (alle Formate; über 12 Momente nur die Summen).
+  - „🧠 Aus #41: Ziel-Dauer 81% → 90% · Schnitt ruhiger (Segmente ×1.15)“ – was deine zuletzt angefasste
+    Bewertung an genau diesem Entwurf geändert hat. „nichts geändert“ heißt: es kam nur 👍/👎 ohne Schnitt-Grund.
+- **Schnitt lernt je Format** (27.09.): Dauer, Segmentlänge, Übergänge, Anlauf/Ausklang und Effekte lernen nur aus
+  Bewertungen desselben Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzt keine Shorts mehr. Was du
+  inhaltlich magst (Momente, Stimmung, Musik, „langweilig“), gilt für beide. `/lernstand` zeigt beide Stände.
+- **Kurzbefehle** unten im Chat (nach /start oder beim nächsten „🎬 Baue …“): 🎬 Short · 🎞️ Zusammenschnitt ·
+  🧠 Lernstand · 📋 Stand · 📊 Publikum · 🎵 Musik.
+- Das Journal zeigt je Klick, wo die Zeit bleibt: `journalctl -u clip-lernbot | grep Knopf`
+  („Antwort 0.21 s · Speichern 0.01 s · Bildunterschrift 0.35 s“).
 - `/lernstand` zeigt, was der Regisseur gelernt hat, `/musik` die Titel, `/stand` einen Satz zum Stand.
 - Abends um 21:00 kommt ein Satz zum Stand (`[lernbot].abend_uhrzeit`).
 - **Publikum (TikTok-Zahlen, Lernschleife):** nach 👍 auf einen Short „📦 Upload-Paket“, nach dem Posten

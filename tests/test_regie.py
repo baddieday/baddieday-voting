@@ -405,6 +405,52 @@ class KandidatenDateien(MitRegieMaterial):
         self.assertEqual(alles["gesperrt"], 3)
 
 
+class JeFormat(MitRegieMaterial):
+    """27.09. („ich bewerte gefühlt ins Leere“): Schnitt-Werte lernen je Format, die Wirkung der letzten Bewertung
+    ist sichtbar, und je Moment wird gezählt, wie oft er schon bewertet wurde."""
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["regie"].update(vorgaben={}, lernen_ab=3)
+        self.n = 0
+
+    def entwurf(self, fmt, gruende=(), daumen=-1, momente=("a",)):
+        self.n += 1
+        pfad = self.tmp / f"f{self.n}.json"
+        pfad.write_text(json.dumps({"stimmung": "episch", "format": fmt, "segmente": [{"moment": m} for m in momente]}),
+                        encoding="utf-8")
+        eid = self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, erstellt) "
+                               "VALUES (?, ?, ?, '{}', 'x')", (f"f{self.n}", fmt, str(pfad))).lastrowid
+        regie_lernen.bewerte(self.con, eid, daumen=daumen)
+        for g in gruende:
+            regie_lernen.bewerte(self.con, eid, grund=g)
+        return eid
+
+    def test_schnitt_lernt_je_format_inhalt_fuer_beide(self):
+        self.entwurf("zusammenschnitt", ["lang", "hektisch", "musik"], momente=("a", "b"))
+        short, _ = regie_lernen.aktuelle(self.con, self.konfig, "short")
+        zs, _ = regie_lernen.aktuelle(self.con, self.konfig, "zusammenschnitt")
+        self.assertEqual((short["dauer_faktor"], short["seg_min_faktor"]), (1.0, 1.0))   # Short unberührt
+        self.assertEqual((zs["dauer_faktor"], zs["seg_min_faktor"]), (0.9, 1.15))
+        self.assertEqual(short["moment_bonus"], zs["moment_bonus"])                     # Inhalt für beide
+        alle, _ = regie_lernen.aktuelle(self.con, self.konfig)                           # ohne Format wie bisher
+        self.assertEqual(alle["dauer_faktor"], 0.9)
+        self.assertIn("Zusammenschnitt (1 Bewertungen): dauer_faktor 0.9", regie_lernen.lernstand_text(self.con, self.konfig))
+
+    def test_wirkung_der_letzten_bewertung_und_zaehler(self):
+        self.assertIsNone(regie_lernen.wirkung(self.con, self.konfig, "short"))
+        self.entwurf("short", daumen=1, momente=("a", "b"))
+        eid = self.entwurf("short", ["hektisch", "lang"], momente=("a", "c"))
+        w = regie_lernen.wirkung(self.con, self.konfig, "short")
+        self.assertEqual(w["entwurf"], eid)
+        self.assertIn("Ziel-Dauer 100% → 90%", w["aenderungen"])
+        self.assertIn("Schnitt ruhiger (Segmente ×1.15)", w["aenderungen"])
+        # auf den Zusammenschnitt wirkt dieselbe Bewertung nicht im Schnitt
+        self.assertFalse([a for a in regie_lernen.wirkung(self.con, self.konfig, "zusammenschnitt")["aenderungen"]
+                          if a.startswith(("Ziel-Dauer", "Schnitt"))])
+        self.assertEqual(regie.bewertet_je_moment(self.con), {"a": 2, "b": 1, "c": 1})
+
+
 class EffekteLernen(MitRegieMaterial):
     """Stufe 2 (Regisseur 2.0): „🎆 zu viele Effekte“ / „💥 mehr Action“ je Hauptstimmung, „zu hektisch“ dämpft.
     Ohne Video: Entwürfe direkt in der Datenbank, die Schnittliste nur mit Stimmung und Momenten."""

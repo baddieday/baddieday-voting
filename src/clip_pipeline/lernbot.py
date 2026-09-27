@@ -40,8 +40,15 @@ HILFE = """<b>Lern-Bot des Regisseurs</b>
    (z. B. „Song: Künstler - Titel / Music provided by NoCopyrightSounds / …“), optional <code>#episch</code>,
    <code>#spannend</code>, <code>#lustig</code>, <code>#frustriert</code> oder <code>#chill</code>.
 🎬 /entwurf <code>short</code> oder /entwurf <code>zusammenschnitt</code> – neuen Entwurf bauen
-👍/👎 unter jedem Entwurf, danach Gründe antippen und ✅ fertig.
-/musik – Titel · /lernstand – was der Regisseur gelernt hat · /stand – kurzer Stand"""
+👍/👎 unter jedem Entwurf, danach Gründe antippen und ✅ fertig. Ohne Grund lernt nur die Moment-Auswahl.
+/musik – Titel · /lernstand – was der Regisseur gelernt hat · /stand – kurzer Stand
+⌨️ Unten die Kurzbefehle: 🎬 Short · 🎞️ Zusammenschnitt · 🧠 Lernstand · 📋 Stand · 📊 Publikum · 🎵 Musik"""
+
+# Kurzbefehl-Tastatur (27.09.): Text der Taste -> Befehl. Die Tasten schicken genau diesen Text.
+KURZBEFEHLE = {"🎬 Short": "short", "🎞️ Zusammenschnitt": "zusammenschnitt", "🧠 Lernstand": "lernstand",
+               "📋 Stand": "stand", "📊 Publikum": "publikum", "🎵 Musik": "musik"}
+TASTATUR = [["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"], ["📊 Publikum", "🎵 Musik"]]
+KREISE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"
 
 
 # --- Knöpfe und Texte (ohne Telegram testbar) ------------------------------------------
@@ -87,6 +94,36 @@ def _balken(werte: list[float]) -> str:
     return "".join(zeichen[round((w - tief) / (hoch - tief) * stufen)] for w in werte)
 
 
+def bewertet_zeile(liste: dict) -> str | None:
+    """„🔁 Schon bewertet: ① neu ② 2× ③ neu …“ in der Reihenfolge des Videos (27.09.). Über 12 Momente nur die
+    Summen. None für alte Schnittlisten ohne Zähler."""
+    momente = [s for s in liste.get("segmente", []) if s.get("teil", 1) == 1 and s.get("rolle") != "hook"]
+    if not momente or any("bewertet" not in s for s in momente):
+        return None
+    zahlen = [int(s["bewertet"]) for s in momente]
+    if not any(zahlen):
+        return "🔁 Alle Momente zum ersten Mal zur Bewertung"
+    if len(zahlen) <= len(KREISE):
+        return "🔁 Schon bewertet: " + " ".join(f"{KREISE[i]} {'neu' if n == 0 else f'{n}×'}"
+                                                for i, n in enumerate(zahlen))
+    neu, einmal = zahlen.count(0), zahlen.count(1)
+    return f"🔁 Schon bewertet: {neu} neu · {einmal} einmal · {len(zahlen) - neu - einmal} zweimal oder öfter"
+
+
+def gelernt_zeile(liste: dict) -> str | None:
+    """„🧠 Aus #41: Ziel-Dauer 81% → 90% · 6 Momente kommen öfter“ – was die letzte Bewertung an diesem Entwurf
+    geändert hat (regie_lernen.wirkung, 27.09.)."""
+    g = liste.get("gelernt")
+    if not g:
+        return None
+    quelle = f"#{g['entwurf']}"
+    if g.get("format") and g["format"] != liste.get("format"):
+        quelle += f" ({FORMAT_NAMEN.get(g['format'], g['format'])})"
+    if not g["aenderungen"]:
+        return f"🧠 Aus {quelle}: nichts geändert – für den Schnitt Gründe antippen"
+    return f"🧠 Aus {quelle}: " + escape(" · ".join(g["aenderungen"][:4]))
+
+
 def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None,
                  erwartung: float | None = None) -> str:
     """Bildunterschrift eines Entwurfs (HTML, höchstens 1000 Zeichen).
@@ -106,6 +143,7 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         if a.get("ohne_datei"):
             zeile += f" · {a['ohne_datei']} ohne Datei"
         teile.append(zeile)
+    teile += [z for z in (bewertet_zeile(liste), gelernt_zeile(liste)) if z]
     if m:
         teile.append(f"🎵 {escape(m['titel'])} – {escape(m.get('kuenstler') or '?')} ({m.get('bpm') or 0:.0f} BPM)")
     if (fx := liste.get("effekte") or {}).get("an"):  # Regisseur 2.0: Impacts = Ereignisse im Effekt-Plan
@@ -194,8 +232,14 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
         with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
                 big.herzschlag(konfig, "lernbot"):
             nachgezogen = stimmung_nachziehen(con, konfig)
-            parameter, ziel = regie_lernen.aktuelle(con, konfig)
-            e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel, hinweise_vorab=nachgezogen["hinweise"])
+            parameter, ziel = regie_lernen.aktuelle(con, konfig, fmt)
+            try:  # nur eine Anzeige – ein Fehler hier darf den Entwurf nicht kosten
+                gelernt = regie_lernen.wirkung(con, konfig, fmt)
+            except Exception:
+                log.exception("Wirkung der letzten Bewertung")
+                gelernt = None
+            e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel, hinweise_vorab=nachgezogen["hinweise"],
+                               gelernt=gelernt)
             entwurf.entwurf(con, konfig, e["entwurf"])
         return int(e["entwurf"])
     finally:
@@ -219,6 +263,14 @@ def _markup(knoepfe):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
     return InlineKeyboardMarkup([[InlineKeyboardButton(t, callback_data=d) for t, d in reihe] for reihe in knoepfe])
+
+
+def tastatur():
+    """Kurzbefehle unten im Chat (bleibt stehen)."""
+    from telegram import ReplyKeyboardMarkup
+
+    return ReplyKeyboardMarkup(TASTATUR, resize_keyboard=True, is_persistent=True,
+                               input_field_placeholder="Kurzbefehl – oder Musik/Screenshot schicken")
 
 
 def _liste(zeile: sqlite3.Row) -> dict:
@@ -320,7 +372,8 @@ async def cmd_hilfe(update, context) -> None:
     from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
 
     # HILFE bleibt unverändert; der Teil zur Lernschleife „Publikum“ kommt als Zusatz dahinter
-    await update.effective_message.reply_text(HILFE + lernbot_publikum.HILFE_ZUSATZ, parse_mode="HTML")
+    await update.effective_message.reply_text(HILFE + lernbot_publikum.HILFE_ZUSATZ, parse_mode="HTML",
+                                              reply_markup=tastatur())
 
 
 async def cmd_stand(update, context) -> None:
@@ -359,7 +412,8 @@ async def neuer_entwurf(app, fmt: str) -> int | None:
         konfig = app.bot_data["konfig"]
         wach = await asyncio.to_thread(speicher_da, konfig)
         await app.bot.send_message(chat, f"🎬 Baue einen {FORMAT_NAMEN[fmt]} …"
-                                   + ("" if wach else " 💤 pve-big schläft – ich wecke ihn (bis zu 3 min)."))
+                                   + ("" if wach else " 💤 pve-big schläft – ich wecke ihn (bis zu 3 min)."),
+                                   reply_markup=tastatur())
         eid = await asyncio.to_thread(baue_entwurf, konfig, fmt)
         await sende_entwuerfe(app)
         log.info("Entwurf #%s gebaut", eid)
@@ -379,6 +433,23 @@ async def cmd_entwurf(update, context) -> None:
         return
     # Im Hintergrund wie nach einer Bewertung: sonst stehen alle anderen Knöpfe, bis der Entwurf fertig ist
     context.application.create_task(neuer_entwurf(context.application, fmt))
+
+
+async def bei_kurzbefehl(update, context) -> None:
+    """Taste der Kurzbefehl-Tastatur: Entwurf im Hintergrund bauen oder Befehl ausführen."""
+    ziel = KURZBEFEHLE.get((update.effective_message.text or "").strip())
+    if ziel in regie.FORMATE:
+        context.application.create_task(neuer_entwurf(context.application, ziel))
+    elif ziel == "lernstand":
+        await cmd_lernstand(update, context)
+    elif ziel == "stand":
+        await cmd_stand(update, context)
+    elif ziel == "musik":
+        await cmd_musik(update, context)
+    elif ziel == "publikum":
+        from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
+
+        await lernbot_publikum.cmd_publikum(update, context)
 
 
 async def bei_audio(update, context) -> None:
@@ -432,29 +503,38 @@ async def bei_klick(update, context) -> None:
     # nicht von der Datenbank ab; die Caption folgt gleich danach.
     weiter = bool(context.bot_data["konfig"].wert("lernbot.naechster_nach_bewertung", True))
     if aktion == "d":
-        await query.answer("Danke! Gründe antippen (optional), dann ✅ fertig.")
+        await query.answer("Danke! Gründe antippen (optional), dann ✅ fertig." if extra == "1" else
+                           "Danke! Was hat gestört? Ohne Grund lernt nur die Moment-Auswahl, nicht der Schnitt.")
+        geantwortet = time.monotonic()
         bewertung = regie_lernen.bewerte(con, eid, daumen=int(extra))
         knoepfe = knoepfe_gruende(eid, json.loads(bewertung["gruende"]))
     elif aktion == "g":
         await query.answer(regie_lernen.GRUENDE[extra])
+        geantwortet = time.monotonic()
         bewertung = regie_lernen.bewerte(con, eid, grund=extra)
         knoepfe = knoepfe_gruende(eid, json.loads(bewertung["gruende"]))
     else:
         await query.answer("Gespeichert – der nächste Entwurf kommt gleich." if weiter
                            else "Gespeichert – fließt in den nächsten Entwurf ein.")
+        geantwortet = time.monotonic()
         bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
         from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
 
         knoepfe = lernbot_paket.knoepfe_nach_fertig(eid, bewertung, zeile["format"])  # 👍-Short: „📦 Upload-Paket“
         if weiter:  # Lernschleife: sofort der nächste Entwurf, schon mit dieser Bewertung eingerechnet
             context.application.create_task(neuer_entwurf(context.application, zeile["format"]))
-    with contextlib.suppress(Exception):  # "message is not modified" bei Doppelklick
+    gespeichert = time.monotonic()
+    try:
         await query.edit_message_caption(caption=entwurf_text(zeile, _liste(zeile), bewertung,
                                                               erwartung=erwartung.gespeichert(con, "entwurf", eid)),
                                          parse_mode="HTML",
                                          reply_markup=_markup(knoepfe) if knoepfe else None)
-    # Wie lange ein Klick im Bot braucht (Antwort + Caption) – zum Nachmessen auf dem Mini: journalctl -u clip-lernbot
-    log.info("Knopf %s Entwurf #%s in %.2f s", aktion, eid, time.monotonic() - start)
+    except Exception as fehler:  # „message is not modified“ beim Doppelklick ist normal; alles andere ins Log
+        if "not modified" not in str(fehler):
+            log.warning("Bildunterschrift #%s nicht aktualisiert: %s: %s", eid, type(fehler).__name__, str(fehler)[:120])
+    # Wo ein Klick Zeit braucht – zum Nachmessen auf dem Mini: journalctl -u clip-lernbot | grep Knopf
+    log.info("Knopf %s Entwurf #%s: Antwort %.2f s · Speichern %.2f s · Bildunterschrift %.2f s", aktion, eid,
+             geantwortet - start, gespeichert - geantwortet, time.monotonic() - gespeichert)
 
 
 async def bei_fehler(update, context) -> None:
@@ -491,6 +571,8 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
                            ("lernstand", cmd_lernstand), ("musik", cmd_musik), ("entwurf", cmd_entwurf)):
         app.add_handler(CommandHandler(name, funktion, filters=nur_ich))
     app.add_handler(MessageHandler(nur_ich & (filters.AUDIO | filters.Document.AUDIO), bei_audio))
+    # Kurzbefehle VOR dem freien Text der Zahlen-Eingabe (lernbot_zahlen.bei_text nimmt sonst jeden Text)
+    app.add_handler(MessageHandler(nur_ich & filters.Text(list(KURZBEFEHLE)), bei_kurzbefehl))
     # Lernschleife „Publikum“ (Spec §7.1, §10.4, §14 Stufe 1): Screenshots/Hand-Eingabe, Upload-Paket und /link,
     # /publikum – eigene Module, hier nur eingehängt. VOR dem allgemeinen Klick-Handler: der liest jeden Knopf als
     # Entwurfs-Knopf; die Module melden ihre Knöpfe (pl/pm, pk/pt) mit eigenem Muster an.

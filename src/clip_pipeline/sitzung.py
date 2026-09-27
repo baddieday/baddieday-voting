@@ -51,8 +51,9 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
         stimmung.analysiere(con, konfig, claude=claude, whisper=whisper)
         entwurf_id = None
         try:
-            parameter, ziel = regie_lernen.aktuelle(con, konfig)
-            e = regie.erstelle(con, konfig, str(konfig.wert("sitzungen.format", "short")), parameter=parameter,
+            fmt = str(konfig.wert("sitzungen.format", "short"))
+            parameter, ziel = regie_lernen.aktuelle(con, konfig, fmt)
+            e = regie.erstelle(con, konfig, fmt, parameter=parameter,
                                ziel=ziel, nur_matches=set(matches))
             entwurf.entwurf(con, konfig, e["entwurf"])
             entwurf_id = e["entwurf"]
