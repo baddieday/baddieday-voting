@@ -21,12 +21,14 @@ laenge und lautstaerke (UNBEKANNT_WENN_FEHLT) werden in einem Paar nur vergliche
 gemessen sind. Sonst lernten die Gewichte „analysiert gegen nicht analysiert“ (z. B. ein Clip mit Mic-Analyse gegen
 einen ohne) statt „lustig gegen nicht lustig“. laenge und lautstaerke fehlen nur bei Datei-Momenten (kein Clip,
 Annahme S2-A9) – Clips haben beide immer, Battles und Freigaben vergleichen sie also wie vor Stufe 2.
-kill_punkte, victory_royale und kommentar bleiben wie vor Stufe 2: fehlt = 0. Die Paar-Dicts werden deshalb nie mit
+kill_punkte und victory_royale bleiben wie vor Stufe 2: fehlt = 0. Die Paar-Dicts werden deshalb nie mit
 0 aufgefüllt.
 
-Sicherungen: Mindestmenge, langsam wachsendes Vertrauen, Leine um die Startgewichte
-und ein Vergleich mit den Startgewichten (nie schlechter werden) – für deine Quote immer, für die
-Publikums-Quote erst ab [lernen].mindest_publikum_paare Paaren (Annahme S2-A10).
+Sicherungen: Mindestmenge, langsam wachsendes Vertrauen, Leine um die Startgewichte (mit Vorzeichen-Sperre,
+_leine – B2/L-A) und ein Vergleich mit den Startgewichten (nie schlechter werden) – für deine Quote immer, für die
+Publikums-Quote erst ab [lernen].mindest_publikum_paare Paaren (Annahme S2-A10). Dazu eine ehrliche, separate
+Out-of-Sample-Quote auf den jüngsten 20 % (_holdout_trefferquote) – rein informativ in /gewichte, ändert nichts an
+den trainierten Gewichten.
 Alles wird jedes Mal komplett neu aus der Historie berechnet -> reproduzierbar.
 
 Import-Regel (Plan Stufe 2, Leitplanke 7; tests/test_vertrag_stufe2.py prüft sie):
@@ -41,7 +43,7 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field, replace
-from itertools import combinations, islice, product
+from itertools import combinations
 
 from . import merkmale as merkmal_modul
 from . import publikum
@@ -61,6 +63,9 @@ NEUE_MERKMALE = frozenset(merkmal_modul.REPLAY_MERKMALE + merkmal_modul.MIC_MERK
 # (die fehlen bei Datei-Momenten – „Datei gegen Clip“ ist kein Unterschied in der Länge)
 UNBEKANNT_WENN_FEHLT = NEUE_MERKMALE | {"laenge", "lautstaerke"}
 QUELLEN = ("battle", "freigabe", "publikum")
+# B2/L-A: die jüngsten so viel Prozent eines Abschnitts sind Holdout – nie trainiert, nur für die ehrliche
+# Out-of-Sample-Quote in /gewichte (siehe _holdout, _holdout_trefferquote)
+HOLDOUT_ANTEIL = 0.2
 
 log = logging.getLogger("pipeline")
 
@@ -89,6 +94,10 @@ class Ergebnis:
     # deine Quote (Battles + Freigaben), die folgenden gehören zum Publikum.
     trefferquote_publikum: float | None = None          # ab dem 1. Publikums-Paar; None nur bei 0 Paaren
     trefferquote_publikum_start: float | None = None
+    # Ehrliche Out-of-Sample-Quote (B2/L-A): auf den jüngsten HOLDOUT_ANTEIL trainiert diese Rechnung NICHT –
+    # None unter 10 Paaren (zu wenig, um noch sinnvoll zu trainieren UND zu prüfen). Ändert nichts an werte/aktiv/
+    # grund, ist nur eine zusätzliche Kennzahl für /gewichte (_holdout_trefferquote).
+    trefferquote_holdout: float | None = None
     paare_je_quelle: dict[str, int] = field(default_factory=dict)   # {"battle": n, "freigabe": n, "publikum": n}
     ohne_mic: int = 0                                   # Clips ohne Mic-Analyse (mic_stand NULL, nicht verworfen)
     auseinander: str | None = None                      # „Du magst X, das Publikum Y“ (ab 10 Publikums-Paaren)
@@ -106,11 +115,11 @@ def startgewichte(konfig) -> dict[str, float]:
 def differenz(paar: Paar) -> dict[str, float]:
     """Merkmals-Unterschied besser − schlechter, nur über die Merkmale, die verglichen werden dürfen.
 
-    kill_punkte, victory_royale, kommentar: fehlt = 0 (wie vor Stufe 2). UNBEKANNT_WENN_FEHLT (die neuen zwölf
+    kill_punkte, victory_royale: fehlt = 0 (wie vor Stufe 2). UNBEKANNT_WENN_FEHLT (die neuen zwölf
     sowie laenge und lautstaerke): fehlt der Schlüssel auf einer Seite, steht das Merkmal NICHT im Ergebnis
     (unbekannt wird nicht verglichen, Annahme S2-A17). laenge/lautstaerke fehlen nur bei Datei-Momenten.
     Beispiel: besser {"kill_punkte": 3, "mic_lachen": 2} (Datei-Moment), schlechter {"kill_punkte": 1,
-    "laenge": 1.5} → {"kill_punkte": 2.0, "victory_royale": 0.0, "kommentar": 0.0} – mic_lachen, laenge und
+    "laenge": 1.5} → {"kill_punkte": 2.0, "victory_royale": 0.0} – mic_lachen, laenge und
     lautstaerke fehlen.
     Rückgabe: neues Dict. Fehler: ein Wert, der keine Zahl ist → ValueError/TypeError (float())."""
     d: dict[str, float] = {}
@@ -139,12 +148,28 @@ def trefferquote(gewichte: dict[str, float], paare: list[Paar]) -> float | None:
     return round(punkte / summe_gewichte, 4)
 
 
+def _leine(start: dict[str, float], anteil: float, minimum: float) -> dict[str, float]:
+    """Leine um die Startgewichte, mit Vorzeichen-Sperre (B2/L-A): ein Merkmal mit Startwert ≠ 0 darf über das
+    Lernen nie die Seite wechseln. Vorher galt das nur für |Start| > leine_minimum – bei `spitzen` (Start 0,25 <
+    leine_minimum 0,5) konnte die volle Leine ±0,5 den Wert bis −0,25 drücken (Gegenbeleg
+    docs/ANALYSE-2026-09-26.md, Abschnitt Belege). Jetzt wird die Leine zusätzlich auf |Start| gedeckelt, sodass sie
+    höchstens bis exakt 0 reicht. Startwert 0 (z. B. `nahkampf`, „das Lernen entscheidet“) hat kein Vorzeichen zu
+    sperren – dort bleibt die volle Leine ±leine_minimum."""
+    leine = {}
+    for m in MERKMALE:
+        s = abs(start.get(m, 0.0))
+        weite = max(minimum, s * anteil)
+        leine[m] = min(weite, s) if s > 0 else weite
+    return leine
+
+
 def trainiere(paare: list[Paar], start: dict[str, float], einstellungen: dict) -> dict[str, float]:
     """Paarweises Nachjustieren (Perzeptron mit Marge) in fester Reihenfolge der Paare.
 
     Liegt der bessere Clip nicht mindestens MARGE vorne, wandert jedes verglichene Merkmal um
-    schritt · Paar-Gewicht · Unterschied – danach zurück an die Leine (Start ± max(leine_minimum,
-    |Start| · leine_anteil)). Unbekannte neue Merkmale (nicht in differenz) bleiben unberührt.
+    schritt · Paar-Gewicht · Unterschied – danach zurück an die Leine (_leine: Start ± max(leine_minimum,
+    |Start| · leine_anteil), gedeckelt auf |Start| – kein Vorzeichenwechsel). Unbekannte neue Merkmale (nicht in
+    differenz) bleiben unberührt.
     Parameter: einstellungen – [lernen] mit schritt, durchlaeufe, leine_anteil, leine_minimum.
     Beispiel: Start lautstaerke 0, schritt 0,1, durchlaeufe 1, ein Freigabe-Paar (Gewicht 0,5) mit Unterschied 1
     → 0,05. Mit der Konfig (schritt 0,05, durchlaeufe 5) → 0,125: Das Paar bleibt mit Vorsprung 0 … 0,1 unter
@@ -153,7 +178,7 @@ def trainiere(paare: list[Paar], start: dict[str, float], einstellungen: dict) -
     schritt = float(einstellungen["schritt"])
     anteil = float(einstellungen["leine_anteil"])
     minimum = float(einstellungen["leine_minimum"])
-    leine = {m: max(minimum, abs(start.get(m, 0.0)) * anteil) for m in MERKMALE}
+    leine = _leine(start, anteil, minimum)
     w = {m: float(start.get(m, 0.0)) for m in MERKMALE}
     for _ in range(int(einstellungen["durchlaeufe"])):
         for p in paare:
@@ -163,6 +188,23 @@ def trainiere(paare: list[Paar], start: dict[str, float], einstellungen: dict) -
                     w[m] += schritt * p.gewicht * unterschied
                     w[m] = min(start.get(m, 0.0) + leine[m], max(start.get(m, 0.0) - leine[m], w[m]))
     return {m: round(v, 4) for m, v in w.items()}
+
+
+def _round_robin(gut: list[dict], schlecht: list[dict], maximal: int):
+    """Round-Robin statt `islice(product(gut, schlecht))` (B2: Analyse lernen.py:194 – die ersten `maximal`
+    Kombinationen aus product() sind zum ersten guten Clip verzerrt, wenn mehr Kombinationen da sind als
+    max_pro_abend). Lateinisches Quadrat: jede Kombination höchstens einmal, in Runden, die reihum jeden guten
+    Clip einmal bedienen – so deckt schon die erste Runde alle guten Clips ab, nicht nur den ersten.
+    Beispiel: gut=[g0,g1,g2], schlecht=[s0,s1], maximal=3 → (g0,s0), (g1,s1), (g2,s0) – jeder gute Clip einmal."""
+    if not gut or not schlecht:
+        return
+    n = 0
+    for versatz in range(len(schlecht)):
+        for gi, g in enumerate(gut):
+            if n >= maximal:
+                return
+            yield g, schlecht[(gi + versatz) % len(schlecht)]
+            n += 1
 
 
 def sammle_paare(con: sqlite3.Connection, *, zonen_name: str, wechsel_stunde: int, max_pro_abend: int) -> tuple[list[Paar], int, int]:
@@ -191,7 +233,7 @@ def sammle_paare(con: sqlite3.Connection, *, zonen_name: str, wechsel_stunde: in
         abende.setdefault(abend, {"gut": [], "schlecht": []})[seite].append(merkmale(c))
     for abend in sorted(abende):
         gruppe = abende[abend]
-        for gut, schlecht in islice(product(gruppe["gut"], gruppe["schlecht"]), max_pro_abend):
+        for gut, schlecht in _round_robin(gruppe["gut"], gruppe["schlecht"], max_pro_abend):
             paare.append(Paar(gut, schlecht, "freigabe"))
     return paare, len(entschieden), len(battles)
 
@@ -338,6 +380,34 @@ def auseinander_satz(nutzer: list[Paar], publikums_paare: list[Paar], mindest: i
     return None
 
 
+def _holdout(paare: list[Paar]) -> tuple[list[Paar], list[Paar]]:
+    """Teilt eine älteste-zuerst sortierte Paar-Liste in (Training, Holdout): die jüngsten HOLDOUT_ANTEIL (20 %)
+    sind das Holdout. Unter 10 Paaren bleibt es leer – zu wenig, um noch sinnvoll zu trainieren UND zu prüfen."""
+    if len(paare) < 10:
+        return paare, []
+    schnitt = len(paare) - max(1, round(len(paare) * HOLDOUT_ANTEIL))
+    return paare[:schnitt], paare[schnitt:]
+
+
+def _holdout_trefferquote(nutzer: list[Paar], pub: list[Paar], start: dict[str, float], vertrauen: float,
+                          einstellungen: dict) -> float | None:
+    """Ehrliche Out-of-Sample-Quote (B2/L-A, „Holdout jüngste 20 %“): trainiert auf allem AUSSER den jüngsten 20 %
+    je Quelle, prüft nur auf denen – anders als trefferquote(werte, nutzer)/(werte, pub), die auf den Daten prüfen,
+    die auch trainiert wurden. Eigene, separate Rechnung: ändert nichts an den „offiziellen“ Gewichten aus
+    berechne() (werte/aktiv/grund bleiben wie zuvor), ist nur eine zusätzliche Kennzahl für /gewichte.
+    nutzer kommt aus sammle_paare (Battles dann Freigaben, je aufsteigend) – als Näherung „ältester zuerst“
+    behandelt; pub ist jüngste zuerst sortiert (publikum_paare) und wird dafür gedreht.
+    None ohne genug Paare (unter 10 je Quelle bleibt deren Holdout-Anteil leer)."""
+    nutzer_zug, nutzer_holdout = _holdout(nutzer)
+    pub_zug, pub_holdout = _holdout(list(reversed(pub)))
+    holdout = nutzer_holdout + pub_holdout
+    if not holdout:
+        return None
+    gelernt = trainiere(nutzer_zug + pub_zug, start, einstellungen)
+    werte = {m: round(start[m] + vertrauen * (gelernt[m] - start[m]), 4) for m in MERKMALE}
+    return trefferquote(werte, holdout)
+
+
 def berechne(con: sqlite3.Connection, konfig) -> Ergebnis:
     """Gewichte komplett neu aus der Historie: Battles, Freigaben, Publikum (in dieser Reihenfolge trainiert).
 
@@ -367,12 +437,13 @@ def berechne(con: sqlite3.Connection, konfig) -> Ergebnis:
     tq_start, tqp_start = trefferquote(start, nutzer), trefferquote(start, pub)
     je_quelle = {q: sum(1 for p in nutzer + pub if p.art == q) for q in QUELLEN}
     ohne_mic = ohne_mic_analyse(con)  # dieselbe Zählung wie „offen“ in mikro.clips_nachziehen
+    tq_holdout = _holdout_trefferquote(nutzer, pub, start, vertrauen, einstellungen)
 
     def ergebnis(werte, aktiv, grund, tq, tqp):
         return Ergebnis(werte, start, n, n_freigaben, n_battles, round(vertrauen, 3), tq, tq_start, aktiv, grund,
                         trefferquote_publikum=tqp, trefferquote_publikum_start=tqp_start, paare_je_quelle=je_quelle,
                         ohne_mic=ohne_mic, auseinander=auseinander_satz(nutzer, pub, mindest_publikum),
-                        mindest_publikum_paare=mindest_publikum)
+                        mindest_publikum_paare=mindest_publikum, trefferquote_holdout=tq_holdout)
 
     if n < int(einstellungen["mindestens"]):
         return ergebnis(dict(start), False, f"noch {int(einstellungen['mindestens']) - n} Bewertungen bis zum Lernen",
@@ -396,6 +467,7 @@ def anzeige_zeilen(e: Ergebnis) -> list[str]:
     der Bot maskiert HTML selbst). Beispiel (12 Publikums-Paare):
       Sortier-Quote du: 80 % (Start 70 %)
       Sortier-Quote Publikum: 64 % (Start 50 %) – 12 Paare
+      Holdout-Quote (jüngste 20 %, nie trainiert): 75 %
       Paare: 2 Battles · 80 Freigaben · 12 Publikum
       ohne Mic-Analyse: 3 Clips
       Du magst Lautstärke, das Publikum Kill-Punkte.
@@ -417,6 +489,9 @@ def anzeige_zeilen(e: Ergebnis) -> list[str]:
         zeilen.append(zeile)
     else:
         zeilen.append("Publikum: noch keine Paare")
+    if e.trefferquote_holdout is not None:
+        zeilen.append(f"Holdout-Quote (jüngste {round(HOLDOUT_ANTEIL * 100)} %, nie trainiert): "
+                      f"{prozent(e.trefferquote_holdout)} %")
     zeilen.append(f"Paare: {e.paare_je_quelle.get('battle', 0)} Battles · {e.paare_je_quelle.get('freigabe', 0)} "
                   f"Freigaben · {n_pub} Publikum")
     zeilen.append(f"ohne Mic-Analyse: {e.ohne_mic} {'Clip' if e.ohne_mic == 1 else 'Clips'}")

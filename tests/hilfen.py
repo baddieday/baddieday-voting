@@ -51,7 +51,7 @@ class MitSpeicher(unittest.TestCase):
             )
         nr = self.con.execute("SELECT COUNT(*) FROM clips WHERE match_id = ?", (match_id,)).fetchone()[0] + 1
         zeiten = [iso(start + timedelta(seconds=10 + 3 * i)) for i in range(max_gruppe)]
-        merkmale = merkmale or {"kill_punkte": 1.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0, "kommentar": 0.0}
+        merkmale = merkmale or {"kill_punkte": 1.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0}
         cursor = self.con.execute(
             """INSERT INTO clips (match_id, nr, status, titel, typ, kills, max_gruppe, kill_zeiten, start_utc, ende_utc,
                                   quelle_pfad, quelle_start_s, quelle_ende_s, merkmale, punkte, begruendung,

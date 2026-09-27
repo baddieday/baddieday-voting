@@ -284,7 +284,6 @@ kill_punkte = 1.0
 victory_royale = 5.0
 laenge = -0.5
 lautstaerke = 1.0
-kommentar = 1.0
 # Stufe 2 (Spec §8.1): Florians Vorgaben, nicht gelernt. Leine wie oben – bei Startwert 0 also ±0,5.
 platzierung = 2.0      # 1/Platz: Sieg 1,0 → +2, Platz 10 → +0,2
 sniper = 1.0           # Anteil Sniper-Kills

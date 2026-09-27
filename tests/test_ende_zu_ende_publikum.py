@@ -91,7 +91,7 @@ TIKTOK_LINK = "https://www.tiktok.com/@baddieday/video/7300123456789012345"
 TIKTOK_ID = "7300123456789012345"
 
 # Merkmale des Clips, wie die Vorbewertung sie vor der Lernschleife gespeichert hat (Triple Kill)
-CLIP_MERKMALE = {"kill_punkte": 6.0, "victory_royale": 0.0, "laenge": 20.0, "lautstaerke": 0.0, "kommentar": 0.0}
+CLIP_MERKMALE = {"kill_punkte": 6.0, "victory_royale": 0.0, "laenge": 20.0, "lautstaerke": 0.0}
 # Ein Moment des Regisseurs ohne Clip (Mikro-Lacher), mit seinen Merkmalen aus der Stimmungs-Analyse
 LACHER = "datei:abend-2026-09-27-2"
 LACHER_MERKMALE = {"lachen": 2, "spitzen": 1}

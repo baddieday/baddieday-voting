@@ -20,7 +20,7 @@ from tests import test_replay_vorbewertung as alt
 EINSTELLUNGEN, ICH, elim = alt.EINSTELLUNGEN, alt.ICH, alt.elim
 GRUND = alt.Replay.DATEN
 
-ALTE_FUENF = ("kill_punkte", "victory_royale", "laenge", "lautstaerke", "kommentar")
+ALTE_VIER = ("kill_punkte", "victory_royale", "laenge", "lautstaerke")
 
 
 def _mit(eliminierungen, **mehr) -> dict:
@@ -87,7 +87,7 @@ def ergebnis(daten: dict) -> dict:
             "titel": k.titel, "gruppen": [[iso(z) for z in g] for g in k.gruppen],
             "aktionen": [[iso(z) for z in g] for g in k.aktionen],
             "start": iso(k.start_utc), "ende": iso(k.ende_utc),
-            "merkmale": {n: k.merkmale[n] for n in ALTE_FUENF},
+            "merkmale": {n: k.merkmale[n] for n in ALTE_VIER},
         } for k in vorbewertung.kandidaten(zl, EINSTELLUNGEN)],
     }
 
@@ -137,8 +137,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    },
    {
@@ -159,8 +158,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    }
   ]
@@ -228,8 +226,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    },
    {
@@ -250,8 +247,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    },
    {
@@ -272,8 +268,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    },
    {
@@ -294,8 +289,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    }
   ]
@@ -357,8 +351,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 6.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    }
   ]
@@ -411,8 +404,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    },
    {
@@ -433,8 +425,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    },
    {
@@ -455,8 +446,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    }
   ]
@@ -499,8 +489,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    },
    {
@@ -521,8 +510,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 1.0,
      "victory_royale": 1.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    }
   ]
@@ -584,8 +572,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 6.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    }
   ]
@@ -658,8 +645,7 @@ SOLL = json.loads(r"""{
      "kill_punkte": 6.0,
      "victory_royale": 0.0,
      "laenge": 0.0,
-     "lautstaerke": 0.0,
-     "kommentar": 0.0
+     "lautstaerke": 0.0
     }
    }
   ]

@@ -21,7 +21,7 @@ MAX_DAUER_S = 60.0  # längster Clip (auch Grenze für den Schnitt von decide)
 FREMD_NACH_S = 0.5  # ein Anlauf beginnt so viel nach dem Kill eines früheren Clips …
 FREMD_VOR_AKTION_S = 1.0  # … aber spätestens so viel vor der ersten Aktion
 
-MERKMALE = ("kill_punkte", "victory_royale", "laenge", "lautstaerke", "kommentar",
+MERKMALE = ("kill_punkte", "victory_royale", "laenge", "lautstaerke",
             # Stufe 2 (Spec §8.1): sieben aus dem Replay, fünf aus Mikro und Spielton (merkmale.py rechnet sie aus)
             "platzierung", "sniper", "nahkampf", "bot_opfer", "phase", "endgame", "clutch",
             "mic_lachen", "mic_jubel", "mic_frust", "mic_laut", "spitzen")
@@ -31,7 +31,6 @@ MERKMAL_NAMEN = {
     "victory_royale": "Victory Royale",
     "laenge": "Länge",
     "lautstaerke": "Lautstärke",
-    "kommentar": "Kommentar",
     "platzierung": "Platzierung",
     "sniper": "Sniper",
     "nahkampf": "Nahkampf",
@@ -231,7 +230,6 @@ def kandidaten(zeitleiste: Zeitleiste, einstellungen: dict) -> list[Kandidat]:
             "victory_royale": 1.0 if k.victory_royale else 0.0,
             "laenge": laenge_merkmal((k.ende_utc - ab_kill).total_seconds(), float(einstellungen["laenge_frei_s"])),
             "lautstaerke": 0.0,
-            "kommentar": 0.0,
         }
     return liste
 
