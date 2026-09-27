@@ -184,3 +184,5 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   midtempo-bass; Metal führt NCS nicht), `tracks.genre`, Bonus 1,5 für `[musik].genres_bevorzugt`. Alte Titel bleiben.
 - 2026-09-27: **Lern-Bot spricht mit Telegram über IPv4** (`[lernbot].nur_ipv4`). Messung auf dem Mini: Bot je Klick
   < 0,3 s, aber Klicks kamen gebündelt 15–20 s später an – die lange Warteabfrage über IPv6 (Fritz!Box/Telekom) hing.
+- 2026-09-27 (B3): **Vorbewertung lernt ab 10 statt 20 Bewertungen** (`[lernen].mindestens`); das Vertrauen wächst weiter
+  mit n bis 60, die Schranken bleiben. `/gewichte` zeigt eine Fortschrittszeile bis zum Lernen bzw. vollen Vertrauen.

@@ -319,8 +319,9 @@ nahkampf = []          # Shotgun, SMG, Spitzhacke
 sonstige = []          # bekannte andere Waffen (schaltet die Meldung für diese Zahl ab)
 
 [lernen]
-# Erst ab so vielen Bewertungen (Freigaben/Verwerfungen + Battles) wird gelernt
-mindestens = 20
+# Erst ab so vielen Bewertungen (Freigaben/Verwerfungen + Battles) wird gelernt. 27.09. (B3): 10 statt 20 – das
+# Vertrauen wächst ohnehin mit n (10 von 60 = 17 %), und die Schranken (nie schlechter als die Startgewichte) bleiben.
+mindestens = 10
 # Ab so vielen Bewertungen voll vertrauen
 voll_vertrauen = 60
 schritt = 0.05
