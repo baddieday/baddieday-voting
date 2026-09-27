@@ -1,6 +1,7 @@
 # Regisseur – Bedienung (Sprint 09/2026)
 
-Aus deinen Clips entstehen automatisch **Zusammenschnitte (16:9, 3–5 min)** und **Shorts (9:16, 30–45 s)** mit
+Aus deinen Clips entstehen automatisch **Zusammenschnitte (16:9, 3–5 min)** und **Shorts (9:16, 30–45 s, einstellbar
+über `[regie.formate]`)** mit
 Musik, Schnitten auf dem Beat und Übergängen passend zur Stimmung. Du bewertest die Entwürfe im **Lern-Bot**
 mit 👍/👎 und Gründen, und der nächste Entwurf berücksichtigt das.
 
@@ -80,6 +81,7 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 | 😵 zu hektisch | Segmente +15 % länger, Übergänge +10 %; ab +30 % nur jeder 2., ab +70 % jeder 4. Beat; dazu Hektik ×0,9 (Beat-Akzente schwächer, 0,3 … 1,3) |
 | 🎯 Stimmung getroffen | Hauptstimmung +0,5; Musikziel dieser Stimmung rückt 20 % zum benutzten Titel |
 | ⏳ zu lang | Ziel-Dauer −10 % (bis 60 %) |
+| ⏱️ zu kurz | Ziel-Dauer +10 % (bis 100 %) – hebt „zu lang“ wieder auf; beide zugleich: nichts. Länger als die Obergrenze des Formats geht nur über `[regie.formate]` (unten) |
 | ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills |
 | 🥱 Clips langweilig | jeder Moment dieses Entwurfs −1 Punkt (kommt seltener) |
 | 🎆 zu viele Effekte | Effekt-Stärke der Hauptstimmung ×0,85 (bis 0,1) – alle Effekte dieser Stimmung schwächer, schwache fallen unter die Schwelle weg |
@@ -104,6 +106,42 @@ kommt ein, zwei Entwürfe später wieder; dazwischen kommen die anderen dran.
 Einstellbar: `[regie.vorgaben] abwechslung = 0.7` (0 = immer die besten, 1 = maximal wechseln).
 Je mehr Clips eine Stimmung haben, desto mehr Auswahl: `regie-starten.sh` analysiert die nächsten 40, der
 Bot vor jedem Entwurf 10 weitere.
+
+**Der Abzug allein reichte nicht (27.09.).** Er ist anteilig – ein 12-Punkte-Moment liegt mit 70 % Abzug (3,6)
+immer noch vor jedem Einzelkill (1–3 Punkte). Simulation mit 120 Momenten, 20 Shorts nacheinander: nur **18
+verschiedene** Momente kamen vor, die Top-10 belegten zwei Drittel aller Plätze, 102 Momente nie. Genau das war
+„immer dieselben 10–20 Clips“. Deshalb dazu, beides nur bei `abwechslung > 0`:
+
+| Regel | Wert | Wirkung |
+|---|---|---|
+| **Cooldown** `cooldown_entwuerfe` | 3 (0 … 12) | Ein Moment aus einem der letzten 3 Entwürfe ist gesperrt – Reserve, falls das freie Material nicht für einen Entwurf reicht (Hinweis „Cooldown aufgehoben“) |
+| **Frische-Quote** `frische_quote` | 0,5 (0 … 1) | Mindestens die Hälfte der Momente eines Entwurfs war in keinem Entwurf des Fensters; fehlt etwas, tauscht der schwächste alte gegen den stärksten frischen Moment |
+
+Simulation damit: **83 verschiedene** Momente in 20 Shorts statt 18 – und die Top-10 kommen trotzdem regelmäßig
+(je 5× in 20 Shorts). Der Entwurf zeigt die Bilanz („Auswahl aus 120 Momenten · 14 im Cooldown“), `/lernstand`
+die Regeln. Einstellbar in `[regie.vorgaben]`.
+
+Fehlt die Datei eines Moments (z. B. eine gelöschte Kopie), nimmt der Regisseur seit 27.09. den Bot-Clip
+(gleicher Inhalt; nicht nach einem Nachschnitt) statt den Moment still wegzulassen – und zählt, was fehlt
+(„… · 2 ohne Datei“, Hinweis „N Momente ohne Datei übersprungen“). Scheitert das Nachziehen der Stimmung vor
+dem Entwurf, steht der Fehler als erster Hinweis im Entwurf statt nur im Log.
+
+## Dauer je Format – und warum Shorts kurz wurden
+Standard: Short 30–45 s (Segment bis 12 s, Serie bis 20 s), Zusammenschnitt 180–300 s (25 s / 30 s). Seit 27.09.
+in `config/lokal.toml` einstellbar, Sekunden 5 … 600, `min_s ≤ max_s`, `seg_max_s` und `serie_max_s ≤ max_s`:
+
+```toml
+[regie.formate.short]
+max_s = 60            # Shorts bis 60 s statt 45
+serie_max_s = 30      # eine Kill-Serie darf am Stück länger bleiben
+```
+
+Ursache der kurzen Shorts (27.09., nachgestellt): Seit „Multikills am Stück“ belegt eine Serie bis 20 s statt
+12 s. Die Auswahl nimmt den letzten Moment auch, wenn er über das Ziel schießt; das Beat-Raster landet dann über
+45 s, das Kürzen strich einen ganzen Moment aus der Mitte – und **nichts füllte die Lücke**: Shorts mit 30–38 s
+und 2–3 Momenten statt 45 s. Jetzt legt der Regisseur nach dem Kürzen erneut nach (nur Momente, die unter die
+Obergrenze passen). Der gelernte `dauer_faktor` („⏳ zu lang“) spielte dabei kaum eine Rolle, konnte aber bis
+27.09. nur fallen – deshalb der neue Grund „⏱️ zu kurz“.
 
 ## Multikills am Stück – Serie und Jump-Cut
 Bei einem Team-Wipe sterben alle umgehauenen Gegner im selben Augenblick. Die Kill-Zeiten liegen dann alle beim

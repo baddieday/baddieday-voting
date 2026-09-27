@@ -170,3 +170,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Highlight-Video und Clip-Shorts (nur noch Ausnahme über /paket). Für die Bewertung zählen alle Stimmen; Vorschauen zum Bewerten behalten alle Spuren.
 - 2026-09-26: **Mic-Schritt als systemd-Dienst** `clip-mikro` (path + timer) statt Kindprozess von render; render schreibt
   nur `/var/lib/clip-pipeline/mikro.anstoss`.
+- 2026-09-27: **Regisseur – Abwechslung mit Cooldown (3 Entwürfe) und Frische-Quote (50 %)**, weil der anteilige
+  Punkte-Abzug allein nur die Spitze rotieren ließ (Simulation: 18 von 120 Momenten in 20 Shorts, jetzt 83).
+  **Nachlegen nach dem Kürzen** (Ursache der kurzen Shorts seit „Multikills am Stück“), Grund **„⏱️ zu kurz“**
+  (dauer_faktor konnte nur fallen), Format-Dauern über `[regie.formate.<format>]`, Rückfall auf den Bot-Clip statt
+  stillem Wegfall bei fehlender Moment-Datei. Ursachenprüfung mit Gegenprüfern; Diagnose für den Mini: `docs/DIAGNOSE-SHORTS.md`.

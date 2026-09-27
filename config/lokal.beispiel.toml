@@ -48,6 +48,8 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # uebergang_faktor = 1.2    # weichere, längere Übergänge
 # musik_pegel = 0.3         # Musik leiser (0 … 1)
 # effekt_hektik = 0.8       # Beat-Akzente schwächer (0.3 … 1.3; „zu hektisch“ lernt ×0.9)
+# cooldown_entwuerfe = 3    # Momente aus den letzten n Entwürfen sind gesperrt (0 … 12; wirkt nur bei abwechslung > 0)
+# frische_quote = 0.5       # mindestens dieser Anteil eines Entwurfs war noch in keinem Entwurf (0 … 1)
 # [regie.vorgaben.stimmung_bonus]
 # lustig = 1.0              # lustige Momente bevorzugen (−2 … +2)
 # [regie.vorgaben.effekt_staerke]
@@ -56,6 +58,14 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # [regie.musik_ziele.episch]
 # bpm = 150                 # für epische Momente schnellere Musik
 # energie = 0.9             # und energiereichere (Rang in deiner Bibliothek, 0 … 1)
+# --- Dauer je Format (27.09.) ------------------------------------------------------------------
+# Sekunden 5 … 600; min_s ≤ max_s, seg_max_s und serie_max_s ≤ max_s – sonst gilt der Standard (Hinweis im Entwurf).
+# Standard: Short 30–45 s (Segment bis 12 s, Serie bis 20 s), Zusammenschnitt 180–300 s (25 s / 30 s).
+# [regie.formate.short]
+# max_s = 60                # Shorts bis 60 s statt 45
+# serie_max_s = 30          # eine Kill-Serie darf am Stück länger bleiben
+# [regie.formate.zusammenschnitt]
+# max_s = 360
 # --- Effekte (Regisseur 2.0) ---------------------------------------------------------------
 # Ganz aus (Schnitt und Übergänge wie vorher):
 # [regie.effekte]

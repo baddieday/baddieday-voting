@@ -139,8 +139,14 @@ class LernBot(MitRegieMaterial):
         self.konfig.daten["lernbot"] = {"stimmung_je_entwurf": 5}
         with mock.patch.object(lernbot.stimmung, "analysiere", side_effect=RuntimeError("Whisper kaputt")), \
                 self.assertLogs("lern-bot", "ERROR"):
-            self.assertTrue(lernbot.baue_entwurf(self.konfig, "short"))  # Entwurf kommt trotzdem
+            eid = lernbot.baue_entwurf(self.konfig, "short")
+        self.assertTrue(eid)                                                # Entwurf kommt trotzdem
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 3)
+        # 27.09.: der Fehler steht als erster Hinweis in der Schnittliste – der Bot zeigt ihn (vorher nur im Log)
+        zeile = self.con.execute("SELECT schnittliste FROM entwuerfe WHERE id = ?", (eid,)).fetchone()
+        with open(zeile["schnittliste"], encoding="utf-8") as f:
+            hinweise = json.load(f)["hinweise"]
+        self.assertTrue(hinweise[0].startswith("Stimmung nachziehen fehlgeschlagen: RuntimeError: Whisper kaputt"), hinweise)
 
     def test_blick_auf_leerlauf_haelt_die_schleife_nicht_auf(self):
         import threading
@@ -221,6 +227,13 @@ class LernBot(MitRegieMaterial):
 
 @unittest.skipIf(lernbot is None, "python-telegram-bot fehlt")
 class EntwurfText(unittest.TestCase):
+    def test_bilanz_cooldown_und_ohne_datei(self):
+        # 27.09.: der Bot zeigt, was der Regisseur wirklich sah – Cooldown und fehlende Dateien waren vorher unsichtbar
+        liste = {"format": "short", "dauer_s": 40.0, "stimmung": "episch", "segmente": [{"moment": "clip:1"}],
+                 "bogen": [9.0], "musik": None, "hinweise": [],
+                 "auswahl": {"neu": 1, "schon_gezeigt": 0, "kandidaten": 120, "gesperrt": 14, "ohne_datei": 2}}
+        self.assertIn("Auswahl aus 120 Momenten · 14 im Cooldown · 2 ohne Datei", lernbot.entwurf_text({"id": 8}, liste))
+
     def test_zaehlt_momente_nicht_segmente(self):
         # Ein Multikill mit Jump-Cut besteht aus mehreren Segmenten (Teilen), bleibt aber ein Moment
         segmente = [{"moment": "clip:1", "teil": 1}, {"moment": "clip:1", "teil": 2}, {"moment": "datei:4"}]
@@ -248,11 +261,11 @@ class EntwurfText(unittest.TestCase):
         liste["effekte"] = {"an": False}
         self.assertNotIn("✨", lernbot.entwurf_text({"id": 7}, liste))
 
-    def test_knoepfe_gruende_vier_reihen(self):
+    def test_knoepfe_gruende_reihen(self):
         eid = 10 ** 12
         reihen = lernbot.knoepfe_gruende(eid, ["action"])
-        self.assertEqual([len(r) for r in reihen], [2, 2, 2, 2, 1])       # 8 Gründe, dann ✅
-        self.assertEqual(reihen[-1], [("✅ fertig", f"x:{eid}:")])
+        self.assertEqual([len(r) for r in reihen], [2, 2, 2, 2, 2])       # 9 Gründe, der letzte neben ✅
+        self.assertEqual(reihen[-1], [("⏱️ zu kurz", f"g:{eid}:kurz"), ("✅ fertig", f"x:{eid}:")])
         self.assertEqual(reihen[3], [("🎆 zu viele Effekte", f"g:{eid}:effekte_viel"),
                                      ("☑️ 💥 mehr Action", f"g:{eid}:action")])
         gesehen = []
