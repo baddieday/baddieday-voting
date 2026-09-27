@@ -215,15 +215,16 @@ class NachFertig(MitLernPaket):
     def fertig(self, eid: int):
         q = FakeQuery(f"x:{eid}:")
         asyncio.run(lernbot.bei_klick(SimpleNamespace(callback_query=q), self.context))
-        return q.bearbeitet[0]["reply_markup"]
+        # seit 27.09. stehen nach ✅ fertig immer die Kurzbefehle (k:) darunter – hier zählt nur der Rest
+        return [d for d in knopf_daten(q.bearbeitet[0]["reply_markup"]) if not d.startswith("k:")]
 
     def test_daumen_hoch_short_zeigt_upload_paket(self):
         eid = self.entwurf_anlegen()
-        self.assertEqual(knopf_daten(self.fertig(eid)), [f"pk:{eid}:"])
+        self.assertEqual(self.fertig(eid), [f"pk:{eid}:"])
 
     def test_daumen_runter_und_zusammenschnitt_ohne_paket(self):
-        self.assertIsNone(self.fertig(self.entwurf_anlegen(daumen=-1)))
-        self.assertIsNone(self.fertig(self.entwurf_anlegen(fmt="zusammenschnitt")))
+        self.assertEqual(self.fertig(self.entwurf_anlegen(daumen=-1)), [])
+        self.assertEqual(self.fertig(self.entwurf_anlegen(fmt="zusammenschnitt")), [])
 
 
 # --- 📦 Upload-Paket ----------------------------------------------------------------------------------------

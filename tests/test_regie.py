@@ -451,6 +451,49 @@ class JeFormat(MitRegieMaterial):
         self.assertEqual(regie.bewertet_je_moment(self.con), {"a": 2, "b": 1, "c": 1})
 
 
+class MusikGenres(MitRegieMaterial):
+    """27.09.: NCS nach Genre laden (abwechselnd je Genre, Genre am Titel), bevorzugte Genres gewinnen die Musikwahl."""
+
+    def test_genres_laden_abwechselnd_und_fehler_ueberspringen(self):
+        from unittest import mock
+
+        from clip_pipeline import musik
+
+        titel = {80: [{"slug": f"t{i}", "kuenstler": "A", "titel": f"Techno {i}", "url": f"u{i}"} for i in range(3)],
+                 83: [{"slug": "r0", "kuenstler": "B", "titel": "Rock 0", "url": "kaputt"},
+                      {"slug": "r1", "kuenstler": "B", "titel": "Rock 1", "url": "r1"}]}
+        suche = lambda stimmung_id=None, *, genre_id=None, seite=1: titel[genre_id] if seite == 1 else []  # noqa: E731
+
+        def hole(url, timeout=0):
+            if url == "kaputt":
+                raise OSError("Verbindung weg")
+            return b"mp3"
+
+        def hinzu(con, konfig, datei, *, titel, kuenstler, quelle, stimmung):
+            return con.execute("INSERT INTO tracks (datei, titel, kuenstler, quelle, sha256, stimmungen, erstellt) "
+                               "VALUES (?, ?, ?, ?, ?, ?, 'x') RETURNING *",
+                               (datei.name, titel, kuenstler, quelle, titel, json.dumps([stimmung]))).fetchone()
+
+        with mock.patch.object(musik, "ncs_suche", suche), mock.patch.object(musik, "_hole", hole), \
+                mock.patch.object(musik, "hinzufuegen", hinzu), mock.patch.object(musik, "ncs_quelle", lambda *a: "NCS"):
+            neu = musik.ncs_genres_laden(self.con, self.konfig, ["techno", "electronic-rock"], anzahl=3)
+        # Reihe T0, R0, T1, R1, …: R0 lädt nicht und wird übersprungen, der Rest läuft weiter
+        self.assertEqual([t["titel"] for t in neu], ["Techno 0", "Techno 1", "Rock 1"])
+        self.assertEqual([t["genre"] for t in neu], ["techno", "techno", "electronic-rock"])
+        with self.assertRaises(ValueError):
+            musik.ncs_genres_laden(self.con, self.konfig, ["edm"])
+
+    def test_bevorzugtes_genre_gewinnt(self):
+        for n, genre in ((1, None), (2, "techno")):
+            self.con.execute("INSERT INTO tracks (datei, titel, quelle, sha256, dauer_s, bpm, energie, beats, stimmungen, "
+                             "genre, erstellt) VALUES (?, ?, 'q', ?, 200, 150, 0.8, '[]', '[\"episch\"]', ?, 'x')",
+                             (f"{n}.mp3", f"T{n}", f"s{n}", genre))
+        p = dict(regie.PARAMETER)
+        ohne, _ = regie.waehle_musik(self.con, "episch", 40, p)
+        mit, wertung = regie.waehle_musik(self.con, "episch", 40, p, bevorzugt={"techno": 1.5})
+        self.assertEqual((ohne["titel"], mit["titel"]), ("T1", "T2"))
+
+
 class EffekteLernen(MitRegieMaterial):
     """Stufe 2 (Regisseur 2.0): „🎆 zu viele Effekte“ / „💥 mehr Action“ je Hauptstimmung, „zu hektisch“ dämpft.
     Ohne Video: Entwürfe direkt in der Datenbank, die Schnittliste nur mit Stimmung und Momenten."""

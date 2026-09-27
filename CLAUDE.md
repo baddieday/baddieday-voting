@@ -179,3 +179,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Schnitt-Gründe wirken nur auf das bewertete Format, Inhalt (Momente, Stimmung, Musik) auf beide. Unter jedem Entwurf
   „🔁 Schon bewertet“ je Moment und „🧠 Aus #n“ mit der Wirkung der letzten Bewertung; Kurzbefehl-Tastatur. Knöpfe werden
   sofort beantwortet, Updates laufen nebenläufig (vorher strikt nacheinander – Ursache der trägen Knöpfe).
+- 2026-09-27: **Kurzbefehle als Knöpfe im Chat** (nicht als Ersatz-Tastatur, Florian). **Musik: Techno/Industrial und
+  Rock statt EDM** – NCS-Genre-Filter (`musik ncs --genre hart`: techno, hardcore, electronic-rock, dance-rock,
+  midtempo-bass; Metal führt NCS nicht), `tracks.genre`, Bonus 1,5 für `[musik].genres_bevorzugt`. Alte Titel bleiben.
+- 2026-09-27: **Lern-Bot spricht mit Telegram über IPv4** (`[lernbot].nur_ipv4`). Messung auf dem Mini: Bot je Klick
+  < 0,3 s, aber Klicks kamen gebündelt 15–20 s später an – die lange Warteabfrage über IPv6 (Fritz!Box/Telekom) hing.

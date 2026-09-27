@@ -65,8 +65,17 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 - **Schnitt lernt je Format** (27.09.): Dauer, Segmentlänge, Übergänge, Anlauf/Ausklang und Effekte lernen nur aus
   Bewertungen desselben Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzt keine Shorts mehr. Was du
   inhaltlich magst (Momente, Stimmung, Musik, „langweilig“), gilt für beide. `/lernstand` zeigt beide Stände.
-- **Kurzbefehle** unten im Chat (nach /start oder beim nächsten „🎬 Baue …“): 🎬 Short · 🎞️ Zusammenschnitt ·
-  🧠 Lernstand · 📋 Stand · 📊 Publikum · 🎵 Musik.
+- **Kurzbefehle** als Knöpfe im Chat, unter /hilfe und nach ✅ fertig: 🎬 Short · 🎞️ Zusammenschnitt ·
+  🧠 Lernstand · 📋 Stand · 📊 Publikum · 🎵 Musik. (Die Ersatz-Tastatur vom Vormittag verschwindet mit dem nächsten „🎬 Baue …“.)
+- **Musik nach Genre** (27.09.): `pipeline musik ncs --genre hart --anzahl 40` lädt Techno, Hardcore, Electronic Rock,
+  Dance-Rock und Midtempo Bass von NCS (Metal gibt es dort nicht). Diese Genres bekommen bei der Musikwahl
+  `[musik].genre_bonus` = 1,5 dazu und schlagen so die alten EDM-Titel. Beim Einspielen gleich mit:
+  `NCS_GENRES=hart NCS_ANZAHL=40` vor `bash` in der Einspiel-Zeile.
+- Journal: „Entwurf #n gebaut in 95 s: Sperre 0 s · Stimmung 50 s (10 Clips) · Schnitt 4 s · Render 41 s“ zeigt,
+  wo die Wartezeit nach ✅ fertig bleibt.
+- **Telegram über IPv4** (`[lernbot].nur_ipv4 = true`, 27.09.): Über IPv6 blieb die Warteabfrage auf dem Mini hängen,
+  Klicks kamen gebündelt 15–20 s später an, obwohl der Bot jeden in unter 0,3 s erledigt. Die Warteabfrage dauert
+  jetzt 5 s (`[lernbot].poll_timeout_s`), hängt sie doch einmal, ist sie nach ~10 s neu aufgebaut.
 - Das Journal zeigt je Klick, wo die Zeit bleibt: `journalctl -u clip-lernbot | grep Knopf`
   („Antwort 0.21 s · Speichern 0.01 s · Bildunterschrift 0.35 s“).
 - `/lernstand` zeigt, was der Regisseur gelernt hat, `/musik` die Titel, `/stand` einen Satz zum Stand.

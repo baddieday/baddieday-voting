@@ -518,7 +518,10 @@ class Befehle(MitBewertung):
         # Hand-Eingabe mit den drei Zusatz-Zählern (Florian 25.09.) – und das Beispiel nimmt der Bot auch an
         self.assertIn("Kommentare, Shares, Saves: <code>#17 1240 61 6.8 34 3 5 2</code>", lernbot_publikum.HILFE_ZUSATZ)
         publikum.lies_hand_eingabe("1240 61 6.8 34 3 5 2")
-        self.assertEqual(kw, {"parse_mode": "HTML"})
+        self.assertEqual(kw["parse_mode"], "HTML")
+        # seit 27.09. hängen die Kurzbefehle als Knöpfe unter der Hilfe
+        self.assertEqual([b.callback_data for reihe in kw["reply_markup"].inline_keyboard for b in reihe],
+                         [d for reihe in lernbot.knoepfe_kurzbefehle() for _, d in reihe])
         self.assertLessEqual(len(text), 4096)  # Telegram: höchstens 4096 Zeichen je Nachricht
         self.assertIn("/publikum", text)
         # Telegram lehnt HTML mit unbekannten oder offenen Tags ab – dann käme gar keine Hilfe

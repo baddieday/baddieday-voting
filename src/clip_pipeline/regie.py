@@ -536,8 +536,10 @@ def _rang(werte: list[float], wert: float) -> float:
     return sum(1 for w in werte if w < wert) / (len(werte) - 1)
 
 
-def waehle_musik(con: sqlite3.Connection, stimmung: str, gesamt_s: float, p: dict, ziel: dict | None = None
-                 ) -> tuple[sqlite3.Row | None, dict[int, float]]:
+def waehle_musik(con: sqlite3.Connection, stimmung: str, gesamt_s: float, p: dict, ziel: dict | None = None,
+                 bevorzugt: dict[str, float] | None = None) -> tuple[sqlite3.Row | None, dict[int, float]]:
+    """bevorzugt (27.09.): Genre -> Bonus ([musik].genres_bevorzugt / genre_bonus) – Titel aus diesen Genres
+    schlagen die alten EDM-Titel, solange Stimmung und Tempo halbwegs passen."""
     ziel = ziel or ZIEL
     tracks = con.execute("SELECT * FROM tracks WHERE beats IS NOT NULL ORDER BY id").fetchall()
     if not tracks:
@@ -555,6 +557,7 @@ def waehle_musik(con: sqlite3.Connection, stimmung: str, gesamt_s: float, p: dic
         wert -= float(p["track_malus"].get(str(t["id"]), 0.0))
         wert -= 0.15 * benutzt.get(t["id"], 0)              # Abwechslung zwischen Entwürfen
         wert -= 0.3 * (float(t["dauer_s"] or 0) < gesamt_s)  # müsste wiederholt werden
+        wert += (bevorzugt or {}).get(t["genre"] if "genre" in t.keys() else None, 0.0)
         wertung[t["id"]] = round(wert, 3)
     beste = max(tracks, key=lambda t: (wertung[t["id"]], -t["id"]))
     return beste, wertung
@@ -792,7 +795,9 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     # STIMMUNG_WERT nur noch als Tiebreak (Spec §8.2 nimmt ihn aus der Momentstärke; Rückfrage S2-R2 in
     # docs/ENTSCHEIDUNGEN.md ist offen)
     haupt = max(anteile, key=lambda s: (anteile[s], STIMMUNG_WERT[s]))
-    track, wertung = waehle_musik(con, haupt, ziel_s, p, ziel)
+    bonus = float(konfig.wert("musik.genre_bonus", 1.5))
+    track, wertung = waehle_musik(con, haupt, ziel_s, p, ziel,
+                                  bevorzugt={g: bonus for g in konfig.wert("musik.genres_bevorzugt", []) or []})
 
     raster: list[float] = []
     schlaege: list[float] = []

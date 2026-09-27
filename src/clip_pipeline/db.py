@@ -35,6 +35,8 @@ MIGRATIONEN += [("gewichte", "trefferquote_publikum", "REAL"), ("gewichte", "tre
 # Eigene Spalte statt neuem Status – die CHECK-Liste von highlights.status ließe sich nur mit Tabellen-Umbau ändern.
 MIGRATIONEN += [("highlights", "hochgeladen", "TEXT")]
 
+# 27.09.: Genre aus dem NCS-Genre-Filter (Techno, Electronic Rock …) – der Regisseur bevorzugt [musik].genres_bevorzugt
+MIGRATIONEN += [("tracks", "genre", "TEXT")]
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)

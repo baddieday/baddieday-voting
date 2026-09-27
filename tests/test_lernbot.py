@@ -88,19 +88,31 @@ class LernBot(MitRegieMaterial):
         alt = {**liste, "segmente": [{"moment": "a"}], "gelernt": None}           # alte Schnittliste: keine Zeilen
         self.assertNotIn("🔁", lernbot.entwurf_text(zeile, alt))
 
-    def test_kurzbefehle(self):
+    def test_kurzbefehle_als_knoepfe_im_chat(self):
+        # 27.09.: Knöpfe im Chat wie beim Bewerten (k:0:<ziel>), nicht die Tastatur ersetzen
         gesendet = []
-        nachricht = SimpleNamespace(text="🧠 Lernstand", reply_text=lambda t, **kw: _merke(gesendet, t))
-        update = SimpleNamespace(effective_message=nachricht)
-        asyncio.run(lernbot.bei_kurzbefehl(update, self.context))
+        q = FakeQuery("k:0:lernstand")
+        q.message = SimpleNamespace(reply_text=lambda t, **kw: _merke(gesendet, t))
+        update = SimpleNamespace(callback_query=q, effective_message=q.message)
+        asyncio.run(lernbot.bei_kurzknopf(update, self.context))
+        self.assertEqual(q.antworten, [None])                                   # Spinner sofort weg
         self.assertTrue(gesendet[0].startswith("🧠 Regie"))
-        nachricht.text = "🎞️ Zusammenschnitt"
-        asyncio.run(lernbot.bei_kurzbefehl(update, self.context))
-        self.assertEqual(len(self.aufgaben), 1)                                 # Entwurf läuft im Hintergrund
+        q = FakeQuery("k:0:zusammenschnitt")
+        asyncio.run(lernbot.bei_kurzknopf(SimpleNamespace(callback_query=q, effective_message=None), self.context))
+        self.assertEqual((q.antworten, len(self.aufgaben)), (["🎬 Zusammenschnitt kommt …"], 1))
         app = lernbot.baue_app(self.konfig, "123456:TEST", 42)
-        texte = [h.filters for h in app.handlers[0] if getattr(h, "callback", None) is lernbot.bei_kurzbefehl]
-        self.assertEqual(len(texte), 1)
+        muster = [h.pattern.pattern for h in app.handlers[0] if getattr(h, "callback", None) is lernbot.bei_kurzknopf]
+        self.assertEqual(muster, ["^k:"])
         app.bot_data["con"].close()
+
+    def test_telegram_ueber_ipv4(self):
+        # 27.09.: über IPv6 blieb die Warteabfrage auf dem Mini hängen – Standard ist IPv4, abschaltbar
+        bot, updates = lernbot.anfragen(self.konfig)
+        self.assertIsNotNone(bot._client_kwargs["transport"])
+        self.assertIsNotNone(updates._client_kwargs["transport"])
+        self.konfig.daten.setdefault("lernbot", {})["nur_ipv4"] = False
+        bot, _ = lernbot.anfragen(self.konfig)
+        self.assertIsNone(bot._client_kwargs["transport"])
 
     def test_knopf_antwortet_vor_der_datenbank(self):
         # 27.09. („Buttons laden lange“): answerCallbackQuery geht raus, bevor Bewertung und Caption gebaut werden
@@ -141,7 +153,8 @@ class LernBot(MitRegieMaterial):
         self.assertIn("☑️ 😵 zu hektisch", [b.text for reihe in q.bearbeitet[0]["reply_markup"].inline_keyboard for b in reihe])
         self.klick(f"g:{eid}:hektisch")  # abwählen
         q = self.klick(f"x:{eid}:")
-        self.assertIsNone(q.bearbeitet[0]["reply_markup"])
+        nach_fertig = [b.callback_data for reihe in q.bearbeitet[0]["reply_markup"].inline_keyboard for b in reihe]
+        self.assertEqual(nach_fertig, [d for reihe in lernbot.knoepfe_kurzbefehle() for _, d in reihe])  # nur Kurzbefehle
         self.assertIn("Musik passt nicht", q.bearbeitet[0]["caption"])
         zeile = self.con.execute("SELECT * FROM entwurf_bewertungen").fetchone()
         self.assertEqual((zeile["daumen"], json.loads(zeile["gruende"])), (-1, ["musik"]))
