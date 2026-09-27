@@ -69,7 +69,25 @@ class LernBot(MitRegieMaterial):
         app = lernbot.baue_app(self.konfig, "123456:TEST", 42)
         befehle = {c for h in app.handlers[0] for c in getattr(h, "commands", ())}
         self.assertTrue({"entwurf", "musik", "lernstand", "stand", "hilfe"} <= befehle)
+        self.assertGreater(app.concurrent_updates, 0)   # 27.09.: Klicks warten nicht aufeinander
         app.bot_data["con"].close()
+
+    def test_knopf_antwortet_vor_der_datenbank(self):
+        # 27.09. („Buttons laden lange“): answerCallbackQuery geht raus, bevor Bewertung und Caption gebaut werden
+        from unittest import mock
+
+        self.momente_anlegen(MOMENTE[:8])
+        self.musik_anlegen(150, "episch")
+        eid = lernbot.baue_entwurf(self.konfig, "short")
+        asyncio.run(lernbot.sende_entwuerfe(self.app))
+        q = FakeQuery(f"d:{eid}:1")
+        with mock.patch.object(regie_lernen, "bewerte", side_effect=AssertionError("Datenbank hängt")), \
+                self.assertRaises(AssertionError):
+            asyncio.run(lernbot.bei_klick(SimpleNamespace(callback_query=q), self.context))
+        self.assertEqual(q.antworten, ["Danke! Gründe antippen (optional), dann ✅ fertig."])
+        self.assertEqual(q.bearbeitet, [])
+        q = self.klick(f"g:{eid}:nix")                    # unbekannter Grund: klare Antwort statt Absturz
+        self.assertEqual(q.antworten, ["Unbekannter Knopf."])
 
     def test_entwurf_senden_und_bewerten(self):
         self.momente_anlegen(MOMENTE[:8])

@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import tempfile
 from datetime import datetime
 from html import escape
@@ -418,23 +419,30 @@ async def bei_klick(update, context) -> None:
     except ValueError:
         await query.answer("Unbekannter Knopf.")
         return
+    start = time.monotonic()
     zeile = con.execute("SELECT * FROM entwuerfe WHERE id = ?", (eid,)).fetchone()
     if zeile is None:
         await query.answer("Entwurf unbekannt.")
         return
+    if aktion == "g" and extra not in regie_lernen.GRUENDE:
+        await query.answer("Unbekannter Knopf.")
+        return
+    # Zuerst antworten (27.09., „Buttons laden lange“): Telegram zeigt am Knopf einen Spinner, bis
+    # answerCallbackQuery da ist – vorher kam die Antwort erst nach Datenbank und Caption-Aufbau. Die Texte hängen
+    # nicht von der Datenbank ab; die Caption folgt gleich danach.
+    weiter = bool(context.bot_data["konfig"].wert("lernbot.naechster_nach_bewertung", True))
     if aktion == "d":
-        bewertung = regie_lernen.bewerte(con, eid, daumen=int(extra))
         await query.answer("Danke! Gründe antippen (optional), dann ✅ fertig.")
+        bewertung = regie_lernen.bewerte(con, eid, daumen=int(extra))
         knoepfe = knoepfe_gruende(eid, json.loads(bewertung["gruende"]))
     elif aktion == "g":
-        bewertung = regie_lernen.bewerte(con, eid, grund=extra)
         await query.answer(regie_lernen.GRUENDE[extra])
+        bewertung = regie_lernen.bewerte(con, eid, grund=extra)
         knoepfe = knoepfe_gruende(eid, json.loads(bewertung["gruende"]))
     else:
-        bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
-        weiter = bool(context.bot_data["konfig"].wert("lernbot.naechster_nach_bewertung", True))
         await query.answer("Gespeichert – der nächste Entwurf kommt gleich." if weiter
                            else "Gespeichert – fließt in den nächsten Entwurf ein.")
+        bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
         from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
 
         knoepfe = lernbot_paket.knoepfe_nach_fertig(eid, bewertung, zeile["format"])  # 👍-Short: „📦 Upload-Paket“
@@ -445,6 +453,8 @@ async def bei_klick(update, context) -> None:
                                                               erwartung=erwartung.gespeichert(con, "entwurf", eid)),
                                          parse_mode="HTML",
                                          reply_markup=_markup(knoepfe) if knoepfe else None)
+    # Wie lange ein Klick im Bot braucht (Antwort + Caption) – zum Nachmessen auf dem Mini: journalctl -u clip-lernbot
+    log.info("Knopf %s Entwurf #%s in %.2f s", aktion, eid, time.monotonic() - start)
 
 
 async def bei_fehler(update, context) -> None:
@@ -469,7 +479,12 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
             with contextlib.suppress(asyncio.CancelledError):
                 await aufgabe
 
-    app = Application.builder().token(token).post_init(nach_start).post_stop(vor_ende).build()
+    # concurrent_updates (27.09.): Updates laufen nebenläufig statt nacheinander. Vorher wartete jeder Klick auf den
+    # vorigen (je zwei Telegram-Roundtrips) und auf Handler, die länger awaiten (Musik, Screenshot) – „Buttons laden
+    # lange“. Alle Handler teilen eine SQLite-Verbindung; sie rufen sie nur synchron zwischen zwei awaits, das ist im
+    # Event-Loop unkritisch. Doppelklicks fangen die Handler selbst ab (arbeitet, paket_arbeitet, message not modified).
+    app = (Application.builder().token(token).concurrent_updates(True)
+           .post_init(nach_start).post_stop(vor_ende).build())
     app.bot_data.update(con=db.verbinde(konfig.datenbank), konfig=konfig, erlaubt=erlaubt)
     nur_ich = filters.User(user_id=erlaubt)
     for name, funktion in (("start", cmd_hilfe), ("hilfe", cmd_hilfe), ("help", cmd_hilfe), ("stand", cmd_stand),
