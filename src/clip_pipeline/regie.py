@@ -12,7 +12,13 @@ Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der K
                  (zusammen höchstens 100 %) – so kommen nicht immer dieselben Momente, die stärksten aber
                  regelmäßig wieder. Als Anteil, weil die Punkte weit streuen (Einzelkill 1, Vierfach-Kill 10,
                  Victory +5): ein fester Abzug ließe die stärksten immer vorn.
-                 Verworfene Clips nie; höchstens n Momente aus demselben Match.
+                 Der Abzug allein reicht nicht (27.09., Simulation mit 120 Momenten: nur 18 verschiedene in 20
+                 Shorts – ein 12-Punkte-Moment liegt mit 70 % Abzug immer noch vor jedem Einzelkill). Deshalb dazu:
+                 Cooldown – ein Moment aus einem der letzten `cooldown_entwuerfe` Entwürfe ist gesperrt (Reserve,
+                 falls das Material sonst nicht reicht); Frische-Quote – mindestens `frische_quote` der gewählten
+                 Momente war in keinem Entwurf des Fensters. Beides nur bei abwechslung > 0 (0 = wie früher).
+                 Verworfene Clips nie; höchstens n Momente aus demselben Match. Fehlt die Moment-Datei, nimmt
+                 der Regisseur den Bot-Clip (gleicher Inhalt, ohne Nachschnitt) statt den Moment still wegzulassen.
   2. Bogen       Einstieg = zweitstärkster Moment (Hook), dann steigend, bei ~60 % eine Atempause
                  (lustig/chill), der stärkste zum Schluss. Keine gleiche Stimmung / kein gleiches Match
                  zweimal hintereinander, wenn es sich vermeiden lässt.
@@ -34,11 +40,12 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import effekte, entwurf, lernen, schema
+from . import effekte, entwurf, lernen, material, schema
 from .db import BEWERTET
 from .konfig import Konfig
 from .merkmale import fuer_moment, stimmen_gebraucht
@@ -55,6 +62,33 @@ FORMATE = {
     "short": {"min_s": 30.0, "max_s": 45.0, "seg_min_s": 2.5, "seg_max_s": 12.0, "serie_max_s": 20.0,
               "b": 1080, "h": 1920},
 }
+# Dauern je Format aus config/lokal.toml, z. B. [regie.formate.short] max_s = 60 (Sekunden, 5 … 600)
+FORMAT_SCHLUESSEL = ("min_s", "max_s", "seg_min_s", "seg_max_s", "serie_max_s")
+
+
+def format_regeln(konfig, fmt_name: str) -> tuple[dict, list[str]]:
+    """FORMATE[fmt_name] mit Vorgaben aus [regie.formate.<format>]: min_s, max_s, seg_min_s, seg_max_s,
+    serie_max_s in Sekunden. Unsinniges wird gemeldet und ignoriert; ein unstimmiger Satz (min > max, seg_max oder
+    serie_max > max, seg_min > seg_max) fällt ganz auf den Standard zurück. Bis 27.09. waren die Dauern fest im
+    Code – die Short-Obergrenze 45 s ließ sich nicht anheben."""
+    fmt, hinweise = dict(FORMATE[fmt_name]), []
+    vorgaben = (konfig.wert(f"regie.formate.{fmt_name}", {}) if konfig is not None else {}) or {}
+    if not isinstance(vorgaben, dict):
+        return fmt, [f"regie.formate.{fmt_name} ignoriert (kein Abschnitt)"]
+    for name, wert in vorgaben.items():
+        if name not in FORMAT_SCHLUESSEL or isinstance(wert, bool) or not isinstance(wert, (int, float)) \
+                or not 5.0 <= float(wert) <= 600.0:
+            hinweise.append(f"regie.formate.{fmt_name}.{name} ignoriert (unbekannt oder nicht 5 … 600 s)")
+            continue
+        fmt[name] = float(wert)
+    if fmt["min_s"] > fmt["max_s"] or fmt["seg_min_s"] > fmt["seg_max_s"] or fmt["seg_max_s"] > fmt["max_s"] \
+            or fmt["serie_max_s"] > fmt["max_s"]:
+        hinweise.append(f"regie.formate.{fmt_name} unstimmig (min ≤ max, seg_min ≤ seg_max ≤ max, "
+                        f"serie_max ≤ max) – Standardwerte")
+        return dict(FORMATE[fmt_name]), hinweise
+    return fmt, hinweise
+
+
 # Rangfolge der Stimmungen. Seit Stufe 2 (Spec §8.2) nicht mehr Teil der Momentstärke, nur noch Tiebreak bei der
 # Musikwahl (gleich lange Anteile: die "stärkere" Stimmung bestimmt die Musik). Rückfrage S2-R2
 # (docs/ENTSCHEIDUNGEN.md) ist offen: eventuell kommt sie als Stimmungs-Bonus in `punkte` zurück.
@@ -76,6 +110,12 @@ PARAMETER = {
     "track_malus": {},            # Track-ID -> Abzug ("Musik passt nicht")
     "moment_bonus": {},           # Moment -> Zusatzpunkte (👍 +, 👎 ohne Grund −, "Clips langweilig" −−)
     "abwechslung": 0.7,           # Anteil der Punkte, den ein Moment aus dem letzten Entwurf verliert (je älter: halb)
+    # 27.09.: Der anteilige Abzug hält die Rotation in der Spitze (18 von 120 Momenten in 20 Shorts). Dazu deshalb
+    # Cooldown (Moment aus einem der letzten n Entwürfe: gesperrt, nur Reserve) und Frische-Quote (Anteil der
+    # gewählten Momente, die in keinem Entwurf des Fensters waren). Simulation: 18 → 83 verschiedene Momente, die
+    # Top-10 kommen weiter regelmäßig (je 5× in 20 Shorts). Beides wirkt nur bei abwechslung > 0.
+    "cooldown_entwuerfe": 3,
+    "frische_quote": 0.5,
     "max_je_match": 3,
     "luecke_max_s": 4.0,          # längere Pause zwischen zwei Aktionen -> Jump-Cut
     "effekt_staerke": {},         # Stimmung -> Faktor auf alle Effekte, fehlt = 1,0 ("zu viele Effekte" ×0,85,
@@ -119,6 +159,7 @@ class Kandidat:
     serie: bool = False            # ≥ 2 Kills mit Aktions-Zeiten: bleibt ein Stück, bis serie_max_s
     max_gruppe: int = 0            # größte Kill-Serie (wie Bot und Elo zählen) – Kill-Titel
     victory: bool = False          # Victory Royale – Titel VICTORY ROYALE
+    gesperrt: bool = False         # Cooldown: in einem der letzten cooldown_entwuerfe Entwürfe – nur Reserve
 
     def __post_init__(self) -> None:
         if not self.teile:  # alte Momente: genau ein Teil = Kern (wie bisher)
@@ -242,6 +283,15 @@ def gezeigte_momente(con: sqlite3.Connection, fenster: int = ABWECHSLUNG_FENSTER
     return ergebnis
 
 
+def zuletzt_gezeigt(frueher: list[list[str]]) -> dict[str, int]:
+    """Moment -> Alter seines jüngsten Auftritts (0 = im letzten Entwurf, 1 = im vorletzten …)."""
+    alter: dict[str, int] = {}
+    for a, momente in enumerate(frueher):
+        for m in momente:
+            alter.setdefault(m, a)
+    return alter
+
+
 def abwechslung(frueher: list[list[str]], anteil: float) -> dict[str, tuple[float, int]]:
     """Moment -> (Anteil der Punkte, der abgezogen wird; wie oft gezeigt).
     Letzter Entwurf: der volle Anteil, davor je Entwurf die Hälfte; zusammen höchstens 1 (= alle Punkte)."""
@@ -253,9 +303,32 @@ def abwechslung(frueher: list[list[str]], anteil: float) -> dict[str, tuple[floa
     return {m: (round(min(1.0, w), 3), n) for m, (w, n) in schon.items()}
 
 
+def _ersatz_datei(konfig: Konfig | None, clip_pfad: str | None, mk: dict) -> Path | None:
+    """Der Bot-Clip als Ersatz für eine fehlende Moment-Datei (gleicher Inhalt: momente.datei war beim Anlegen
+    material.lokal(clip_pfad), eine Kopie oder der Clip selbst). Nicht nach einem Nachschnitt – dessen
+    kill_sekunden zählen ab der neu geschnittenen Datei (stimmung.NACHSCHNITT), nicht ab dem Bot-Clip."""
+    if konfig is None or not clip_pfad or isinstance(mk.get("nachschnitt"), dict):
+        return None
+    ersatz = material.lokal(konfig, clip_pfad)
+    return ersatz if ersatz.is_file() else None
+
+
 def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None = None, *,
-               gewichte: dict[str, float], kill_tabelle: list[float]) -> list[Kandidat]:
+               gewichte: dict[str, float], kill_tabelle: list[float], konfig: Konfig | None = None) -> list[Kandidat]:
+    """Alle Momente mit Stimmung als Kandidaten – siehe kandidaten_mit_bericht (nur die Liste)."""
+    return kandidaten_mit_bericht(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle, konfig=konfig)[0]
+
+
+def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None = None, *,
+                           gewichte: dict[str, float], kill_tabelle: list[float], konfig: Konfig | None = None,
+                           nur_matches: set[str] | None = None) -> tuple[list[Kandidat], dict[str, int]]:
     """Alle Momente mit Stimmung als Kandidaten: Stärke, Punkte für die Auswahl, Kern und Teile für den Schnitt.
+
+    Bericht (zweiter Wert): {"ohne_datei": übersprungen, weil weder Moment-Datei noch Bot-Clip da sind;
+    "ersetzt": Moment-Datei fehlte, der Bot-Clip springt ein (nur mit konfig, nie nach Nachschnitt);
+    "gesperrt": im Cooldown (in einem der letzten p["cooldown_entwuerfe"] Entwürfe, nur bei abwechslung > 0)};
+    mit nur_matches zählt die Bilanz nur diese Matches (Spielabend).
+    Bis 27.09. fielen Momente ohne Datei still weg – der Bot zeigte dann „Auswahl aus 20 Momenten“ statt 128.
 
     Stärke (`intensitaet`, für Bogen, Hook und Kürzen) = der Moment-Score, dieselbe Bewertung wie im Clip-Bot
     (Spec §8.2): round(roh_score(fuer_moment(clips.merkmale, momente.merkmale, kill_tabelle), gewichte), 2).
@@ -272,18 +345,33 @@ def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None
     Beispiel: Clip-Moment, clips.merkmale {"kill_punkte": 3, "bot_opfer": 1}, momente {"spitzen": 2}, Startgewichte
     (kill_punkte 1, bot_opfer −2, spitzen 0,25), Status gesendet, Elo 1500 → intensitaet 1.5, punkte 1.5.
     """
-    schon = abwechslung(frueher or [], float(p.get("abwechslung", 0.0)))
+    anteil_ab = float(p.get("abwechslung", 0.0))
+    schon = abwechslung(frueher or [], anteil_ab)
+    alter = zuletzt_gezeigt(frueher or [])
+    cooldown = int(p.get("cooldown_entwuerfe", 0)) if anteil_ab > 0 else 0
+    bericht = {"ohne_datei": 0, "ersetzt": 0, "gesperrt": 0}
     zeilen = con.execute(
         """SELECT m.*, c.status AS clip_status, c.elo AS elo, c.merkmale AS clip_merkmale,
-                  c.max_gruppe AS max_gruppe, c.victory_royale AS victory_royale
+                  c.max_gruppe AS max_gruppe, c.victory_royale AS victory_royale, c.clip_pfad AS clip_pfad
              FROM momente m LEFT JOIN clips c ON c.id = m.clip_id
             ORDER BY m.id"""
     ).fetchall()
     ergebnis = []
     for z in zeilen:
-        if z["clip_status"] == "verworfen" or not Path(z["datei"]).is_file():
+        if z["clip_status"] == "verworfen":
             continue
+        if nur_matches is not None and z["match_id"] not in nur_matches:
+            continue  # Spielabend: fremde Matches zählen auch in der Bilanz nicht mit
         mk = json.loads(z["merkmale"])
+        datei = z["datei"]
+        if not Path(datei).is_file():
+            ersatz = _ersatz_datei(konfig, z["clip_pfad"], mk)
+            if ersatz is None:
+                bericht["ohne_datei"] += 1
+                log.warning("Moment %s: Datei fehlt (%s) – übersprungen", z["schluessel"], datei)
+                continue
+            log.info("Moment %s: Datei fehlt (%s) – nehme den Bot-Clip %s", z["schluessel"], datei, ersatz)
+            datei, bericht["ersetzt"] = str(ersatz), bericht["ersetzt"] + 1
         # Kill-/Aktions-Sekunden zählen ab Dateibeginn (Vertrag mit stimmung.py) – nutzbar ist die Datei bis ende_s.
         # Bisher ist start_s immer 0; ein Nachschnitt mit start_s > 0 darf den Anlauf davor mitnehmen.
         dauer = float(z["ende_s"])
@@ -306,10 +394,13 @@ def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None
         kern, muss, teile, teile_muss, serie = _teile(mk, dauer, kern, muss, p)
         if len(teile) > 1:
             grund += f", {len(teile)} Teile (Jump-Cut)"
-        ergebnis.append(Kandidat(z["schluessel"], z["datei"], dauer, z["stimmung"], intensitaet,
+        gesperrt = cooldown > 0 and alter.get(z["schluessel"], cooldown) < cooldown
+        bericht["gesperrt"] += int(gesperrt)
+        ergebnis.append(Kandidat(z["schluessel"], datei, dauer, z["stimmung"], intensitaet,
                                  round(punkte - abzug, 2), z["clip_id"], z["match_id"], kern, muss, grund, mk,
-                                 abzug, gezeigt, teile, teile_muss, serie, max_gruppe=gruppe, victory=bool(victory)))
-    return ergebnis
+                                 abzug, gezeigt, teile, teile_muss, serie, max_gruppe=gruppe, victory=bool(victory),
+                                 gesperrt=gesperrt))
+    return ergebnis, bericht
 
 
 def plan_laenge(k: Kandidat, fmt: dict, seg_min: float) -> float:
@@ -324,26 +415,74 @@ def serie_zu_lang(k: Kandidat, fmt: dict) -> bool:
     return k.serie and k.min_laenge > fmt["serie_max_s"] + 1e-6
 
 
+COOLDOWN_AUFGEHOBEN = "Cooldown aufgehoben"
+
+
+def frei_von_cooldown(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandidat], str | None]:
+    """Kandidaten ohne die gesperrten (Cooldown) – außer die freien reichen nicht für einen Entwurf (min_s):
+    dann alle, mit Hinweis. Eine Regel für Auswahl und Nachlegen."""
+    frei = [k for k in kandidaten_ if not k.gesperrt]
+    if len(frei) == len(kandidaten_):
+        return frei, None
+    seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
+    if sum(plan_laenge(k, fmt, seg_min) for k in frei) >= fmt["min_s"]:
+        return frei, None
+    return list(kandidaten_), f"{COOLDOWN_AUFGEHOBEN} – nur {len(frei)} frische Momente"
+
+
+def frische_soll(n: int, p: dict) -> int:
+    """Wie viele von n gewählten Momenten frisch sein sollen (gezeigt 0) – 0, wenn Abwechslung aus ist."""
+    quote = float(p.get("frische_quote", 0.0)) if float(p.get("abwechslung", 0.0)) > 0 else 0.0
+    return math.ceil(quote * n - 1e-9) if quote > 0 and n > 0 else 0
+
+
 def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandidat], float, list[str]]:
-    """Beste Momente, bis die Ziel-Dauer erreicht ist. Ziel richtet sich nach dem Material."""
+    """Beste Momente, bis die Ziel-Dauer erreicht ist. Ziel richtet sich nach dem Material.
+
+    Cooldown: gesperrte Momente (frei_von_cooldown) bleiben Reserve. Frische-Quote (p["frische_quote"], nur bei
+    abwechslung > 0): mindestens dieser Anteil der gewählten Momente war in keinem Entwurf des Fensters (gezeigt 0);
+    fehlt etwas, tauscht der schwächste „alte“ gegen den stärksten frischen Moment, der die Match-Grenze einhält."""
     hinweise = []
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
     laenge = lambda k: plan_laenge(k, fmt, seg_min)  # noqa: E731
-    vorrat = sum(laenge(k) for k in kandidaten_)
+    auswahl, hinweis = frei_von_cooldown(kandidaten_, fmt, p)
+    if hinweis:
+        hinweise.append(hinweis)
+    vorrat = sum(laenge(k) for k in auswahl)
     ziel = min(fmt["max_s"], max(fmt["min_s"], 0.8 * vorrat)) * p["dauer_faktor"]
     ziel = min(fmt["max_s"], max(fmt["min_s"], ziel))
     if vorrat < fmt["min_s"]:
         hinweise.append(f"nur {vorrat:.0f} s Material – kürzer als {fmt['min_s']:.0f} s")
+    max_je_match = int(p["max_je_match"])
     gewaehlt, summe, je_match = [], 0.0, {}
-    for k in sorted(kandidaten_, key=lambda k: (-k.punkte, k.schluessel)):
+    nach_punkten = sorted(auswahl, key=lambda k: (-k.punkte, k.schluessel))
+    for k in nach_punkten:
         if summe >= ziel:
             break
-        if k.match_id and je_match.get(k.match_id, 0) >= int(p["max_je_match"]):
+        if k.match_id and je_match.get(k.match_id, 0) >= max_je_match:
             continue
         gewaehlt.append(k)
         summe += laenge(k)
         if k.match_id:
             je_match[k.match_id] = je_match.get(k.match_id, 0) + 1
+    soll = frische_soll(len(gewaehlt), p)
+    if soll > 0:
+        frische = [k for k in nach_punkten if k.gezeigt == 0 and k not in gewaehlt]
+        while sum(1 for k in gewaehlt if k.gezeigt == 0) < soll and frische:
+            alte = [k for k in gewaehlt if k.gezeigt > 0]
+            if not alte:
+                break
+            raus = min(alte, key=lambda k: (k.punkte, k.schluessel))
+            rein = next((k for k in frische if not k.match_id or k.match_id == raus.match_id
+                         or je_match.get(k.match_id, 0) < max_je_match), None)
+            if rein is None:
+                break
+            gewaehlt[gewaehlt.index(raus)] = rein
+            frische.remove(rein)
+            if raus.match_id:
+                je_match[raus.match_id] -= 1
+            if rein.match_id:
+                je_match[rein.match_id] = je_match.get(rein.match_id, 0) + 1
     return gewaehlt, ziel, hinweise
 
 
@@ -591,11 +730,15 @@ def ordner(konfig: Konfig) -> Path:
 
 
 def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, parameter: dict | None = None,
-             name: str | None = None, ziel: dict | None = None, nur_matches: set[str] | None = None) -> dict:
-    """nur_matches: nur Momente aus diesen Matches (z. B. ein Spielabend)."""
+             name: str | None = None, ziel: dict | None = None, nur_matches: set[str] | None = None,
+             hinweise_vorab: list[str] | None = None) -> dict:
+    """nur_matches: nur Momente aus diesen Matches (z. B. ein Spielabend).
+    hinweise_vorab: Hinweise des Aufrufers (z. B. Lern-Bot: Stimmung nachziehen fehlgeschlagen) – kommen vorn in
+    die Schnittliste, damit der Bot sie zeigt (er zeigt die ersten drei)."""
     if fmt_name not in FORMATE:
         raise RegieFehler(f"Unbekanntes Format {fmt_name!r}")
-    fmt = FORMATE[fmt_name]
+    fmt, hinweise = format_regeln(konfig, fmt_name)
+    hinweise = [*(hinweise_vorab or []), *hinweise]
     p = {**PARAMETER, **(parameter or {})}
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
     fx, fx_hinweise = effekte.einstellungen(konfig)
@@ -603,8 +746,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     # Gewichte einmal holen und durchreichen (Leitplanke 7); die Kill-Tabelle ist dieselbe wie im Clip-Bot
     _version, gewichte = lernen.aktuelle(con, konfig)
     kill_tabelle = [float(x) for x in konfig.wert("vorbewertung.kill_punkte")]
-    alle = [k for k in kandidaten(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle)
-            if nur_matches is None or k.match_id in nur_matches]
+    alle, bericht = kandidaten_mit_bericht(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle, konfig=konfig,
+                                           nur_matches=nur_matches)
+    if bericht["ohne_datei"]:
+        hinweise.append(f"{bericht['ohne_datei']} Momente ohne Datei übersprungen"
+                        + (f" ({bericht['ersetzt']} weitere: Bot-Clip statt Moment-Datei)" if bericht["ersetzt"] else ""))
     if not alle:
         raise RegieFehler("Keine Momente mit Stimmung" + (" in diesen Matches" if nur_matches else "")
                           + " – erst `pipeline stimmung`")
@@ -616,9 +762,12 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         if not alle:
             raise RegieFehler(f"Alle {len(zu_lang)} Momente sind Serien, die für einen Short zu lang sind "
                               f"(> {fmt['serie_max_s']:.0f} s am Stück) – Zusammenschnitt nehmen")
-    gewaehlt, ziel_s, hinweise = waehle(alle, fmt, p)
+    gewaehlt, ziel_s, wahl_hinweise = waehle(alle, fmt, p)
+    hinweise += wahl_hinweise
     if zu_lang:
         hinweise.append(f"{len(zu_lang)} Serie(n) zu lang für Short (> {fmt['serie_max_s']:.0f} s am Stück)")
+    # Nachlegen nimmt aus demselben Vorrat wie die Auswahl: ohne die Momente im Cooldown, außer der reichte nicht
+    vorrat, _ = frei_von_cooldown(alle, fmt, p)
     reihe = bogen(gewaehlt, fmt_name)
 
     # Vorherrschende Stimmung (nach Länge gewichtet) bestimmt die Musik
@@ -647,33 +796,57 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         hinweise.append("keine Musik in der Bibliothek – ohne Musik, Schnitte nicht auf dem Beat")
 
     segmente = plane_zeitleiste(reihe, raster, fmt, p, fps, fx)
-    # Beat-Raster kürzt Segmente -> bis zum Ziel nachlegen: erst mit Match-Grenze, notfalls ohne
     passt_nicht: list[Kandidat] = []  # eigene Liste: `alle` bleibt die ganze Auswahl (für Zählung und Hinweis)
-    for mit_grenze in (True, False):
-        while segmente and segmente[-1]["zeit_ende"] < ziel_s - 1e-6:
-            je_match: dict[str, int] = {}
-            for k in reihe:
-                je_match[k.match_id or ""] = je_match.get(k.match_id or "", 0) + 1
-            rest = [k for k in alle if k not in gewaehlt and k not in passt_nicht
-                    and (not mit_grenze or not k.match_id or je_match.get(k.match_id, 0) < int(p["max_je_match"]))]
-            if not rest:
-                break
-            naechster_ = max(rest, key=lambda k: (k.punkte, k.schluessel))
-            neue_reihe = bogen([*gewaehlt, naechster_], fmt_name)
-            neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
-            if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
-                passt_nicht.append(naechster_)
-                continue
-            gewaehlt.append(naechster_)
-            reihe, segmente = neue_reihe, neue_segmente
-            if not mit_grenze and (h := f"mehr als {p['max_je_match']} Momente aus einem Match") not in hinweise:
-                hinweise.append(h)
+
+    def nachlegen(reihe: list[Kandidat], segmente: list[dict]) -> tuple[list[Kandidat], list[dict]]:
+        """Beat-Raster kürzt Segmente -> bis zum Ziel nachlegen: erst mit Match-Grenze, notfalls ohne.
+        Nur Momente, die unter max_s passen; die anderen merkt sich passt_nicht."""
+        for mit_grenze in (True, False):
+            while segmente and segmente[-1]["zeit_ende"] < ziel_s - 1e-6:
+                je_match: dict[str, int] = {}
+                for k in reihe:
+                    je_match[k.match_id or ""] = je_match.get(k.match_id or "", 0) + 1
+                rest = [k for k in vorrat if k not in gewaehlt and k not in passt_nicht
+                        and (not mit_grenze or not k.match_id or je_match.get(k.match_id, 0) < int(p["max_je_match"]))]
+                if not rest:
+                    break
+                # Frische-Quote (Review 27.09.): fehlt noch ein frischer Moment, kommt er vor den punktstärkeren alten
+                frische = [k for k in rest if k.gezeigt == 0]
+                if frische and sum(1 for k in gewaehlt if k.gezeigt == 0) < frische_soll(len(gewaehlt) + 1, p):
+                    rest = frische
+                naechster_ = max(rest, key=lambda k: (k.punkte, k.schluessel))
+                neue_reihe = bogen([*gewaehlt, naechster_], fmt_name)
+                neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
+                if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
+                    passt_nicht.append(naechster_)
+                    continue
+                gewaehlt.append(naechster_)
+                reihe, segmente = neue_reihe, neue_segmente
+                if not mit_grenze and (h := f"mehr als {p['max_je_match']} Momente aus einem Match") not in hinweise:
+                    hinweise.append(h)
+        return reihe, segmente
+
+    reihe, segmente = nachlegen(reihe, segmente)
     # Zu lang (Short!)? Den Moment mit den wenigsten Punkten (inkl. Gelerntem und Abwechslung) aus der Mitte
-    # streichen und neu planen – der Höhepunkt am Schluss bleibt
+    # streichen und neu planen – der Höhepunkt am Schluss bleibt. Danach noch einmal nachlegen (27.09.): Die
+    # Auswahl nimmt den letzten Moment auch dann, wenn er über das Ziel schießt (bei Serien bis 20 s) – wurde er
+    # hier gestrichen, blieb die Lücke, und die Shorts endeten bei 30–38 s mit 2–3 Momenten statt bei 45 s.
+    gekuerzt = False
     while segmente and segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6 and len(reihe) > 1:
-        mitte = reihe[:-1]
-        reihe.remove(min(mitte, key=lambda k: (k.punkte, k.intensitaet, k.schluessel)))
+        # Frische-Quote (Review 27.09.): frische Momente sind meist die punktschwächsten – das Kürzen warf sie
+        # als Erste wieder raus. Solange die Quote sonst fiele, wird unter den alten gestrichen.
+        zur_wahl = reihe[:-1]
+        alte = [k for k in zur_wahl if k.gezeigt > 0]
+        if alte and sum(1 for k in reihe if k.gezeigt == 0) <= frische_soll(len(reihe) - 1, p):
+            zur_wahl = alte
+        raus = min(zur_wahl, key=lambda k: (k.punkte, k.intensitaet, k.schluessel))
+        reihe.remove(raus)
+        gewaehlt.remove(raus)
+        passt_nicht.append(raus)
         segmente = plane_zeitleiste(reihe, raster, fmt, p, fps, fx)
+        gekuerzt = True
+    if gekuerzt:
+        reihe, segmente = nachlegen(reihe, segmente)
     gesamt = segmente[-1]["zeit_ende"] if segmente else 0.0
     if gesamt < fmt["min_s"] - 1e-6:
         hinweise.append(f"Dauer {gesamt:.1f} s unter {fmt['min_s']:.0f} s – zu wenig Material")
@@ -710,7 +883,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         "effekte": fx_plan,
         "bogen": [s["intensitaet"] for s in momente],
         "auswahl": {"kandidaten": len(alle), "neu": neu, "schon_gezeigt": len(momente) - neu,
-                    "abwechslung": float(p.get("abwechslung", 0.0))},
+                    "abwechslung": float(p.get("abwechslung", 0.0)),
+                    # 27.09.: Bilanz, damit der Bot zeigt, was der Regisseur wirklich sah
+                    "gesperrt": bericht["gesperrt"], "ohne_datei": bericht["ohne_datei"], "ersetzt": bericht["ersetzt"],
+                    "cooldown": int(p.get("cooldown_entwuerfe", 0)) if float(p.get("abwechslung", 0.0)) > 0 else 0,
+                    "frische_quote": float(p.get("frische_quote", 0.0)) if float(p.get("abwechslung", 0.0)) > 0 else 0.0},
         "segmente": segmente,
         "hinweise": hinweise,
         "erstellt": iso(jetzt()),

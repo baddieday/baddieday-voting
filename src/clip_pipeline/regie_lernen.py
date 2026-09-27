@@ -28,7 +28,7 @@ import sqlite3
 from . import effekte
 from .konfig import Konfig
 from .musik import ZIEL
-from .regie import PARAMETER
+from .regie import FORMATE, PARAMETER, format_regeln
 
 # Neue Gründe immer hinten anhängen: gespeicherte Bewertungen nennen die Schlüssel
 GRUENDE = {
@@ -40,6 +40,7 @@ GRUENDE = {
     "langweilig": "🥱 Clips langweilig",
     "effekte_viel": "🎆 zu viele Effekte",
     "action": "💥 mehr Action",
+    "kurz": "⏱️ zu kurz",       # 27.09.: Gegenstück zu „zu lang“ – vorher konnte dauer_faktor nur fallen
 }
 
 
@@ -71,6 +72,7 @@ VORGABE_GRENZEN = {
     "dauer_faktor": (0.6, 1.0), "uebergang_faktor": (0.5, 2.0), "musik_pegel": (0.0, 1.0),
     "max_je_match": (1, 10), "beats_pro_schnitt": (1, 4), "abwechslung": (0.0, 1.0),
     "effekt_hektik": (0.3, 1.3),
+    "cooldown_entwuerfe": (0, 12), "frische_quote": (0.0, 1.0),   # 27.09.: Abwechslung, siehe regie.PARAMETER
 }
 EFFEKT_STAERKE_GRENZEN = (0.0, 1.5)    # Vorgabe je Stimmung; 0 = diese Stimmung ohne Effekte
 EFFEKT_STAERKE_GELERNT = (0.1, 1.5)    # durch Bewertungen
@@ -147,8 +149,11 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig) -> tuple[dict, dict]:
             unten, oben = EFFEKT_STAERKE_GELERNT
             if alt > 0:  # eine Vorgabe 0 (diese Stimmung ohne Effekte) bleibt 0; eine unter 0,1 steigt nicht durch 🎆
                 p["effekt_staerke"][haupt] = _grenze(alt * (0.85 if weniger else 1.15), min(unten, alt), oben)
-        if "lang" in gruende:
-            p["dauer_faktor"] = _grenze(p["dauer_faktor"] * 0.9, 0.6, 1.0)
+        # „zu lang“ ×0,9 / „zu kurz“ ÷0,9 (27.09.: vorher gab es kein Gegenstück – der Faktor konnte nur fallen und
+        # blieb für immer unten, auch eine Vorgabe in lokal.toml ist nur der Startwert); beide zugleich: nichts
+        kuerzer, laenger = "lang" in gruende, "kurz" in gruende
+        if kuerzer != laenger:
+            p["dauer_faktor"] = _grenze(p["dauer_faktor"] * (0.9 if kuerzer else 1 / 0.9), 0.6, 1.0)
         if "abgeschnitten" in gruende:
             p["puffer_vor_s"] = _grenze(p["puffer_vor_s"] + 0.5, 1.0, 6.0)
             p["puffer_nach_s"] = _grenze(p["puffer_nach_s"] + 0.3, 0.5, 4.0)
@@ -220,6 +225,25 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     teile.append(f"Abwechslung: Momente aus dem letzten Entwurf verlieren {p['abwechslung']:.0%} ihrer Punkte, "
                  "je älterem Entwurf die Hälfte" + ("" if start["abwechslung"] == PARAMETER["abwechslung"]
                                                      else " (deine Vorgabe)"))
+    if p["abwechslung"] > 0:
+        teile.append(f"Cooldown: Momente aus den letzten {int(p['cooldown_entwuerfe'])} Entwürfen sind gesperrt · "
+                     f"Frische-Quote: mind. {p['frische_quote']:.0%} der Momente eines Entwurfs waren noch in keinem"
+                     + ("" if (start["cooldown_entwuerfe"], start["frische_quote"])
+                        == (PARAMETER["cooldown_entwuerfe"], PARAMETER["frische_quote"]) else " (deine Vorgabe)"))
+    else:
+        teile.append("Abwechslung aus (0): immer die besten Momente, kein Cooldown, keine Frische-Quote")
+    if p["dauer_faktor"] < 1.0:
+        gruende_je = [set(json.loads(z["gruende"] or "[]")) for z in zeilen]
+        lang = sum(1 for g in gruende_je if "lang" in g and "kurz" not in g)   # nur die, die gewirkt haben
+        kurz = sum(1 for g in gruende_je if "kurz" in g and "lang" not in g)
+        teile.append(f"Ziel-Dauer bei {p['dauer_faktor']:.0%} ({lang}× „⏳ zu lang“, {kurz}× „⏱️ zu kurz“) – "
+                     "„⏱️ zu kurz“ hebt sie wieder an")
+    for fmt_name in ("short", "zusammenschnitt"):
+        fmt, fmt_hinweise = format_regeln(konfig, fmt_name)
+        standard = fmt == FORMATE[fmt_name]
+        teile.append(f"{fmt_name}: {fmt['min_s']:.0f}–{fmt['max_s']:.0f} s, Segment bis {fmt['seg_max_s']:.0f} s, "
+                     f"Serie bis {fmt['serie_max_s']:.0f} s" + ("" if standard else " (deine Vorgabe [regie.formate])"))
+        teile += [f"⚠️ {h}" for h in fmt_hinweise]
     geaendert = [s for s in ziel if ziel[s] != ZIEL[s]]  # durch Vorgabe oder "Stimmung getroffen"
     for s in geaendert:
         teile.append(f"Musik für {s}: Energie-Rang {ziel[s]['energie']}, {ziel[s]['bpm']} BPM")

@@ -99,7 +99,12 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
              f"Stimmung <b>{liste['stimmung']}</b> · {momente} Momente",
              f"Bogen {_balken(liste['bogen'])}"]
     if a := liste.get("auswahl"):
-        teile.append(f"🆕 {a['neu']} neue · {a['schon_gezeigt']} schon gezeigt · Auswahl aus {a['kandidaten']} Momenten")
+        zeile = f"🆕 {a['neu']} neue · {a['schon_gezeigt']} schon gezeigt · Auswahl aus {a['kandidaten']} Momenten"
+        if a.get("gesperrt"):
+            zeile += f" · {a['gesperrt']} im Cooldown"
+        if a.get("ohne_datei"):
+            zeile += f" · {a['ohne_datei']} ohne Datei"
+        teile.append(zeile)
     if m:
         teile.append(f"🎵 {escape(m['titel'])} – {escape(m.get('kuenstler') or '?')} ({m.get('bpm') or 0:.0f} BPM)")
     if (fx := liste.get("effekte") or {}).get("an"):  # Regisseur 2.0: Impacts = Ereignisse im Effekt-Plan
@@ -154,20 +159,26 @@ def speicher_da(konfig: Konfig) -> bool:
         return False
 
 
-def stimmung_nachziehen(con: sqlite3.Connection, konfig: Konfig) -> int:
+def stimmung_nachziehen(con: sqlite3.Connection, konfig: Konfig) -> dict:
     """Vor jedem Entwurf die nächsten n Clips ohne Stimmung analysieren (die besten zuerst) – so wächst die
-    Auswahl mit jeder Runde, ohne pve-big dafür extra wach zu halten. Ohne Claude (der zählt gegen dein Abo)."""
+    Auswahl mit jeder Runde, ohne pve-big dafür extra wach zu halten. Ohne Claude (der zählt gegen dein Abo).
+    Rückgabe {"analysiert": n, "hinweise": [...]}: Fehler und Clips ohne Datei kommen als Hinweis in den Entwurf
+    (27.09. – vorher nur im Log, der Bot zeigte nichts)."""
     n = int(konfig.wert("lernbot.stimmung_je_entwurf", 10))
     if n <= 0:
-        return 0
+        return {"analysiert": 0, "hinweise": []}
     try:
         e = stimmung.analysiere(con, konfig, claude=False, maximal=n)
-    except Exception:  # der Entwurf ist wichtiger – mit den vorhandenen Momenten weitermachen
+    except Exception as fehler:  # der Entwurf ist wichtiger – mit den vorhandenen Momenten weitermachen
         log.exception("Stimmung nachziehen fehlgeschlagen")
-        return 0
-    if e["analysiert"]:
-        log.info("Stimmung für %s weitere Clips: %s", e["analysiert"], e["stimmungen"])
-    return int(e["analysiert"])
+        return {"analysiert": 0,
+                "hinweise": [f"Stimmung nachziehen fehlgeschlagen: {type(fehler).__name__}: {str(fehler)[:80]}"]}
+    hinweise = []
+    if e.get("fehlende_dateien"):
+        hinweise.append(f"{e['fehlende_dateien']} Clips ohne Datei im Puffer – keine Stimmung möglich")
+    if e.get("analysiert"):
+        log.info("Stimmung für %s weitere Clips: %s", e["analysiert"], e.get("stimmungen"))
+    return {"analysiert": int(e.get("analysiert", 0)), "hinweise": hinweise}
 
 
 def baue_entwurf(konfig: Konfig, fmt: str) -> int:
@@ -181,9 +192,9 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
         # Rendern ist ein rechenintensiver Schritt: gleiche Sperre wie die Pipeline (nur einer gleichzeitig)
         with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
                 big.herzschlag(konfig, "lernbot"):
-            stimmung_nachziehen(con, konfig)
+            nachgezogen = stimmung_nachziehen(con, konfig)
             parameter, ziel = regie_lernen.aktuelle(con, konfig)
-            e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel)
+            e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel, hinweise_vorab=nachgezogen["hinweise"])
             entwurf.entwurf(con, konfig, e["entwurf"])
         return int(e["entwurf"])
     finally:

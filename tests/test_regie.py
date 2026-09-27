@@ -2,8 +2,11 @@
 
 import json
 import unittest
+import unittest.mock
+from pathlib import Path
 
 from clip_pipeline import regie, regie_lernen
+from clip_pipeline.konfig import Konfig
 
 from tests.hilfen import HAT_FFMPEG
 from tests.regie_hilfen import MOMENTE, MitRegieMaterial
@@ -196,22 +199,73 @@ class Abwechslung(MitRegieMaterial):
         return {s["moment"] for s in liste["segmente"]}
 
     def test_neue_momente_und_die_besten_kommen_wieder(self):
+        """Abwechslung seit 27.09.: Cooldown 3 Entwürfe (Momente aus den letzten drei sind gesperrt), danach kommen
+        die stärksten wieder; mindestens die Hälfte eines Entwurfs war noch in keinem (Frische-Quote)."""
         self.momente_anlegen(MOMENTE * 2)  # 32 Momente, ein Short braucht ~5
         self.musik_anlegen(150, "episch")
-        listen = [self.compose() for _ in range(4)]
+        listen = [self.compose() for _ in range(6)]
         for liste in listen:
             self.assertEqual(regie.pruefe_liste(liste), [])
-        eins, zwei, drei = (self.momente(listen[i]) for i in range(3))
+        eins, zwei, drei, vier, fuenf = (self.momente(listen[i]) for i in range(5))
         self.assertEqual(eins & zwei, set())                   # direkt danach: alles neu
         self.assertEqual(listen[0]["auswahl"]["neu"], len(eins))
         self.assertEqual(listen[1]["auswahl"]["schon_gezeigt"], len(eins & zwei))
-        self.assertTrue(eins & drei)                           # die stärksten kommen wieder, nur nicht jedes Mal
-        gezeigt = {s["moment"]: s["gezeigt"] for s in listen[2]["segmente"]}
-        self.assertTrue(all(gezeigt[m] >= 1 for m in eins & drei))
-        # Ohne Abwechslung (Vorgabe 0): immer dieselben – so war es vorher
+        self.assertEqual((eins & drei, eins & vier), (set(), set()))   # Cooldown: drei Entwürfe lang gesperrt
+        self.assertGreater(listen[1]["auswahl"]["gesperrt"], 0)
+        self.assertEqual(listen[1]["auswahl"]["cooldown"], 3)
+        self.assertTrue(eins & fuenf)                          # die stärksten kommen wieder, nur nicht jedes Mal
+        gezeigt = {s["moment"]: s["gezeigt"] for s in listen[4]["segmente"]}
+        self.assertTrue(all(gezeigt[m] >= 1 for m in eins & fuenf))
+        # Frische-Quote: mindestens die Hälfte neu – solange es noch frische Momente gibt (32 Momente, ~6 je Short:
+        # ab dem 4./5. Entwurf ist jeder schon einmal gezeigt, dann ist die Quote nicht mehr erfüllbar)
+        for liste in listen[1:3]:
+            self.assertGreaterEqual(liste["auswahl"]["neu"] * 2, liste["auswahl"]["neu"] + liste["auswahl"]["schon_gezeigt"])
+        self.assertEqual(listen[1]["auswahl"]["frische_quote"], 0.5)
+        # Ohne Abwechslung (Vorgabe 0): immer dieselben – so war es vorher; Cooldown und Quote sind dann auch aus
         self.konfig.daten["regie"]["vorgaben"] = {"abwechslung": 0}
         self.assertEqual(self.momente(self.compose()), self.momente(self.compose()))
-        self.assertIn("deine Vorgabe", regie_lernen.lernstand_text(self.con, self.konfig))
+        text = regie_lernen.lernstand_text(self.con, self.konfig)
+        self.assertIn("deine Vorgabe", text)
+        self.assertIn("Abwechslung aus (0)", text)
+
+    def test_frische_ueberleben_kuerzen_und_nachlegen(self):
+        """Review 27.09.: waehle hielt die Frische-Quote, aber Kürzen (min Punkte) und Nachlegen (max Punkte) warfen
+        die frischen – meist punktschwächsten – Momente danach wieder raus (Entwurf 7: 0 frische trotz Vorrat)."""
+        self.momente_anlegen(MOMENTE * 2)
+        self.musik_anlegen(150, "episch")
+        frisch_gewaehlt = []
+        original = regie.waehle
+
+        def waehle(ks, fmt, p):
+            gewaehlt, ziel, hinweise = original(ks, fmt, p)
+            frisch_gewaehlt.append(sum(1 for k in gewaehlt if k.gezeigt == 0))
+            return gewaehlt, ziel, hinweise
+
+        with unittest.mock.patch.object(regie, "waehle", waehle):
+            listen = [self.compose() for _ in range(6)]
+        for liste, frisch in zip(listen, frisch_gewaehlt):
+            n = liste["auswahl"]["neu"] + liste["auswahl"]["schon_gezeigt"]
+            soll = regie.frische_soll(n, liste["parameter"])
+            self.assertGreaterEqual(liste["auswahl"]["neu"], min(frisch, soll), (liste["name"], frisch, soll))
+        alle = {z[0] for z in self.con.execute("SELECT schluessel FROM momente")}
+        self.assertEqual(set.union(*(self.momente(liste) for liste in listen)), alle)  # vorher fehlte nach 6 einer
+
+    def test_nach_dem_kuerzen_wird_nachgelegt(self):
+        """27.09.: Serien (bis 20 s) lassen die Auswahl über 45 s schießen; das Kürzen streicht dann einen ganzen
+        Moment – vorher blieb die Lücke (Shorts 30–38 s mit 2–3 Momenten). Jetzt füllen kleinere Momente nach."""
+        self.momente_anlegen(MOMENTE * 2)
+        self.musik_anlegen(150, "episch")
+        # Multikills mit Aktions-Zeiten = Serien ab dem ersten Umhauen (10–14 s am Stück statt 12 s Deckel)
+        for z in self.con.execute("SELECT id, merkmale FROM momente").fetchall():
+            mk = json.loads(z["merkmale"])
+            if len(mk["kill_sekunden"]) >= 2:
+                mk["aktion_sekunden"] = [round(k - 4.0, 1) for k in mk["kill_sekunden"]]
+                self.con.execute("UPDATE momente SET merkmale = ? WHERE id = ?", (json.dumps(mk), z["id"]))
+        for _ in range(3):
+            liste = self.compose()
+            self.assertEqual(regie.pruefe_liste(liste), [])
+            self.assertGreaterEqual(liste["dauer_s"], 42.0, liste["dauer_s"])   # vorher ~37 s
+            self.assertLessEqual(liste["dauer_s"], 45.0 + 1e-6)
 
     def test_auswahl_zaehlt_alle_momente(self):
         # Passt beim Auffüllen kein Moment mehr hinein, bleibt die Auswahl trotzdem vollständig
@@ -245,6 +299,110 @@ class Abwechslung(MitRegieMaterial):
         self.assertIn("weniger gern gesehen", regie_lernen.lernstand_text(self.con, self.konfig))
         danach = self.momente(lies(regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel)))
         self.assertNotEqual(danach, m)                                        # andere Clips, obwohl ohne Abwechslung
+
+
+class Auswahl(unittest.TestCase):
+    """waehle(): Cooldown und Frische-Quote (27.09.) – ohne Datenbank und ffmpeg."""
+
+    @staticmethod
+    def k(name, punkte, *, gezeigt=0, gesperrt=False, match="m1", kern=(4.0, 12.0)):
+        return regie.Kandidat(name, f"/x/{name}.mp4", 20.0, "episch", punkte, punkte, None, match, kern,
+                              (kern[0] + 1.0, kern[1] - 0.5), "Test", gezeigt=gezeigt, gesperrt=gesperrt)
+
+    def test_cooldown_sperrt_und_quote_mischt(self):
+        fmt, p = regie.FORMATE["short"], dict(regie.PARAMETER)
+        stark = [self.k(f"alt{i}", 10.0, gezeigt=2, match=f"a{i}") for i in range(6)]   # schon gezeigt, nicht gesperrt
+        frisch = [self.k(f"neu{i}", 2.0, match=f"n{i}") for i in range(6)]               # in keinem Entwurf
+        gewaehlt, _, hinweise = regie.waehle(stark + frisch, fmt, p)
+        # Gierig kämen nur die starken (6 × 8 s ≥ 45 s) – die Quote tauscht die Hälfte gegen frische
+        self.assertGreaterEqual(sum(1 for k in gewaehlt if k.gezeigt == 0) * 2, len(gewaehlt))
+        self.assertTrue(any(k.punkte == 10.0 for k in gewaehlt))                         # die stärksten bleiben dabei
+        self.assertEqual(hinweise, [])
+        # Cooldown: gesperrte Momente bleiben Reserve, solange die freien reichen
+        gesperrt = [self.k(f"cd{i}", 20.0, gezeigt=1, gesperrt=True, match=f"c{i}") for i in range(6)]
+        gewaehlt, _, hinweise = regie.waehle(gesperrt + stark + frisch, fmt, p)
+        self.assertFalse(any(k.gesperrt for k in gewaehlt))
+        self.assertEqual(hinweise, [])
+        # … außer das freie Material reicht nicht für einen Entwurf: dann mit Hinweis freigegeben
+        gewaehlt, _, hinweise = regie.waehle(gesperrt + frisch[:2], fmt, p)
+        self.assertTrue(any(k.gesperrt for k in gewaehlt))
+        self.assertTrue(hinweise and hinweise[0].startswith(regie.COOLDOWN_AUFGEHOBEN), hinweise)
+
+    def test_abwechslung_null_schaltet_alles_aus(self):
+        fmt, p = regie.FORMATE["short"], {**regie.PARAMETER, "abwechslung": 0.0}
+        stark = [self.k(f"alt{i}", 10.0, gezeigt=2, match=f"a{i}") for i in range(6)]
+        frisch = [self.k(f"neu{i}", 2.0, match=f"n{i}") for i in range(6)]
+        gewaehlt, _, _ = regie.waehle(stark + frisch, fmt, p)
+        self.assertTrue(all(k.punkte == 10.0 for k in gewaehlt))                        # keine Quote: nur die besten
+
+
+class FormatRegeln(unittest.TestCase):
+    """[regie.formate.<format>] (27.09.): Dauern je Format aus der Konfig statt fest im Code."""
+
+    @staticmethod
+    def konfig(formate):
+        return Konfig(daten={"regie": {"formate": formate}}, quelle=Path("test"))
+
+    def test_vorgabe_und_unsinn(self):
+        fmt, hinweise = regie.format_regeln(self.konfig({"short": {"max_s": 60, "serie_max_s": 30}}), "short")
+        self.assertEqual((fmt["max_s"], fmt["serie_max_s"], fmt["min_s"], hinweise), (60.0, 30.0, 30.0, []))
+        fmt, hinweise = regie.format_regeln(self.konfig({"short": {"max_s": 20, "quatsch": 1}}), "short")
+        self.assertEqual(fmt, regie.FORMATE["short"])                                 # min 30 > max 20: Standard
+        self.assertEqual(len(hinweise), 2)
+        self.assertEqual(regie.format_regeln(None, "zusammenschnitt"), (regie.FORMATE["zusammenschnitt"], []))
+
+
+class KandidatenDateien(MitRegieMaterial):
+    """27.09.: Fehlt die Moment-Datei, springt der Bot-Clip ein (gleicher Inhalt) und alles wird gezählt – vorher
+    fiel der Moment still weg. Nicht nach einem Nachschnitt (andere Zeitbasis)."""
+
+    def zeile(self, schluessel, clip_id, datei, merkmale):
+        self.con.execute(
+            """INSERT INTO momente (schluessel, clip_id, match_id, datei, start_s, ende_s, kills, stimmung, sicherheit,
+                                    quelle, merkmale, erstellt, geaendert)
+               VALUES (?, ?, 'm1', ?, 0, 20, 1, 'episch', 0.8, 'regel', ?, 'x', 'x')""",
+            (schluessel, clip_id, datei, json.dumps(merkmale)))
+
+    def test_rueckfall_auf_den_bot_clip_und_zaehlung(self):
+        clip = self.clip_anlegen(status="freigegeben")
+        clip_datei = self.konfig.wurzel / "sessions" / "m1" / "clips" / "001.mp4"
+        clip_datei.parent.mkdir(parents=True, exist_ok=True)
+        clip_datei.write_bytes(b"x")
+        self.con.execute("UPDATE clips SET clip_pfad = 'sessions/m1/clips/001.mp4' WHERE id = ?", (clip,))
+        mk = {"kills": 1, "max_gruppe": 1, "kill_sekunden": [8.0], "spitzen": 1, "jubel_laut": 0}
+        self.zeile(f"clip:{clip}", clip, str(self.tmp / "material-alt" / "001.mp4"), mk)     # Kopie weg → Bot-Clip
+        self.zeile("datei:99", None, str(self.tmp / "weg.mp4"), mk)                             # kein Clip → weg
+        self.zeile("clip:98", clip, str(self.tmp / "nachschnitt-weg.mp4"), {**mk, "nachschnitt": {"version": 1}})
+        gewichte, tabelle = {"kill_punkte": 1.0}, [0, 1, 3, 6, 10]
+        ks, bericht = regie.kandidaten_mit_bericht(self.con, dict(regie.PARAMETER), [], gewichte=gewichte,
+                                                   kill_tabelle=tabelle, konfig=self.konfig)
+        self.assertEqual([k.schluessel for k in ks], [f"clip:{clip}"])
+        self.assertEqual(ks[0].datei, str(clip_datei))
+        self.assertEqual(bericht, {"ohne_datei": 2, "ersetzt": 1, "gesperrt": 0})
+        # Ohne konfig (alte Aufrufer, Tests): wie bisher nur überspringen
+        self.assertEqual(regie.kandidaten(self.con, dict(regie.PARAMETER), gewichte=gewichte, kill_tabelle=tabelle), [])
+
+    def test_bilanz_nur_fuer_die_matches(self):
+        # Spielabend (nur_matches): die Bilanz zählt fremde Matches nicht mit – vorher stand „30 im Cooldown“ im Short
+        # eines Abends, zu dem keiner davon gehörte
+        mk = {"kills": 1, "max_gruppe": 1, "kill_sekunden": [8.0], "spitzen": 1, "jubel_laut": 0}
+        for schluessel, match in (("datei:1", "m1"), ("datei:2", "m2"), ("datei:3", "m2")):
+            datei = self.tmp / f"{schluessel.replace(':', '-')}.mp4"
+            datei.write_bytes(b"x")
+            self.con.execute(
+                """INSERT INTO momente (schluessel, clip_id, match_id, datei, start_s, ende_s, kills, stimmung,
+                                        sicherheit, quelle, merkmale, erstellt, geaendert)
+                   VALUES (?, NULL, ?, ?, 0, 20, 1, 'episch', 0.8, 'regel', ?, 'x', 'x')""",
+                (schluessel, match, str(datei), json.dumps(mk)))
+        frueher = [["datei:1", "datei:2", "datei:3"]]  # alle drei im letzten Entwurf -> alle im Cooldown
+        p = {**regie.PARAMETER, "abwechslung": 0.7, "cooldown_entwuerfe": 3}
+        ks, bericht = regie.kandidaten_mit_bericht(self.con, p, frueher, gewichte={"kill_punkte": 1.0},
+                                                   kill_tabelle=[0, 1, 3, 6, 10], nur_matches={"m1"})
+        self.assertEqual([k.schluessel for k in ks], ["datei:1"])
+        self.assertEqual(bericht["gesperrt"], 1)
+        _, alles = regie.kandidaten_mit_bericht(self.con, p, frueher, gewichte={"kill_punkte": 1.0},
+                                                kill_tabelle=[0, 1, 3, 6, 10])
+        self.assertEqual(alles["gesperrt"], 3)
 
 
 class EffekteLernen(MitRegieMaterial):
@@ -284,7 +442,21 @@ class EffekteLernen(MitRegieMaterial):
         self.assertEqual(list(regie_lernen.GRUENDE)[:6],
                          ["musik", "hektisch", "getroffen", "lang", "abgeschnitten", "langweilig"])
         self.assertEqual(list(regie_lernen.GRUENDE.items())[6:],
-                         [("effekte_viel", "🎆 zu viele Effekte"), ("action", "💥 mehr Action")])
+                         [("effekte_viel", "🎆 zu viele Effekte"), ("action", "💥 mehr Action"), ("kurz", "⏱️ zu kurz")])
+
+    def test_zu_kurz_hebt_zu_lang_wieder_auf(self):
+        """27.09.: „⏳ zu lang“ ×0,9 hatte kein Gegenstück – der Faktor konnte nur fallen. „⏱️ zu kurz“ ÷0,9,
+        Deckel bleibt 1,0; beide Gründe zugleich heben sich auf."""
+        self.entwurf("episch", ["lang"])
+        self.assertEqual(self.p()["dauer_faktor"], 0.9)
+        self.entwurf("episch", ["kurz"])
+        self.assertEqual(self.p()["dauer_faktor"], 1.0)
+        self.entwurf("episch", ["kurz"])                                  # nie über 1,0 (max_s regelt die Länge)
+        self.assertEqual(self.p()["dauer_faktor"], 1.0)
+        self.entwurf("episch", ["lang", "kurz"])
+        self.assertEqual(self.p()["dauer_faktor"], 1.0)
+        self.entwurf("episch", ["lang"])
+        self.assertIn("Ziel-Dauer bei 90% (2× „⏳ zu lang“, 2× „⏱️ zu kurz“)", regie_lernen.lernstand_text(self.con, self.konfig))
         self.assertEqual((regie.PARAMETER["effekt_staerke"], regie.PARAMETER["effekt_hektik"]), ({}, 1.0))
 
     def test_vorgaben_mit_grenzen(self):
@@ -355,7 +527,7 @@ class EffekteLernen(MitRegieMaterial):
                "stimmung_bonus": {"chill": 0.25, "episch": -0.25, "lustig": 0.5, "spannend": -0.25},
                "track_malus": {"2": 1.0}, "uebergang_faktor": 1.21}
         self.assertEqual({k: v for k, v in p.items() if k in alt}, alt)
-        self.assertEqual(set(p) - set(alt), {"effekt_staerke", "effekt_hektik"})
+        self.assertEqual(set(p) - set(alt), {"effekt_staerke", "effekt_hektik", "cooldown_entwuerfe", "frische_quote"})
         self.assertEqual((p["effekt_staerke"], p["effekt_hektik"]), ({}, 0.81))   # zweimal „zu hektisch“
         self.assertEqual(ziel["lustig"], {"energie": 0.64, "bpm": 117.6})
 
