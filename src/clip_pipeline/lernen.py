@@ -93,6 +93,8 @@ class Ergebnis:
     # Mit Standardwerten, damit Aufrufer, die nur die Felder oben kennen, unverändert laufen. trefferquote oben =
     # deine Quote (Battles + Freigaben), die folgenden gehören zum Publikum.
     trefferquote_publikum: float | None = None          # ab dem 1. Publikums-Paar; None nur bei 0 Paaren
+    mindestens: int = 0         # [lernen].mindestens / voll_vertrauen – für die Fortschrittszeile (B3, 27.09.)
+    voll_vertrauen: int = 0
     trefferquote_publikum_start: float | None = None
     # Ehrliche Out-of-Sample-Quote (B2/L-A): auf den jüngsten HOLDOUT_ANTEIL trainiert diese Rechnung NICHT –
     # None unter 10 Paaren (zu wenig, um noch sinnvoll zu trainieren UND zu prüfen). Ändert nichts an werte/aktiv/
@@ -443,7 +445,9 @@ def berechne(con: sqlite3.Connection, konfig) -> Ergebnis:
         return Ergebnis(werte, start, n, n_freigaben, n_battles, round(vertrauen, 3), tq, tq_start, aktiv, grund,
                         trefferquote_publikum=tqp, trefferquote_publikum_start=tqp_start, paare_je_quelle=je_quelle,
                         ohne_mic=ohne_mic, auseinander=auseinander_satz(nutzer, pub, mindest_publikum),
-                        mindest_publikum_paare=mindest_publikum, trefferquote_holdout=tq_holdout)
+                        mindest_publikum_paare=mindest_publikum, trefferquote_holdout=tq_holdout,
+                        mindestens=int(einstellungen["mindestens"]),
+                        voll_vertrauen=int(einstellungen["voll_vertrauen"]))
 
     if n < int(einstellungen["mindestens"]):
         return ergebnis(dict(start), False, f"noch {int(einstellungen['mindestens']) - n} Bewertungen bis zum Lernen",
@@ -462,6 +466,21 @@ def berechne(con: sqlite3.Connection, konfig) -> Ergebnis:
     return ergebnis(werte, True, "aktiv", tq, tqp)
 
 
+def fortschritt_zeile(e: Ergebnis) -> str | None:
+    """„Fortschritt: ▓▓░░░░░░░░ 14/60 bis volles Vertrauen (23 %) – lernt seit 10“ (B3, 27.09.). Vor dem Lernen:
+    „… 6/10 bis zum Lernen“. None, wenn das Ergebnis die Grenzen nicht kennt (alte Aufrufer)."""
+    if not e.voll_vertrauen:
+        return None
+    n, ab, voll = e.datenbasis, e.mindestens, e.voll_vertrauen
+    voll_teile = min(10, round(10 * n / voll))
+    balken = "▓" * voll_teile + "░" * (10 - voll_teile)
+    if n < ab:
+        return f"Fortschritt: {balken} {n}/{ab} bis zum Lernen, {voll} für volles Vertrauen"
+    if n < voll:
+        return f"Fortschritt: {balken} {n}/{voll} bis volles Vertrauen ({round(e.vertrauen * 100)} %) – lernt seit {ab}"
+    return f"Fortschritt: {balken} volles Vertrauen ({n} Bewertungen)"
+
+
 def anzeige_zeilen(e: Ergebnis) -> list[str]:
     """Die Zeilen unter der Gewichts-Tabelle – eine Stelle für /gewichte im Bot und `pipeline gewichte` (Klartext,
     der Bot maskiert HTML selbst). Beispiel (12 Publikums-Paare):
@@ -475,7 +494,7 @@ def anzeige_zeilen(e: Ergebnis) -> list[str]:
     def prozent(x: float | None) -> int:
         return round((x or 0.0) * 100)
 
-    zeilen = []
+    zeilen = [z for z in (fortschritt_zeile(e),) if z]
     if e.trefferquote is not None:
         zeilen.append(f"Sortier-Quote du: {prozent(e.trefferquote)} % (Start {prozent(e.trefferquote_start)} %)")
     else:

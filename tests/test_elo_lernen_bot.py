@@ -36,7 +36,7 @@ class Lernen(MitSpeicher):
                               merkmale=m(3.0, 0.9 if laut else 0.1), match_id=f"m{tag}")
 
     def test_unter_mindestmenge_bleiben_startgewichte(self):
-        self._abend(1, 10)
+        self._abend(1, int(self.konfig.wert("lernen.mindestens")) - 1)  # eine unter der Schwelle (B3: 10 statt 20)
         e = lernen.berechne(self.con, self.konfig)
         self.assertFalse(e.aktiv)
         self.assertEqual(e.werte, e.start)

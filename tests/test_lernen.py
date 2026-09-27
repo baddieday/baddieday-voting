@@ -561,6 +561,14 @@ class GewichteAnzeige(MitPosts):
         self.assertIn("Du magst Lautstärke, das Publikum Kill-Punkte.", text)
         self.assertIn("10 Posts", text)                           # Datenbasis 52 = 40 + 2 + 10 Posts
 
+    def test_fortschritt_zeile(self):
+        # B3 (27.09.): vor dem Lernen „n/10 bis zum Lernen“, danach der Weg zum vollen Vertrauen
+        vorher = self.ergebnis(datenbasis=6, vertrauen=0.1, mindestens=10, voll_vertrauen=60)
+        self.assertIn("Fortschritt: ▓░░░░░░░░░ 6/10 bis zum Lernen, 60 für volles Vertrauen", texte.gewichte_text(vorher, 0))
+        danach = self.ergebnis(datenbasis=30, vertrauen=0.5, mindestens=10, voll_vertrauen=60)
+        self.assertIn("▓▓▓▓▓░░░░░ 30/60 bis volles Vertrauen (50 %) – lernt seit 10", texte.gewichte_text(danach, 1))
+        self.assertIsNone(lernen.fortschritt_zeile(self.ergebnis()))     # alte Aufrufer ohne Grenzen: keine Zeile
+
     def test_bot_text_unter_zehn_publikums_paaren(self):
         e = self.ergebnis(paare_je_quelle={"battle": 0, "freigabe": 4, "publikum": 9}, auseinander=None)
         text = texte.gewichte_text(e, 1)
