@@ -392,7 +392,7 @@ def _cmd_musik(args, konfig, con) -> int:
 def _cmd_compose(args, konfig, con) -> int:
     from . import regie, regie_lernen
 
-    parameter, ziel = regie_lernen.aktuelle(con, konfig)
+    parameter, ziel = regie_lernen.aktuelle(con, konfig, args.format)
     try:
         ergebnis = regie.erstelle(con, konfig, args.format, parameter=parameter, ziel=ziel, name=args.name)
     except regie.RegieFehler as e:
@@ -437,7 +437,7 @@ def _cmd_entwurf_neu(args, konfig, con) -> int:
     """compose + render-entwurf in einem Schritt (z. B. für einen Timer); der Lern-Bot schickt ihn dann."""
     from . import entwurf, regie, regie_lernen
 
-    parameter, ziel = regie_lernen.aktuelle(con, konfig)
+    parameter, ziel = regie_lernen.aktuelle(con, konfig, args.format)
     try:
         e = regie.erstelle(con, konfig, args.format, parameter=parameter, ziel=ziel)
     except regie.RegieFehler as fehler:
@@ -496,8 +496,9 @@ def _cmd_lernstand(args, konfig, con) -> int:
     # kommt dahinter – nur, wenn es schon geurteilte Erwartungen gibt
     if zusatz := erwartung.trefferquote_text(con, konfig):
         print(zusatz, file=sys.stderr)
-    parameter, ziel = regie_lernen.aktuelle(con, konfig)
-    _json({"parameter": parameter, "musik_ziele": ziel})
+    parameter, ziel = regie_lernen.aktuelle(con, konfig, "short")
+    _json({"parameter": parameter, "musik_ziele": ziel,  # Schnitt-Werte je Format (27.09.)
+           "parameter_zusammenschnitt": regie_lernen.aktuelle(con, konfig, "zusammenschnitt")[0]})
     return 0
 
 

@@ -55,6 +55,9 @@
       }
     },
     "hinweise": {"type": "array", "items": {"type": "string"}},
+    "gelernt": {"type": "object", "additionalProperties": false, "required": ["entwurf", "aenderungen"],
+                "properties": {"entwurf": {"type": "integer", "minimum": 1}, "format": {"type": ["string", "null"]},
+                               "aenderungen": {"type": "array", "items": {"type": "string"}}}},
     "erstellt": {"type": "string"},
     "segmente": {
       "type": "array",
@@ -79,6 +82,7 @@
           "punkte": {"type": "number"},
           "abzug": {"type": "number", "minimum": 0},
           "gezeigt": {"type": "integer", "minimum": 0},
+          "bewertet": {"type": "integer", "minimum": 0},
           "quelle_start_s": {"type": "number", "minimum": 0},
           "quelle_ende_s": {"type": "number", "minimum": 0},
           "quelle_dauer_s": {"type": "number", "minimum": 0},

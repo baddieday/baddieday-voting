@@ -21,6 +21,10 @@ except ImportError:
     lernbot = None
 
 
+async def _merke(liste, text):
+    liste.append(text)
+
+
 class FakeBot:
     def __init__(self):
         self.videos, self.texte = [], []
@@ -70,6 +74,32 @@ class LernBot(MitRegieMaterial):
         befehle = {c for h in app.handlers[0] for c in getattr(h, "commands", ())}
         self.assertTrue({"entwurf", "musik", "lernstand", "stand", "hilfe"} <= befehle)
         self.assertGreater(app.concurrent_updates, 0)   # 27.09.: Klicks warten nicht aufeinander
+        app.bot_data["con"].close()
+
+    def test_bildunterschrift_zaehler_und_gelernt(self):
+        zeile = {"id": 7}
+        liste = {"format": "short", "dauer_s": 44, "stimmung": "episch", "bogen": [1, 2, 3],
+                 "segmente": [{"moment": "a", "bewertet": 0}, {"moment": "b", "bewertet": 2},
+                              {"moment": "b", "teil": 2, "bewertet": 2}, {"moment": "c", "bewertet": 1}],
+                 "gelernt": {"entwurf": 6, "format": "zusammenschnitt", "aenderungen": ["3 Momente seltener"]}}
+        text = lernbot.entwurf_text(zeile, liste)
+        self.assertIn("🔁 Schon bewertet: ① neu ② 2× ③ 1×", text)
+        self.assertIn("🧠 Aus #6 (Zusammenschnitt): 3 Momente seltener", text)
+        alt = {**liste, "segmente": [{"moment": "a"}], "gelernt": None}           # alte Schnittliste: keine Zeilen
+        self.assertNotIn("🔁", lernbot.entwurf_text(zeile, alt))
+
+    def test_kurzbefehle(self):
+        gesendet = []
+        nachricht = SimpleNamespace(text="🧠 Lernstand", reply_text=lambda t, **kw: _merke(gesendet, t))
+        update = SimpleNamespace(effective_message=nachricht)
+        asyncio.run(lernbot.bei_kurzbefehl(update, self.context))
+        self.assertTrue(gesendet[0].startswith("🧠 Regie"))
+        nachricht.text = "🎞️ Zusammenschnitt"
+        asyncio.run(lernbot.bei_kurzbefehl(update, self.context))
+        self.assertEqual(len(self.aufgaben), 1)                                 # Entwurf läuft im Hintergrund
+        app = lernbot.baue_app(self.konfig, "123456:TEST", 42)
+        texte = [h.filters for h in app.handlers[0] if getattr(h, "callback", None) is lernbot.bei_kurzbefehl]
+        self.assertEqual(len(texte), 1)
         app.bot_data["con"].close()
 
     def test_knopf_antwortet_vor_der_datenbank(self):
