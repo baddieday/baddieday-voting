@@ -922,7 +922,7 @@ class Rezept(MitPublikum):
 
 class PostDaten(MitPublikum):
     def test_clip_post_daten_ohne_dateizugriff(self):
-        merkmale = {"kill_punkte": 6.0, "victory_royale": 1.0, "laenge": 0.2, "lautstaerke": 0.0, "kommentar": 0.0}
+        merkmale = {"kill_punkte": 6.0, "victory_royale": 1.0, "laenge": 0.2, "lautstaerke": 0.0}
         cid = self.clip_anlegen(merkmale=merkmale)
         # Pfade absichtlich ungültig: die Funktion darf keine Datei anfassen (hängender NFS im Bot)
         self.con.execute("UPDATE clips SET quelle_pfad = '/gibt/es/nicht.mp4', clip_pfad = '/gibt/es/nicht',"

@@ -21,11 +21,11 @@ from tests.test_regie_serie import WIPE, kandidat
 
 KILL = [0, 1, 3, 6, 10]
 # Startgewichte aus config/pipeline.toml, hier fest – die Tests sollen nicht von gelernten Gewichten abhängen
-GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.0, "kommentar": 1.0,
+GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.0,
             "platzierung": 2.0, "sniper": 1.0, "nahkampf": 0.0, "bot_opfer": -2.0, "phase": 0.5, "endgame": 1.0,
             "clutch": 2.0, "mic_lachen": 1.0, "mic_jubel": 1.0, "mic_frust": 0.5, "mic_laut": 0.5, "spitzen": 0.25}
 # Ein Clip, wie render ihn heute schreibt, plus die sieben Replay-Merkmale = 0
-CLIP_NULL = {"kill_punkte": 3.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0, "kommentar": 0.0,
+CLIP_NULL = {"kill_punkte": 3.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0,
              "platzierung": 0.0, "sniper": 0.0, "nahkampf": 0.0, "bot_opfer": 0.0, "phase": 0.0, "endgame": 0.0,
              "clutch": 0.0}
 

@@ -19,7 +19,7 @@ from clip_pipeline.vorbewertung import MERKMAL_NAMEN, MERKMALE, bewerte, roh_sco
 from .hilfen import MitSpeicher
 
 # Startgewichte wie in config/pipeline.toml, fest im Test, damit eine Konfig-Änderung hier nichts verschiebt
-GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.0, "kommentar": 1.0,
+GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.0,
             "platzierung": 2.0, "sniper": 1.0, "nahkampf": 0.0, "bot_opfer": -2.0, "phase": 0.5, "endgame": 1.0,
             "clutch": 2.0, "mic_lachen": 1.0, "mic_jubel": 1.0, "mic_frust": 0.5, "mic_laut": 0.5, "spitzen": 0.25}
 KILL_TABELLE = [0.0, 1.0, 3.0, 6.0, 10.0]
@@ -67,7 +67,7 @@ class RohScore(unittest.TestCase):
         faelle = [
             ({"kill_punkte": 6, "lautstaerke": 0.8, "laenge": 1.5}, GEWICHTE, "Triple Kill"),
             ({}, GEWICHTE, "Kills"),
-            ({"kill_punkte": 1.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0, "kommentar": 0.0},
+            ({"kill_punkte": 1.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0},
              GEWICHTE, "Einzelkill"),
             ({"kill_punkte": 10, "victory_royale": 1, "laenge": 2.8, "lautstaerke": 0.35}, GEWICHTE,
              "4-fach Kill + Victory Royale"),
@@ -199,7 +199,7 @@ class AktualisiereClip(MitSpeicher):
         z = self.zeile(cid)
         mk = json.loads(z["merkmale"])
         self.assertEqual(mk, {"kill_punkte": 1.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0,
-                              "kommentar": 0.0, "bot_opfer": 1.0, "spitzen": 2.0})
+                              "bot_opfer": 1.0, "spitzen": 2.0})
         punkte, begruendung = vorbewertung.bewerte(mk, GEWICHTE, "Test")   # wie render, Titel aus clips.titel
         self.assertEqual((z["punkte"], z["begruendung"], z["gewichte_version"]), (punkte, begruendung, 7))
         self.assertEqual(z["punkte"], -0.5)                                 # 1 − 2 + 0,5

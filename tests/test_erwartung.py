@@ -34,7 +34,7 @@ from tests.hilfen import MitSpeicher
 
 # Gewichte fest im Test (alle 17 gesetzt): Die Tests hängen weder an pipeline.toml noch daran, ob
 # lernen.aktuelle fehlende Startgewichte auffüllt (Paket D).
-GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.0, "kommentar": 1.0,
+GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.0,
             "platzierung": 2.0, "sniper": 1.0, "nahkampf": 0.0, "bot_opfer": -2.0, "phase": 0.5, "endgame": 1.0,
             "clutch": 2.0, "mic_lachen": 1.0, "mic_jubel": 1.0, "mic_frust": 0.5, "mic_laut": 0.5, "spitzen": 0.25}
 KILL_TABELLE = [0.0, 1.0, 3.0, 6.0, 10.0]

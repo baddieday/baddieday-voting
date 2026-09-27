@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
@@ -33,8 +34,8 @@ T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 
 
 def alt(kill: float = 1.0, laut: float = 0.0, **neu: float) -> dict:
-    """Merkmale wie vor Stufe 2 (die alten fünf), dazu wahlweise neue Schlüssel."""
-    return {"kill_punkte": kill, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": laut, "kommentar": 0.0, **neu}
+    """Merkmale wie vor Stufe 2 (die alten vier), dazu wahlweise neue Schlüssel."""
+    return {"kill_punkte": kill, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": laut, **neu}
 
 
 class MitPosts(MitSpeicher):
@@ -136,6 +137,19 @@ class DreiQuellen(MitPosts):
         self.assertEqual([p.art for p in spion.call_args.args[0]], ["battle", "freigabe", "publikum"])
 
 
+class RoundRobin(unittest.TestCase):
+    def test_deckt_alle_guten_clips_ab_nicht_nur_den_ersten(self):
+        """B2: vorher (islice(product(...))) bekam bei mehr Kombinationen als max_pro_abend meist nur der erste
+        gute Clip Paare, weitere gute Clips keine. Round-Robin bedient reihum jeden guten Clip."""
+        gut = [{"id": i} for i in range(5)]
+        schlecht = [{"id": "s0"}, {"id": "s1"}]
+        paare = list(lernen._round_robin(gut, schlecht, 3))
+        self.assertEqual([g["id"] for g, _ in paare], [0, 1, 2])
+
+    def test_ohne_schlechte_clips_keine_paare(self):
+        self.assertEqual(list(lernen._round_robin([{"id": 1}], [], 5)), [])
+
+
 # --- trainiere und trefferquote --------------------------------------------------------------------------------
 
 class Trainieren(MitPosts):
@@ -157,6 +171,22 @@ class Trainieren(MitPosts):
         self.assertEqual(lernen.trainiere([klar], start, self.einstellungen()), start)
         self.assertEqual(lernen.MARGE, 1.0)
 
+    def test_leine_sperrt_vorzeichen_auch_bei_kleinem_start(self):
+        """B2/L-A, Gegenbeleg docs/ANALYSE-2026-09-26.md: Start 0,25 < leine_minimum 0,5 – vorher konnte die volle
+        Leine ±0,5 den Wert bis −0,25 drücken. Zehn klare Battles gegen `spitzen` (stärkstmöglicher Druck)
+        drücken das Gewicht jetzt nur bis exakt 0, nie darunter."""
+        start = dict.fromkeys(MERKMALE, 0.0) | {"spitzen": 0.25}
+        gegen = [Paar({"spitzen": 0.0}, {"spitzen": 4.0}, "battle") for _ in range(10)]
+        w = lernen.trainiere(gegen, start, self.einstellungen(durchlaeufe=5))
+        self.assertEqual(w["spitzen"], 0.0)
+
+    def test_leine_erlaubt_vorzeichenwechsel_bei_neutralem_start(self):
+        """Startwert 0 (z. B. nahkampf) hat kein Vorzeichen zu sperren – die volle Leine ±leine_minimum bleibt."""
+        start = dict.fromkeys(MERKMALE, 0.0)
+        gegen = [Paar({"nahkampf": 0.0}, {"nahkampf": 4.0}, "battle") for _ in range(10)]
+        w = lernen.trainiere(gegen, start, self.einstellungen(durchlaeufe=5))
+        self.assertAlmostEqual(w["nahkampf"], -0.4)
+
     def test_mic_lachen_nur_auf_einer_seite_bleibt(self):
         """„Fehlt = unbekannt“: analysiert gegen nicht analysiert lernt nichts über mic_lachen."""
         start = {m: float(self.konfig.wert(f"vorbewertung.startgewichte.{m}", 0.0)) for m in MERKMALE}
@@ -172,12 +202,12 @@ class Trainieren(MitPosts):
         self.assertGreater(w["mic_lachen"], start["mic_lachen"])
 
     def test_alte_merkmale_fehlend_zaehlen_null(self):
-        """kill_punkte, victory_royale, kommentar wie vor Stufe 2: fehlt = 0 (nicht „unbekannt“).
+        """kill_punkte und victory_royale wie vor Stufe 2: fehlt = 0 (nicht „unbekannt“).
         Befund K-3: laenge und lautstaerke gelten seitdem als unbekannt, wenn sie fehlen (Datei-Momente) – das
-        Beispiel nimmt deshalb kommentar statt lautstaerke."""
+        Beispiel nimmt deshalb victory_royale statt lautstaerke."""
         start = dict.fromkeys(MERKMALE, 0.0)
-        w = lernen.trainiere([Paar({"kommentar": 1.0}, {}, "battle")], start, self.einstellungen())
-        self.assertAlmostEqual(w["kommentar"], 0.1)
+        w = lernen.trainiere([Paar({"victory_royale": 1.0}, {}, "battle")], start, self.einstellungen())
+        self.assertAlmostEqual(w["victory_royale"], 0.1)
 
     def test_laenge_und_lautstaerke_fehlend_werden_nicht_verglichen(self):
         """Befund K-3: Ein Datei-Moment hat kein laenge/lautstaerke – das ist unbekannt, nicht 0."""
@@ -433,6 +463,27 @@ class ZweiQuoten(MitPosts):
         self.assertEqual(lernen.aktualisiere(self.con, self.konfig)[0], 1)
 
 
+class HoldoutQuote(MitPosts):
+    """B2/L-A: ehrliche Out-of-Sample-Quote – ab 10 Paaren trainiert eine separate Rechnung NICHT auf den
+    jüngsten 20 % und prüft nur auf denen. Ändert nichts an der offiziellen trefferquote/werte/aktiv."""
+
+    def test_ab_zehn_paaren_gesetzt(self):
+        self.abend(1, 8)                                        # 16 Freigabe-Paare (>= 10 → Holdout aktiv)
+        self.konfig.daten["lernen"]["mindestens"] = 1
+        e = lernen.berechne(self.con, self.konfig)
+        self.assertIsNotNone(e.trefferquote_holdout)
+        self.assertGreaterEqual(e.trefferquote_holdout, 0.0)
+        self.assertLessEqual(e.trefferquote_holdout, 1.0)
+
+    def test_unter_zehn_paaren_none(self):
+        a = self.clip_anlegen(status="gesendet", merkmale=alt(3.0), match_id="b1")
+        b = self.clip_anlegen(status="gesendet", merkmale=alt(1.0), match_id="b1")
+        self.battle(a, b)                                       # nur 1 Paar
+        self.konfig.daten["lernen"]["mindestens"] = 1
+        e = lernen.berechne(self.con, self.konfig)
+        self.assertIsNone(e.trefferquote_holdout)
+
+
 class Auseinander(MitPosts):
     """Du magst laut (Freigaben), das Publikum mag Kills (und leiser)."""
 
@@ -463,7 +514,7 @@ class Auseinander(MitPosts):
 
 class AktuelleGewichte(MitPosts):
     def test_alte_db_ohne_neue_schluessel_bekommt_startgewichte(self):
-        alt_werte = {"kill_punkte": 1.2, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.3, "kommentar": 1.0}
+        alt_werte = {"kill_punkte": 1.2, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.3}
         self.con.execute("INSERT INTO gewichte (version, werte, datenbasis, vertrauen, trefferquote,"
                          " trefferquote_start, erstellt) VALUES (4, ?, 30, 0.5, 0.8, 0.7, ?)",
                          (json.dumps(alt_werte), iso(T0)))
@@ -501,7 +552,7 @@ class GewichteAnzeige(MitPosts):
     def test_bot_text(self):
         text = texte.gewichte_text(self.ergebnis(), 2)
         tabelle = text.split("<pre>")[1].split("</pre>")[0].splitlines()
-        self.assertEqual(len(tabelle), 1 + 17)                   # Kopf + 17 Merkmale
+        self.assertEqual(len(tabelle), 1 + 16)                   # Kopf + 16 Merkmale
         self.assertIn("Sortier-Quote du: 80 % (Start 70 %)", text)
         self.assertIn("Sortier-Quote Publikum: 64 % (Start 50 %) – 12 Paare", text)
         self.assertNotIn("zählt für die Schranke", text)          # ab 10 ohne Zusatz
@@ -538,7 +589,7 @@ class GewichteAnzeige(MitPosts):
         self.clip_post(alt(3.0), 1.0, tag=2)
         zeilen = self.cli_lauf()
         text = "\n".join(zeilen)
-        self.assertEqual(sum(1 for z in zeilen if z[:16].strip() in set(MERKMAL_NAMEN.values())), 17)
+        self.assertEqual(sum(1 for z in zeilen if z[:16].strip() in set(MERKMAL_NAMEN.values())), 16)
         self.assertIn("Sortier-Quote du: ", text)
         self.assertIn("Sortier-Quote Publikum: 100 % (Start 100 %) – 1 Paar, zählt für die Schranke erst ab 10", text)
         self.assertIn("Paare: 0 Battles · 8 Freigaben · 1 Publikum", text)

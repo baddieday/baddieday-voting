@@ -71,10 +71,10 @@ def _orte_des_imports(quelltext: str, ziel: str) -> set[str]:
 
 
 class Merkmale(unittest.TestCase):
-    def test_siebzehn_merkmale_in_fester_reihenfolge(self):
-        self.assertEqual(len(MERKMALE), 17)
-        self.assertEqual(MERKMALE[:5], ("kill_punkte", "victory_royale", "laenge", "lautstaerke", "kommentar"))
-        self.assertEqual(set(MERKMALE[5:]), set(merkmale.REPLAY_MERKMALE) | set(merkmale.MIC_MERKMALE))
+    def test_sechzehn_merkmale_in_fester_reihenfolge(self):
+        self.assertEqual(len(MERKMALE), 16)
+        self.assertEqual(MERKMALE[:4], ("kill_punkte", "victory_royale", "laenge", "lautstaerke"))
+        self.assertEqual(set(MERKMALE[4:]), set(merkmale.REPLAY_MERKMALE) | set(merkmale.MIC_MERKMALE))
 
     def test_jedes_merkmal_hat_einen_kurzen_namen(self):
         for m in MERKMALE:

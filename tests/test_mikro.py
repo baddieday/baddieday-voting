@@ -33,7 +33,7 @@ from tests.test_stimmung import START, video
 SID = "2026-09-21_21-00-00"
 ANDERE = "2026-09-20_20-00-00"
 # Startgewichte für die Tests: bewusst ausgeschrieben, damit Punkte nachvollziehbar sind
-GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 1.0, "laenge": 0.0, "lautstaerke": 0.0, "kommentar": 0.0,
+GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 1.0, "laenge": 0.0, "lautstaerke": 0.0,
             "platzierung": 0.0, "sniper": 0.0, "nahkampf": 0.0, "bot_opfer": 0.0, "phase": 0.0, "endgame": 0.0,
             "clutch": 0.0, "mic_lachen": 1.0, "mic_jubel": 1.0, "mic_frust": 0.5, "mic_laut": 0.5, "spitzen": 0.25}
 

@@ -313,7 +313,7 @@ class UnbekannteWaffen(MitSpeicher):
         self.assertEqual(self.meldungen(), {})
 
 
-GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.0, "kommentar": 1.0,
+GEWICHTE = {"kill_punkte": 1.0, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.0,
             "platzierung": 2.0, "sniper": 1.0, "nahkampf": 0.0, "bot_opfer": -2.0, "phase": 0.5, "endgame": 1.0,
             "clutch": 2.0}
 CLIP_START = t(100)  # clip_anlegen legt die Kills bei Start + 10 s, + 13 s … an
@@ -337,7 +337,7 @@ class Nachtragen(MitSpeicher):
                     platz=4)
         cid = self.clip_anlegen(status="vorbewertet", start=CLIP_START, max_gruppe=2, match_id="s1",
                                 merkmale={"kill_punkte": 3.0, "victory_royale": 0.0, "laenge": 0.0,
-                                          "lautstaerke": 0.0, "kommentar": 0.0})
+                                          "lautstaerke": 0.0})
         ergebnis = self.trage_nach()
         self.assertEqual(ergebnis, {"clips": 1, "geaendert": 1, "ohne_replay": 0, "waffen_gemeldet": [12]})
         zeile = db.clip(self.con, cid)

@@ -155,8 +155,13 @@ def _kandidaten(con: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def neues_battle(con: sqlite3.Connection) -> tuple[int, sqlite3.Row, sqlite3.Row] | None:
-    """Paarung wie in cliphub: der Clip mit den wenigsten Battles gegen den ähnlichsten Gegner.
+    """Paarung wie in cliphub, mit L6 (B2/Analyse "billigster Hebel"): der Clip mit den wenigsten Battles gegen
+    den Gegner mit der größten Rating-Unsicherheit (elo_rd), erst danach die ähnlichste Elo.
 
+    Ein Battle zwischen zwei längst eingespielten (niedriges elo_rd), elo-nahen Clips sortiert das Modell dank der
+    Marge (lernen.MARGE) oft schon richtig und lehrt fast nichts. Ein Gegner, dessen Rating noch unsicher ist
+    (hohes elo_rd, wenige Battles), liefert mehr neue Information – deshalb zuerst nach elo_rd absteigend, dann
+    wie bisher nach Elo-Nähe.
     Nur Clips mit Telegram-file_id: so klappen Battles auch, wenn der große Host schläft.
     """
     clips = _kandidaten(con)
@@ -168,7 +173,7 @@ def neues_battle(con: sqlite3.Connection) -> tuple[int, sqlite3.Row, sqlite3.Row
     gegner = [c for c in clips if c["id"] != a["id"] and {a["id"], c["id"]} != letztes_paar] or [
         c for c in clips if c["id"] != a["id"]
     ]
-    b = min(gegner, key=lambda c: (abs(c["elo"] - a["elo"]), c["battles"], c["id"]))
+    b = min(gegner, key=lambda c: (-c["elo_rd"], abs(c["elo"] - a["elo"]), c["battles"], c["id"]))
     cursor = con.execute(
         "INSERT INTO battles (clip_a, clip_b, erstellt) VALUES (?, ?, ?)", (a["id"], b["id"], iso(jetzt()))
     )

@@ -185,7 +185,7 @@ BEWERTEN = P0 + timedelta(days=8)               # Timer clip-publikum: alle sieb
 ABEND = datetime(2026, 9, 21, 19, 0, tzinfo=UTC)  # alle Clips vom selben Spielabend (Freigabe-Paare je Abend)
 
 # Merkmale (alte fünf – so bleibt die Rechnung im Kopf nachvollziehbar):
-GUT = {"kill_punkte": 1.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.5, "kommentar": 0.0}
+GUT = {"kill_punkte": 1.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.5}
 DOUBLE = dict(GUT, kill_punkte=3.0)  # der Clip, den das Publikum mag
 SCHLECHT = dict(GUT, lautstaerke=0.0)
 # Messungen am Tag 7 (views, likes, Ø Wiedergabe in s; Clip 20 s ohne Endcard). Die ersten fünf sind die
@@ -337,7 +337,7 @@ class PublikumsKette(MitSpeicher):
 
 # --- 4. Migration auf einer Datenbank vor Stufe 2 --------------------------------------------------------------------
 
-ALTE_GEWICHTE = {"kill_punkte": 1.2, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.3, "kommentar": 1.0}
+ALTE_GEWICHTE = {"kill_punkte": 1.2, "victory_royale": 5.0, "laenge": -0.5, "lautstaerke": 1.3}
 
 
 class Migration(MitSpeicher):
@@ -502,7 +502,7 @@ class MerkmaleNachtragen(MitSpeicher):
         self.konfig.daten["lager"]["wurzel"] = str(self.tmp / "lager")  # getrennter Betrieb
         self.konfig.daten["merkmale"]["waffen"] = {"sniper": [], "nahkampf": [], "sonstige": []}
         self.konfig.daten["speicher"].update(host="pve-gross", wol_mac="aa:bb:cc:dd:ee:ff", wecken_warten_s=0)
-        alte = {"kill_punkte": 1.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0, "kommentar": 0.0}
+        alte = {"kill_punkte": 1.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0}
         self.cid = self.clip_anlegen(status="vorbewertet", start=datetime(2026, 9, 21, 19, 0, tzinfo=UTC),
                                      match_id=self.SID, merkmale=alte)
         ordner = self.konfig.ordner("sessions") / self.SID
