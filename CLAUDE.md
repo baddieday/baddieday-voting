@@ -214,3 +214,14 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   (Beats) bleibt, nur die Quelle wird angepasst; Deckel `max_lupen`/`max_raffer` = 2. Renderer: `setpts` vor
   `fps`, Ton in Stücken. (3) **Impacts:** flash/shake/rgb, die Finisher wechseln den Stil (Punch · Punch+Blitz ·
   Wackeln · Punch+RGB), der Tod wackelt und blitzt. Doku: `docs/REGIE.md`, Abschnitt „Effekte“.
+- 2026-09-28 (Regisseur 2.2, Florian: „das wird langweilig … mir ist egal, wie lange es rechnen muss, hauptsächlich
+  es kommt ein sehr gutes Video raus … keine doppelten“): **Rechenzeit ist Nebensache, Dichte und Vielfalt zählen.**
+  Effekt-Katalog im Spielbild (nur ffmpeg-Bordmittel, kein Paket): Negativ, Blur-Hit, Strobe, Farb-Pop,
+  Kontrast-Punch, Farbrad, Vignetten-Puls, Pixel-Hit, Dutch-Tilt, Zoom-Einzug, Ken-Burns-Drift – dazu Punch, Blitz,
+  Wackeln, RGB. Dichte: Einstieg auf jedem harten Schnitt, Drift auf jedem Segment, Beat-Effekte schon nach 0,8 s
+  Ruhe (statt 2,5 s), Zeitlupe auf bis zu 8 Momenten (statt 2). Keine Wiederholung: eigene Stil-Rotationen für
+  Finisher (11 Stile), Nebenkills, Beats und Schnitte, je Video an anderer Stelle beginnend (`effekte.Stilfolge`).
+  Große Filtergraphen gehen als Datei an ffmpeg (`-/filter_complex`), damit lange Zusammenschnitte nicht an der
+  Befehlszeile scheitern. Weiter über 🎆/💥/😵 lernbar und mit `[regie.effekte] an = false` abschaltbar.
+  Tailscale-Deploy aus der Cloud-Sitzung blockt der Berechtigungs-Check („Containment Escape“) – Einspielen bis zur
+  Freigabe per `regie-aktualisieren.sh` auf pve-mini.

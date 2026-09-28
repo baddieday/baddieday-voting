@@ -17,8 +17,29 @@ from clip_pipeline.medien import MedienFehler
 from tests.regie_hilfen import MOMENTE, MitRegieMaterial
 from tests.test_regie_serie import BEATS, WIPE, kandidat, liste_um
 
-ERLAUBT = {"punch", "akzent", "meme", "flash", "shake", "rgb", "titel", "zaehler", "sfx"}
-ZOOM = {"punch", "akzent", "meme", "shake"}
+ERLAUBT = {"punch", "akzent", "meme", "shake", "tilt", "einzug", "drift_ein", "drift_aus", "flash", "strobe", "farbpop",
+           "kontrast", "hue", "negativ", "blur", "pixel", "vignette", "rgb", "titel", "zaehler", "sfx"}
+ZOOM = {"punch", "akzent", "meme", "shake", "tilt", "einzug"}
+
+# Regisseur 2.0-Verhalten für die Logik-Tests (Ketten, Titel, Budget, Akzente): ein Finisher-/Nebenstil (Punch), Beat
+# nur Zoom-Puls, kein Einstieg, kein Drift, alte Akzent-Stärken. Die Katalog-Tests (Katalog2) prüfen das Neue.
+KLASSISCH = {"episch": (0.5, 2.5), "spannend": (0.4, 2.5), "lustig": (0.3, 3.0), "frustriert": (0.0, None),
+             "chill": (0.0, None)}
+
+
+def klassisch(test: unittest.TestCase) -> None:
+    from unittest import mock
+
+    profil = copy.deepcopy(effekte.PROFIL)
+    for st, (akzent, ruhe) in KLASSISCH.items():
+        profil[st].update(akzent=akzent, max_ruhe_s=ruhe, einstieg=0.0, drift=0.0)
+    profil["lustig"]["lupe"] = 0.0
+    for patch in (mock.patch.object(effekte, "PROFIL", profil),
+                  mock.patch.object(effekte, "STILE", (("punch",),)),
+                  mock.patch.object(effekte, "NEBEN_STILE", (("punch",),)),
+                  mock.patch.object(effekte, "BEAT_STILE", (("akzent",),))):
+        patch.start()
+        test.addCleanup(patch.stop)
 
 
 def seg(nr, moment, qs, qe, zs, *, art="schnitt", d=0.0, stimmung="episch", teil=None, dauer=40.0):
@@ -69,6 +90,9 @@ def ein_moment(mk, *, stimmung="episch", ende=20.0, **kw):
 
 
 class Ketten(unittest.TestCase):
+    def setUp(self):
+        klassisch(self)
+
     def test_ketten_wie_vorbewertung(self):
         self.assertEqual(effekte.ketten([6.0, 8.0], 10.0), [[6.0, 8.0]])
         self.assertEqual(effekte.ketten([17.0, 5.0], 10.0), [[5.0], [17.0]])
@@ -118,6 +142,9 @@ class Ketten(unittest.TestCase):
 
 
 class Plan(unittest.TestCase):
+    def setUp(self):
+        klassisch(self)
+
     def test_finisher_buendel_und_zaehler(self):
         liste = ein_moment({"kill_sekunden": [6.0, 8.0, 10.0]})
         es = [e for _, e in ereignisse(liste)]
@@ -129,7 +156,7 @@ class Plan(unittest.TestCase):
                          [(6.0, 0.35, 0.35), (8.0, 0.35, 0.35), (10.0, 0.7, 0.35)])
         self.assertEqual([(e["t_s"], e["zahl"], e["dauer_s"]) for e in es if e["art"] == "zaehler"],
                          [(6.0, 1, 1.5), (8.0, 2, 1.5), (10.0, 3, 1.5)])
-        self.assertEqual(liste["effekte"], {"an": True, "profil_version": 1, "look": "cinematic", "look_staerke": 0.8,
+        self.assertEqual(liste["effekte"], {"an": True, "profil_version": 2, "look": "cinematic", "look_staerke": 0.8,
                                             "hook": False, "loop": False})
 
     def test_kills_in_den_griffen_ohne_ereignis(self):
@@ -161,7 +188,7 @@ class Plan(unittest.TestCase):
         mk = {"kill_sekunden": [round(1.0 + 0.5 * i, 2) for i in range(30)]}
         liste = ein_moment(mk)  # plane() prüft die Liste
         s = liste["segmente"][0]
-        self.assertEqual((len(s["effekte"]), len(s["kill_s"])), (24, 20))
+        self.assertEqual((len(s["effekte"]), len(s["kill_s"])), (60, 20))
         self.assertEqual(titel(liste), [("MULTI KILL", 15.6)])          # das Wichtigste bleibt
         self.assertIn((15.5, 0.7), [(e["t_s"], e["staerke"]) for _, e in ereignisse(liste, "punch")])
 
@@ -307,6 +334,9 @@ class Plan(unittest.TestCase):
 
 
 class Uebergaenge(unittest.TestCase):
+    def setUp(self):
+        klassisch(self)
+
     def test_rotation_glitch_hoehepunkt(self):
         p = dict(regie.PARAMETER)
         self.assertEqual(effekte.uebergang("spannend", 2, False, p, True, 0), ("glitch", 0.2))
@@ -354,7 +384,9 @@ class Uebergaenge(unittest.TestCase):
     def test_hektik_daempft_nur_akzent(self):
         # „zu hektisch“ dämpft die Beat-Akzente und (28.09.) die Impacts flash/shake/rgb – nicht Punch, Titel,
         # Zähler, Klänge. Übergänge, auch der Glitch-Übergang, haben immer Stärke 1 (§4)
-        self.assertEqual(effekte.HEKTISCH, {"akzent", "flash", "shake", "rgb"})
+        self.assertEqual({"akzent", "flash", "shake", "rgb", "negativ", "blur", "tilt", "einzug"} - effekte.HEKTISCH,
+                         set())
+        self.assertFalse({"punch", "titel", "zaehler", "sfx", "drift_ein"} & effekte.HEKTISCH)
         segs = [seg(1, "a", 0.0, 10.0, 0.0, stimmung="spannend"),
                 seg(2, "b", 2.0, 10.0, 10.0, art="glitch", d=0.2, stimmung="spannend"),
                 seg(3, "c", 2.0, 10.0, 18.0, art="whip", d=0.25, stimmung="spannend")]
@@ -462,29 +494,96 @@ class Impacts(unittest.TestCase):
     """28.09.: Blitz, Wackeln, RGB-Stoß im Spielbild; die Finisher wechseln den Stil – kein Kill sieht aus wie der vorige."""
 
     def test_finisher_stile_rotieren(self):
-        kills = [5.0, 17.0, 29.0, 41.0]   # vier Ketten (> 10 s auseinander) -> vier Finisher, vier Stile
-        liste = plane([seg(1, "m", 0.0, 50.0, 0.0, dauer=60.0)], [moment("m", {"kill_sekunden": kills}, dauer=60.0)])
-        je_kill = {k: sorted(e["art"] for _, e in ereignisse(liste)
-                             if abs(e["t_s"] - k) < 1e-6 and e["art"] not in ("sfx", "titel", "zaehler"))
-                   for k in kills}
-        self.assertEqual(je_kill, {5.0: ["punch"], 17.0: ["flash", "punch"], 29.0: ["shake"], 41.0: ["punch", "rgb"]})
-        self.assertTrue(all(e["dauer_s"] > 0 for _, e in ereignisse(liste) if e["art"] in ("flash", "shake", "rgb")))
-        self.assertEqual([e["klang"] for _, e in ereignisse(liste, "sfx")].count("basshit"), 4)   # Bass-Hit bleibt
-        # lustig hat keinen RGB-Stoß (drei Stile im Wechsel), chill nur den (wirkungslosen) Punch
-        self.assertEqual([effekte.finisher_stil(effekte.PROFIL["lustig"], k) for k in range(4)],
-                         [("punch",), ("punch", "flash"), ("shake",), ("punch",)])
-        self.assertEqual(effekte.finisher_stil(effekte.PROFIL["chill"], 1), ("punch",))
+        kills = [5.0, 17.0, 29.0, 41.0, 53.0]   # fünf Ketten (> 10 s auseinander) -> fünf Finisher
+        liste = plane([seg(1, "m", 0.0, 58.0, 0.0, dauer=60.0)], [moment("m", {"kill_sekunden": kills}, dauer=60.0)])
+        je_kill = [tuple(sorted(e["art"] for _, e in ereignisse(liste) if abs(e["t_s"] - k) < 1e-6
+                                and e["art"] not in ("sfx", "titel", "zaehler"))) for k in kills]
+        stile = {tuple(sorted(s)) for s in effekte.STILE}
+        self.assertTrue(all(s in stile for s in je_kill), je_kill)            # jeder Finisher ein ganzer Stil
+        self.assertEqual(len(set(je_kill)), 5, je_kill)                       # fünf Kills, fünf verschiedene Stile
+        self.assertEqual([e["klang"] for _, e in ereignisse(liste, "sfx")].count("basshit"), 5)   # Bass-Hit bleibt
+        # finisher_stil (ohne Seed) filtert nach dem Profil: lustig ohne RGB/Negativ, chill ohne die harten Stile
+        lustig = {effekte.finisher_stil(effekte.PROFIL["lustig"], k) for k in range(20)}
+        self.assertFalse([s for s in lustig if {"rgb", "negativ"} & set(s)])
+        self.assertIn(("punch", "flash"), lustig)
+        chill = {effekte.finisher_stil(effekte.PROFIL["chill"], k) for k in range(20)}
+        self.assertFalse([s for s in chill if {"flash", "shake", "negativ", "strobe", "tilt"} & set(s)], chill)
 
     def test_tod_wackelt_und_blitzt(self):
         liste = ein_moment({"kill_sekunden": [], "tod_sekunde": 10.0}, stimmung="frustriert")
-        self.assertEqual(sorted(e["art"] for _, e in ereignisse(liste) if e["art"] != "sfx"), ["flash", "shake"])
-        self.assertEqual([e["klang"] for _, e in ereignisse(liste, "sfx")], ["einschlag"])
-        self.assertEqual({e["t_s"] for _, e in ereignisse(liste)}, {10.0})
+        beim_tod = [e for _, e in ereignisse(liste) if e["t_s"] == 10.0]
+        self.assertEqual(sorted(e["art"] for e in beim_tod if e["art"] != "sfx"), ["flash", "shake"])
+        self.assertEqual([e["klang"] for e in beim_tod if e["art"] == "sfx"], ["einschlag"])
+
+
+class Katalog2(unittest.TestCase):
+    """Regisseur 2.2 (28.09., Florian: „das wird langweilig … egal wie lange es rechnet“): Dichte und Katalog – mit den
+    echten Profilen (nicht klassisch)."""
+
+    def test_stilfolge_ohne_wiederholung_und_je_video_anders(self):
+        pr = effekte.PROFIL["episch"]
+        folge = effekte.Stilfolge(effekte.STILE, "a")
+        zuege = [folge.naechster(pr) for _ in range(30)]
+        self.assertFalse([1 for x, y in zip(zuege, zuege[1:]) if x == y])                  # nie zweimal nacheinander
+        self.assertEqual(set(zuege), set(effekte.moegliche_stile(effekte.STILE, pr)))     # alle kommen dran
+        erster = effekte.Stilfolge(effekte.STILE, "a").naechster(pr)
+        self.assertEqual(erster, zuege[0])                                               # deterministisch
+        starts = {effekte.Stilfolge(effekte.STILE, f"video{n}").naechster(pr) for n in range(20)}
+        self.assertGreater(len(starts), 4)                                                # je Video anders
+        # Stimmungswechsel mitten in der Folge: auch dann kein Doppel
+        folge = effekte.Stilfolge(effekte.NEBEN_STILE, "b")
+        zuege = [folge.naechster(effekte.PROFIL[st]) for st in ["episch", "chill"] * 10]
+        self.assertFalse([1 for x, y in zip(zuege, zuege[1:]) if x == y], zuege)
+        self.assertEqual(effekte.Stilfolge(effekte.BEAT_STILE, "c").naechster({}), ())      # nichts geht -> leer
+
+    def test_dichte_einstieg_drift_und_beats(self):
+        segs = [seg(1, "a", 0.0, 12.0, 0.0), seg(2, "b", 0.0, 12.0, 12.0),
+                seg(3, "c", 2.0, 14.0, 24.0, art="whip", d=0.25), seg(4, "d", 0.0, 12.0, 36.0, stimmung="spannend")]
+        reihe = [moment("a", {"kill_sekunden": [6.0]}), moment("b", {"kill_sekunden": [3.0, 5.0, 9.0]}, max_gruppe=3),
+                 moment("c", {}), moment("d", {"kill_sekunden": [8.0]}, stimmung="spannend")]
+        beats = [round(0.4 * i, 3) for i in range(1, 120)]   # 150 BPM
+        liste = plane(segs, reihe, beats=beats)               # plane() prüft die Liste gegen Schema und Regeln
+        alle = ereignisse(liste)
+        self.assertEqual({e["art"] for _, e in alle} - ERLAUBT, set())
+        # Einstieg auf jedem harten Schnitt (Segment 1, 2, 4 – Segment 3 kommt per Whip): ein Effekt auf dem Quellstart
+        for nr in (1, 2, 4):
+            s = liste["segmente"][nr - 1]
+            self.assertTrue([e for n, e in alle if n == nr and e["t_s"] == s["quelle_start_s"]
+                             and e["art"] not in ("drift_ein", "drift_aus", "sfx")], nr)
+        # Drift über jedes Segment, abwechselnd hinein und heraus, so lang wie das Segment
+        drift = [(n, e["art"], e["dauer_s"]) for n, e in alle if e["art"].startswith("drift")]
+        self.assertEqual(drift, [(1, "drift_ein", 12.0), (2, "drift_aus", 12.0), (3, "drift_ein", 12.0),
+                                 (4, "drift_aus", 12.0)])
+        # Beats: viele und nicht nur Zoom-Pulse (Farb-Pop, Vignette, Blur, Kontrast, Farbrad …)
+        auf_beats = [e for n, e in alle if any(abs(effekte.auf_zeitleiste(liste["segmente"][n - 1], e["t_s"]) - b) < 1e-3
+                                               for b in beats) and e["art"] not in ("sfx", "drift_ein", "drift_aus")]
+        self.assertGreater(len({e["art"] for e in auf_beats}), 3, auf_beats)
+        self.assertGreater(len([1 for _, e in alle if e["art"] != "sfx"]), 45)
+
+    def test_chill_bleibt_ruhig(self):
+        liste = ein_moment({"kill_sekunden": [6.0, 8.0]}, stimmung="chill")
+        arten = {e["art"] for _, e in ereignisse(liste)}
+        self.assertFalse(arten & {"negativ", "strobe", "shake", "tilt", "rgb", "pixel", "hue", "flash"}, arten)
+        self.assertIn("drift_ein", arten)
+
+    def test_gelernte_daempfung_wirkt_auf_den_katalog(self):
+        mk = {"kill_sekunden": [5.0, 17.0, 29.0]}
+        beats = [round(0.5 * i, 3) for i in range(1, 80)]
+        voll = plane([seg(1, "m", 0.0, 38.0, 0.0)], [moment("m", mk)], beats=beats)
+        ruhig = plane([seg(1, "m", 0.0, 38.0, 0.0)], [moment("m", mk)], beats=beats, p={"effekt_hektik": 0.3})
+        hektisch = lambda l: [e["staerke"] for _, e in ereignisse(l) if e["art"] in effekte.HEKTISCH]   # noqa: E731
+        self.assertLess(sum(hektisch(ruhig)), 0.5 * sum(hektisch(voll)))
+        aus = plane([seg(1, "m", 0.0, 38.0, 0.0)], [moment("m", mk)], beats=beats,
+                    p={"effekt_staerke": {"episch": 0.0}})
+        self.assertEqual(ereignisse(aus), [])
 
 
 class Tempo(unittest.TestCase):
     """28.09.: Zeitlupe um den Finisher, Zeitraffer über den Anlauf (effekte.plane_tempo) – die Zeitleiste (Beats)
     bleibt, nur die Quelle wird gekürzt bzw. verlängert; danach plant effekte.plane wie gehabt, die Liste ist gültig."""
+
+    def setUp(self):
+        klassisch(self)
 
     @staticmethod
     def material():
@@ -537,6 +636,7 @@ class Tempo(unittest.TestCase):
 
 class SchemaV4(unittest.TestCase):
     def setUp(self):
+        klassisch(self)
         self.gut = ein_moment({"kill_sekunden": [6.0, 8.0, 10.0]})
 
     def pruefe(self, aendern, **kw):
@@ -568,8 +668,8 @@ class SchemaV4(unittest.TestCase):
             "text": lambda l: l["segmente"][0]["effekte"].append({"art": "titel", "t_s": 7.0, "staerke": 1.0,
                                                                   "text": "GODLIKE'"}),
             "unbekanntes Feld": lambda l: erstes(l).update(farbe="rot"),
-            "25 Ereignisse": lambda l: l["segmente"][0]["effekte"].extend(
-                [{"art": "akzent", "t_s": 1.0, "staerke": 0.5}] * (25 - len(l["segmente"][0]["effekte"]))),
+            "61 Ereignisse": lambda l: l["segmente"][0]["effekte"].extend(
+                [{"art": "akzent", "t_s": 1.0, "staerke": 0.5}] * (61 - len(l["segmente"][0]["effekte"]))),
             "t_s außerhalb": lambda l: erstes(l).update(t_s=25.0),
             "uebergang": lambda l: l["segmente"][0]["uebergang"].update(art="whip;x"),
             "uebergang staerke": lambda l: l["segmente"][0]["uebergang"].update(staerke=0.4),  # immer 1 (§4)
@@ -578,7 +678,7 @@ class SchemaV4(unittest.TestCase):
             "sfx ohne klang": dazu(art="sfx"),
             "klang": dazu(art="sfx", klang="../boom"),
             "zahl 0": dazu(art="zaehler", zahl=0),
-            "dauer 5": lambda l: erstes(l).update(dauer_s=5.0),
+            "dauer 31": lambda l: erstes(l).update(dauer_s=31.0),
             "kill_s 21": lambda l: l["segmente"][0].update(kill_s=[1.0] * 21),
             "kill_s außerhalb": lambda l: l["segmente"][0].update(kill_s=[21.0]),
             "look": lambda l: l["effekte"].update(look="warm,curves=all='0/1'"),
@@ -588,15 +688,15 @@ class SchemaV4(unittest.TestCase):
         }
         for was, aendern in faelle.items():
             self.assertTrue(self.pruefe(aendern), was)
-        self.assertIn("mehr als 24 Einträge", " ".join(self.pruefe(faelle["25 Ereignisse"])))
+        self.assertIn("mehr als 60 Einträge", " ".join(self.pruefe(faelle["61 Ereignisse"])))
 
-    def test_hoechstens_400_ereignisse(self):
-        segs = [seg(i + 1, f"m{i}", 0.0, 10.0, 10.0 * i) for i in range(17)]
+    def test_hoechstens_1500_ereignisse(self):
+        segs = [seg(i + 1, f"m{i}", 0.0, 10.0, 10.0 * i) for i in range(26)]
         liste = {**liste_um(segs), "version": 4, "effekte": {"an": True}}
         for s in segs:
-            s["effekte"] = [{"art": "akzent", "t_s": 5.0, "staerke": 0.5}] * 24
-        self.assertIn("408 Effekt-Ereignisse", " ".join(regie.pruefe_liste(liste)))
-        segs[0]["effekte"] = segs[0]["effekte"][:16]
+            s["effekte"] = [{"art": "akzent", "t_s": 5.0, "staerke": 0.5}] * 60
+        self.assertIn("1560 Effekt-Ereignisse", " ".join(regie.pruefe_liste(liste)))
+        segs[0]["effekte"] = segs[0]["effekte"][:0]
         self.assertEqual(regie.pruefe_liste(liste), [])
         self.assertIn("mehr als 200 Einträge", " ".join(regie.pruefe_liste(
             {**liste_um([seg(i + 1, "m", 0.0, 1.0, float(i)) for i in range(201)])})))

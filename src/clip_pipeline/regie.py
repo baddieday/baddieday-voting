@@ -128,9 +128,9 @@ ABWECHSLUNG_FENSTER = 12          # so viele letzte Entwürfe zählen für die A
 SPRUNG_NACH_S = 1.5
 SPRUNG_VOR_S = 2.0
 # Schnittliste version 4 (Regisseur 2.0): Grenzen der fachlichen Prüfung
-MAX_EREIGNISSE = 400
-MAX_LUPEN = 2                     # Standard von [regie.effekte].max_lupen (Zeitlupen, Faktor < 1)
-MAX_RAFFER = 2                    # Standard von [regie.effekte].max_raffer (Zeitraffer, Faktor > 1)
+MAX_EREIGNISSE = 1500
+MAX_LUPEN = 20                    # obere Grenze im Prüfer (Standard in [regie.effekte].max_lupen: 8)
+MAX_RAFFER = 20                   # obere Grenze im Prüfer (Standard in [regie.effekte].max_raffer: 6)
 HOOK_MAX_S = 2.5
 V4_FELDER = ("rolle", "kill_s", "lupe", "raffer", "effekte")
 

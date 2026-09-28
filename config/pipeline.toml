@@ -145,10 +145,10 @@ final_halten_min = 60
 # Aus = wie vorher (gleiche Übergänge, gleicher Filtergraph):
 an = true
 # Höchstens so viele Zeitlupen bzw. Zeitraffer je Video (28.09.; 0 = keine)
-max_lupen = 2
-max_raffer = 2
+max_lupen = 8
+max_raffer = 6
 # steigt, wenn sich die Profilwerte im Code ändern (steht in jeder Schnittliste)
-profil_version = 1
+profil_version = 2
 # Effekte schwächer als das fallen weg (Stärke 0..1 = Profilwert × gelernte Effekt-Stärke)
 schwelle = 0.15
 # Zoom-Ereignisse (Punch, Beat-Akzent, Meme) liegen mindestens so weit auseinander

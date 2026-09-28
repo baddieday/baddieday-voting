@@ -19,8 +19,10 @@ Ohne Effekte (an = false oder version 3) ist der Graph zeichengleich mit dem von
 
 from __future__ import annotations
 
+import functools
 import json
 import math
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -35,8 +37,31 @@ from .medien import MedienFehler, fuehre_aus, probe
 ENTWURF_KURZE_SEITE = 720
 UEBERHANG_S = 0.2
 ENTWURF_KBIT = 4000
-# Der Filtergraph ist EIN Argument auf der Befehlszeile – Linux erlaubt je Argument höchstens 128 KB
-MAX_GRAPH = 64_000
+# Der Filtergraph ist EIN Argument auf der Befehlszeile – Linux erlaubt je Argument höchstens 128 KB. Darüber geht er
+# als Datei an ffmpeg (_graph_argumente, 28.09.: viele Effekte in einem langen Zusammenschnitt). MAX_GRAPH ist nur
+# noch eine Notbremse gegen einen außer Kontrolle geratenen Plan.
+MAX_INLINE = 100_000
+MAX_GRAPH = 4_000_000
+
+
+@functools.lru_cache(maxsize=1)
+def _ffmpeg_hauptversion() -> int:
+    """Hauptversion von ffmpeg (7 für „ffmpeg version 7.1…“); 0, wenn sie sich nicht lesen lässt."""
+    try:
+        text = subprocess.run(["ffmpeg", "-hide_banner", "-version"], capture_output=True, text=True, check=False).stdout
+    except OSError:
+        return 0
+    treffer = re.search(r"ffmpeg version n?(\d+)\.", text)
+    return int(treffer.group(1)) if treffer else 0
+
+
+def _graph_argumente(graph: str, datei: Path) -> list[str]:
+    """Kleiner Graph: „-filter_complex <graph>“ wie bisher. Großer Graph: in datei schreiben und per
+    „-/filter_complex <datei>“ (ffmpeg ≥ 7) bzw. „-filter_complex_script <datei>“ (ältere) übergeben."""
+    if len(graph.encode()) < MAX_INLINE:
+        return ["-filter_complex", graph]
+    datei.write_text(graph, encoding="utf-8")
+    return ["-/filter_complex" if _ffmpeg_hauptversion() >= 7 else "-filter_complex_script", str(datei)]
 
 
 def schnitt_dauer(fps: int) -> float:
@@ -72,7 +97,8 @@ def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", lo
     zoom: Kette aus effekt_filter.zoom – sitzt auf dem Spielbild allein (Short: vor dem Einsetzen in den unscharfen
     Hintergrund, 16:9: vor dem Rand), der Hintergrund zoomt also nie mit.
     look (nur Short): Farblook auf Spielbild und kleinem Hintergrund, bevor beide zusammengesetzt werden.
-    flash (effekt_filter.flash): Blitz nur auf dem Spielbild, nach dem Zoom, vor dem Look."""
+    flash (effekt_filter.bildfilter): der Effekt-Katalog (Blitz, Strobe, Farb-Pop, Negativ, Blur …) nur auf dem
+    Spielbild, nach dem Zoom, vor dem Look."""
     z = f",{zoom}" if zoom else ""
     fl = f",{flash}" if flash else ""
     lk = f",{look}" if look else ""
@@ -120,7 +146,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
     griffe = _griffe(segmente, fps)
     ereignisse = effekte.zeitleiste(liste)  # leer ohne Effekte (an = false oder version 3)
     zooms = effekt_filter.zooms_je_segment(liste, ereignisse, griffe)
-    flashes = effekt_filter.je_segment(liste, ereignisse, griffe, ("flash",))
+    bild = effekt_filter.je_segment(liste, ereignisse, griffe, effekte.BILD)   # Katalog nur aufs Spielbild
     look = effekt_filter.look_der_liste(liste) if hoch else ""  # 16:9: einmal global (effekt_filter.global_kette)
     teile, laengen = [], []
     for i, (s, (vorne, hinten)) in enumerate(zip(segmente, griffe)):
@@ -133,7 +159,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
             eingang = s["quelle_start_s"] - vorne
             tempo_v, tempo_a = effekt_filter.tempo_video(fenster, eingang), effekt_filter.tempo_ton(i, s, eingang)
         teile.append(_bild(i, b, h, fps, hoch, effekt_filter.zoom(i, zooms[i]) if i in zooms else "", look, tempo_v,
-                           effekt_filter.flash(flashes[i]) if i in flashes else ""))
+                           effekt_filter.bildfilter(bild[i], b) if i in bild else ""))
         teile.append(_ton(i, spuren[i], laenge, bool(s.get("stimmen", True)), tempo_a))
     # Verketten: offset_i = bisherige Länge − Übergangsdauer (siehe Herleitung in docs/ENTSCHEIDUNGEN.md E8)
     v, a, gesamt = "[v0]", "[a0]", laengen[0]
@@ -259,8 +285,10 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
         graph = graph.replace("null[vout]", "format=nv12,hwupload[vout]")
     ziel.parent.mkdir(parents=True, exist_ok=True)
     tmp = ziel.with_name(ziel.stem + ".tmp" + ziel.suffix)
+    graph_datei = ziel.with_name(ziel.stem + ".filtergraph.txt")   # nur bei großem Graphen, danach wieder weg
     befehl = befehl[:4] + eingang + befehl[4:]
-    befehl += ["-filter_complex", graph, "-map", "[vout]", "-map", "[aout]", "-t", f"{gesamt:.3f}", *video, *rate]
+    befehl += [*_graph_argumente(graph, graph_datei), "-map", "[vout]", "-map", "[aout]", "-t", f"{gesamt:.3f}",
+               *video, *rate]
     befehl += ["-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(tmp)]
     try:
         fuehre_aus(befehl, f"Entwurf {liste['name']}")
@@ -269,6 +297,8 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
             return rendere(liste, ziel, konfig, final=final, max_bytes=max_bytes, encoder_name="libx264",
                            volle_aufloesung=volle_aufloesung, crf=crf, kbit_max=kbit_max)
         raise
+    finally:
+        graph_datei.unlink(missing_ok=True)
     groesse = tmp.stat().st_size
     if not final and groesse > max_bytes:
         tmp.unlink(missing_ok=True)
