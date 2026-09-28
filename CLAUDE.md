@@ -191,3 +191,14 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   (vorher ohne `stdin=DEVNULL`, ohne `--no-session-persistence`; `caption` sogar fest `"claude"` statt
   `[decide].programm`). Rückgabeform je Aufrufer unverändert, n8n-Vertrag unangetastet. Neue Schemas
   `momente_stimmung`, `beschreibung`.
+- 2026-09-28 (B5, Florian: „nicht jeden Clip freigeben und bewerten müssen – das kann eine KI schneller, sagen
+  will ich trotzdem, was hochgeladen wird“): **Lern-Bot filtert automatisch vor**, als Zusatz zum bestehenden
+  Bewertungsweg (nichts entfernt). Neu `[lernbot].auto_schwelle` (Standard 0,0 = aus): liegt die Erwartung
+  (`erwartung.py`, die schon vorhandene Vorhersage „gibst du 👍?“) eines frisch gebauten Entwurfs darunter, wird er
+  still verworfen (`entwuerfe.auto_verworfen`, kein Foto an dich) und der Bot baut automatisch den nächsten – bis zu
+  `auto_versuche_max` (Standard 3), danach kommt der letzte Versuch trotzdem durch. Neue Funktion
+  `erwartung.vorhersage` (wie `festschreiben`, aber ohne zu speichern) – ein still verworfener Entwurf bekommt
+  bewusst KEINE Zeile in `erwartungen`/`entwurf_bewertungen`, sonst würde die Erwartung ihr eigenes Urteil als
+  Treffer zählen (Zirkelschluss). Du siehst weiterhin jeden Entwurf, der die Schwelle schafft, mit den normalen
+  👍/👎-Knöpfen – die letzte Entscheidung bleibt bei dir. `/stand` zeigt zusätzlich, wie viele automatisch aussortiert
+  wurden.
