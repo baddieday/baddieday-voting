@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import time
 import unittest
 from datetime import datetime, timedelta
@@ -34,6 +35,28 @@ class Caption(MitSpeicher):
         self.assertTrue(caption.pruefe_ki_text("Triple in 6 Sekunden, Platz 3 🔥", fakten, 150))
         self.assertFalse(caption.pruefe_ki_text("Triple in 4 Sekunden mit der Pumpgun", fakten, 150))
         self.assertFalse(caption.pruefe_ki_text("x" * 151, fakten, 150))
+
+
+class KiBeschreibung(MitSpeicher):
+    """B4 (27.09.): caption.ki_beschreibung über claude_aufruf.frage_json statt eigenem subprocess.run."""
+
+    FAKTEN = {"kills": 3, "sekunden": 6, "typ": "triple", "victory_royale": False, "platzierung": 3, "kills_match": 7}
+
+    def _lauf(self, ergebnis: str):
+        huelle = {"is_error": False, "result": ergebnis}
+        return subprocess.CompletedProcess([], 0, stdout=json.dumps(huelle), stderr="")
+
+    def test_gueltige_antwort_kommt_durch(self):
+        fertig = self._lauf('{"beschreibung": "Triple in 6 Sekunden, Platz 3 🔥"}')
+        with mock.patch("shutil.which", return_value="claude"), mock.patch("subprocess.run", return_value=fertig) as lauf:
+            text = caption.ki_beschreibung(self.FAKTEN, timeout_s=10, max_laenge=150, konfig=self.konfig)
+        self.assertEqual(text, "Triple in 6 Sekunden, Platz 3 🔥")
+        self.assertEqual(lauf.call_args.args[0][0], "claude")
+
+    def test_erfundene_zahl_wird_verworfen(self):
+        fertig = self._lauf('{"beschreibung": "Triple in 4 Sekunden mit der Pumpgun"}')
+        with mock.patch("shutil.which", return_value="claude"), mock.patch("subprocess.run", return_value=fertig):
+            self.assertIsNone(caption.ki_beschreibung(self.FAKTEN, timeout_s=10, max_laenge=150, konfig=self.konfig))
 
 
 class Aufraeumen(MitSpeicher):

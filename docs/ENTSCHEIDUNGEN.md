@@ -408,7 +408,11 @@ Prüfer-Panel und nach Florians Antworten (`docs/SPRINT-LOG-LERNSCHLEIFE.md`).
   `CLAUDE_CONFIG_DIR` nichts ins Home (geprüft mit claude 2.1.281 im Container, 🏠 am Mini). Rückfall
   `screenshot_claude = false`. (R2.)
 - **A18 claude_aufruf** ist die gemeinsame Hilfe für neue Aufrufe; `decide`/`stimmung` bleiben vorerst, die
-  Wochenzahl zählt deshalb nur neue Aufrufe.
+  Wochenzahl zählt deshalb nur neue Aufrufe. ~~Ersetzt durch B4 (27.09.)~~: `decide`, `stimmung` und
+  `caption.ki_beschreibung` rufen jetzt ebenfalls `claude_aufruf.frage_json` auf (vorher ohne `stdin=DEVNULL`,
+  ohne `--no-session-persistence`, `caption` sogar fest `"claude"` statt `[decide].programm`) – nur der
+  Unterbau ist gemeinsam, keiner der drei zählt `protokolliere` und damit in die Wochenzahl, das bleibt wie
+  bisher nur Screenshot und Wochen-Analyst vorbehalten.
 - **A19 /publikum** nur im Lern-Bot.
 - **A20 Neue Lern-Bot-Tests** in eigenen Dateien (Spec §13 sagt „test_lernbot.py erweitert“) – wegen paralleler Pakete
   und R2.0.

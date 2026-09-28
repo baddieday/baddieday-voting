@@ -1,9 +1,10 @@
 """Ein `claude -p`-Aufruf mit JSON-Antwort und Schema-Prüfung – einmal sauber, statt in jedem Modul neu.
 
-Warum es das gibt: Das Muster steht schon zweimal im Code (verarbeitung.frage_claude für `decide`,
-stimmung.frage_claude für die Stimmung). Die Lernschleife braucht es zweimal mehr (Screenshot, Wochen-Analyst).
-Statt einer dritten und vierten Kopie gibt es diese Hilfsfunktion; die beiden alten Stellen bleiben vorerst,
-wie sie sind (der `decide`-Pfad gehört zum n8n-Vertrag und wird in diesem Sprint nicht angefasst).
+Warum es das gibt: Das Muster stand schon zweimal im Code (verarbeitung.frage_claude für `decide`,
+stimmung.frage_claude für die Stimmung), beide ohne `stdin=DEVNULL` und ohne `--no-session-persistence`. Die
+Lernschleife brauchte es zweimal mehr (Screenshot, Wochen-Analyst). B4 (27.09.) hat auch `decide`, `stimmung`
+und `caption.ki_beschreibung` hierauf umgestellt – der `decide`-Pfad bleibt trotzdem im n8n-Vertrag unverändert
+(gleiche Eingabe/Ausgabe, nur der Unterbau ist jetzt gemeinsam).
 
 Was beim Aufruf passiert (wie bisher, CLAUDE.md „KI-Entscheidungen“):
   1. `shutil.which([decide].programm)` – ohne claude kein Aufruf, sondern ein Hinweis.

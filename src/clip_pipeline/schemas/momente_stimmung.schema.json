@@ -1,0 +1,8 @@
+{
+  "$comment": "Antwort von claude -p in stimmung.frage_claude. Nur die Grobform wird geprüft – jeder Eintrag wird danach in Python gegen erlaubte ids/Stimmungen geprüft; ein unbekannter Wert wird dort einzeln verworfen, ist also kein Schema-Fehler.",
+  "type": "object",
+  "required": ["momente"],
+  "properties": {
+    "momente": {"type": "array"}
+  }
+}
