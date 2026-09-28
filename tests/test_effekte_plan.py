@@ -311,17 +311,44 @@ class Uebergaenge(unittest.TestCase):
         self.assertEqual(effekte.uebergang("spannend", 2, False, p, True, 0), ("glitch", 0.2))
         self.assertEqual(effekte.uebergang("spannend", 2, False, p, True, 1), ("whip", 0.25))  # max_glitch 1
         self.assertEqual(effekte.uebergang("spannend", 0, True, p, True, 0), ("schnitt", 0.0))  # in den Höhepunkt
-        self.assertEqual(effekte.uebergang("lustig", 4, True, p, True, 0), ("squeeze", 0.3))
+        self.assertEqual(effekte.uebergang("lustig", 4, True, p, True, 0), ("squeezev", 0.3))
         self.assertEqual(effekte.uebergang("episch", 1, False, {**p, "uebergang_faktor": 2.0}, True, 0), ("whip", 0.5))
         for s, (art, d) in regie.UEBERGANG.items():  # aus = wie bisher
             self.assertEqual(effekte.uebergang(s, 1, True, p, False, 5), (art, d))
-        ks = [kandidat(f"m{i}", {"kill_sekunden": [6.0]}, stimmung="spannend", dauer=20.0) for i in range(9)]
-        fx, _ = effekte.einstellungen(fx_konfig())
-        segs = regie.plane_zeitleiste(ks, BEATS, regie.FORMATE["zusammenschnitt"], dict(regie.PARAMETER), 60, fx)
-        arten = [s["uebergang"]["art"] for s in segs]
-        self.assertEqual(arten.count("glitch"), 1)
-        self.assertEqual(arten[-1], "schnitt")
-        self.assertIn("whip", arten)
+
+    def test_mix_ohne_wiederholung_deterministisch(self):
+        # 28.09. (Florian: „immer die gleichen Übergänge“): plane_zeitleiste mischt den Pool je Stimmung – jede Art
+        # einmal je Runde, nie dieselbe weiche Art zweimal nacheinander, höchstens ein Glitch, Höhepunkt = Schnitt
+        def arten_fuer(ks):
+            fx, _ = effekte.einstellungen(fx_konfig())
+            segs = regie.plane_zeitleiste(ks, BEATS, regie.FORMATE["zusammenschnitt"], dict(regie.PARAMETER), 60, fx)
+            return [s["uebergang"]["art"] for s in segs]
+
+        ks = [kandidat(f"m{i}", {"kill_sekunden": [6.0]}, stimmung="spannend", dauer=20.0) for i in range(14)]
+        arten = arten_fuer(ks)
+        pool = {a for a, _ in effekte.PROFIL["spannend"]["uebergaenge"]}
+        self.assertEqual(arten[0], "schnitt")                  # erstes Segment: immer Schnitt
+        self.assertEqual(arten[-1], "schnitt")                 # spannender Höhepunkt: harter Schnitt
+        self.assertEqual(arten.count("glitch"), 1)             # max_glitch 1, in der ersten Runde einmal gezogen
+        self.assertEqual(set(arten[1:-1]), pool)               # 12 Züge aus 10 Arten: jede kam dran
+        for a, b in zip(arten[1:-1], arten[2:-1]):
+            if a != "schnitt":
+                self.assertNotEqual(a, b, arten)               # keine doppelte weiche Art
+        self.assertEqual(arten_fuer(ks), arten)                # deterministisch (Seed = Momentfolge)
+        anders = arten_fuer([ks[0], *reversed(ks[1:])])
+        self.assertEqual(len(anders), len(arten))
+        self.assertNotEqual(anders, arten)                     # andere Momentfolge -> anderer Mix
+        # Der Mix selbst mit winzigem Pool: genau ein Glitch (Deckel), danach bleibt nur die andere Art – und er
+        # bleibt nie auf dem Whip-Rückfall hängen (den gibt es nur, wenn der Pool allein aus Glitch besteht)
+        mix, folge, glitches = effekte.Uebergangsmix("x"), [], 0
+        for _ in range(6):
+            art, _d = mix.waehle("frustriert", [("glitch", 0.2), ("fadeblack", 0.5)], glitches, 1)
+            glitches += art == "glitch"
+            folge.append(art)
+        self.assertEqual((folge.count("glitch"), folge.count("fadeblack")), (1, 5))
+        nur_glitch = effekte.Uebergangsmix("y")
+        self.assertEqual(nur_glitch.waehle("spannend", [("glitch", 0.2)], 0, 1), ("glitch", 0.2))
+        self.assertEqual(nur_glitch.waehle("spannend", [("glitch", 0.2)], 1, 1), ("whip", 0.25))
 
     def test_hektik_daempft_nur_akzent(self):
         # Ü1: kein Blitz/Wackeln/Glitch-Ereignis mehr – „zu hektisch“ dämpft nur die Beat-Akzente. Übergänge, auch

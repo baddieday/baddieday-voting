@@ -129,9 +129,12 @@
             "required": ["art", "dauer_s"],
             "additionalProperties": false,
             "properties": {
-              "art": {"type": "string", "enum": ["schnitt", "fade", "fadeblack", "fadewhite", "wipeleft", "slideleft", "circleopen",
-                                                  "whip", "zoom", "glitch", "squeeze", "dissolve"],
-                      "$comment": "whip, zoom, glitch, squeeze, dissolve sind eigene Namen – die ffmpeg-Art bestimmt der Renderer"},
+              "art": {"type": "string", "enum": ["schnitt", "fade", "fadeblack", "fadewhite", "wipeleft", "wiperight", "wipeup",
+                                                  "wipedown", "slideleft", "slideright", "slideup", "slidedown", "circleopen",
+                                                  "circleclose", "radial", "smoothleft", "smoothright", "smoothup", "smoothdown",
+                                                  "diagtl", "diagbr", "hblur", "squeezev", "coverleft", "revealright",
+                                                  "whip", "whip_up", "whip_right", "zoom", "glitch", "squeeze", "dissolve", "flash"],
+                      "$comment": "whip*, zoom, glitch, squeeze, dissolve, flash sind eigene Namen – die ffmpeg-Art bestimmt der Renderer (effekt_filter.XFADE)"},
               "dauer_s": {"type": "number", "minimum": 0, "maximum": 3}
             }
           }

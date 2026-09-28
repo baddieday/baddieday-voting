@@ -614,8 +614,10 @@ def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: d
     fx = fx or {"an": False}
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
     segmente, t = [], 0.0
-    je_stimmung: dict[str, int] = {}   # Rotation der Übergänge: frühere Momente derselben Stimmung
+    je_stimmung: dict[str, int] = {}   # Rotation der Übergänge (ohne Mix): frühere Momente derselben Stimmung
     glitches = 0
+    # 28.09.: gemischte Übergänge ohne Wiederholung; Seed = Momentfolge, damit derselbe Entwurf gleich gebaut wird
+    mix = effekte.Uebergangsmix("|".join(k.schluessel for k in reihe)) if fx["an"] else None
     for k in reihe:
         # Am Dateiende 0,25 s frei lassen: Schnitt/Übergang brauchen dort noch Bilder (entwurf._griffe, UEBERHANG_S)
         nutzbar = max(0.5, k.dauer_s - 0.25)
@@ -641,7 +643,7 @@ def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: d
             if teil == 1 and nr > 1:
                 art, dauer = effekte.uebergang(k.stimmung, je_stimmung.get(k.stimmung, 0), k is reihe[-1], p,
                                                bool(fx["an"]), glitches, profil_=fx.get("profile", {}).get(k.stimmung),
-                                               max_glitch=int(fx.get("max_glitch", 1)))
+                                               max_glitch=int(fx.get("max_glitch", 1)), mix=mix)
                 glitches += art == "glitch"
                 uebergang = {"art": art, "dauer_s": dauer}
             else:  # erstes Segment, Jump-Cut innerhalb des Moments

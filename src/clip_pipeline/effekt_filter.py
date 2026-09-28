@@ -23,9 +23,13 @@ from pathlib import Path
 
 from . import effekte, shorts
 
-# Eigene Übergangsnamen -> xfade. Harter Schnitt = fade über ein einziges Bild (siehe entwurf.schnitt_dauer)
-XFADE = {"schnitt": "fade", "whip": "slideleft", "zoom": "zoomin", "glitch": "pixelize", "squeeze": "squeezeh",
-         "dissolve": "dissolve"}
+# Eigene Übergangsnamen -> xfade. Harter Schnitt = fade über ein einziges Bild (siehe entwurf.schnitt_dauer).
+# Alle anderen Arten des Schemas heißen wie bei xfade. flash = kurze Weißblende (Florian 28.09.: „ruhig viral“).
+XFADE = {"schnitt": "fade", "whip": "slideleft", "whip_up": "slideup", "whip_right": "slideright", "zoom": "zoomin",
+         "glitch": "pixelize", "squeeze": "squeezeh", "dissolve": "dissolve", "flash": "fadewhite"}
+# Whip-Arten mit Bewegungsunschärfe in der Blende: waagrecht (Schwenk nach links/rechts) bzw. senkrecht
+WHIP_WAAGRECHT = ("whip", "whip_right")
+WHIP_SENKRECHT = ("whip_up",)
 
 # Zoom je Art: (Zoom je Stärke 1, hinein s, halten s) – zurück in der restlichen Dauer, weich ((1−u)²)
 ZOOM_FORM = {"punch": (0.25, 0.05, 0.0), "akzent": (0.06, 0.05, 0.0), "meme": (0.20, 0.08, 0.60)}
@@ -128,8 +132,10 @@ def fenster(uebergaenge: list[tuple[str, float, float, float]], b: int) -> list[
     gemessen 9 ms je Bild bei 720×1280, für 0,2 s Glitch. chromashift versetzt die Farbanteile direkt.
     Übergänge immer mit Stärke 1 (§4)."""
     teile = []
-    if whip := [(a, e) for art, a, e, _s in uebergaenge if art == "whip"]:
+    if whip := [(a, e) for art, a, e, _s in uebergaenge if art in WHIP_WAAGRECHT]:
         teile.append(f"avgblur=sizeX={max(1, round(48 * b / 1080))}:sizeY=1:enable='{_zeiten(whip)}'")
+    if whip_v := [(a, e) for art, a, e, _s in uebergaenge if art in WHIP_SENKRECHT]:
+        teile.append(f"avgblur=sizeX=1:sizeY={max(1, round(48 * b / 1080))}:enable='{_zeiten(whip_v)}'")
     if glitch := [(a, e) for art, a, e, _s in uebergaenge if art == "glitch"]:
         r = max(1, round(10 * b / 1080))  # in Farbanteil-Pixeln (halbe Breite): 20 Bildpunkte bei 1080
         an = f"enable='{_zeiten(glitch)}'"

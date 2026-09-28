@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import bisect
 import copy
+import random
 from dataclasses import dataclass
 
 from . import schema
@@ -73,28 +74,37 @@ VERGROESSERND = {"zoom"}              # Übergänge, die das GANZE Bild vergrö�
 RANG_FINISHER, RANG_MEME, RANG_PUNCH, RANG_AKZENT = 3, 2, 1, 0
 
 _GEMEINSAM = {"mini_faktor": 0.5, "titel_ab_kette": 2}
-# Stärken 0..1 je Stimmung (0 = aus). uebergaenge: Rotation (Art, Dauer s) für die Übergänge IN Momente dieser Stimmung.
+# Stärken 0..1 je Stimmung (0 = aus). uebergaenge: Pool (Art, Dauer s) für die Übergänge IN Momente dieser Stimmung –
+# der Uebergangsmix zieht daraus in gemischten Runden ohne direkte Wiederholung (28.09., Florian: „immer die gleichen
+# Übergänge, das ist langweilig“); ohne Mix (Tests, alte Aufrufer) gilt die Reihenfolge als Rotation.
 PROFIL = {
     "episch": {**_GEMEINSAM, "punch": 0.7, "titel": 1.0, "zaehler": 1.0, "akzent": 0.5, "max_ruhe_s": 2.5,
                "meme": 0.0, "tod_punch": 0.0, "basshit": 0.9, "tick": 0.5, "whoosh": 0.6, "pop": 0.0,
                "einschlag": 0.0, "riser": 0.6, "lupe": 0.8, "look": ("cinematic", 0.8),
-               "uebergaenge": [("schnitt", 0.0), ("whip", 0.25), ("schnitt", 0.0), ("zoom", 0.3)]},
+               "uebergaenge": [("schnitt", 0.0), ("whip", 0.25), ("zoom", 0.3), ("schnitt", 0.0), ("whip_up", 0.25),
+                               ("flash", 0.15), ("radial", 0.3), ("smoothleft", 0.3), ("glitch", 0.2),
+                               ("coverleft", 0.3)]},
     "spannend": {**_GEMEINSAM, "punch": 0.5, "titel": 1.0, "zaehler": 0.8, "akzent": 0.4, "max_ruhe_s": 2.5,
                  "meme": 0.0, "tod_punch": 0.0, "basshit": 0.7, "tick": 0.4, "whoosh": 0.6, "pop": 0.0,
                  "einschlag": 0.0, "riser": 0.5, "lupe": 0.5, "look": ("kalt", 0.6),
-                 "uebergaenge": [("whip", 0.25), ("schnitt", 0.0), ("glitch", 0.2), ("schnitt", 0.0)]},
+                 "uebergaenge": [("whip", 0.25), ("schnitt", 0.0), ("glitch", 0.2), ("zoom", 0.3), ("whip_right", 0.25),
+                                 ("hblur", 0.3), ("circleclose", 0.3), ("schnitt", 0.0), ("diagtl", 0.3),
+                                 ("flash", 0.12)]},
     "lustig": {**_GEMEINSAM, "punch": 0.3, "titel": 1.0, "zaehler": 0.4, "akzent": 0.3, "max_ruhe_s": 3.0,
                "meme": 0.8, "tod_punch": 0.0, "basshit": 0.0, "tick": 0.3, "whoosh": 0.4, "pop": 0.5,
                "einschlag": 0.0, "riser": 0.0, "lupe": 0.0, "look": ("warm", 0.5),
-               "uebergaenge": [("wipeleft", 0.3), ("squeeze", 0.3), ("slideleft", 0.3)]},
+               "uebergaenge": [("wipeleft", 0.3), ("squeeze", 0.3), ("slideleft", 0.3), ("wipeup", 0.3),
+                               ("squeezev", 0.3), ("circleopen", 0.35), ("slidedown", 0.3), ("revealright", 0.3),
+                               ("diagbr", 0.3)]},
     "frustriert": {**_GEMEINSAM, "punch": 0.3, "titel": 0.0, "zaehler": 0.6, "akzent": 0.0, "max_ruhe_s": None,
                    "meme": 0.0, "tod_punch": 0.3, "basshit": 0.4, "tick": 0.3, "whoosh": 0.0, "pop": 0.0,
                    "einschlag": 0.7, "riser": 0.0, "lupe": 0.6, "look": ("entsaettigt", 0.7),
-                   "uebergaenge": [("fadeblack", 0.5), ("glitch", 0.2)]},
+                   "uebergaenge": [("fadeblack", 0.5), ("glitch", 0.2), ("hblur", 0.4), ("fade", 0.4),
+                                   ("smoothdown", 0.4)]},
     "chill": {**_GEMEINSAM, "punch": 0.0, "titel": 1.0, "zaehler": 0.0, "akzent": 0.0, "max_ruhe_s": None,
               "meme": 0.0, "tod_punch": 0.0, "basshit": 0.0, "tick": 0.0, "whoosh": 0.25, "pop": 0.0,
               "einschlag": 0.0, "riser": 0.0, "lupe": 0.0, "look": ("soft", 0.3),
-              "uebergaenge": [("fade", 0.8), ("dissolve", 0.6)]},
+              "uebergaenge": [("fade", 0.8), ("dissolve", 0.6), ("smoothright", 0.8), ("circleopen", 0.7)]},
 }
 STAERKEN = {"mini_faktor", "punch", "titel", "zaehler", "akzent", "meme", "tod_punch", "basshit", "tick", "whoosh",
             "pop", "einschlag", "riser", "lupe"}
@@ -253,17 +263,58 @@ def kills_mit_anker(mk: dict) -> list[tuple[float, float]]:
 
 # --- Übergänge -----------------------------------------------------------------------------
 
+class Uebergangsmix:
+    """Zieht die Übergänge eines Entwurfs aus dem Pool je Stimmung (Profil „uebergaenge“).
+
+    Deterministisch aus einem Seed (regie: die Momentfolge) – derselbe Entwurf wird immer gleich gebaut, ein anderer
+    bekommt andere Übergänge. Gemischte Runden: jede Art des Pools kommt einmal dran, bevor eine wiederkommt; nie
+    zweimal dieselbe weiche Art nacheinander (harte Schnitte dürfen sich folgen); höchstens max_glitch Glitches,
+    danach die nächste Art der Runde. Beispiel: Pool [whip, schnitt, glitch] → z. B. glitch, whip, schnitt | schnitt,
+    whip, (glitch gesperrt) …"""
+
+    def __init__(self, seed: str):
+        self._rnd = random.Random(seed)
+        self._runden: dict[str, list[tuple[str, float]]] = {}
+        self.letzte: str | None = None
+
+    def waehle(self, stimmung: str, pool: list[tuple[str, float]], glitch_zaehler: int,
+               max_glitch: int) -> tuple[str, float]:
+        def ohne_gedeckelte(runde: list[tuple[str, float]]) -> list[tuple[str, float]]:
+            return [x for x in runde if x[0] != "glitch"] if glitch_zaehler >= max_glitch else runde
+
+        rest = ohne_gedeckelte(self._runden.get(stimmung) or [])
+        if not rest:  # Runde aufgebraucht (oder nur Gedeckeltes übrig): neue Runde mischen
+            rest = list(pool)
+            self._rnd.shuffle(rest)
+            rest = ohne_gedeckelte(rest)
+        if not rest:  # Pool besteht nur aus Glitch
+            self._runden[stimmung], self.letzte = rest, "whip"
+            return "whip", 0.25
+        # nie dieselbe weiche Art nacheinander; geht es nicht anders (winziger Pool), die erste der Runde
+        n = next((n for n, (art, _) in enumerate(rest) if art == "schnitt" or art != self.letzte), 0)
+        art, dauer = rest.pop(n)
+        self._runden[stimmung] = rest
+        self.letzte = art
+        return art, dauer
+
+
 def uebergang(stimmung: str, index: int, ist_hoehepunkt: bool, p: dict, an: bool, glitch_zaehler: int, *,
-              profil_: dict | None = None, max_glitch: int = STANDARD["max_glitch"]) -> tuple[str, float]:
-    """Übergang in einen Moment: (Art, Dauer s). Aus: regie.UEBERGANG wie bisher. An: Rotation aus dem Profil
-    (index = frühere Momente derselben Stimmung); in einen epischen/spannenden Höhepunkt harter Schnitt auf den
-    Drop; mehr als max_glitch Glitches -> Whip. Dauer × uebergang_faktor."""
+              profil_: dict | None = None, max_glitch: int = STANDARD["max_glitch"],
+              mix: Uebergangsmix | None = None) -> tuple[str, float]:
+    """Übergang in einen Moment: (Art, Dauer s). Aus: regie.UEBERGANG wie bisher. An: aus dem Pool des Profils –
+    mit mix (regie.plane_zeitleiste) gemischt ohne Wiederholung (Uebergangsmix), ohne mix als Rotation
+    (index = frühere Momente derselben Stimmung, mehr als max_glitch Glitches -> Whip); in einen
+    epischen/spannenden Höhepunkt harter Schnitt auf den Drop. Dauer × uebergang_faktor."""
     if not an:
         from .regie import UEBERGANG
 
         art, dauer = UEBERGANG[stimmung]
     elif ist_hoehepunkt and stimmung in ("episch", "spannend"):
         art, dauer = "schnitt", 0.0
+        if mix is not None:
+            mix.letzte = art
+    elif mix is not None:
+        art, dauer = mix.waehle(stimmung, (profil_ or PROFIL[stimmung])["uebergaenge"], glitch_zaehler, max_glitch)
     else:
         folge = (profil_ or PROFIL[stimmung])["uebergaenge"]
         art, dauer = folge[index % len(folge)]
