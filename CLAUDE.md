@@ -233,3 +233,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   sind, schaltet `clip-mikro` ein (`clip-aufraeumen` bleibt aus), startet beide Bots neu und schreibt ein
   Rückweg-Skript. Dafür kam der Sprint-Stand Lernschleife (82 Commits, 26.–28.09.) nach `main` – ohne neue volle
   Suite (letzte volle bei PR #19, danach breiter Lauf 255 Tests zu 2.1/2.2). Windows-Skript und pve-big unverändert.
+- 2026-09-28 (Florian: „über 100-mal gesagt, dass die Shorts zu kurz sind“): **„⏱️ zu kurz“ wirkt jetzt über 45 s
+  hinaus.** Ursache: Der gelernte `dauer_faktor` war auf 1,0 gedeckelt, und die Short-Obergrenze 45 s stand nur in
+  `[regie.formate]` (lokal.toml) – nach 1–3 Stimmen war Schluss, jede weitere verpuffte ohne sichtbare Wirkung. Neu:
+  Deckel 2,0; über 1,0 wächst das Format mit (`regie.dauer_skaliert`: min_s und max_s × Faktor, Short bis 60–90 s,
+  Segment- und Serien-Grenzen bleiben – länger heißt mehr Momente). Alle gespeicherten Stimmen wirken sofort neu
+  (Lernen rechnet jedes Mal alles nach). `pipeline lernstand` zeigt immer „Short-Länge: n× zu kurz, n× zu lang …“.
