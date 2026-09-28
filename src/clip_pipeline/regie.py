@@ -89,6 +89,16 @@ def format_regeln(konfig, fmt_name: str) -> tuple[dict, list[str]]:
     return fmt, hinweise
 
 
+def dauer_skaliert(fmt: dict, dauer_faktor: float) -> dict:
+    """Gelernte Ziel-Dauer über 100 % (28.09.): hebt Mindest- und Höchstdauer des Formats mit an. Vorher war max_s die
+    feste Decke (Short 45 s): „⏱️ zu kurz“ hob den Faktor nur bis 1,0, jede weitere Stimme verpuffte. Bis 100 % bleibt
+    das Format, wie es ist, und nur das Ziel darin sinkt („⏳ zu lang“). Segment- und Serien-Grenzen bleiben: länger
+    heißt mehr Momente, nicht längere Schnitte."""
+    if dauer_faktor <= 1.0:
+        return fmt
+    return {**fmt, "min_s": round(fmt["min_s"] * dauer_faktor, 1), "max_s": round(fmt["max_s"] * dauer_faktor, 1)}
+
+
 # Rangfolge der Stimmungen. Seit Stufe 2 (Spec §8.2) nicht mehr Teil der Momentstärke, nur noch Tiebreak bei der
 # Musikwahl (gleich lange Anteile: die "stärkere" Stimmung bestimmt die Musik). Rückfrage S2-R2
 # (docs/ENTSCHEIDUNGEN.md) ist offen: eventuell kommt sie als Stimmungs-Bonus in `punkte` zurück.
@@ -103,7 +113,7 @@ PARAMETER = {
     "puffer_nach_s": 1.5,         # nach dem letzten Kill
     "seg_min_faktor": 1.0,        # Mindestlänge je Segment ("zu hektisch" -> länger)
     "beats_pro_schnitt": 1,       # nur auf jedem n-ten Beat schneiden ("zu hektisch" -> 2, 4)
-    "dauer_faktor": 1.0,          # Ziel-Gesamtdauer ("zu lang" -> kürzer)
+    "dauer_faktor": 1.0,          # Ziel-Gesamtdauer ("zu lang" -> kürzer, "zu kurz" -> länger, bis 2,0)
     "uebergang_faktor": 1.0,      # Länge der Übergänge
     "musik_pegel": 0.35,
     "stimmung_bonus": {},         # Stimmung -> Zusatzpunkte ("Stimmung getroffen" + 👍)
@@ -465,7 +475,8 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandid
     if hinweis:
         hinweise.append(hinweis)
     vorrat = sum(laenge(k) for k in auswahl)
-    ziel = min(fmt["max_s"], max(fmt["min_s"], 0.8 * vorrat)) * p["dauer_faktor"]
+    # über 1,0 ist das Format selbst schon länger (dauer_skaliert) – hier wirkt nur noch der Teil unter 100 %
+    ziel = min(fmt["max_s"], max(fmt["min_s"], 0.8 * vorrat)) * min(1.0, float(p["dauer_faktor"]))
     ziel = min(fmt["max_s"], max(fmt["min_s"], ziel))
     if vorrat < fmt["min_s"]:
         hinweise.append(f"nur {vorrat:.0f} s Material – kürzer als {fmt['min_s']:.0f} s")
@@ -767,6 +778,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     fmt, hinweise = format_regeln(konfig, fmt_name)
     hinweise = [*(hinweise_vorab or []), *hinweise]
     p = {**PARAMETER, **(parameter or {})}
+    fmt = dauer_skaliert(fmt, float(p["dauer_faktor"]))   # „⏱️ zu kurz“ über 100 %: Format wird länger (28.09.)
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
     fx, fx_hinweise = effekte.einstellungen(konfig)
     frueher = gezeigte_momente(con)
