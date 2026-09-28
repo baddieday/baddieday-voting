@@ -7,6 +7,7 @@ begrenzten Schritt:
   zu hektisch         Segmente länger (+15 %), Übergänge länger (+10 %); ab +30 % nur jeden 2., ab +70 % jeden 4. Beat;
                       effekt_hektik ×0,9 (0,3 … 1,3): Beat-Akzente und Impacts (Blitz, Wackeln, RGB) schwächer
   zu lang             Ziel-Dauer −10 % (höchstens bis 60 %)
+  zu kurz             Ziel-Dauer +11 % (÷0,9) bis 200 %: über 100 % wächst das Format mit (Short 45 s → bis 90 s)
   abgeschnitten       mehr Vorlauf (+0,5 s) und Nachlauf (+0,3 s) um die Kills
   Musik passt nicht   dieser Titel bekommt einen Abzug (−1 je Nennung)
   Stimmung getroffen  die Hauptstimmung bekommt Bonus (+0,5), und die Musik-Ziele dieser Stimmung rücken
@@ -28,7 +29,7 @@ import sqlite3
 from . import db, effekte
 from .konfig import Konfig
 from .musik import ZIEL
-from .regie import FORMATE, PARAMETER, format_regeln
+from .regie import FORMATE, PARAMETER, dauer_skaliert, format_regeln
 
 # Neue Gründe immer hinten anhängen: gespeicherte Bewertungen nennen die Schlüssel
 GRUENDE = {
@@ -73,7 +74,7 @@ def _liste(zeile: sqlite3.Row) -> dict:
 # Deine Vorgaben ([regie.vorgaben] in config/lokal.toml): erlaubte Schlüssel und ihre Grenzen
 VORGABE_GRENZEN = {
     "puffer_vor_s": (1.0, 6.0), "puffer_nach_s": (0.5, 4.0), "seg_min_faktor": (0.5, 2.0),
-    "dauer_faktor": (0.6, 1.0), "uebergang_faktor": (0.5, 2.0), "musik_pegel": (0.0, 1.0),
+    "dauer_faktor": (0.6, 2.0), "uebergang_faktor": (0.5, 2.0), "musik_pegel": (0.0, 1.0),
     "max_je_match": (1, 10), "beats_pro_schnitt": (1, 4), "abwechslung": (0.0, 1.0),
     "effekt_hektik": (0.3, 1.3),
     "cooldown_entwuerfe": (0, 12), "frische_quote": (0.0, 1.0),   # 27.09.: Abwechslung, siehe regie.PARAMETER
@@ -166,7 +167,9 @@ def _falte(zeilen: list, konfig: Konfig, energien: list[float], fmt: str | None)
         # blieb für immer unten, auch eine Vorgabe in lokal.toml ist nur der Startwert); beide zugleich: nichts
         kuerzer, laenger = "lang" in gruende, "kurz" in gruende
         if kuerzer != laenger:
-            p["dauer_faktor"] = _grenze(p["dauer_faktor"] * (0.9 if kuerzer else 1 / 0.9), 0.6, 1.0)
+            # 28.09.: Deckel 2,0 statt 1,0 – über 100 % wird das Format länger (regie.dauer_skaliert); vorher war bei
+            # 1,0 Schluss (Short 45 s), und jedes weitere „zu kurz“ verpuffte ohne Wirkung
+            p["dauer_faktor"] = _grenze(p["dauer_faktor"] * (0.9 if kuerzer else 1 / 0.9), *VORGABE_GRENZEN["dauer_faktor"])
         if "abgeschnitten" in gruende:
             p["puffer_vor_s"] = _grenze(p["puffer_vor_s"] + 0.5, 1.0, 6.0)
             p["puffer_nach_s"] = _grenze(p["puffer_nach_s"] + 0.3, 0.5, 4.0)
@@ -272,6 +275,20 @@ def wirkung(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> dict | None:
             "aenderungen": _unterschiede(vorher, nachher)}
 
 
+def dauer_zeile(zeilen: list, dauer_faktor: float) -> str:
+    """Auswertung deiner Längen-Stimmen für Shorts (28.09.): wie oft „zu kurz“/„zu lang“, wie oft beides zugleich
+    (hebt sich auf) und wo die Ziel-Dauer jetzt steht."""
+    gruende_je = [set(json.loads(z["gruende"] or "[]")) for z in zeilen if z["format"] == "short"]
+    kurz = sum(1 for g in gruende_je if "kurz" in g and "lang" not in g)
+    lang = sum(1 for g in gruende_je if "lang" in g and "kurz" not in g)
+    beide = sum(1 for g in gruende_je if "kurz" in g and "lang" in g)
+    text = (f"Short-Länge: {len(gruende_je)} Short-Bewertungen, {kurz}× „⏱️ zu kurz“, {lang}× „⏳ zu lang“"
+            + (f", {beide}× beides (hebt sich auf)" if beide else "") + f" → Ziel-Dauer {dauer_faktor:.0%}")
+    if dauer_faktor >= VORGABE_GRENZEN["dauer_faktor"][1]:
+        text += " (Höchstwert – länger nur über [regie.formate.short] max_s in lokal.toml)"
+    return text
+
+
 def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     p, ziel = aktuelle(con, konfig, "short")
     start, start_ziel, hinweise = vorgaben(konfig)
@@ -309,17 +326,14 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     teile.append(f"Zusammenschnitt ({n_zs} Bewertungen): dauer_faktor {zs['dauer_faktor']}, "
                  f"seg_min_faktor {zs['seg_min_faktor']}, puffer_vor_s {zs['puffer_vor_s']}, "
                  f"uebergang_faktor {zs['uebergang_faktor']}")
-    if p["dauer_faktor"] < 1.0:
-        gruende_je = [set(json.loads(z["gruende"] or "[]")) for z in zeilen if z["format"] == "short"]
-        lang = sum(1 for g in gruende_je if "lang" in g and "kurz" not in g)   # nur die, die gewirkt haben
-        kurz = sum(1 for g in gruende_je if "kurz" in g and "lang" not in g)
-        teile.append(f"Ziel-Dauer bei {p['dauer_faktor']:.0%} ({lang}× „⏳ zu lang“, {kurz}× „⏱️ zu kurz“) – "
-                     "„⏱️ zu kurz“ hebt sie wieder an")
-    for fmt_name in ("short", "zusammenschnitt"):
+    teile.append(dauer_zeile(zeilen, p["dauer_faktor"]))
+    for fmt_name, df in (("short", p["dauer_faktor"]), ("zusammenschnitt", zs["dauer_faktor"])):
         fmt, fmt_hinweise = format_regeln(konfig, fmt_name)
         standard = fmt == FORMATE[fmt_name]
+        fmt = dauer_skaliert(fmt, df)
         teile.append(f"{fmt_name}: {fmt['min_s']:.0f}–{fmt['max_s']:.0f} s, Segment bis {fmt['seg_max_s']:.0f} s, "
-                     f"Serie bis {fmt['serie_max_s']:.0f} s" + ("" if standard else " (deine Vorgabe [regie.formate])"))
+                     f"Serie bis {fmt['serie_max_s']:.0f} s" + ("" if standard else " (deine Vorgabe [regie.formate])")
+                     + (f" (gelernt: Dauer {df:.0%})" if df > 1.0 else ""))
         teile += [f"⚠️ {h}" for h in fmt_hinweise]
     geaendert = [s for s in ziel if ziel[s] != ZIEL[s]]  # durch Vorgabe oder "Stimmung getroffen"
     for s in geaendert:
