@@ -443,6 +443,29 @@ class LookUndBlenden(unittest.TestCase):
                                  "noise=alls=30:allf=t:all_seed=1:enable='between(t,1,1.2)+between(t,9,9.2)'"])
 
 
+class Impacts(unittest.TestCase):
+    """28.09.: Blitz (eq nur aufs Spielbild), Wackeln (Versatz im Zoom-Overlay), RGB-Stoß (chromashift-Fenster)."""
+
+    def test_flash_shake_rgb_im_graphen(self):
+        q = Path("/x/q.mp4")
+        liste = mini_liste([(q, 1.0, 7.0, ("schnitt", 0.0))], ereignisse=[
+            (1, "flash", 1.5, {"dauer_s": 0.12}), (1, "shake", 2.5, {"dauer_s": 0.25}), (1, "rgb", 3.5, {"dauer_s": 0.15})])
+        g = graph(liste)
+        zoom = beginnt_mit(g, "[zo0]")   # Spielbild: Zoom-Overlay mit Wackeln, danach der Blitz, dann [vgs0]
+        self.assertIn("overlay=x='(W-w)/2+between(t,2.5,2.75)*0.025*W*sin(87.9645*(t-2.5))*pow(1-(t-2.5)/0.25,2)'"
+                      ":y='(H-h)/2+between(t,2.5,2.75)*0.02*H*cos(69.115*(t-2.5))*pow(1-(t-2.5)/0.25,2)'"
+                      ":enable='between(t,2.5,2.75)',eq=brightness='between(t,1.5,1.62)*0.6*(1-(t-1.5)/0.12)':eval=frame"
+                      "[vgs0]", zoom)
+        self.assertNotIn("eq=brightness='between", beginnt_mit(g, "[hg0]"))      # nie auf dem Hintergrund
+        self.assertIn("chromashift=cbh=-7:crh=7:enable='between(t,3.5,3.65)'", g)
+        self.assertNotIn("noise=", g)                                            # Rauschen nur beim Glitch-Übergang
+        self.assertIn("between(t,2.5,2.75)*0.1*min(", beginnt_mit(g, "[zs0]"))   # Wackeln: Zoom 1,10 verdeckt den Rand
+        # ohne Wackeln bleibt der Zoom-Baustein wie vorher
+        nur_punch = graph(mini_liste([(q, 1.0, 7.0, ("schnitt", 0.0))], ereignisse=[(1, "punch", 2.0, {"dauer_s": 0.35})]))
+        self.assertIn("overlay=(W-w)/2:(H-h)/2:enable=", nur_punch)
+        self.assertNotIn("eq=brightness='between", nur_punch)
+
+
 class Tempo(unittest.TestCase):
     """28.09.: Zeitlupe/Zeitraffer im Graphen – setpts vor fps (stückweise linear in T), der Ton in Stücken."""
 

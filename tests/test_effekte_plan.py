@@ -1,8 +1,8 @@
-"""Regisseur 2.0, Effekt-Planer (effekte.py) und Schnittliste v4 – ohne Video, bis auf die compose-Klasse am Ende.
+"""Regisseur 2.0/2.1, Effekt-Planer (effekte.py) und Schnittliste v4 – ohne Video, bis auf die compose-Klasse am Ende.
 
-Spielbild clean (25.09.): nur Zoom (punch, akzent, meme), Übergänge und Look im Bild – kein Blitz, kein Wackeln, kein
-Glitch-Ereignis. Titel/Zähler im Short im unscharfen Rand, im 16:9 kein Zähler und der Titel nur in der Blende.
-Anker = mein Umhauen (aktion_sekunden), sonst der Kill; ein Titel je Serie an ihrem Ende."""
+Im Spielbild: Zoom (punch, akzent, meme, shake), Übergänge (Mix), Tempo (Zeitlupe/Zeitraffer), Look und seit 28.09.
+die Impacts flash/shake/rgb mit Stil-Rotation. Titel/Zähler im Short im unscharfen Rand, im 16:9 kein Zähler und
+der Titel nur in der Blende. Anker = mein Umhauen (aktion_sekunden), sonst der Kill; ein Titel je Serie an ihrem Ende."""
 
 import copy
 import json
@@ -17,8 +17,8 @@ from clip_pipeline.medien import MedienFehler
 from tests.regie_hilfen import MOMENTE, MitRegieMaterial
 from tests.test_regie_serie import BEATS, WIPE, kandidat, liste_um
 
-ERLAUBT = {"punch", "akzent", "meme", "titel", "zaehler", "sfx"}
-ZOOM = {"punch", "akzent", "meme"}
+ERLAUBT = {"punch", "akzent", "meme", "flash", "shake", "rgb", "titel", "zaehler", "sfx"}
+ZOOM = {"punch", "akzent", "meme", "shake"}
 
 
 def seg(nr, moment, qs, qe, zs, *, art="schnitt", d=0.0, stimmung="episch", teil=None, dauer=40.0):
@@ -197,7 +197,8 @@ class Plan(unittest.TestCase):
         frust = ein_moment({"kill_sekunden": [6.0, 8.0], "tod_sekunde": 12.0}, stimmung="frustriert")
         self.assertEqual(titel(frust), [])                                     # kein Titel
         self.assertEqual({(e["t_s"], e["art"], e.get("klang"), e["staerke"]) for _, e in ereignisse(frust)
-                          if e["t_s"] == 12.0}, {(12.0, "punch", None, 0.3), (12.0, "sfx", "einschlag", 0.7)})
+                          if e["t_s"] == 12.0},   # 28.09.: Tod = Wackeln (Stärke tod_punch) + Blitz + Einschlag
+                         {(12.0, "shake", None, 0.3), (12.0, "flash", None, 0.5), (12.0, "sfx", "einschlag", 0.7)})
         self.assertIn((8.0, "basshit", 0.4),
                       [(e["t_s"], e["klang"], e["staerke"]) for _, e in ereignisse(frust, "sfx")])
         chill = ein_moment({"kill_sekunden": [6.0, 8.0]}, stimmung="chill")
@@ -351,9 +352,9 @@ class Uebergaenge(unittest.TestCase):
         self.assertEqual(nur_glitch.waehle("spannend", [("glitch", 0.2)], 1, 1), ("whip", 0.25))
 
     def test_hektik_daempft_nur_akzent(self):
-        # Ü1: kein Blitz/Wackeln/Glitch-Ereignis mehr – „zu hektisch“ dämpft nur die Beat-Akzente. Übergänge, auch
-        # der Glitch-Übergang, haben immer Stärke 1 (§4)
-        self.assertEqual(effekte.HEKTISCH, {"akzent"})
+        # „zu hektisch“ dämpft die Beat-Akzente und (28.09.) die Impacts flash/shake/rgb – nicht Punch, Titel,
+        # Zähler, Klänge. Übergänge, auch der Glitch-Übergang, haben immer Stärke 1 (§4)
+        self.assertEqual(effekte.HEKTISCH, {"akzent", "flash", "shake", "rgb"})
         segs = [seg(1, "a", 0.0, 10.0, 0.0, stimmung="spannend"),
                 seg(2, "b", 2.0, 10.0, 10.0, art="glitch", d=0.2, stimmung="spannend"),
                 seg(3, "c", 2.0, 10.0, 18.0, art="whip", d=0.25, stimmung="spannend")]
@@ -366,7 +367,7 @@ class Uebergaenge(unittest.TestCase):
         self.assertEqual(effekte.uebergangs_fenster(ruhig), effekte.uebergangs_fenster(voll))
         self.assertEqual([f[3] for f in effekte.uebergangs_fenster(ruhig)], [1.0, 1.0])   # Glitch, Whip
         self.assertEqual({e["staerke"] for _, e in ereignisse(ruhig, "akzent")}, {0.2})  # 0,4 × 0,5
-        nicht_hektisch = lambda l: [(nr, e) for nr, e in ereignisse(l) if e["art"] != "akzent"]  # noqa: E731
+        nicht_hektisch = lambda l: [(nr, e) for nr, e in ereignisse(l) if e["art"] not in effekte.HEKTISCH]  # noqa: E731
         self.assertEqual(nicht_hektisch(ruhig), nicht_hektisch(voll))      # Punch, Titel, Zähler, Klänge gleich
         # „zu viele Effekte“ für spannend: keine Ereignisse mehr, der Übergang bleibt, wie er ist
         wenig = plane(copy.deepcopy(segs), reihe, p={"effekt_staerke": {"spannend": 0.1}}, stimmung="spannend")
@@ -457,6 +458,30 @@ class Zeit(unittest.TestCase):
                 self.assertAlmostEqual(schritt, 0.01, delta=1e-9)                 # Steigung 1 nach der Lupe
 
 
+class Impacts(unittest.TestCase):
+    """28.09.: Blitz, Wackeln, RGB-Stoß im Spielbild; die Finisher wechseln den Stil – kein Kill sieht aus wie der vorige."""
+
+    def test_finisher_stile_rotieren(self):
+        kills = [5.0, 17.0, 29.0, 41.0]   # vier Ketten (> 10 s auseinander) -> vier Finisher, vier Stile
+        liste = plane([seg(1, "m", 0.0, 50.0, 0.0, dauer=60.0)], [moment("m", {"kill_sekunden": kills}, dauer=60.0)])
+        je_kill = {k: sorted(e["art"] for _, e in ereignisse(liste)
+                             if abs(e["t_s"] - k) < 1e-6 and e["art"] not in ("sfx", "titel", "zaehler"))
+                   for k in kills}
+        self.assertEqual(je_kill, {5.0: ["punch"], 17.0: ["flash", "punch"], 29.0: ["shake"], 41.0: ["punch", "rgb"]})
+        self.assertTrue(all(e["dauer_s"] > 0 for _, e in ereignisse(liste) if e["art"] in ("flash", "shake", "rgb")))
+        self.assertEqual([e["klang"] for _, e in ereignisse(liste, "sfx")].count("basshit"), 4)   # Bass-Hit bleibt
+        # lustig hat keinen RGB-Stoß (drei Stile im Wechsel), chill nur den (wirkungslosen) Punch
+        self.assertEqual([effekte.finisher_stil(effekte.PROFIL["lustig"], k) for k in range(4)],
+                         [("punch",), ("punch", "flash"), ("shake",), ("punch",)])
+        self.assertEqual(effekte.finisher_stil(effekte.PROFIL["chill"], 1), ("punch",))
+
+    def test_tod_wackelt_und_blitzt(self):
+        liste = ein_moment({"kill_sekunden": [], "tod_sekunde": 10.0}, stimmung="frustriert")
+        self.assertEqual(sorted(e["art"] for _, e in ereignisse(liste) if e["art"] != "sfx"), ["flash", "shake"])
+        self.assertEqual([e["klang"] for _, e in ereignisse(liste, "sfx")], ["einschlag"])
+        self.assertEqual({e["t_s"] for _, e in ereignisse(liste)}, {10.0})
+
+
 class Tempo(unittest.TestCase):
     """28.09.: Zeitlupe um den Finisher, Zeitraffer über den Anlauf (effekte.plane_tempo) – die Zeitleiste (Beats)
     bleibt, nur die Quelle wird gekürzt bzw. verlängert; danach plant effekte.plane wie gehabt, die Liste ist gültig."""
@@ -535,7 +560,7 @@ class SchemaV4(unittest.TestCase):
         faelle = {
             "art injiziert": lambda l: erstes(l).update(art="blitz:enable=between(t,0,1)"),
             "blitz": lambda l: erstes(l).update(art="blitz"),
-            "shake": lambda l: erstes(l).update(art="shake"),
+            "wackeln": lambda l: erstes(l).update(art="wackeln"),
             "glitch-Ereignis": lambda l: erstes(l).update(art="glitch"),
             "staerke Text": lambda l: erstes(l).update(staerke="1:x"),
             "staerke riesig": lambda l: erstes(l).update(staerke=1e9),

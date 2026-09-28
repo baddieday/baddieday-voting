@@ -5,10 +5,12 @@ Plan ≠ Render: Nur plane() (aufgerufen in regie.erstelle) entscheidet. Jedes E
 nur – über zeitleiste() und uebergangs_fenster() – und liest nie liste["parameter"]. auf_zeitleiste()/auf_quelle()
 sind die EINZIGE Umrechnung zwischen Quelle und Zeitleiste.
 
-Spielbild clean (Entscheidung 25.09.): Im Spielbild gibt es nur Übergänge, Zoom (punch, akzent, meme), später die
-Zeitlupe und den Farblook – keinen Blitz, kein Wackeln, keinen Glitch-Stoß (Glitch nur als Übergangsart). Texte
-liegen außerhalb des Spielbilds: im Short Kill-Titel und Zähler im unscharfen Rand, im 16:9-Zusammenschnitt kein
-Zähler und ein Kill-Titel nur während der Übergangsblende direkt nach dem Segment mit der Serie.
+Im Spielbild (28.09., Florian: „ruhig viral, viele Effekte, keine doppelten“ – ersetzt „Spielbild clean“ vom
+25.09. in diesem Punkt): Übergänge (Uebergangsmix), Zoom (punch, akzent, meme), Tempo (plane_tempo: Zeitlupe,
+Zeitraffer), Farblook und die Impacts flash (Blitz), shake (Wackeln), rgb (Farbversatz-Stoß). Die Finisher
+wechseln den Stil (STILE, finisher_stil) – kein Kill sieht aus wie der vorige. Texte liegen weiter außerhalb des
+Spielbilds: im Short Kill-Titel und Zähler im unscharfen Rand, im 16:9-Zusammenschnitt kein Zähler und ein
+Kill-Titel nur während der Übergangsblende direkt nach dem Segment mit der Serie.
 
 Anker = die sichtbare Aktion: mein Umhauen (merkmale.aktion_sekunden), sonst der Kill. Gezählt wird wie in der
 Vorbewertung: Kette = Kills mit ≤ [vorbewertung].multikill_fenster_s Abstand (nach Kill-Zeit).
@@ -16,14 +18,15 @@ Vorbewertung: Kette = Kills mit ≤ [vorbewertung].multikill_fenster_s Abstand (
 plane() in dieser Reihenfolge:
    1. sichtbar     Anker ≥ 0,1 s vom Segmentrand bzw. vom Übergangs-Griff entfernt -> segment["kill_s"]
    2. Ketten       über alle Kills des Moments; Ereignisse nur an sichtbaren Ankern
-   3. Finisher     die letzte Aktion einer Kette: Punch + Bass-Hit; die anderen Kills: Mini-Punch + Tick
+   3. Finisher     die letzte Aktion einer Kette: Stil aus der Rotation (Punch · Punch + Blitz · Wackeln ·
+                   Punch + RGB-Stoß, nur Stile mit Stärke im Profil) + Bass-Hit; die anderen Kills: Mini-Punch + Tick
    4. Titel        einmal je Kette ab titel_ab_kette Kills, am Ende der Kette (DOUBLE … PENTA, ab 6 MULTI KILL);
                    VICTORY ROYALE ersetzt überlappende Titel. 16:9: nur in der Blende nach dem Moment (nach seinem
                    letzten Teil – Jump-Cuts liegen innerhalb der Serie)
    5. Zähler       „KILLS n“ je sichtbarem Kill, laufende Summe im Video (nur Short). Short: Titel und Zähler enden
                    spätestens am Anfang einer Zoom-Blende (xfade zoomin vergrößert das ganze Bild, das Spielbild
                    wüchse unter den Text)
-   6. Tod          Punch + Einschlag (nur frustriert hat dafür Stärke), kein Titel
+   6. Tod          Wackeln (Stärke tod_punch) + Blitz + Einschlag (nur frustriert hat dafür Stärke), kein Titel
    7. Jubel        Meme-Zoom + Pop auf der ersten Jubel-Spitze (nur lustig)
    8. Riser        endet auf dem ersten Kill des Höhepunkts (wenn davor ≥ 1,5 s Video liegen)
    9. Whoosh       auf jedem weichen Übergang (nicht Schnitt, nicht Abblende über Schwarz)
@@ -32,7 +35,8 @@ plane() in dieser Reihenfolge:
   11. Akzente      kleiner Zoom auf einem Musik-Beat, wenn max_ruhe_s lang weder Schnitt noch Zoom war
   12. Stärke unter der Schwelle fällt weg, Zeiten auf ms
 Übergänge haben immer Stärke 1 (§4), auch der Glitch-Übergang.
-Gelernt (regie_lernen): effekt_staerke[stimmung] wirkt auf alle Effekte, effekt_hektik nur auf HEKTISCH (Beat-Akzente).
+Gelernt (regie_lernen): effekt_staerke[stimmung] wirkt auf alle Effekte, effekt_hektik nur auf HEKTISCH (Beat-Akzente
+und die Impacts flash, shake, rgb).
 """
 
 from __future__ import annotations
@@ -48,6 +52,9 @@ from .konfig import Konfig
 RAND_S = 0.1             # sichtbar: so weit weg vom Segmentrand bzw. vom Übergangs-Griff
 PUNCH_S = 0.35
 AKZENT_S = 0.2
+FLASH_S = 0.12           # Blitz: kurz, fällt linear ab
+SHAKE_S = 0.25           # Wackeln (mit leichtem Zoom, damit kein Rand erscheint)
+RGB_S = 0.15             # Farbversatz-Stoß
 MEME_S = 0.83            # 0,08 s hinein, 0,6 s halten, 0,15 s zurück
 TITEL_VERSATZ_S = 0.1    # Titel kurz nach der Aktion
 TITEL_MAX_S = 1.2
@@ -67,8 +74,10 @@ VICTORY = "VICTORY ROYALE"
 LOOKS = ("neutral", "cinematic", "kalt", "warm", "entsaettigt", "soft")
 LOOK_JE_STIMMUNG = {"episch": "cinematic", "spannend": "kalt", "lustig": "warm", "frustriert": "entsaettigt",
                     "chill": "soft"}
-ZOOM = ("punch", "akzent", "meme")    # wirkt nur auf das Spielbild
-HEKTISCH = {"akzent"}                 # gedämpft durch effekt_hektik („zu hektisch“); Blitz/Wackeln gibt es nicht (Ü1)
+ZOOM = ("punch", "akzent", "meme", "shake")   # wirkt nur auf das Spielbild (shake = Zoom 1,10 + Versatz)
+HEKTISCH = {"akzent", "flash", "shake", "rgb"}   # gedämpft durch effekt_hektik („zu hektisch“)
+# Finisher-Stile in Rotation (28.09.): je Kill der nächste – Stile, deren Extra im Profil keine Stärke hat, fehlen
+STILE = (("punch",), ("punch", "flash"), ("shake",), ("punch", "rgb"))
 VERGROESSERND = {"zoom"}              # Übergänge, die das GANZE Bild vergrößern (xfade zoomin) – Short: Texte enden davor
 # Zoom-Budget: wer gewinnt bei zu engem Abstand (Tod-Punch zählt wie ein Finisher)
 RANG_FINISHER, RANG_MEME, RANG_PUNCH, RANG_AKZENT = 3, 2, 1, 0
@@ -107,11 +116,23 @@ PROFIL = {
               "uebergaenge": [("fade", 0.8), ("dissolve", 0.6), ("smoothright", 0.8), ("circleopen", 0.7)]},
 }
 STAERKEN = {"mini_faktor", "punch", "titel", "zaehler", "akzent", "meme", "tod_punch", "basshit", "tick", "whoosh",
-            "pop", "einschlag", "riser", "lupe", "raffer"}
-# Zeitraffer im Anlauf (plane_tempo), Stärke je Stimmung wie die anderen Effekte (0 = keiner)
-RAFFER = {"episch": 0.6, "spannend": 0.7, "lustig": 0.3, "frustriert": 0.0, "chill": 0.0}
-for _st, _wert in RAFFER.items():
-    PROFIL[_st]["raffer"] = _wert
+            "pop", "einschlag", "riser", "lupe", "raffer", "flash", "shake", "rgb"}
+# 28.09.: Zeitraffer im Anlauf (plane_tempo) und die Impacts (Blitz, Wackeln, RGB-Stoß) je Stimmung, 0 = keiner
+NEU_2_1 = {"episch": {"raffer": 0.6, "flash": 0.7, "shake": 0.6, "rgb": 0.5},
+           "spannend": {"raffer": 0.7, "flash": 0.6, "shake": 0.7, "rgb": 0.6},
+           "lustig": {"raffer": 0.3, "flash": 0.3, "shake": 0.5, "rgb": 0.0},
+           "frustriert": {"raffer": 0.0, "flash": 0.5, "shake": 0.6, "rgb": 0.0},
+           "chill": {"raffer": 0.0, "flash": 0.0, "shake": 0.0, "rgb": 0.0}}
+for _st, _werte in NEU_2_1.items():
+    PROFIL[_st].update(_werte)
+
+
+def finisher_stil(pr: dict, k: int) -> tuple[str, ...]:
+    """Stil des k-ten Finishers im Video aus STILE, reihum – nur Stile, deren Extras (alles außer punch) im Profil
+    Stärke haben. Beispiel episch: k 0 → ("punch",), 1 → ("punch", "flash"), 2 → ("shake",), 3 → ("punch", "rgb"),
+    4 → wieder ("punch",); lustig (rgb 0): drei Stile im Wechsel."""
+    moeglich = [s for s in STILE if all(float(pr.get(a, 0.0)) > 0 for a in s if a != "punch")] or [STILE[0]]
+    return moeglich[k % len(moeglich)]
 
 # [regie.effekte]: Standardwerte und Grenzen. Weitere Schlüssel (z. B. für Export oder Hook) lesen andere Module selbst.
 STANDARD = {"an": True, "profil_version": 1, "schwelle": 0.15, "effekt_abstand_s": 0.4, "max_glitch": 1,
@@ -531,9 +552,9 @@ def _wichtig(e: _Plan) -> int:
         return 7
     if e.art == "sfx":
         return {"basshit": 6, "einschlag": 6, "riser": 5, "whoosh": 5, "pop": 4}.get(e.klang or "", 1)
-    if e.art == "punch":
+    if e.art in ("punch", "shake"):
         return 6 if e.rang >= RANG_FINISHER else 2
-    return {"meme": 4, "zaehler": 3}.get(e.art, 0)
+    return {"meme": 4, "zaehler": 3, "flash": 3, "rgb": 3}.get(e.art, 0)
 
 
 def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: str, fps: int,
@@ -572,6 +593,8 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
     titel: list[_Plan] = []
     victory: list[_Plan] = []
     gezaehlt: list[tuple[float, int]] = []   # (Zeit, Segment) je sichtbarem Kill
+    finisher = 0                             # Zähler für die Stil-Rotation (finisher_stil)
+    impact_dauer = {"punch": PUNCH_S, "shake": SHAKE_S, "flash": FLASH_S, "rgb": RGB_S}
     for moment, idx in je_moment.items():
         k = momente.get(moment)
         mk = k.merkmale if k is not None else {}
@@ -590,7 +613,10 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
                     continue
                 pr, t = prof[segmente[i]["stimmung"]], auf_zeitleiste(segmente[i], a)
                 if n == fin:
-                    dazu(plan, "punch", i, t, stark(i, pr["punch"], "punch"), dauer=PUNCH_S, rang=RANG_FINISHER)
+                    for art in finisher_stil(pr, finisher):  # Stil-Rotation: kein Kill wie der vorige
+                        dazu(plan, art, i, t, stark(i, pr[art], art), dauer=impact_dauer[art],
+                             rang=RANG_FINISHER if art in ZOOM else 0)
+                    finisher += 1
                     dazu(plan, "sfx", i, t, stark(i, pr["basshit"], "basshit"), klang="basshit")
                 else:
                     dazu(plan, "punch", i, t, stark(i, pr["punch"] * pr["mini_faktor"], "punch"), dauer=PUNCH_S,
@@ -620,7 +646,8 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
         # 6. Tod, 7. Jubel
         if (tod := mk.get("tod_sekunde")) is not None and (i := wo(idx, float(tod))) is not None:
             pr, t = prof[segmente[i]["stimmung"]], auf_zeitleiste(segmente[i], float(tod))
-            dazu(plan, "punch", i, t, stark(i, pr["tod_punch"], "punch"), dauer=PUNCH_S, rang=RANG_FINISHER)
+            dazu(plan, "shake", i, t, stark(i, pr["tod_punch"], "shake"), dauer=SHAKE_S, rang=RANG_FINISHER)
+            dazu(plan, "flash", i, t, stark(i, pr["flash"], "flash"), dauer=FLASH_S)
             dazu(plan, "sfx", i, t, stark(i, pr["einschlag"], "einschlag"), klang="einschlag")
         for jubel in sorted(float(x) for x in mk.get("jubel_laut_s") or []):
             if (i := wo(idx, jubel)) is not None:

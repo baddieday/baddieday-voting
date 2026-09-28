@@ -64,14 +64,17 @@ def _gerade(x: float) -> int:
     return int(round(x / 2) * 2)
 
 
-def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", look: str = "", tempo: str = "") -> str:
+def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", look: str = "", tempo: str = "",
+          flash: str = "") -> str:
     """fps zuerst: Alle weiteren Filter sehen nur noch die Bilder, die ins Ergebnis kommen (60 fps -> halb so viele).
     tempo (effekt_filter.tempo_video) noch davor: Zeitlupe/Zeitraffer dehnen die Quelle, fps macht daraus die
     Bilder des Videos (eine 60-fps-Aufnahme bleibt bei Faktor 0,5 im 30-fps-Short flüssig).
     zoom: Kette aus effekt_filter.zoom – sitzt auf dem Spielbild allein (Short: vor dem Einsetzen in den unscharfen
     Hintergrund, 16:9: vor dem Rand), der Hintergrund zoomt also nie mit.
-    look (nur Short): Farblook auf Spielbild und kleinem Hintergrund, bevor beide zusammengesetzt werden."""
+    look (nur Short): Farblook auf Spielbild und kleinem Hintergrund, bevor beide zusammengesetzt werden.
+    flash (effekt_filter.flash): Blitz nur auf dem Spielbild, nach dem Zoom, vor dem Look."""
     z = f",{zoom}" if zoom else ""
+    fl = f",{flash}" if flash else ""
     lk = f",{look}" if look else ""
     kopf = f"[{i}:v]{tempo + ',' if tempo else ''}fps={fps}"
     if hochformat:  # wie shorts.py "unschaerfe": ganzes Spielbild, unscharfer Hintergrund füllt den Rand
@@ -80,9 +83,9 @@ def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", lo
         return (f"{kopf},split=2[hg{i}][vg{i}];"
                 f"[hg{i}]scale={b4}:{h4}:force_original_aspect_ratio=increase,crop={b4}:{h4},boxblur=5:2{lk},"
                 f"scale={b}:{h},eq=brightness=-0.08[hgb{i}];"
-                f"[vg{i}]scale={b}:-2{z}{lk}[vgs{i}];[hgb{i}][vgs{i}]overlay=(W-w)/2:(H-h)/2,"
+                f"[vg{i}]scale={b}:-2{z}{fl}{lk}[vgs{i}];[hgb{i}][vgs{i}]overlay=(W-w)/2:(H-h)/2,"
                 f"format=yuv420p,setsar=1,settb=AVTB[v{i}]")
-    return (f"{kopf},scale={b}:{h}:force_original_aspect_ratio=decrease{z},pad={b}:{h}:(ow-iw)/2:(oh-ih)/2,"
+    return (f"{kopf},scale={b}:{h}:force_original_aspect_ratio=decrease{z}{fl},pad={b}:{h}:(ow-iw)/2:(oh-ih)/2,"
             f"format=yuv420p,setsar=1,settb=AVTB[v{i}]")
 
 
@@ -117,6 +120,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
     griffe = _griffe(segmente, fps)
     ereignisse = effekte.zeitleiste(liste)  # leer ohne Effekte (an = false oder version 3)
     zooms = effekt_filter.zooms_je_segment(liste, ereignisse, griffe)
+    flashes = effekt_filter.je_segment(liste, ereignisse, griffe, ("flash",))
     look = effekt_filter.look_der_liste(liste) if hoch else ""  # 16:9: einmal global (effekt_filter.global_kette)
     teile, laengen = [], []
     for i, (s, (vorne, hinten)) in enumerate(zip(segmente, griffe)):
@@ -128,7 +132,8 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
         if fenster := effekte.tempo_fenster(s):
             eingang = s["quelle_start_s"] - vorne
             tempo_v, tempo_a = effekt_filter.tempo_video(fenster, eingang), effekt_filter.tempo_ton(i, s, eingang)
-        teile.append(_bild(i, b, h, fps, hoch, effekt_filter.zoom(i, zooms[i]) if i in zooms else "", look, tempo_v))
+        teile.append(_bild(i, b, h, fps, hoch, effekt_filter.zoom(i, zooms[i]) if i in zooms else "", look, tempo_v,
+                           effekt_filter.flash(flashes[i]) if i in flashes else ""))
         teile.append(_ton(i, spuren[i], laenge, bool(s.get("stimmen", True)), tempo_a))
     # Verketten: offset_i = bisherige Länge − Übergangsdauer (siehe Herleitung in docs/ENTSCHEIDUNGEN.md E8)
     v, a, gesamt = "[v0]", "[a0]", laengen[0]
