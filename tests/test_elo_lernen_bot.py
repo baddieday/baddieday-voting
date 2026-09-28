@@ -23,7 +23,7 @@ class Elo(unittest.TestCase):
 
 
 def m(kill=1.0, laut=0.0) -> dict:
-    return {"kill_punkte": kill, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": laut, "kommentar": 0.0}
+    return {"kill_punkte": kill, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": laut}
 
 
 class Lernen(MitSpeicher):
@@ -36,7 +36,7 @@ class Lernen(MitSpeicher):
                               merkmale=m(3.0, 0.9 if laut else 0.1), match_id=f"m{tag}")
 
     def test_unter_mindestmenge_bleiben_startgewichte(self):
-        self._abend(1, 10)
+        self._abend(1, int(self.konfig.wert("lernen.mindestens")) - 1)  # eine unter der Schwelle (B3: 10 statt 20)
         e = lernen.berechne(self.con, self.konfig)
         self.assertFalse(e.aktiv)
         self.assertEqual(e.werte, e.start)
@@ -68,6 +68,18 @@ class BotAktionen(MitSpeicher):
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM ereignisse WHERE clip_id = ?", (cid,)).fetchone()[0], 1)
         self.assertEqual(aktionen.rueckgaengig(self.con, cid).neuer_status, "gesendet")
         self.assertEqual(aktionen.entscheide(self.con, cid, "verworfen").neuer_status, "verworfen")
+
+    def test_neues_battle_bevorzugt_hoehere_elo_rd(self):
+        """L6/B2 (billigster Hebel, docs/ANALYSE-2026-09-26.md): Gegner mit größerer Rating-Unsicherheit (elo_rd)
+        zuerst, erst danach Elo-Nähe – ein Battle zwischen zwei längst eingespielten (niedriges elo_rd), elo-nahen
+        Clips lehrt dank der Marge kaum etwas."""
+        a_id = self.clip_anlegen(status="freigegeben")                             # wenigste Battles (0), Kandidat
+        nah_sicher = self.clip_anlegen(status="freigegeben", elo=1510)             # Elo nah, aber sicher
+        fern_unsicher = self.clip_anlegen(status="freigegeben", elo=1700)          # Elo fern, aber unsicher
+        self.con.execute("UPDATE clips SET elo_rd = 75 WHERE id = ?", (nah_sicher,))
+        self.con.execute("UPDATE clips SET elo_rd = 350 WHERE id = ?", (fern_unsicher,))
+        bid, a, b = aktionen.neues_battle(self.con)
+        self.assertEqual((a["id"], b["id"]), (a_id, fern_unsicher))
 
     def test_outbox(self):
         cid = self.clip_anlegen(status="vorbewertet", file_id=None)

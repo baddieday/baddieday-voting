@@ -5,7 +5,7 @@ berechnet (deterministisch, jederzeit nachvollziehbar). Jede Regel verschiebt ei
 begrenzten Schritt:
 
   zu hektisch         Segmente länger (+15 %), Übergänge länger (+10 %); ab +30 % nur jeden 2., ab +70 % jeden 4. Beat;
-                      effekt_hektik ×0,9 (0,3 … 1,3): Beat-Akzente schwächer
+                      effekt_hektik ×0,9 (0,3 … 1,3): Beat-Akzente und Impacts (Blitz, Wackeln, RGB) schwächer
   zu lang             Ziel-Dauer −10 % (höchstens bis 60 %)
   abgeschnitten       mehr Vorlauf (+0,5 s) und Nachlauf (+0,3 s) um die Kills
   Musik passt nicht   dieser Titel bekommt einen Abzug (−1 je Nennung)
@@ -25,10 +25,10 @@ import copy
 import json
 import sqlite3
 
-from . import effekte
+from . import db, effekte
 from .konfig import Konfig
 from .musik import ZIEL
-from .regie import PARAMETER
+from .regie import FORMATE, PARAMETER, format_regeln
 
 # Neue Gründe immer hinten anhängen: gespeicherte Bewertungen nennen die Schlüssel
 GRUENDE = {
@@ -40,7 +40,12 @@ GRUENDE = {
     "langweilig": "🥱 Clips langweilig",
     "effekte_viel": "🎆 zu viele Effekte",
     "action": "💥 mehr Action",
+    "kurz": "⏱️ zu kurz",       # 27.09.: Gegenstück zu „zu lang“ – vorher konnte dauer_faktor nur fallen
 }
+
+
+# Gründe, die den Inhalt betreffen (gelten für beide Formate); alle anderen sind Schnitt-Gründe je Format
+INHALT_GRUENDE = {"musik", "getroffen", "langweilig"}
 
 
 def _grenze(wert: float, unten: float, oben: float) -> float:
@@ -71,6 +76,7 @@ VORGABE_GRENZEN = {
     "dauer_faktor": (0.6, 1.0), "uebergang_faktor": (0.5, 2.0), "musik_pegel": (0.0, 1.0),
     "max_je_match": (1, 10), "beats_pro_schnitt": (1, 4), "abwechslung": (0.0, 1.0),
     "effekt_hektik": (0.3, 1.3),
+    "cooldown_entwuerfe": (0, 12), "frische_quote": (0.0, 1.0),   # 27.09.: Abwechslung, siehe regie.PARAMETER
 }
 EFFEKT_STAERKE_GRENZEN = (0.0, 1.5)    # Vorgabe je Stimmung; 0 = diese Stimmung ohne Effekte
 EFFEKT_STAERKE_GELERNT = (0.1, 1.5)    # durch Bewertungen
@@ -120,13 +126,20 @@ def vorgaben(konfig: Konfig) -> tuple[dict, dict, list[str]]:
     return p, ziel, hinweise
 
 
-def aktuelle(con: sqlite3.Connection, konfig: Konfig) -> tuple[dict, dict]:
-    """(Regie-Parameter, Musik-Ziele je Stimmung): deine Vorgaben, dann alle bisherigen Bewertungen."""
+def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None) -> tuple[dict, dict]:
+    """(Regie-Parameter, Musik-Ziele je Stimmung): deine Vorgaben, dann alle bisherigen Bewertungen.
+
+    fmt (27.09.): Schnitt-Werte (Dauer, Segmente, Übergänge, Anlauf, Effekte) lernen nur aus Bewertungen dieses
+    Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzte vorher auch die Shorts. Was du inhaltlich magst
+    (Momente, Stimmungen, Musik), gilt für beide. fmt None: alle Bewertungen wie bisher."""
+    energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
+    return _falte(bewertungen(con), konfig, energien, fmt)
+
+
+def _falte(zeilen: list, konfig: Konfig, energien: list[float], fmt: str | None) -> tuple[dict, dict]:
     p, ziel, _ = vorgaben(konfig)
     beats_vorgabe = int(p["beats_pro_schnitt"])
-    zeilen = bewertungen(con)
     mindestens = int(konfig.wert("regie.lernen_ab", 3))
-    energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
     for n, b in enumerate(zeilen, 1):
         gruende = set(json.loads(b["gruende"] or "[]"))
         liste = _liste(b)
@@ -136,6 +149,8 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig) -> tuple[dict, dict]:
         for m in {s.get("moment") for s in liste.get("segmente", []) if isinstance(s, dict)} - {None}:
             if schritt:
                 p["moment_bonus"][m] = _grenze(p["moment_bonus"].get(m, 0.0) + schritt, -3.0, 3.0)
+        if fmt is not None and b["format"] != fmt:
+            gruende = gruende & INHALT_GRUENDE  # Schnitt-Gründe des anderen Formats wirken hier nicht
         if "hektisch" in gruende:
             p["seg_min_faktor"] = _grenze(p["seg_min_faktor"] * 1.15, 0.5, 2.0)
             p["uebergang_faktor"] = _grenze(p["uebergang_faktor"] * 1.10, 0.5, 2.0)
@@ -147,8 +162,11 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig) -> tuple[dict, dict]:
             unten, oben = EFFEKT_STAERKE_GELERNT
             if alt > 0:  # eine Vorgabe 0 (diese Stimmung ohne Effekte) bleibt 0; eine unter 0,1 steigt nicht durch 🎆
                 p["effekt_staerke"][haupt] = _grenze(alt * (0.85 if weniger else 1.15), min(unten, alt), oben)
-        if "lang" in gruende:
-            p["dauer_faktor"] = _grenze(p["dauer_faktor"] * 0.9, 0.6, 1.0)
+        # „zu lang“ ×0,9 / „zu kurz“ ÷0,9 (27.09.: vorher gab es kein Gegenstück – der Faktor konnte nur fallen und
+        # blieb für immer unten, auch eine Vorgabe in lokal.toml ist nur der Startwert); beide zugleich: nichts
+        kuerzer, laenger = "lang" in gruende, "kurz" in gruende
+        if kuerzer != laenger:
+            p["dauer_faktor"] = _grenze(p["dauer_faktor"] * (0.9 if kuerzer else 1 / 0.9), 0.6, 1.0)
         if "abgeschnitten" in gruende:
             p["puffer_vor_s"] = _grenze(p["puffer_vor_s"] + 0.5, 1.0, 6.0)
             p["puffer_nach_s"] = _grenze(p["puffer_nach_s"] + 0.3, 0.5, 4.0)
@@ -180,28 +198,87 @@ def bewerte(con: sqlite3.Connection, entwurf_id: int, *, daumen: int | None = No
     if grund is not None and grund not in GRUENDE:
         raise ValueError(f"Unbekannter Grund {grund!r}")
     zeit = iso(jetzt())
-    alt = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (entwurf_id,)).fetchone()
-    gruende = json.loads(alt["gruende"]) if alt else []
-    if grund:
-        gruende = [g for g in gruende if g != grund] if grund in gruende else [*gruende, grund]
-    # Ohne Daumen: "Stimmung getroffen" ist Lob, die anderen Gründe sind Kritik
-    neuer_daumen = daumen if daumen is not None else (alt["daumen"] if alt else 1 if grund == "getroffen" else -1)
-    con.execute(
-        """INSERT INTO entwurf_bewertungen (entwurf_id, daumen, gruende, erstellt, geaendert) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT (entwurf_id) DO UPDATE SET daumen = excluded.daumen, gruende = excluded.gruende,
-               geaendert = excluded.geaendert""",
-        (entwurf_id, neuer_daumen, json.dumps(gruende), zeit, zeit),
-    )
-    con.execute("UPDATE entwuerfe SET status = 'bewertet' WHERE id = ?", (entwurf_id,))
+    # Eine Transaktion (27.09.): ein Schreibvorgang auf die Platte statt zwei – im Lern-Bot läuft das im Event-Loop,
+    # und unter Last (Rendern, Whisper) kostete jeder einzelne spürbar Zeit. Lesen und Umschalten gehören dazu.
+    with db.transaktion(con):
+        alt = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (entwurf_id,)).fetchone()
+        gruende = json.loads(alt["gruende"]) if alt else []
+        if grund:
+            gruende = [g for g in gruende if g != grund] if grund in gruende else [*gruende, grund]
+        # Ohne Daumen: "Stimmung getroffen" ist Lob, die anderen Gründe sind Kritik
+        neuer_daumen = daumen if daumen is not None else (alt["daumen"] if alt else 1 if grund == "getroffen" else -1)
+        con.execute(
+            """INSERT INTO entwurf_bewertungen (entwurf_id, daumen, gruende, erstellt, geaendert) VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT (entwurf_id) DO UPDATE SET daumen = excluded.daumen, gruende = excluded.gruende,
+                   geaendert = excluded.geaendert""",
+            (entwurf_id, neuer_daumen, json.dumps(gruende), zeit, zeit),
+        )
+        con.execute("UPDATE entwuerfe SET status = 'bewertet' WHERE id = ?", (entwurf_id,))
     return con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (entwurf_id,)).fetchone()
 
 
+def _prozent(x: float) -> str:
+    return f"{x:.0%}"
+
+
+# (Parameter, Text aus altem und neuem Wert) – Reihenfolge = Reihenfolge in der Bildunterschrift
+WIRKUNG_TEXTE = [
+    ("dauer_faktor", lambda a, b: f"Ziel-Dauer {_prozent(a)} → {_prozent(b)}"),
+    ("seg_min_faktor", lambda a, b: f"Schnitt {'ruhiger' if b > a else 'schneller'} (Segmente ×{b:.2f})"),
+    ("beats_pro_schnitt", lambda a, b: f"Schnitt auf jeden {b}. Beat" if b > 1 else "Schnitt auf jeden Beat"),
+    ("puffer_vor_s", lambda a, b: f"Anlauf {a:.1f} → {b:.1f} s"),
+    ("puffer_nach_s", lambda a, b: f"Ausklang {a:.1f} → {b:.1f} s"),
+    ("uebergang_faktor", lambda a, b: f"Übergänge {'weicher' if b > a else 'härter'}"),
+    ("effekt_hektik", lambda a, b: f"Beat-Akzente {'stärker' if b > a else 'schwächer'}"),
+]
+
+
+def _unterschiede(vorher: dict, nachher: dict) -> list[str]:
+    """Was sich zwischen zwei Parameter-Ständen geändert hat, in kurzen Sätzen (für die Bildunterschrift)."""
+    teile = [text(vorher[k], nachher[k]) for k, text in WIRKUNG_TEXTE if vorher[k] != nachher[k]]
+    for s in sorted(set(vorher["effekt_staerke"]) | set(nachher["effekt_staerke"])):
+        a, b = vorher["effekt_staerke"].get(s, 1.0), nachher["effekt_staerke"].get(s, 1.0)
+        if a != b:
+            teile.append(f"Effekte {s} {'stärker' if b > a else 'schwächer'} ({b:.2f})")
+    for s in sorted(set(vorher["stimmung_bonus"]) | set(nachher["stimmung_bonus"])):
+        a, b = vorher["stimmung_bonus"].get(s, 0.0), nachher["stimmung_bonus"].get(s, 0.0)
+        if a != b:
+            teile.append(f"{s} {'öfter' if b > a else 'seltener'}")
+    for t in sorted(set(nachher["track_malus"]) - set(vorher["track_malus"])
+                    | {k for k in vorher["track_malus"] if nachher["track_malus"].get(k) != vorher["track_malus"][k]}):
+        teile.append(f"Musik #{t} seltener")
+    hoch = sum(1 for m, v in nachher["moment_bonus"].items() if v > vorher["moment_bonus"].get(m, 0.0))
+    runter = sum(1 for m, v in nachher["moment_bonus"].items() if v < vorher["moment_bonus"].get(m, 0.0))
+    if hoch:
+        teile.append(f"{hoch} Momente kommen öfter")
+    if runter:
+        teile.append(f"{runter} Momente seltener")
+    return teile
+
+
+def wirkung(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> dict | None:
+    """Was deine zuletzt angefasste Bewertung am nächsten Entwurf dieses Formats geändert hat (27.09., „ich bewerte
+    gefühlt ins Leere“): Parameter mit und ohne diese Bewertung, als kurze Sätze. None ohne Bewertungen.
+    Beispiel: {"entwurf": 41, "format": "short", "aenderungen": ["Ziel-Dauer 81% → 90%", "6 Momente kommen öfter"]}."""
+    zeilen = bewertungen(con)
+    if not zeilen:
+        return None
+    letzte = max(zeilen, key=lambda z: (z["geaendert"] or z["erstellt"] or "", z["entwurf_id"]))
+    energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
+    ohne = [z for z in zeilen if z["entwurf_id"] != letzte["entwurf_id"]]
+    vorher, _ = _falte(ohne, konfig, energien, fmt)
+    nachher, _ = _falte(zeilen, konfig, energien, fmt)
+    return {"entwurf": int(letzte["entwurf_id"]), "format": letzte["format"],
+            "aenderungen": _unterschiede(vorher, nachher)}
+
+
 def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
-    p, ziel = aktuelle(con, konfig)
+    p, ziel = aktuelle(con, konfig, "short")
     start, start_ziel, hinweise = vorgaben(konfig)
     zeilen = bewertungen(con)
     daumen = sum(1 for z in zeilen if z["daumen"] > 0)
-    teile = [f"🧠 Regie – {len(zeilen)} Bewertungen ({daumen} 👍 / {len(zeilen) - daumen} 👎)"]
+    teile = [f"🧠 Regie – {len(zeilen)} Bewertungen ({daumen} 👍 / {len(zeilen) - daumen} 👎)",
+             "Schnitt-Werte lernen je Format (unten: Short); Momente, Stimmung und Musik gelten für beide"]
     for name in ("puffer_vor_s", "puffer_nach_s", "seg_min_faktor", "beats_pro_schnitt", "dauer_faktor", "uebergang_faktor"):
         s0, jetzt_ = start[name], p[name]
         herkunft = "" if s0 == PARAMETER[name] else ", deine Vorgabe"
@@ -220,6 +297,30 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     teile.append(f"Abwechslung: Momente aus dem letzten Entwurf verlieren {p['abwechslung']:.0%} ihrer Punkte, "
                  "je älterem Entwurf die Hälfte" + ("" if start["abwechslung"] == PARAMETER["abwechslung"]
                                                      else " (deine Vorgabe)"))
+    if p["abwechslung"] > 0:
+        teile.append(f"Cooldown: Momente aus den letzten {int(p['cooldown_entwuerfe'])} Entwürfen sind gesperrt · "
+                     f"Frische-Quote: mind. {p['frische_quote']:.0%} der Momente eines Entwurfs waren noch in keinem"
+                     + ("" if (start["cooldown_entwuerfe"], start["frische_quote"])
+                        == (PARAMETER["cooldown_entwuerfe"], PARAMETER["frische_quote"]) else " (deine Vorgabe)"))
+    else:
+        teile.append("Abwechslung aus (0): immer die besten Momente, kein Cooldown, keine Frische-Quote")
+    zs, _ = aktuelle(con, konfig, "zusammenschnitt")
+    n_zs = sum(1 for z in zeilen if z["format"] == "zusammenschnitt")
+    teile.append(f"Zusammenschnitt ({n_zs} Bewertungen): dauer_faktor {zs['dauer_faktor']}, "
+                 f"seg_min_faktor {zs['seg_min_faktor']}, puffer_vor_s {zs['puffer_vor_s']}, "
+                 f"uebergang_faktor {zs['uebergang_faktor']}")
+    if p["dauer_faktor"] < 1.0:
+        gruende_je = [set(json.loads(z["gruende"] or "[]")) for z in zeilen if z["format"] == "short"]
+        lang = sum(1 for g in gruende_je if "lang" in g and "kurz" not in g)   # nur die, die gewirkt haben
+        kurz = sum(1 for g in gruende_je if "kurz" in g and "lang" not in g)
+        teile.append(f"Ziel-Dauer bei {p['dauer_faktor']:.0%} ({lang}× „⏳ zu lang“, {kurz}× „⏱️ zu kurz“) – "
+                     "„⏱️ zu kurz“ hebt sie wieder an")
+    for fmt_name in ("short", "zusammenschnitt"):
+        fmt, fmt_hinweise = format_regeln(konfig, fmt_name)
+        standard = fmt == FORMATE[fmt_name]
+        teile.append(f"{fmt_name}: {fmt['min_s']:.0f}–{fmt['max_s']:.0f} s, Segment bis {fmt['seg_max_s']:.0f} s, "
+                     f"Serie bis {fmt['serie_max_s']:.0f} s" + ("" if standard else " (deine Vorgabe [regie.formate])"))
+        teile += [f"⚠️ {h}" for h in fmt_hinweise]
     geaendert = [s for s in ziel if ziel[s] != ZIEL[s]]  # durch Vorgabe oder "Stimmung getroffen"
     for s in geaendert:
         teile.append(f"Musik für {s}: Energie-Rang {ziel[s]['energie']}, {ziel[s]['bpm']} BPM")

@@ -55,6 +55,9 @@
       }
     },
     "hinweise": {"type": "array", "items": {"type": "string"}},
+    "gelernt": {"type": "object", "additionalProperties": false, "required": ["entwurf", "aenderungen"],
+                "properties": {"entwurf": {"type": "integer", "minimum": 1}, "format": {"type": ["string", "null"]},
+                               "aenderungen": {"type": "array", "items": {"type": "string"}}}},
     "erstellt": {"type": "string"},
     "segmente": {
       "type": "array",
@@ -73,11 +76,13 @@
           "match_id": {"type": ["string", "null"]},
           "datei": {"type": "string", "minLength": 1},
           "stimmung": {"type": "string", "enum": ["episch", "lustig", "spannend", "frustriert", "chill"]},
+          "stimmen": {"type": "boolean"},
           "intensitaet": {"type": "number"},
           "grund": {"type": "string"},
           "punkte": {"type": "number"},
           "abzug": {"type": "number", "minimum": 0},
           "gezeigt": {"type": "integer", "minimum": 0},
+          "bewertet": {"type": "integer", "minimum": 0},
           "quelle_start_s": {"type": "number", "minimum": 0},
           "quelle_ende_s": {"type": "number", "minimum": 0},
           "quelle_dauer_s": {"type": "number", "minimum": 0},
@@ -89,28 +94,43 @@
           "kill_s": {"type": "array", "maxItems": 20, "items": {"type": "number", "minimum": 0},
                      "$comment": "sichtbare eigene Kills (Anker: mein Umhauen, sonst der Kill) in Quellsekunden"},
           "lupe": {
+            "$comment": "Zeitlupe in Quellzeit (effekte.plane_tempo): die Zeitleiste dehnt sich um (bis−ab)·(1/faktor−1)",
             "type": ["object", "null"],
             "required": ["ab_s", "bis_s", "faktor", "ton"],
             "additionalProperties": false,
             "properties": {
               "ab_s": {"type": "number", "minimum": 0},
               "bis_s": {"type": "number", "minimum": 0},
-              "faktor": {"type": "number", "enum": [0.5]},
+              "faktor": {"type": "number", "enum": [0.25, 0.5]},
+              "ton": {"type": "string", "enum": ["tief", "tempo", "stumm"]}
+            }
+          },
+          "raffer": {
+            "$comment": "Zeitraffer im Anlauf (effekte.plane_tempo), liegt vor der Zeitlupe; die Zeitleiste staucht sich um (bis−ab)·(1−1/faktor)",
+            "type": ["object", "null"],
+            "required": ["ab_s", "bis_s", "faktor", "ton"],
+            "additionalProperties": false,
+            "properties": {
+              "ab_s": {"type": "number", "minimum": 0},
+              "bis_s": {"type": "number", "minimum": 0},
+              "faktor": {"type": "number", "enum": [1.5, 2.0]},
               "ton": {"type": "string", "enum": ["tief", "tempo", "stumm"]}
             }
           },
           "effekte": {
-            "$comment": "Effekt-Plan (effekte.plane): t_s = Quellzeit, dauer_s = Dauer im Video. Spielbild clean: kein Blitz, kein Wackeln, kein Glitch-Ereignis",
+            "$comment": "Effekt-Plan (effekte.plane): t_s = Quellzeit, dauer_s = Dauer im Video. Im Spielbild: Zoom/Drift und der Katalog (effekte.BILD, 28.09.); Texte nie im Spielbild",
             "type": "array",
-            "maxItems": 24,
+            "maxItems": 60,
             "items": {
               "type": "object",
               "required": ["art", "t_s", "staerke"],
               "additionalProperties": false,
               "properties": {
-                "art": {"type": "string", "enum": ["punch", "akzent", "meme", "titel", "zaehler", "sfx"]},
+                "art": {"type": "string", "enum": ["punch", "akzent", "meme", "shake", "tilt", "einzug", "drift_ein", "drift_aus",
+                                                    "flash", "strobe", "farbpop", "kontrast", "hue", "negativ", "blur", "pixel",
+                                                    "vignette", "rgb", "titel", "zaehler", "sfx"]},
                 "t_s": {"type": "number", "minimum": 0},
-                "dauer_s": {"type": "number", "minimum": 0, "maximum": 3},
+                "dauer_s": {"type": "number", "minimum": 0, "maximum": 30},
                 "staerke": {"type": "number", "minimum": 0, "maximum": 1},
                 "text": {"type": "string", "enum": ["DOUBLE KILL", "TRIPLE KILL", "QUAD KILL", "PENTA KILL", "MULTI KILL",
                                                      "VICTORY ROYALE"]},
@@ -124,9 +144,12 @@
             "required": ["art", "dauer_s"],
             "additionalProperties": false,
             "properties": {
-              "art": {"type": "string", "enum": ["schnitt", "fade", "fadeblack", "fadewhite", "wipeleft", "slideleft", "circleopen",
-                                                  "whip", "zoom", "glitch", "squeeze", "dissolve"],
-                      "$comment": "whip, zoom, glitch, squeeze, dissolve sind eigene Namen – die ffmpeg-Art bestimmt der Renderer"},
+              "art": {"type": "string", "enum": ["schnitt", "fade", "fadeblack", "fadewhite", "wipeleft", "wiperight", "wipeup",
+                                                  "wipedown", "slideleft", "slideright", "slideup", "slidedown", "circleopen",
+                                                  "circleclose", "radial", "smoothleft", "smoothright", "smoothup", "smoothdown",
+                                                  "diagtl", "diagbr", "hblur", "squeezev", "coverleft", "revealright",
+                                                  "whip", "whip_up", "whip_right", "zoom", "glitch", "squeeze", "dissolve", "flash"],
+                      "$comment": "whip*, zoom, glitch, squeeze, dissolve, flash sind eigene Namen – die ffmpeg-Art bestimmt der Renderer (effekt_filter.XFADE)"},
               "dauer_s": {"type": "number", "minimum": 0, "maximum": 3}
             }
           }

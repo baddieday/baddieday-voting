@@ -1,6 +1,7 @@
 # Regisseur – Bedienung (Sprint 09/2026)
 
-Aus deinen Clips entstehen automatisch **Zusammenschnitte (16:9, 3–5 min)** und **Shorts (9:16, 30–45 s)** mit
+Aus deinen Clips entstehen automatisch **Zusammenschnitte (16:9, 3–5 min)** und **Shorts (9:16, 30–45 s, einstellbar
+über `[regie.formate]`)** mit
 Musik, Schnitten auf dem Beat und Übergängen passend zur Stimmung. Du bewertest die Entwürfe im **Lern-Bot**
 mit 👍/👎 und Gründen, und der nächste Entwurf berücksichtigt das.
 
@@ -27,7 +28,8 @@ Musik (NCS / Lern-Bot) ─► pipeline musik ─► Tempo, Beats, Energie ─┤
 | `pipeline big aus [--sofort]` | von Hand herunterfahren |
 | `pipeline bestand [--bericht docs/BESTAND.md]` | Replays, Videos, Tonspuren (Mikro?), VA-API, Platz – weckt nicht |
 | `pipeline material [--probelauf]` | Replays, Sessions, Videos auf den Mini kopieren (1× wecken, SHA-256) |
-| `pipeline stimmung [--dateien] [--neu] [--ohne-claude] [--ohne-whisper]` | Stimmung je Moment |
+| `pipeline stimmung [--dateien] [--neu] [--ohne-claude] [--ohne-whisper] [--max n]` | Stimmung je Moment |
+| `pipeline stimmung --clips [--session ID] [--max n]` | Mic-Schritt (Stufe 2): Mic-Merkmale in die Clips, ohne Claude, nur Puffer – startet sonst im Hintergrund nach `render` |
 | `pipeline musik ncs --stimmung episch --anzahl 3` | NCS-Titel laden (mit Quellenangabe) |
 | `pipeline musik hinzufuegen <datei> --quelle "…" [--titel --kuenstler]` | eigenen Titel aufnehmen |
 | `pipeline musik analysieren <datei>` · `pipeline musik liste` | Tempo/Energie ansehen |
@@ -54,7 +56,28 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 - Unter jedem Entwurf steht „🆕 3 neue · 2 schon gezeigt · Auswahl aus 40 Momenten“ und mit Effekten
   „✨ Look cinematic · 23 Impacts“ (Impacts = Ereignisse im Effekt-Plan: Zooms, Titel, Zähler, Klänge;
   später dazu „Hook ✓ · Zeitlupe ✓“). „n Momente“ zählt Momente, nicht Segmente.
-- Gründe: 8 Knöpfe in 4 Reihen zu je 2, darunter ✅ fertig.
+- Gründe: 9 Knöpfe (5 Reihen, ✅ fertig neben „⏱️ zu kurz“). Ohne Grund lernt nur die Moment-Auswahl, nicht der Schnitt.
+- Seit 27.09. zusätzlich unter jedem Entwurf:
+  - „🔁 Schon bewertet: ① neu ② 2× ③ neu …“ – je Moment in Video-Reihenfolge, in wie vielen bewerteten Entwürfen
+    er schon war (alle Formate; über 12 Momente nur die Summen).
+  - „🧠 Aus #41: Ziel-Dauer 81% → 90% · Schnitt ruhiger (Segmente ×1.15)“ – was deine zuletzt angefasste
+    Bewertung an genau diesem Entwurf geändert hat. „nichts geändert“ heißt: es kam nur 👍/👎 ohne Schnitt-Grund.
+- **Schnitt lernt je Format** (27.09.): Dauer, Segmentlänge, Übergänge, Anlauf/Ausklang und Effekte lernen nur aus
+  Bewertungen desselben Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzt keine Shorts mehr. Was du
+  inhaltlich magst (Momente, Stimmung, Musik, „langweilig“), gilt für beide. `/lernstand` zeigt beide Stände.
+- **Kurzbefehle** als Knöpfe im Chat, unter /hilfe und nach ✅ fertig: 🎬 Short · 🎞️ Zusammenschnitt ·
+  🧠 Lernstand · 📋 Stand · 📊 Publikum · 🎵 Musik. (Die Ersatz-Tastatur vom Vormittag verschwindet mit dem nächsten „🎬 Baue …“.)
+- **Musik nach Genre** (27.09.): `pipeline musik ncs --genre hart --anzahl 40` lädt Techno, Hardcore, Electronic Rock,
+  Dance-Rock und Midtempo Bass von NCS (Metal gibt es dort nicht). Diese Genres bekommen bei der Musikwahl
+  `[musik].genre_bonus` = 1,5 dazu und schlagen so die alten EDM-Titel. Beim Einspielen gleich mit:
+  `NCS_GENRES=hart NCS_ANZAHL=40` vor `bash` in der Einspiel-Zeile.
+- Journal: „Entwurf #n gebaut in 95 s: Sperre 0 s · Stimmung 50 s (10 Clips) · Schnitt 4 s · Render 41 s“ zeigt,
+  wo die Wartezeit nach ✅ fertig bleibt.
+- **Telegram über IPv4** (`[lernbot].nur_ipv4 = true`, 27.09.): Über IPv6 blieb die Warteabfrage auf dem Mini hängen,
+  Klicks kamen gebündelt 15–20 s später an, obwohl der Bot jeden in unter 0,3 s erledigt. Die Warteabfrage dauert
+  jetzt 5 s (`[lernbot].poll_timeout_s`), hängt sie doch einmal, ist sie nach ~10 s neu aufgebaut.
+- Das Journal zeigt je Klick, wo die Zeit bleibt: `journalctl -u clip-lernbot | grep Knopf`
+  („Antwort 0.21 s · Speichern 0.01 s · Bildunterschrift 0.35 s“).
 - `/lernstand` zeigt, was der Regisseur gelernt hat, `/musik` die Titel, `/stand` einen Satz zum Stand.
 - Abends um 21:00 kommt ein Satz zum Stand (`[lernbot].abend_uhrzeit`).
 - **Publikum (TikTok-Zahlen, Lernschleife):** nach 👍 auf einen Short „📦 Upload-Paket“, nach dem Posten
@@ -79,6 +102,7 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 | 😵 zu hektisch | Segmente +15 % länger, Übergänge +10 %; ab +30 % nur jeder 2., ab +70 % jeder 4. Beat; dazu Hektik ×0,9 (Beat-Akzente schwächer, 0,3 … 1,3) |
 | 🎯 Stimmung getroffen | Hauptstimmung +0,5; Musikziel dieser Stimmung rückt 20 % zum benutzten Titel |
 | ⏳ zu lang | Ziel-Dauer −10 % (bis 60 %) |
+| ⏱️ zu kurz | Ziel-Dauer +10 % (bis 100 %) – hebt „zu lang“ wieder auf; beide zugleich: nichts. Länger als die Obergrenze des Formats geht nur über `[regie.formate]` (unten) |
 | ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills |
 | 🥱 Clips langweilig | jeder Moment dieses Entwurfs −1 Punkt (kommt seltener) |
 | 🎆 zu viele Effekte | Effekt-Stärke der Hauptstimmung ×0,85 (bis 0,1) – alle Effekte dieser Stimmung schwächer, schwache fallen unter die Schwelle weg |
@@ -92,14 +116,53 @@ Alles wird bei jedem Lauf aus den gespeicherten Bewertungen neu berechnet und is
 kann nichts kaputt machen (je Moment höchstens ±3).
 
 ## Abwechslung – warum nicht immer dieselben Clips kommen
-Jeder Moment hat Punkte (Kill-Serie 1/3/6/10, Victory +5, Stimmung, Elo, Freigabe, Gelerntes). Früher gewannen
+Jeder Moment hat Punkte: seine Stärke nach derselben Bewertung wie im Clip-Bot (`vorbewertung.roh_score`, seit
+Lernschleife Stufe 2 – Kill-Serie 1/3/6/10, Victory +5, Bot-Opfer, Clutch, Mic-Werte …), dazu gelernter
+Stimmungs-Bonus, Elo und Freigabe. Der feste Stimmungswert zählt nicht mehr zur Stärke (offene Rückfrage S2-R2 in
+`docs/ENTSCHEIDUNGEN.md`), er entscheidet nur noch bei der Musik mit. Früher gewannen
 bei jedem Entwurf dieselben Top-Momente; nur die Musik wechselte. Jetzt verliert ein Moment, der im **letzten**
 Entwurf war, **70 %** seiner Punkte, einer aus dem vorletzten 35 %, davor 17,5 % … (zusammen höchstens 100 %,
-die letzten 12 Entwürfe zählen). Ein Vierfach-Kill (13,5 Punkte) fällt damit nach einem Auftritt auf 4 und
+die letzten 12 Entwürfe zählen). Ein Vierfach-Kill (10 Punkte) fällt damit nach einem Auftritt auf 3 und
 kommt ein, zwei Entwürfe später wieder; dazwischen kommen die anderen dran.
 Einstellbar: `[regie.vorgaben] abwechslung = 0.7` (0 = immer die besten, 1 = maximal wechseln).
 Je mehr Clips eine Stimmung haben, desto mehr Auswahl: `regie-starten.sh` analysiert die nächsten 40, der
 Bot vor jedem Entwurf 10 weitere.
+
+**Der Abzug allein reichte nicht (27.09.).** Er ist anteilig – ein 12-Punkte-Moment liegt mit 70 % Abzug (3,6)
+immer noch vor jedem Einzelkill (1–3 Punkte). Simulation mit 120 Momenten, 20 Shorts nacheinander: nur **18
+verschiedene** Momente kamen vor, die Top-10 belegten zwei Drittel aller Plätze, 102 Momente nie. Genau das war
+„immer dieselben 10–20 Clips“. Deshalb dazu, beides nur bei `abwechslung > 0`:
+
+| Regel | Wert | Wirkung |
+|---|---|---|
+| **Cooldown** `cooldown_entwuerfe` | 3 (0 … 12) | Ein Moment aus einem der letzten 3 Entwürfe ist gesperrt – Reserve, falls das freie Material nicht für einen Entwurf reicht (Hinweis „Cooldown aufgehoben“) |
+| **Frische-Quote** `frische_quote` | 0,5 (0 … 1) | Mindestens die Hälfte der Momente eines Entwurfs war in keinem Entwurf des Fensters; fehlt etwas, tauscht der schwächste alte gegen den stärksten frischen Moment. Kürzen und Nachlegen halten die Quote ebenfalls (streichen zuerst alte, legen zuerst frische nach) |
+
+Simulation damit: **83 verschiedene** Momente in 20 Shorts statt 18 – und die Top-10 kommen trotzdem regelmäßig
+(je 5× in 20 Shorts). Der Entwurf zeigt die Bilanz („Auswahl aus 120 Momenten · 14 im Cooldown“), `/lernstand`
+die Regeln. Einstellbar in `[regie.vorgaben]`.
+
+Fehlt die Datei eines Moments (z. B. eine gelöschte Kopie), nimmt der Regisseur seit 27.09. den Bot-Clip
+(gleicher Inhalt; nicht nach einem Nachschnitt) statt den Moment still wegzulassen – und zählt, was fehlt
+(„… · 2 ohne Datei“, Hinweis „N Momente ohne Datei übersprungen“). Scheitert das Nachziehen der Stimmung vor
+dem Entwurf, steht der Fehler als erster Hinweis im Entwurf statt nur im Log.
+
+## Dauer je Format – und warum Shorts kurz wurden
+Standard: Short 30–45 s (Segment bis 12 s, Serie bis 20 s), Zusammenschnitt 180–300 s (25 s / 30 s). Seit 27.09.
+in `config/lokal.toml` einstellbar, Sekunden 5 … 600, `min_s ≤ max_s`, `seg_max_s` und `serie_max_s ≤ max_s`:
+
+```toml
+[regie.formate.short]
+max_s = 60            # Shorts bis 60 s statt 45
+serie_max_s = 30      # eine Kill-Serie darf am Stück länger bleiben
+```
+
+Ursache der kurzen Shorts (27.09., nachgestellt): Seit „Multikills am Stück“ belegt eine Serie bis 20 s statt
+12 s. Die Auswahl nimmt den letzten Moment auch, wenn er über das Ziel schießt; das Beat-Raster landet dann über
+45 s, das Kürzen strich einen ganzen Moment aus der Mitte – und **nichts füllte die Lücke**: Shorts mit 30–38 s
+und 2–3 Momenten statt 45 s. Jetzt legt der Regisseur nach dem Kürzen erneut nach (nur Momente, die unter die
+Obergrenze passen). Der gelernte `dauer_faktor` („⏳ zu lang“) spielte dabei kaum eine Rolle, konnte aber bis
+27.09. nur fallen – deshalb der neue Grund „⏱️ zu kurz“.
 
 ## Multikills am Stück – Serie und Jump-Cut
 Bei einem Team-Wipe sterben alle umgehauenen Gegner im selben Augenblick. Die Kill-Zeiten liegen dann alle beim
@@ -149,17 +212,22 @@ Umhauen 8,0   Umhauen 11,8           ……… 17 s nichts ………           W
 | chill | keine Kills, wenig los, leise | weiche Überblendung 0,8 s |
 
 Die Mitte jedes Übergangs liegt genau auf dem Beat; kein Kill wird angeschnitten (fachliche Prüfung der
-Schnittliste vor dem Speichern). Mit Effekten (unten) wechseln die Übergänge je Stimmung nach einer festen Rotation.
+Schnittliste vor dem Speichern). Mit Effekten (unten) zieht der Regisseur die Übergänge je Stimmung aus einem
+**Pool** – gemischt in Runden (jede Art einmal, bevor eine wiederkommt), nie dieselbe weiche Art zweimal
+nacheinander, deterministisch aus der Momentfolge (`effekte.Uebergangsmix`, 28.09.: „immer die gleichen Übergänge“).
 
 ## Effekte (Regisseur 2.0) – der Plan
 Der Regisseur schreibt für jeden Entwurf einen **Effekt-Plan** in die Schnittliste (`version 4`): welcher Effekt
 wann (Quellzeit `t_s`) und wie stark (0 … 1). Der Renderer setzt den Plan nur um – so lässt sich alles ohne Video
 prüfen (`tests/test_effekte_plan.py`). Code: `src/clip_pipeline/effekte.py`, Werte je Stimmung in `effekte.PROFIL`.
 
-Deine Vorgaben vom 25.09. (gehen der ursprünglichen Planung vor):
-1. **Spielbild clean:** im Spielbild nur Übergänge, **Zoom** (Punch, Beat-Akzent, Meme), später die Zeitlupe und
-   der **Farblook** – kein Blitz, kein Wackeln, kein Glitch-Stoß (Glitch nur als Übergangsart). Der Zoom wirkt nur
-   auf das Spielbild: im Short nie auf den unscharfen Hintergrund, nie auf Texte. Tod (frustriert): nur Punch +
+Deine Vorgaben (25.09., Punkt 1 am 28.09. ersetzt – „ruhig viral, Slowmo und beschleunigt, viele Effekte, keine
+doppelten“):
+1. **Im Spielbild:** Übergänge (Mix), **Zoom** (Punch, Beat-Akzent, Meme), **Zeitlupe/Zeitraffer**, der
+   **Farblook** und die **Impacts** Blitz (`flash`), Wackeln (`shake`, mit Zoom 1,10, damit kein Rand erscheint) und
+   RGB-Stoß (`rgb`). Die Finisher wechseln den Stil (Punch · Punch + Blitz · Wackeln · Punch + RGB; nur Stile, deren
+   Extra im Profil Stärke hat) – kein Kill sieht aus wie der vorige. Zoom, Blitz und Wackeln wirken nur auf das
+   Spielbild: im Short nie auf den unscharfen Hintergrund, nie auf Texte. Tod (frustriert): Wackeln + Blitz +
    Einschlag.
 2. **Texte nur außerhalb des Spielbilds, animiert** (Pop-in über die Größe, Ein-/Ausblenden, leichtes
    Hineingleiten). Short (1080×1920, Spielbild mittig bei y 34–66 %): Zähler oben unter „clip-battle.de“ (bleibt
@@ -177,24 +245,33 @@ Deine Vorgaben vom 25.09. (gehen der ursprünglichen Planung vor):
 |---|---|
 | Anker | die sichtbare Aktion: **mein Umhauen** (`aktion_sekunden`), sonst der Kill; nur ≥ 0,1 s weg vom Schnitt bzw. außerhalb der Blende (steht als `kill_s` im Segment) |
 | Kette | Kills mit ≤ 10 s Abstand (`[vorbewertung].multikill_fenster_s`, gezählt wie Bot und Elo) |
-| Finisher (letzte Aktion der Kette) | Zoom-Punch + Bass-Hit; die Kills davor: Mini-Punch (halb so stark) + Tick |
+| Finisher (letzte Aktion der Kette) | Stil aus der Rotation (11 Stile: Punch · Punch + Blitz · Wackeln + RGB · Punch + Negativ · Tilt + Blitz · Punch + Blur · Punch + Strobe · Wackeln + Farbrad · Punch + Pixel · Punch + Kontrast + Vignette · Tilt + Farb-Pop) + Bass-Hit; die Kills davor: eigene Rotation (Punch, Punch + Kontrast, Puls + Farb-Pop, Punch + Vignette, Wackeln) halb so stark + Tick |
+| Einstieg (2.2) | jeder harte Schnitt, auch Jump-Cut und ganz vorn: Einzug (Bild startet 18 % vergrößert und zieht auf), mit Blitz, RGB oder Farb-Pop, oder Blur / Negativ / Pixel – Rotation |
+| Drift (2.2) | jedes Segment zoomt langsam 6 % hinein bzw. heraus (abwechselnd) – das Bild steht nie still |
+| Beat-Effekte (2.2) | auf den Musik-Beats nach 0,8 s Ruhe (lustig 1,2, frustriert 2, chill 2,5): Zoom-Puls, Farb-Pop, Vignette, Blur, Kontrast, Farbrad, Blitz – Rotation, Stärke × `akzent` |
+| Zeitlupe (`lupe`) | um den Finisher der längsten Kette je Moment: 0,35 s davor … 0,45 s danach mit Faktor 0,5 (→ 1,6 s im Video); episch mit Serie ≥ 3 oder Victory ±0,2 s mit 0,25. Höchstens `max_lupen` (2) je Video – Vorrang Höhepunkt, längere Serie, mehr Punkte. Ton tiefer (`asetrate`) |
+| Zeitraffer (`raffer`) | über einen Anlauf ≥ 3 s vor der ersten Aktion: die letzten ≤ 4 s davor (bis 0,8 s vor der Aktion) mit Faktor 2, Tonhöhe bleibt (`atempo`). Höchstens `max_raffer` (2), längerer Anlauf zuerst; darf im selben Segment wie die Zeitlupe liegen |
+| Zeitleiste bei Tempo | bleibt (Beats!): die Zeitlupe kürzt die Quelle hinten um den Zuschlag, der Zeitraffer verlängert sie – nie in Muss-Zone, Fenster oder Griff; passt es nicht, schrumpft das Fenster (Lupe ≥ 0,3 s, Raffer ≥ 1,5 s) oder fällt weg |
 | Kill-Titel | **einmal je Serie am Ende**: DOUBLE / TRIPLE / QUAD / PENTA KILL, ab 6 MULTI KILL – nie DOUBLE und TRIPLE nacheinander. Die längste Serie heißt wie `max_gruppe` des Moments |
 | VICTORY ROYALE | ab letztem Kill + 0,4 s bis Segmentende (mindestens 1 s), ersetzt einen überlappenden Kill-Titel |
 | Zähler „KILLS n“ | nur Short, bei jedem sichtbaren Kill, zählt über das ganze Video |
-| Tod (frustriert) | Punch + dumpfer Einschlag, kein Titel |
+| Tod (frustriert) | Wackeln (Stärke `tod_punch`) + Blitz + dumpfer Einschlag, kein Titel |
 | Jubel (lustig) | Meme-Zoom + Pop auf der ersten Jubel-Spitze |
 | Riser | endet auf dem ersten Kill des Höhepunkts |
 | Whoosh | auf jedem weichen Übergang (nicht bei Schnitt, Jump-Cut und Abblende über Schwarz) |
 | Budget | Zooms ≥ 0,4 s auseinander (Finisher vor Meme vor Punch vor Akzent), kein Zoom-Start in einer Blende, höchstens 1 Glitch-Übergang |
 | Beat-Akzent | kleiner Zoom auf einem Musik-Beat, wenn 2,5 s (lustig 3 s) weder Schnitt noch Zoom war |
 
-| Stimmung | Look | Übergänge (Rotation) | Besonderes |
-|---|---|---|---|
-| episch | cinematic 0,8 | Schnitt, Whip 0,25, Schnitt, Zoom 0,3 | Punch 0,7; in den Höhepunkt immer harter Schnitt |
-| spannend | kalt 0,6 | Whip 0,25, Schnitt, Glitch 0,2, Schnitt | Punch 0,5; in den Höhepunkt harter Schnitt |
-| lustig | warm 0,5 | Wischen, Squeeze, Schieben (je 0,3) | Meme-Zoom, kein Bass-Hit |
-| frustriert | entsättigt 0,7 | Abblende 0,5, Glitch 0,2 | kein Titel, keine Akzente |
-| chill | soft 0,3 | Blende 0,8, Dissolve 0,6 | kein Punch, kein Zähler |
+| Stimmung | Look | Übergänge (Pool, gemischt) | Impacts (Blitz/Wackeln/RGB) · Tempo (Lupe/Raffer) | Besonderes |
+|---|---|---|---|---|
+| episch | cinematic 0,8 | Schnitt ×2, Whip, Zoom, Whip ↑, Flash, Radial, Smooth, Glitch, Cover | 0,7/0,6/0,5 · 0,8/0,6 | Punch 0,7; in den Höhepunkt immer harter Schnitt |
+| spannend | kalt 0,6 | Whip, Schnitt ×2, Glitch, Zoom, Whip →, Blur, Circle, Diag, Flash | 0,6/0,7/0,6 · 0,5/0,7 | Punch 0,5; in den Höhepunkt harter Schnitt |
+| lustig | warm 0,5 | Wischen ←↑, Squeeze ↔↕, Schieben ←↓, Circle, Reveal, Diag | 0,3/0,5/– · –/0,3 | Meme-Zoom, kein Bass-Hit |
+| frustriert | entsättigt 0,7 | Abblende, Glitch, Blur, Blende, Smooth ↓ | 0,5/0,6/– · 0,6/– | kein Titel, keine Akzente |
+| chill | soft 0,3 | Blende 0,8, Dissolve, Smooth →, Circle | – · – | kein Punch, kein Zähler |
+
+Die Werte je Stimmung (`effekte.PROFIL`) sind Startwerte; `[regie.effekte.<stimmung>]` überschreibt sie (auch
+`uebergaenge` als Pool, `flash`, `shake`, `rgb`, `lupe`, `raffer`), `max_lupen`/`max_raffer` in `[regie.effekte]`.
 
 Der Look richtet sich nach der Hauptstimmung des Videos. Stärke = Profilwert × gelernte Effekt-Stärke; unter
 `schwelle` (0,15) fällt ein Effekt weg. **Ausschalten:** `[regie.effekte] an = false` – dann sind Schnitt und
@@ -219,9 +296,9 @@ Bewertungen – wie die anderen Regeln):
 | Parameter | Start | wirkt auf | lernt aus |
 |---|---|---|---|
 | `effekt_staerke[stimmung]` | 1,0 je Stimmung | **alle** Effekte von Segmenten dieser Stimmung (Zoom, Titel, Zähler, Klänge) und den Look, wenn sie die Hauptstimmung ist | 🎆 ×0,85 · 💥 ×1,15 für die **Hauptstimmung** des Entwurfs, Grenzen 0,1 … 1,5; beide zugleich: nichts; 👍/👎 ohne Grund: nichts |
-| `effekt_hektik` | 1,0 | nur die Beat-Akzente – Blitz und Wackeln gibt es nicht mehr | 😵 zu hektisch ×0,9, Grenzen 0,3 … 1,3 |
+| `effekt_hektik` | 1,0 | die Beat-Akzente und die Impacts Blitz, Wackeln, RGB-Stoß (28.09.) | 😵 zu hektisch ×0,9, Grenzen 0,3 … 1,3 |
 
-Stärke eines Effekts = Profilwert × `effekt_staerke[stimmung]` (× `effekt_hektik` bei Beat-Akzenten), höchstens 1;
+Stärke eines Effekts = Profilwert × `effekt_staerke[stimmung]` (× `effekt_hektik` bei Beat-Akzenten und Impacts), höchstens 1;
 unter `schwelle` (0,15) fällt er weg. Übergänge, auch der Glitch-Übergang, haben immer volle Stärke (Spezifikation §4).
 **Vorgaben:** `[regie.vorgaben] effekt_hektik = 0.8` und `[regie.vorgaben.effekt_staerke] chill = 0.5` (0 … 1,5;
 **0 = diese Stimmung ohne Effekte**, das bleibt auch nach „💥 mehr Action“ so). `/lernstand` zeigt die Zeile
@@ -234,8 +311,15 @@ liest nur `liste["effekte"]` und `segmente[].effekte`, nie die gelernten Paramet
 | Effekt | ffmpeg | Wo im Graphen |
 |---|---|---|
 | Zoom (Punch 1 + 0,25·s, Akzent 1 + 0,06·s, Meme 1 + 0,2·s) | `scale` mit `eval=frame`, mittig per `overlay` auf das unveränderte Bild (`overlay` rechnet nur während eines Zooms) | je Segment **nur auf dem Spielbild**: im Short vor dem Einsetzen in den unscharfen Hintergrund, im 16:9 vor dem Rand |
-| Übergänge Whip, Zoom, Glitch, Squeeze, Dissolve | `xfade` slideleft, zoomin, pixelize, squeezeh, dissolve | wie die alten Übergänge |
-| Whip / Glitch zusätzlich | waagrechte Unschärfe (`avgblur`) bzw. Farbversatz + Rauschen (`chromashift`, `noise`) | nur während der Blende (`enable`) |
+| Übergänge (33 Arten im Schema) | `xfade`; eigene Namen: whip/whip_right → slideleft/slideright, whip_up → slideup, zoom → zoomin, glitch → pixelize, squeeze → squeezeh, flash → fadewhite | wie die alten Übergänge |
+| Whip / Glitch zusätzlich | waagrechte (Whip ↑: senkrechte) Unschärfe (`avgblur`) bzw. Farbversatz + Rauschen (`chromashift`, `noise`) | nur während der Blende (`enable`) |
+| Zeitlupe / Zeitraffer | `setpts` **vor** `fps` (stückweise linear in T, auch zwei Fenster je Segment); Ton in Stücken (`asplit`, `atrim`, `asetrate`+`aresample` = tief bzw. `atempo` = Tonhöhe bleibt, `concat`) | je Segment am Eingang – eine 60-fps-Aufnahme bleibt bei 0,5 im 30-fps-Short flüssig |
+| Blitz, Strobe, Kontrast, Farb-Pop | ein `eq` mit `eval=frame` (brightness 0,6·(1−u) bzw. an/aus mit 7,5 Hz; contrast/saturation 1 + Wert·(1−u)²) | je Segment nur auf dem Spielbild, nach dem Zoom, vor dem Look – wie alle Katalog-Filter nur in ihren Fenstern (`enable`) |
+| Farbrad, Negativ, Blur, Pixel, Vignette | `hue=h` (eine Umdrehung), `negate`, `gblur` (erst σ 14, dann 6 bei 1080 Breite), `pixelize` (24 px), `vignette` (Winkel im sin-Bogen) | wie oben, Reihenfolge eq → hue → negate → gblur → pixelize → vignette |
+| Tilt / Einzug / Drift | `rotate` vor dem Hochskalieren im Zoom-Zweig (bis ≈ 2,3°, Zoom 1,12 deckt die Ecken); Einzug und Drift als Summanden im Zoom-Faktor; mit Drift arbeitet das Zoom-`overlay` durchgehend | nur Spielbild |
+| Großer Graph | ab 100 KB als Datei: `-/filter_complex <datei>` (ffmpeg ≥ 7) bzw. `-filter_complex_script` | Notbremse erst bei 4 MB |
+| Wackeln (`shake`) | Versatz `x`/`y` im Zoom-`overlay` (sin 14 Hz / cos 11 Hz, 2,5 %/2 % der Größe, (1−u)²) bei Zoom 1,10 | wie der Zoom: nur das Spielbild |
+| RGB-Stoß (`rgb`) | derselbe `chromashift` wie der Glitch-Übergang, ohne Rauschen, 0,15 s | nach den Übergängen, vor den Texten |
 | Look | `eq` (Kontrast, Sättigung, Helligkeit) + `colorcorrect` (Farbstich in Schatten und Lichtern) | Short: je Segment auf Spielbild und kleinem Hintergrund (vor dem Hochskalieren); 16:9: einmal nach den Übergängen |
 | Kill-Titel, Zähler | `drawtext`, DejaVu Sans Bold (`[shorts].schriften`): wächst kurz über seine Größe (Pop-in), blendet ein und aus, gleitet leicht herein | nach dem Look (Schrift bleibt reinweiß); Short: Zähler zwischen clip-battle.de und Spielbild, Titel darunter (über den unteren 25 % für die App-Knöpfe) – auch beim Pop nie im Spielbild; die Höhe des Spielbilds misst `rendere` an den Quellen (4:3-Aufnahmen sind höher). 16:9: Titel mittig, nur in der Blende |
 | Klänge | selbst erzeugte WAVs (`sfx.py`), samplegenau verschoben | nach dem Ducking dazugemischt (die Musik weicht nur dem Spielton aus) |

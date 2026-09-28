@@ -37,8 +37,10 @@ ssh_schluessel = "/var/lib/clip-pipeline/.ssh/pve-big"
 mindest_wach_min = 20
 aus_warten_s = 180
 # Ab dieser Zeit wird pve-big nicht mehr geweckt; läuft er, fährt der Wächter ihn einmal herunter.
-# Sprint-Regel bis Mo 28.09., 20:00. NACH DEM SPRINT LEEREN (frist = ""), sonst weckt die Pipeline nie mehr.
-frist = "2026-09-28T20:00:00+02:00"
+# Leer = keine Frist (Standard). Eine befristete Sprint-Regel gehört NICHT hierher (Repo-Standard, öffentlich für
+# jede Betriebsart) – sondern ins gitignorte config/lokal.toml auf der jeweiligen Maschine (B1, 26.09.: der letzte
+# Sprint-Wert hier hätte die Pipeline nach Ablauf für immer am Wecken gehindert, ohne dass es jemand gemerkt hätte).
+frist = ""
 # Auch der bisherige Weckweg (n8n-Schritte, /paket, highlight) weckt nur, wenn das Herunterfahren gesichert ist.
 # Bis die SSH-Steuerung eingerichtet ist, enden diese Schritte bei schlafendem pve-big mit Exit 3 (Alarm).
 alter_weckweg_nur_mit_aus = true
@@ -111,6 +113,10 @@ claude_timeout_s = 180
 [musik]
 # Musik für den Regisseur liegt auf dem Mini (pve-big darf schlafen). Je Titel <name>.lizenz.txt daneben.
 ordner = "/var/lib/clip-pipeline/musik"
+# 27.09. (Florian: „Techno/Industrial oder Rock/Metal, kein EDM“): Titel aus diesen NCS-Genres bekommen bei der
+# Musikwahl genre_bonus Punkte dazu (Stimmung passt = 2, Energie ≤ 1, Tempo ≤ 0,6). Laden: pipeline musik ncs --genre hart
+genres_bevorzugt = ["techno", "hardcore", "electronic-rock", "dance-rock", "midtempo-bass"]
+genre_bonus = 1.5
 
 [musik.ncs_stimmungen]
 # `pipeline musik ncs --stimmung X` sucht auf ncs.io mit diesen Mood-Filtern (IDs aus der NCS-Suche)
@@ -131,14 +137,18 @@ lernen_ab = 3
 final_halten_min = 60
 
 [regie.effekte]
-# Regisseur 2.0: Der Regisseur schreibt einen Effekt-Plan in die Schnittliste (src/clip_pipeline/effekte.py), der
-# Renderer setzt ihn nur um. Spielbild clean: im Bild nur Übergänge, Zoom und Farblook; Kill-Titel und Zähler im Short
+# Regisseur 2.0/2.1: Der Regisseur schreibt einen Effekt-Plan in die Schnittliste (src/clip_pipeline/effekte.py), der
+# Renderer setzt ihn nur um. Im Spielbild: Übergänge (gemischt ohne Wiederholung), Zoom, Zeitlupe/Zeitraffer, Farblook
+# und seit 28.09. die Impacts Blitz/Wackeln/RGB-Stoß mit wechselndem Stil je Kill; Kill-Titel und Zähler im Short
 # nur im unscharfen Rand, im Zusammenschnitt kein Zähler. Profile je Stimmung: effekte.PROFIL, anpassbar in
 # config/lokal.toml unter [regie.effekte.<stimmung>] (Beispiele in config/lokal.beispiel.toml).
 # Aus = wie vorher (gleiche Übergänge, gleicher Filtergraph):
 an = true
+# Höchstens so viele Zeitlupen bzw. Zeitraffer je Video (28.09.; 0 = keine)
+max_lupen = 8
+max_raffer = 6
 # steigt, wenn sich die Profilwerte im Code ändern (steht in jeder Schnittliste)
-profil_version = 1
+profil_version = 2
 # Effekte schwächer als das fallen weg (Stärke 0..1 = Profilwert × gelernte Effekt-Stärke)
 schwelle = 0.15
 # Zoom-Ereignisse (Punch, Beat-Akzent, Meme) liegen mindestens so weit auseinander
@@ -167,6 +177,15 @@ naechster_nach_bewertung = true
 # Vor jedem Entwurf so viele weitere Clips analysieren (Stimmung, Whisper) – die Auswahl wächst mit; 0 = aus
 stimmung_je_entwurf = 10
 intervall_s = 30
+# B5 (28.09., Florian: „nicht jeden Entwurf bewerten müssen, will aber sagen was hochgeladen wird“): Entwürfe, deren
+# Erwartung (erwartung.py) unter dieser Schwelle liegt, bekommst du gar nicht erst gezeigt – der Bot verwirft sie
+# still (entwuerfe.auto_verworfen) und baut automatisch den nächsten. 0 = aus (wie bisher: jeder Entwurf kommt zu
+# dir). Ohne genug Urteile gibt es noch keine Erwartung – dann kommt der Entwurf immer, die Schwelle greift erst,
+# sobald das Modell steht ([erwartung].mindest_urteile).
+auto_schwelle = 0.0
+# So oft in Folge automatisch neu gebaut wird, bevor der letzte Versuch trotzdem gesendet wird (nie unbegrenzt
+# weiterrendern – Rendern ist der teure Schritt, Mini-PC hat nur eine Sperre gleichzeitig).
+auto_versuche_max = 3
 # Lernschleife „Publikum“ (Spec §7.1): Screenshots der TikTok-Statistik per `claude -p` lesen (1 Aufruf je Bild,
 # zählt gegen dein Abo). false = der Bot fragt die Zahlen gleich von Hand ab (views likes wiedergabe voll%,
 # optional dahinter kommentare shares saves).
@@ -282,11 +301,40 @@ kill_punkte = 1.0
 victory_royale = 5.0
 laenge = -0.5
 lautstaerke = 1.0
-kommentar = 1.0
+# Stufe 2 (Spec §8.1): Florians Vorgaben, nicht gelernt. Leine wie oben – bei Startwert 0 also ±0,5.
+platzierung = 2.0      # 1/Platz: Sieg 1,0 → +2, Platz 10 → +0,2
+sniper = 1.0           # Anteil Sniper-Kills
+nahkampf = 0.0         # Anteil Shotgun/SMG/Spitzhacke – neutral, das Lernen entscheidet
+bot_opfer = -2.0       # Anteil Bot-Opfer: ein reiner Bot-Clip verliert 2 Punkte
+phase = 0.5            # 0 = Match-Start … 1 = Ende: späte Momente leicht bevorzugt
+endgame = 1.0          # beim Kill höchstens [merkmale].endgame_spieler übrig
+clutch = 2.0           # selbst am Boden gewesen und trotzdem den Kill geholt
+mic_lachen = 1.0       # Wortzähler aus dem Transkript, je auf 3 gedeckelt
+mic_jubel = 1.0
+mic_frust = 0.5
+mic_laut = 0.5         # laute Mikro-Spitzen, auf 3 gedeckelt
+spitzen = 0.25         # Spielton-Spitzen, auf 4 gedeckelt
+
+[merkmale]
+# Neue Merkmale aus Replay und Mikro (Spec §8.1, src/clip_pipeline/merkmale.py)
+endgame_spieler = 10   # Endgame: beim Kill höchstens so viele Spieler übrig
+clutch_vor_s = 30.0    # Clutch: selbst umgehauen höchstens so lange vor dem Kill …
+clutch_nach_s = 10.0   # … und danach so lange nicht gestorben
+mic = true             # Mic-Analyse im Hintergrund nach render (Whisper, nice 15); false = aus
+mic_je_lauf = 3        # höchstens so viele Clips je Hintergrundlauf (Whisper ~30–60 s je Clip, hält die Sperre)
+
+[merkmale.waffen]
+# GunType-ZAHLEN aus replay2json (kein Name – FortniteReplayReader 3.1.0 liest nur ein Byte und kennt keine Namen).
+# Kalibrieren mit `pipeline replay <datei>` an bekannten Kills (docs/PUBLIKUM.md). Nicht eingetragene Zahlen zählen
+# als sonstige und kommen einmal als Sammelmeldung je Match (Annahme S2-A4).
+sniper = []
+nahkampf = []          # Shotgun, SMG, Spitzhacke
+sonstige = []          # bekannte andere Waffen (schaltet die Meldung für diese Zahl ab)
 
 [lernen]
-# Erst ab so vielen Bewertungen (Freigaben/Verwerfungen + Battles) wird gelernt
-mindestens = 20
+# Erst ab so vielen Bewertungen (Freigaben/Verwerfungen + Battles) wird gelernt. 27.09. (B3): 10 statt 20 – das
+# Vertrauen wächst ohnehin mit n (10 von 60 = 17 %), und die Schranken (nie schlechter als die Startgewichte) bleiben.
+mindestens = 10
 # Ab so vielen Bewertungen voll vertrauen
 voll_vertrauen = 60
 schritt = 0.05
@@ -295,6 +343,23 @@ durchlaeufe = 5
 leine_anteil = 0.5
 leine_minimum = 0.5
 max_paare_pro_abend = 20
+# Stufe 2 (Spec §8.3): Freigabe-Paare zählen halb – eine Freigabe ist nur ein indirekter Vergleich, ein Battle direkt
+gewicht_freigabe = 0.5
+# Erst ab so vielen Publikums-Paaren prüft die Schranke „nie schlechter als der Start“ auch die Publikums-Quote
+# (angezeigt wird sie ab dem ersten Paar; Annahme S2-A10)
+mindest_publikum_paare = 10
+
+[erwartung]
+# Wie wahrscheinlich gibst du frei? (Spec §10.5, src/clip_pipeline/erwartung.py)
+mindest_urteile = 10   # darunter keine Erwartung („noch keine“)
+referenz = 50          # z gegen die letzten so vielen gesendeten derselben Art
+schritte = 50          # Gradientenabstieg je Schätzung
+lernrate = 0.1         # Schrittweite des Gradientenabstiegs (Spec nennt keine; Annahme)
+l2 = 0.1               # Strafe auf a und b (nicht c), damit wenige Urteile nichts Extremes lernen
+start_a = 1.0
+start_b = 0.5
+start_c = 0.0
+mad_minimum = 0.25     # Mindest-Streuung der Moment-Scores (Punkte-Skala, nicht Publikums-Skala; Annahme)
 
 [elo]
 # Variante A aus clips_voter (src/community_clip_os.py)
@@ -366,7 +431,9 @@ schriften = [
 # h = 300
 
 [veroeffentlichung]
-# Auf diese Plattformen MUSS jeder freigegebene Clip. Erst wenn alle erledigt sind: "veröffentlicht".
+# Einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.): kein 📦-Knopf, keine Erinnerung. Hochgeladen werden
+# die Shorts aus dem Lern-Bot und das Highlight-Video (Erinnerung bis „✅ Hochgeladen“). pflicht/zusatz gelten nur noch,
+# wenn du einen Clip doch per /paket bzw. /link einträgst – erst wenn alle Pflicht-Plattformen erledigt sind: "veröffentlicht".
 pflicht = ["youtube", "tiktok"]
 # Zusätzlich nachverfolgt (optional): Einreichen des YouTube-Links auf clip-battle.de
 zusatz = ["clipbattle"]
@@ -384,6 +451,10 @@ leise_von = "23:00"
 leise_bis = "08:00"
 
 [aufraeumen]
+# Nie automatisch löschen ist der Standard (Entscheidung 25.09.) – aus, bis ausdrücklich auf true gesetzt
+# (z. B. in config/lokal.toml, für Betriebsarten ohne [lager]-Abgleich). Im getrennten Betrieb (E19) bleibt
+# aufraeumen unabhängig davon immer gesperrt (siehe aufraeumen.pruefe_erlaubt).
+aktiv = false
 # Nach so vielen Tagen wird recycelt (erst Papierkorb, dann endgültig) ...
 nach_tagen = 182
 papierkorb_tage = 14

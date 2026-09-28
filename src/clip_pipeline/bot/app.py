@@ -18,7 +18,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
 
-from .. import caption, db, highlight, lernen, publikum, shorts
+from .. import caption, db, erwartung, highlight, lernen, merkmale, publikum, shorts
 from ..konfig import Konfig, SpeicherOffline
 from ..medien import MedienFehler
 from ..zeit import aus_iso, iso, jetzt
@@ -38,8 +38,20 @@ def _daten(context: ContextTypes.DEFAULT_TYPE):
 
 
 def _clip_text(con, konfig: Konfig, clip_id: int) -> str:
+    """Bildunterschrift eines Clips. Die Erwartung wird hier nur GELESEN (/offen, nach einem Klick) – festgeschrieben
+    wird sie einmal beim ersten Senden (sende_outbox, Spec §10.5)."""
     clip = db.clip(con, clip_id)
-    return texte.clip_text(clip, db.match(con, clip["match_id"]), konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+    return texte.clip_text(clip, db.match(con, clip["match_id"]), konfig.wert("zeit.zeitzone", "Europe/Berlin"),
+                           erwartung=erwartung.gespeichert(con, "clip", clip_id))
+
+
+def _erwartung_festschreiben(con, konfig: Konfig, clip_id: int) -> None:
+    """Erwartung VOR dem Senden festschreiben (sie muss feststehen, bevor du urteilst). Ein Fehler hier darf das
+    Senden nicht aufhalten: der Clip kommt dann mit „Erwartung: noch keine“, der Fehler steht im Log."""
+    try:
+        erwartung.festschreiben(con, konfig, "clip", clip_id)
+    except Exception:
+        log.exception("Erwartung für Clip #%s nicht festgeschrieben", clip_id)
 
 
 def _upload_text(con, clip_id: int, stand: dict[str, bool]) -> str:
@@ -89,6 +101,7 @@ async def sende_outbox(app: Application) -> int:
         if pfad is None or not pfad.is_file():
             log.warning("Vorschau für Clip #%s fehlt: %s", z["id"], pfad)
             continue
+        _erwartung_festschreiben(con, konfig, z["id"])  # vor send_video: die Bildunterschrift zeigt sie schon
         with pfad.open("rb") as datei:
             nachricht = await app.bot.send_video(
                 chat_id=chat, video=datei, caption=_clip_text(con, konfig, z["id"]), parse_mode=ParseMode.HTML,
@@ -114,18 +127,19 @@ async def sende_outbox(app: Application) -> int:
 
 
 async def erinnere(app: Application) -> bool:
-    """Erinnert an Clips, die seit über erinnerung_h freigegeben, aber nicht überall hochgeladen sind."""
+    """Erinnert an Highlight-Videos, die seit über erinnerung_h freigegeben, aber noch nicht hochgeladen sind –
+    höchstens einmal je erinnerung_h. Einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.)."""
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     stunden = float(konfig.wert("veroeffentlichung.erinnerung_h", 24))
     grenze = jetzt() - timedelta(hours=stunden)
     letzte = con.execute("SELECT zeit FROM ereignisse WHERE art = 'erinnerung' ORDER BY id DESC LIMIT 1").fetchone()
     if letzte and aus_iso(letzte["zeit"]) > grenze:
         return False
-    offen = [(c, f) for c, f in aktionen.offene_uploads(con, konfig) if c["entschieden"] and aus_iso(c["entschieden"]) < grenze]
-    if not offen:
+    videos = [h for h in aktionen.offene_highlight_videos(con) if h["entschieden"] and aus_iso(h["entschieden"]) < grenze]
+    if not videos:
         return False
-    await app.bot.send_message(chat, "⏰ " + texte.offene_uploads_text(offen), parse_mode=ParseMode.HTML)
-    db.protokoll(con, "erinnerung", f"{len(offen)} Clip(s) noch nicht überall hochgeladen")
+    await app.bot.send_message(chat, "⏰ " + texte.offene_uploads_text(videos), parse_mode=ParseMode.HTML)
+    db.protokoll(con, "erinnerung", f"{len(videos)} Highlight-Video(s) nicht hochgeladen")
     return True
 
 
@@ -236,7 +250,10 @@ async def cmd_rangliste(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def cmd_gewichte(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     con, konfig, _ = _daten(context)
     version, ergebnis = lernen.aktualisiere(con, konfig)
-    await update.effective_message.reply_text(texte.gewichte_text(ergebnis, version), parse_mode=ParseMode.HTML)
+    text = texte.gewichte_text(ergebnis, version)
+    if zusatz := erwartung.trefferquote_text(con, konfig):  # Spec §10.5 – leer, solange nichts zu zeigen ist
+        text += "\n" + escape(zusatz)
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 async def sende_paket(context: ContextTypes.DEFAULT_TYPE, clip_id: int) -> None:
@@ -261,7 +278,9 @@ async def sende_paket(context: ContextTypes.DEFAULT_TYPE, clip_id: int) -> None:
         await context.bot.send_message(chat, f"🎬 Rendere Short für Clip #{clip_id} …")
         try:
             # Rendern dauert: in einem eigenen Thread, damit der Bot weiter reagiert (DB bleibt im Haupt-Thread)
-            await asyncio.to_thread(shorts.rendere, konfig.absolut(clip["clip_pfad"]), ziel, konfig)
+            # Mikro/Chat nur bei Lachen, Jubel oder Gags (merkmale.stimmen_fuer_clip)
+            await asyncio.to_thread(shorts.rendere, konfig.absolut(clip["clip_pfad"]), ziel, konfig,
+                                    stimmen=merkmale.stimmen_fuer_clip(con, clip_id))
         except MedienFehler as e:
             await context.bot.send_message(chat, f"⚠️ Short fehlgeschlagen: {escape(str(e)[:300])}")
             return
@@ -304,7 +323,7 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_uploads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     con, konfig, _ = _daten(context)
-    text = texte.offene_uploads_text(aktionen.offene_uploads(con, konfig))
+    text = texte.offene_uploads_text(aktionen.offene_highlight_videos(con))
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
@@ -335,6 +354,16 @@ async def bei_klick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if aktion in ("hf", "hv"):
         h = highlight.entscheide(con, nummer, freigeben=aktion == "hf")
         await query.answer("Highlight nicht gefunden" if h is None else ("✅ Freigegeben" if aktion == "hf" else "🗑️ Verworfen"))
+        if h is not None:
+            knoepfe = aktionen.knoepfe_highlight_freigegeben(h["id"]) if h["status"] == "freigegeben" else None
+            with contextlib.suppress(BadRequest):
+                await query.edit_message_caption(caption=texte.highlight_text(h), parse_mode=ParseMode.HTML,
+                                                 reply_markup=_markup(knoepfe))
+        return
+
+    if aktion == "hu":
+        h = highlight.hochgeladen(con, nummer)
+        await query.answer("Highlight nicht gefunden" if h is None else "✅ Hochgeladen")
         if h is not None:
             with contextlib.suppress(BadRequest):
                 await query.edit_message_caption(caption=texte.highlight_text(h), parse_mode=ParseMode.HTML, reply_markup=None)

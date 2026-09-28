@@ -1,0 +1,12 @@
+# Startet clip-mikro.service, sobald render die Anstoß-Datei schreibt (mikro.anstossen, Name mikro.ANSTOSS_NAME).
+# Läuft der Dienst gerade, geht ein weiterer Anstoß ggf. verloren – dann holt ihn clip-mikro.timer nach.
+# Aktivieren: sudo systemctl enable --now clip-mikro.path clip-mikro.timer
+[Unit]
+Description=Clip-Pipeline: Mic-Schritt nach render anstoßen
+
+[Path]
+PathChanged=/var/lib/clip-pipeline/mikro.anstoss
+Unit=clip-mikro.service
+
+[Install]
+WantedBy=paths.target

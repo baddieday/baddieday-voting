@@ -28,6 +28,14 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # was du ändern willst; gilt nur für Scores, die danach gesetzt werden. Beispiel: Engagement-Ausreißer dämpfen:
 # [publikum.mad_minimum]
 # engagement = 0.01
+# Stufe 2 (docs/PUBLIKUM.md, S3/S4). Waffen-Nummern aus `pipeline replay <datei>` – GunType-ZAHLEN, keine Namen:
+# [merkmale.waffen]
+# sniper = [12]
+# nahkampf = [3, 27]
+# sonstige = [5]
+# Mic-Schritt nach render aus (z. B. wenn logind KillUserProcesses=yes meldet):
+# [merkmale]
+# mic = false
 
 # --- Regisseur steuern (optional) ---------------------------------------------------------
 # Startwerte, von denen aus der Regisseur mit deinen Bewertungen weiterlernt. Nur eintragen, was du ändern willst.
@@ -40,6 +48,8 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # uebergang_faktor = 1.2    # weichere, längere Übergänge
 # musik_pegel = 0.3         # Musik leiser (0 … 1)
 # effekt_hektik = 0.8       # Beat-Akzente schwächer (0.3 … 1.3; „zu hektisch“ lernt ×0.9)
+# cooldown_entwuerfe = 3    # Momente aus den letzten n Entwürfen sind gesperrt (0 … 12; wirkt nur bei abwechslung > 0)
+# frische_quote = 0.5       # mindestens dieser Anteil eines Entwurfs war noch in keinem Entwurf (0 … 1)
 # [regie.vorgaben.stimmung_bonus]
 # lustig = 1.0              # lustige Momente bevorzugen (−2 … +2)
 # [regie.vorgaben.effekt_staerke]
@@ -48,6 +58,14 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # [regie.musik_ziele.episch]
 # bpm = 150                 # für epische Momente schnellere Musik
 # energie = 0.9             # und energiereichere (Rang in deiner Bibliothek, 0 … 1)
+# --- Dauer je Format (27.09.) ------------------------------------------------------------------
+# Sekunden 5 … 600; min_s ≤ max_s, seg_max_s und serie_max_s ≤ max_s – sonst gilt der Standard (Hinweis im Entwurf).
+# Standard: Short 30–45 s (Segment bis 12 s, Serie bis 20 s), Zusammenschnitt 180–300 s (25 s / 30 s).
+# [regie.formate.short]
+# max_s = 60                # Shorts bis 60 s statt 45
+# serie_max_s = 30          # eine Kill-Serie darf am Stück länger bleiben
+# [regie.formate.zusammenschnitt]
+# max_s = 360
 # --- Effekte (Regisseur 2.0) ---------------------------------------------------------------
 # Ganz aus (Schnitt und Übergänge wie vorher):
 # [regie.effekte]
@@ -57,6 +75,15 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # punch = 0.5               # sanfterer Zoom auf dem Finisher (Standard 0.7)
 # look = "warm"             # Farblook: neutral, cinematic, kalt, warm, entsaettigt, soft
 # look_staerke = 0.4
-# uebergaenge = [["whip", 0.25], ["schnitt", 0]]   # Rotation der Übergänge in epische Momente
+# uebergaenge = [["whip", 0.25], ["schnitt", 0], ["radial", 0.3]]   # Pool der Übergänge in epische Momente (gemischt)
+# flash = 0.4               # 28.09.: Blitz, Wackeln, RGB-Stoß auf den Finishern (0 = ohne diesen Stil)
+# shake = 0.3
+# rgb = 0
+# lupe = 0.5                # Zeitlupe um den Finisher (Standard 0.8), raffer = Zeitraffer im Anlauf (0.6)
+# raffer = 0
+# 2.2-Katalog (0 = diesen Effekt nie): negativ, blur, strobe, farbpop, kontrast, hue, vignette, pixel, tilt,
+# einstieg (Effekt auf jedem harten Schnitt), drift (Ken-Burns je Segment), akzent + max_ruhe_s (Beat-Effekte)
+# strobe = 0
+# max_ruhe_s = 1.5          # Beat-Effekte seltener (Standard episch 0.8)
 # [regie.effekte.lustig]
 # max_ruhe_s = 0            # keine Beat-Akzente (Zoom auf dem Beat nach so vielen Sekunden Ruhe)

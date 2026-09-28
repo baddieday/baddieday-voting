@@ -181,7 +181,7 @@ class Aufbau(unittest.TestCase):
             g = graph(voll(fmt), musik=True)
             with self.subTest(fmt=fmt):
                 self.assertIsNone(re.search(r"\d[eE][-+]?\d", g))
-                for verboten in ("minterpolate", "lut3d", "colorbalance", "vignette", "vibrance", "zoompan",
+                for verboten in ("minterpolate", "lut3d", "colorbalance", "vibrance", "zoompan",
                                  "custom", "rgbashift", "curves", "fade=t=in:st", ":color=white"):
                     self.assertNotIn(verboten, g)
 
@@ -441,6 +441,122 @@ class LookUndBlenden(unittest.TestCase):
         self.assertEqual(teile, ["avgblur=sizeX=48:sizeY=1:enable='between(t,3,3.25)'",
                                  "chromashift=cbh=-10:crh=10:enable='between(t,1,1.2)+between(t,9,9.2)'",
                                  "noise=alls=30:allf=t:all_seed=1:enable='between(t,1,1.2)+between(t,9,9.2)'"])
+
+
+class Impacts(unittest.TestCase):
+    """28.09.: Blitz (eq nur aufs Spielbild), Wackeln (Versatz im Zoom-Overlay), RGB-Stoß (chromashift-Fenster)."""
+
+    def test_flash_shake_rgb_im_graphen(self):
+        q = Path("/x/q.mp4")
+        liste = mini_liste([(q, 1.0, 7.0, ("schnitt", 0.0))], ereignisse=[
+            (1, "flash", 1.5, {"dauer_s": 0.12}), (1, "shake", 2.5, {"dauer_s": 0.25}), (1, "rgb", 3.5, {"dauer_s": 0.15})])
+        g = graph(liste)
+        zoom = beginnt_mit(g, "[zo0]")   # Spielbild: Zoom-Overlay mit Wackeln, danach der Blitz, dann [vgs0]
+        self.assertIn("overlay=x='(W-w)/2+between(t,2.5,2.75)*0.025*W*sin(87.9645*(t-2.5))*pow(1-(t-2.5)/0.25,2)'"
+                      ":y='(H-h)/2+between(t,2.5,2.75)*0.02*H*cos(69.115*(t-2.5))*pow(1-(t-2.5)/0.25,2)'"
+                      ":enable='between(t,2.5,2.75)',eq=brightness='between(t,1.5,1.62)*0.6*(1-(t-1.5)/0.12)':eval=frame"
+                      ":enable='between(t,1.5,1.62)'[vgs0]", zoom)
+        self.assertNotIn("eq=brightness='between", beginnt_mit(g, "[hg0]"))      # nie auf dem Hintergrund
+        self.assertIn("chromashift=cbh=-7:crh=7:enable='between(t,3.5,3.65)'", g)
+        self.assertNotIn("noise=", g)                                            # Rauschen nur beim Glitch-Übergang
+        self.assertIn("between(t,2.5,2.75)*0.1*min(", beginnt_mit(g, "[zs0]"))   # Wackeln: Zoom 1,10 verdeckt den Rand
+        # ohne Wackeln bleibt der Zoom-Baustein wie vorher
+        nur_punch = graph(mini_liste([(q, 1.0, 7.0, ("schnitt", 0.0))], ereignisse=[(1, "punch", 2.0, {"dauer_s": 0.35})]))
+        self.assertIn("overlay=(W-w)/2:(H-h)/2:enable=", nur_punch)
+        self.assertNotIn("eq=brightness='between", nur_punch)
+
+
+class Katalog2(unittest.TestCase):
+    """Regisseur 2.2: Spielbild-Katalog, Tilt, Einzug, Drift und große Graphen als Datei."""
+
+    def test_katalog_nur_aufs_spielbild_in_fester_reihenfolge(self):
+        q = Path("/x/q.mp4")
+        liste = mini_liste([(q, 1.0, 7.0, ("schnitt", 0.0))], ereignisse=[
+            (1, "negativ", 1.0, {"dauer_s": 0.1}), (1, "blur", 1.5, {"dauer_s": 0.2}),
+            (1, "strobe", 2.0, {"dauer_s": 0.4}), (1, "farbpop", 3.0, {"dauer_s": 0.45}),
+            (1, "hue", 4.0, {"dauer_s": 0.5}), (1, "pixel", 5.0, {"dauer_s": 0.1}),
+            (1, "vignette", 5.5, {"dauer_s": 0.6}), (1, "kontrast", 3.0, {"dauer_s": 0.35})])
+        g = graph(liste)
+        spiel = beginnt_mit(g, "[vg0]")
+        reihenfolge = [spiel.index(f) for f in ("eq=", "hue=h=", "negate=", "gblur=sigma=9:", "gblur=sigma=4:",
+                                               "pixelize=w=16:h=16:", "vignette=angle=")]
+        self.assertEqual(reihenfolge, sorted(reihenfolge))
+        self.assertIn("negate=enable='between(t,1,1.1)'", spiel)
+        self.assertIn("gblur=sigma=9:enable='between(t,1.5,1.58)'", spiel)            # erste 40 % stark
+        self.assertIn("lt(mod((t-2)*7.5,1),0.5)", spiel)                                # Strobe 7,5 Hz
+        self.assertIn("saturation='1+between(t,3,3.45)*1.2*pow(1-(t-3)/0.45,2)'", spiel)
+        self.assertIn("contrast='1+between(t,3,3.35)*0.6*pow(1-(t-3)/0.35,2)'", spiel)
+        for f in ("negate", "gblur", "pixelize", "vignette", "hue="):                     # nie auf dem Hintergrund
+            self.assertNotIn(f, beginnt_mit(g, "[hg0]"))
+
+    def test_tilt_einzug_drift(self):
+        z = effekt_filter.zoom(0, [("einzug", 0.0, 0.35, 1.0), ("drift_aus", 0.0, 6.0, 1.0), ("tilt", 2.0, 0.5, 1.0)])
+        self.assertIn("[zs0]rotate=a='between(t,2,2.5)*0.07*sin(PI*(t-2)/0.5)*(1-(t-2)/0.5)':c=black:"
+                      "enable='between(t,2,2.5)',scale=", z)                                # kippen vor dem Skalieren
+        self.assertIn("between(t,0,0.35)*0.18*pow(1-(t-0)/0.35,2)", z)                     # Einzug
+        self.assertIn("0.06*(1-clip((t-0)/6,0,1))", z)                                     # Drift heraus
+        self.assertTrue(z.endswith("overlay=(W-w)/2:(H-h)/2"))                             # Drift: overlay immer an
+        # Tilt-Ränder: bei jeder Phase deckt der Zoom die gekippten Ecken (16:9, Stärke 1)
+        import math
+        a, ein, halten = effekt_filter.ZOOM_FORM["tilt"]
+        for n in range(51):
+            u = n / 50
+            t = u * 0.5
+            winkel = effekt_filter.TILT * math.sin(math.pi * u) * (1 - u)
+            aus = 0.5 - ein - halten
+            zoom = 1 + a * min(min(t / ein, 1), (1 - (t - ein - halten) / aus) ** 2)
+            self.assertLessEqual(8 * math.sin(winkel) + 4.5 * math.cos(winkel), 4.5 * zoom + 1e-3, u)
+            self.assertLessEqual(8 * math.cos(winkel) + 4.5 * math.sin(winkel), 8 * zoom + 1e-3, u)
+
+    def test_grosser_graph_geht_als_datei(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as ordner:
+            datei = Path(ordner) / "g.txt"
+            self.assertEqual(entwurf._graph_argumente("klein", datei), ["-filter_complex", "klein"])
+            self.assertFalse(datei.exists())
+            with mock.patch.object(entwurf, "MAX_INLINE", 3), \
+                    mock.patch.object(entwurf, "_ffmpeg_hauptversion", return_value=7):
+                self.assertEqual(entwurf._graph_argumente("gross", datei), ["-/filter_complex", str(datei)])
+            self.assertEqual(datei.read_text(encoding="utf-8"), "gross")
+            with mock.patch.object(entwurf, "MAX_INLINE", 3), \
+                    mock.patch.object(entwurf, "_ffmpeg_hauptversion", return_value=6):
+                self.assertEqual(entwurf._graph_argumente("gross", datei), ["-filter_complex_script", str(datei)])
+
+
+class Tempo(unittest.TestCase):
+    """28.09.: Zeitlupe/Zeitraffer im Graphen – setpts vor fps (stückweise linear in T), der Ton in Stücken."""
+
+    def test_zeitlupe_setpts_vor_fps_und_ton_in_stuecken(self):
+        q = Path("/x/q.mp4")
+        liste = mini_liste([(q, 1.0, 4.0, ("schnitt", 0.0)), (q, 1.0, 5.0, ("dissolve", 0.6))],
+                           tempo={2: {"lupe": {"ab_s": 2.0, "bis_s": 2.8, "faktor": 0.5, "ton": "tief"}}})
+        self.assertAlmostEqual(liste["dauer_s"], 3 + 4 + 0.8)
+        g = graph(liste)
+        # Eingang 2 beginnt bei 1,0 − 0,3 (Griff) = 0,7 s: Fenster 1,3 … 2,1 s des Eingangs, danach +0,8 s
+        self.assertTrue(beginnt_mit(g, "[1:v]").startswith(
+            "[1:v]setpts='if(lt(T,1.3),T,if(lt(T,2.1),1.3+(T-1.3)/0.5,T+0.8))/TB',fps=30,split=2"), g)
+        self.assertIn("aformat=sample_fmts=fltp:channel_layouts=stereo,asplit=3[tp1_0][tp1_1][tp1_2];"
+                      "[tp1_0]atrim=0:1.3,asetpts=PTS-STARTPTS[tq1_0];"
+                      "[tp1_1]atrim=1.3:2.1,asetpts=PTS-STARTPTS,asetrate=24000,aresample=48000[tq1_1];"
+                      "[tp1_2]atrim=2.1,asetpts=PTS-STARTPTS[tq1_2];"
+                      "[tq1_0][tq1_1][tq1_2]concat=n=3:v=0:a=1,apad,atrim=0:5.100[a1]", g)
+        self.assertNotIn("setpts", beginnt_mit(g, "[0:v]"))
+        self.assertNotIn("concat", beginnt_mit(g, "[0:a:0]"))
+
+    def test_raffer_und_lupe_im_selben_segment(self):
+        q = Path("/x/q.mp4")
+        liste = mini_liste([(q, 0.5, 6.5, ("schnitt", 0.0))], tempo={1: {
+            "raffer": {"ab_s": 1.0, "bis_s": 3.0, "faktor": 2.0, "ton": "tempo"},
+            "lupe": {"ab_s": 4.0, "bis_s": 4.8, "faktor": 0.5, "ton": "tief"}}})
+        self.assertAlmostEqual(liste["dauer_s"], 6.0 - 1.0 + 0.8)
+        g = graph(liste)
+        self.assertIn("setpts='if(lt(T,0.5),T,if(lt(T,2.5),0.5+(T-0.5)/2,if(lt(T,3.5),T-1,"
+                      "if(lt(T,4.3),2.5+(T-3.5)/0.5,T-0.2))))/TB'", g)
+        self.assertIn("asplit=5[tp0_0][tp0_1][tp0_2][tp0_3][tp0_4]", g)
+        self.assertIn("atrim=0.5:2.5,asetpts=PTS-STARTPTS,atempo=2[tq0_1]", g)
+        self.assertIn("atrim=3.5:4.3,asetpts=PTS-STARTPTS,asetrate=24000,aresample=48000[tq0_3]", g)
+        self.assertIn("concat=n=5:v=0:a=1,apad,atrim=0:5.800[a0]", g)
+        self.assertEqual(effekt_filter.tempo_video([], 0.0), "")
 
 
 class Groesse(unittest.TestCase):

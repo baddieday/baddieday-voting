@@ -26,6 +26,22 @@ MIGRATIONEN = [("clips", "short_pfad", "TEXT"), ("clips", "beschreibung", "TEXT"
 # Branch (Regisseur 2.0) oben ergänzen, ohne dass sich die Änderungen beim Zusammenführen in die Quere kommen.
 MIGRATIONEN += [("clips", "mic_stand", "TEXT"), ("entwuerfe", "rezept", "TEXT"), ("entwuerfe", "upload_pfad", "TEXT")]
 
+# Stufe 2 (Spec §8.3): Publikums-Quote und Paar-Zahlen je Gewichts-Version – eigene Zeile (Merge-freundlich wie oben).
+# quellen: JSON {"battle": n, "freigabe": n, "publikum": n}
+MIGRATIONEN += [("gewichte", "trefferquote_publikum", "REAL"), ("gewichte", "trefferquote_publikum_start", "REAL"),
+                ("gewichte", "quellen", "TEXT")]
+
+# Upload nur für Highlights (Entscheidung 25.09.): Häkchen „✅ Hochgeladen“ am Highlight-Video (Zeitpunkt, NULL = offen).
+# Eigene Spalte statt neuem Status – die CHECK-Liste von highlights.status ließe sich nur mit Tabellen-Umbau ändern.
+MIGRATIONEN += [("highlights", "hochgeladen", "TEXT")]
+
+# 27.09.: Genre aus dem NCS-Genre-Filter (Techno, Electronic Rock …) – der Regisseur bevorzugt [musik].genres_bevorzugt
+MIGRATIONEN += [("tracks", "genre", "TEXT")]
+
+# B5 (28.09.): Grund, warum ein Entwurf automatisch aussortiert wurde, bevor er dir gezeigt wurde ([lernbot].
+# auto_schwelle), NULL = normal. Eigene Spalte statt neuem Status – die CHECK-Liste von entwuerfe.status ließe
+# sich nur mit Tabellen-Umbau ändern (wie schon bei highlights.hochgeladen).
+MIGRATIONEN += [("entwuerfe", "auto_verworfen", "TEXT")]
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)
@@ -45,7 +61,14 @@ def verbinde(pfad: Path | str) -> sqlite3.Connection:
             con.executescript(resources.files("clip_pipeline").joinpath(datei).read_text(encoding="utf-8"))
         for tabelle, spalte, typ in MIGRATIONEN:
             if spalte not in {z["name"] for z in con.execute(f"PRAGMA table_info({tabelle})")}:
-                con.execute(f"ALTER TABLE {tabelle} ADD COLUMN {spalte} {typ}")
+                try:
+                    con.execute(f"ALTER TABLE {tabelle} ADD COLUMN {spalte} {typ}")
+                except sqlite3.OperationalError as e:
+                    # Zwei Prozesse (z. B. beide Bots oder ein Bot und render nach einem Update) verbinden
+                    # gleichzeitig: Beide sahen die Spalte als fehlend, der andere war beim ALTER schneller.
+                    # Dann ist die Spalte da – genau das wollten wir. Jeder andere Fehler fliegt weiter.
+                    if "duplicate column name" not in str(e):
+                        raise
     except BaseException:
         con.close()  # sonst bleibt die Datei (unter Windows) gesperrt
         raise
@@ -117,6 +140,18 @@ def match(con: sqlite3.Connection, match_id: str) -> sqlite3.Row | None:
 
 def merkmale(zeile: sqlite3.Row) -> dict[str, float]:
     return {k: float(v) for k, v in json.loads(zeile["merkmale"]).items()}
+
+
+def ohne_mic_analyse(con: sqlite3.Connection) -> int:
+    """Wie viele Clips haben noch keine vollständige Mic-Analyse? (mic_stand leer, Status nicht verworfen)
+
+    Die eine Zählung für „offen“ in `pipeline stimmung --clips` (mikro.clips_nachziehen) und „ohne Mic-Analyse“ in
+    /gewichte (lernen.berechne) – so zeigen beide immer dieselbe Zahl. Verworfene zählen nicht: Die misst niemand
+    mehr nach. Fehler: sqlite3-Fehler gehen an den Aufrufer.
+    Beispiel: 3 Clips ohne mic_stand, davon 1 verworfen → 2.
+    """
+    return int(con.execute(
+        "SELECT COUNT(*) FROM clips WHERE mic_stand IS NULL AND status <> 'verworfen'").fetchone()[0])
 
 
 def anzahl_je_status(con: sqlite3.Connection) -> dict[str, int]:

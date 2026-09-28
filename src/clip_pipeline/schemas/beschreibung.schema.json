@@ -1,0 +1,8 @@
+{
+  "$comment": "Antwort von claude -p in caption.ki_beschreibung. Länge und erfundene Zahlen prüft pruefe_ki_text danach.",
+  "type": "object",
+  "required": ["beschreibung"],
+  "properties": {
+    "beschreibung": {"type": "string"}
+  }
+}

@@ -202,7 +202,7 @@ class Entscheidung(MitSpeicher):
                  **neu,
                  "aufnahme": "eingang/x.mp4", "quelle": "steelseries", "abdeckung": 1.0,
                  "vorschlag": {"start_s": 10.0 if mit_aktion else 22.0, "ende_s": 39.0}, "grenzen": grenzen,
-                 "merkmale": {"kill_punkte": 3.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0, "kommentar": 0.0},
+                 "merkmale": {"kill_punkte": 3.0, "victory_royale": 0.0, "laenge": 0.0, "lautstaerke": 0.0},
                  "punkte": 3.0, "begruendung": "Double Kill 3,0"}
                 for n in (1, 2, 3)
             ],

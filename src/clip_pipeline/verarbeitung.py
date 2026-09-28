@@ -14,13 +14,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shutil
 import sqlite3
-import subprocess
 from datetime import timedelta
 from pathlib import Path
 
-from . import caption, db, erfassung, lernen, medien, replay, schema, schnittliste, vorbewertung, zeitleiste
+from . import caption, db, erfassung, lernen, medien, merkmale, replay, schema, schnittliste, vorbewertung, zeitleiste
 from .konfig import Konfig
 from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
 
@@ -93,6 +91,12 @@ def prepare(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
 # --- analyze --------------------------------------------------------------------
 
 def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
+    """Replay lesen → Kills → Kandidaten mit Merkmalen und Punkten → analyse.json (idempotent: überschreibt sie).
+
+    Stufe 2: Je Kandidat kommen die sieben Replay-Merkmale (merkmale.aus_replay: Platzierung, Waffen,
+    Bot-Opfer, Phase, Endgame, Clutch) vor der Bewertung dazu; neue Waffen-Nummern meldet einmal je Session
+    merkmale.melde_unbekannte_waffen. Gewichte holt analyze als äußerster Aufrufer einmal (lernen.aktuelle).
+    """
     konfig.pruefe_speicher()
     zeile = db.match(con, pruefe_id(sid))
     if zeile is None:
@@ -114,7 +118,7 @@ def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
     zl = zeitleiste.baue(match, aufnahmen, start, ende)
     warnungen += zl.warnungen
     einstellungen = konfig.abschnitt("vorbewertung")
-    _, gewichte = lernen.aktuelle(con, konfig)
+    _, gewichte = lernen.aktuelle(con, konfig)  # einmal holen, durchreichen (Stufe 2, Leitplanke 7)
     prioritaet = list(konfig.wert("auswahl.prioritaet", []))
 
     kandidaten, ohne_video = [], []
@@ -128,6 +132,7 @@ def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
         k.merkmale["laenge"] = vorbewertung.laenge_ab_kill(
             s.start_s, s.ende_s, s.aufnahme.sekunde(k.kill_zeiten[0]), float(einstellungen["puffer_vorne_s"]),
             float(einstellungen["laenge_frei_s"]))
+        k.merkmale.update(merkmale.aus_replay(match, k.kill_zeiten, konfig))  # Spec §8.1, rein (keine DB)
         k.punkte, k.begruendung = vorbewertung.bewerte(k.merkmale, gewichte, k.titel)
         kill_sekunden = [round(s.aufnahme.sekunde(z), 2) for z in k.kill_zeiten]
         aktion_sekunden = [round(s.aufnahme.sekunde(z), 2) for z in k.aktion_zeiten]  # darf < 0 sein
@@ -164,6 +169,7 @@ def analyze(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
             (iso(start), iso(ende), zl.quelle, zl.platzierung, int(zl.victory_royale), len(zl.kills),
              match.build if match else None, "\n".join(warnungen) or None, iso(jetzt()), sid),
         )
+        merkmale.melde_unbekannte_waffen(con, konfig, sid, match)  # höchstens eine Sammelmeldung je Session
     return {"session": sid, "kills": len(zl.kills), "kandidaten": len(kandidaten), "kill_quelle": zl.quelle, "warnungen": warnungen}
 
 
@@ -195,32 +201,15 @@ def _json_aus_text(text: str) -> dict | None:
 
 
 def frage_claude(konfig: Konfig, arbeitsordner: Path) -> tuple[dict[int, dict] | None, str | None]:
-    """Fragt claude -p (Max-Abo, nur Leserechte). Gibt ({nr: wahl} oder None, Hinweis) zurück."""
-    programm = shutil.which(str(konfig.wert("decide.programm", "claude")))
-    if not programm:
-        return None, "claude nicht gefunden – Regel-Schnittliste"
-    try:
-        ergebnis = subprocess.run(
-            [programm, "-p", "--output-format", "json", "--allowedTools", "Read", AUFTRAG],
-            cwd=arbeitsordner, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=float(konfig.wert("decide.timeout_s", 180)), check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return None, f"claude nicht nutzbar ({type(e).__name__}) – Regel-Schnittliste"
-    if ergebnis.returncode != 0:
-        return None, f"claude Exit {ergebnis.returncode} – Regel-Schnittliste"
-    try:
-        huelle = json.loads(ergebnis.stdout)
-    except json.JSONDecodeError:
-        return None, "claude-Ausgabe kein JSON – Regel-Schnittliste"
-    if huelle.get("is_error"):
-        return None, "claude meldet Fehler (Limit?) – Regel-Schnittliste"
-    antwort = _json_aus_text(str(huelle.get("result", "")))
-    if antwort is None:
-        return None, "claude-Antwort ohne JSON – Regel-Schnittliste"
-    if fehler := schema.pruefe(antwort, schema.lade("entscheidung")):
-        return None, f"claude-Antwort verletzt Schema ({fehler[0]}) – Regel-Schnittliste"
-    return {int(c["nr"]): c for c in antwort["clips"]}, None
+    """Fragt claude -p (Max-Abo, nur Leserechte) über claude_aufruf.frage_json (B4, 27.09.: vereinheitlicht –
+    vorher ohne stdin=DEVNULL und ohne --no-session-persistence). Gibt ({nr: wahl} oder None, Hinweis) zurück."""
+    from . import claude_aufruf  # hier, nicht oben: claude_aufruf importiert verarbeitung (_json_aus_text) – Kreis vermeiden
+
+    antwort = claude_aufruf.frage_json(konfig, AUFTRAG, arbeitsordner, schema_name="entscheidung",
+                                       timeout_s=float(konfig.wert("decide.timeout_s", 180)))
+    if antwort.daten is None:
+        return None, f"{antwort.hinweis} – Regel-Schnittliste"
+    return {int(c["nr"]): c for c in antwort.daten["clips"]}, None
 
 
 def serie_sekunden(kandidat: dict, fenster_s: float) -> int:

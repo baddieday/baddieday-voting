@@ -1,0 +1,12 @@
+# Rückfall für den Mic-Schritt: alle 30 min offene Clips nachholen (verpasste Anstöße, mehr Clips als mic_je_lauf).
+# Findet der Lauf nichts, ist er nach wenigen Sekunden fertig.
+# Aktivieren: sudo systemctl enable --now clip-mikro.path clip-mikro.timer
+[Unit]
+Description=Clip-Pipeline: Mic-Schritt alle 30 Minuten
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target

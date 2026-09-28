@@ -73,10 +73,15 @@ class LokaleKonfig(unittest.TestCase):
 
 
 class AufraeumenTaeglich(MitSpeicher):
+    def setUp(self):
+        super().setUp()
+        # B1 (26.09.): aufraeumen ist standardmäßig aus (nie automatisch löschen) – dieser Test prüft die
+        # Tageslogik selbst, braucht also das ausdrückliche Opt-in.
+        self.konfig.daten.setdefault("aufraeumen", {})["aktiv"] = True
+
     def _cli(self, *argv) -> dict:
-        umgebung = {"CLIP_SPEICHER": str(self.konfig.wurzel), "CLIP_DATENBANK": str(self.konfig.datenbank)}
         ausgabe = io.StringIO()
-        with mock.patch.dict(os.environ, umgebung), contextlib.redirect_stdout(ausgabe), \
+        with mock.patch("clip_pipeline.cli.lade", return_value=self.konfig), contextlib.redirect_stdout(ausgabe), \
                 contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(list(argv)), 0)
         return json.loads(ausgabe.getvalue().strip().splitlines()[-1])

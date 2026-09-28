@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import time
 import unittest
 from datetime import datetime, timedelta
@@ -36,7 +37,35 @@ class Caption(MitSpeicher):
         self.assertFalse(caption.pruefe_ki_text("x" * 151, fakten, 150))
 
 
+class KiBeschreibung(MitSpeicher):
+    """B4 (27.09.): caption.ki_beschreibung über claude_aufruf.frage_json statt eigenem subprocess.run."""
+
+    FAKTEN = {"kills": 3, "sekunden": 6, "typ": "triple", "victory_royale": False, "platzierung": 3, "kills_match": 7}
+
+    def _lauf(self, ergebnis: str):
+        huelle = {"is_error": False, "result": ergebnis}
+        return subprocess.CompletedProcess([], 0, stdout=json.dumps(huelle), stderr="")
+
+    def test_gueltige_antwort_kommt_durch(self):
+        fertig = self._lauf('{"beschreibung": "Triple in 6 Sekunden, Platz 3 🔥"}')
+        with mock.patch("shutil.which", return_value="claude"), mock.patch("subprocess.run", return_value=fertig) as lauf:
+            text = caption.ki_beschreibung(self.FAKTEN, timeout_s=10, max_laenge=150, konfig=self.konfig)
+        self.assertEqual(text, "Triple in 6 Sekunden, Platz 3 🔥")
+        self.assertEqual(lauf.call_args.args[0][0], "claude")
+
+    def test_erfundene_zahl_wird_verworfen(self):
+        fertig = self._lauf('{"beschreibung": "Triple in 4 Sekunden mit der Pumpgun"}')
+        with mock.patch("shutil.which", return_value="claude"), mock.patch("subprocess.run", return_value=fertig):
+            self.assertIsNone(caption.ki_beschreibung(self.FAKTEN, timeout_s=10, max_laenge=150, konfig=self.konfig))
+
+
 class Aufraeumen(MitSpeicher):
+    def setUp(self):
+        super().setUp()
+        # Diese Klasse testet die alte Regel selbst (182 Tage recyceln) – die braucht seit B1 (26.09.) das
+        # ausdrückliche Opt-in; Standard ist aus (Entscheidung 25.09., "nie automatisch löschen").
+        self.konfig.daten.setdefault("aufraeumen", {})["aktiv"] = True
+
     def _datei(self, relativ: str, alter_tage: float):
         pfad = self.konfig.wurzel / relativ
         pfad.parent.mkdir(parents=True, exist_ok=True)
@@ -69,6 +98,18 @@ class Aufraeumen(MitSpeicher):
     def test_loescht_nie_ausserhalb_des_papierkorbs(self):
         with self.assertRaises(RuntimeError):
             aufraeumen.fuehre_aus(self.con, self.konfig, [aufraeumen.Aktion(self.konfig.ordner("sessions"), "loeschen", "")])
+
+    def test_ohne_aktiv_verweigert(self):
+        """B1 (26.09.): Standard ist aus (Entscheidung 25.09., „nie automatisch löschen“) – auch ohne getrennten
+        Betrieb bleibt aufraeumen gesperrt, bis [aufraeumen].aktiv = true ausdrücklich gesetzt ist."""
+        self._datei("sessions/m1/clips/002_einzel_1k.mp4", 200)
+        self.konfig.daten["aufraeumen"]["aktiv"] = False
+        with self.assertRaises(KonfigFehler) as fehler:
+            aufraeumen.plane(self.con, self.konfig)
+        self.assertIn("aktiv", str(fehler.exception))
+        code, e = self._cli(["aufraeumen"])
+        self.assertEqual((code, e["fehler"]), (2, "konfig"))
+        self.assertIn("aktiv", e["hinweis"])
 
     def test_im_getrennten_betrieb_verweigert(self):
         """E19: im Puffer wird nichts verschoben und kein DB-Pfad umgeschrieben – Klartext, Exit 2."""

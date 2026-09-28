@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from . import aufraeumen, bestand, big, caption, db, erfassung, highlight, lernen, material, replay, shorts, stimmung, verarbeitung
+from . import erwartung, merkmale, mikro  # Stufe 2 (Lernschleife): Merkmale, Mic-Schritt, Erwartung
 from .konfig import KonfigFehler, SpeicherOffline, lade
 from .medien import MedienFehler
 from .sperre import Gesperrt, sperre
@@ -42,7 +43,12 @@ def _cmd_schritt(args, konfig, con) -> int:
     schritt = {"prepare": verarbeitung.prepare, "analyze": verarbeitung.analyze,
                "decide": verarbeitung.decide, "render": verarbeitung.render}[args.befehl]
     log.info("%s --session %s", args.befehl, args.session)
-    _json(schritt(con, konfig, args.session))
+    ergebnis = schritt(con, konfig, args.session)
+    if args.befehl == "render" and ergebnis.get("neu", 0) > 0:
+        # Mic-Analyse (Whisper) im Dienst clip-mikro (Spec §8.2, §12, Rückfrage S2-R3): render schreibt nur die
+        # Anstoß-Datei; ein Fehler dabei ist eine Log-Warnung – JSON-Zeile und Exit-Code bleiben gleich (n8n-Vertrag)
+        mikro.anstossen(konfig, args.session)
+    _json(ergebnis)
     return 0
 
 
@@ -74,7 +80,10 @@ def _cmd_process(args, konfig, con) -> int:
 
 
 def _cmd_replay(args, konfig, con) -> int:
-    """Zeigt meine Ereignisse eines Replays in Ortszeit – zum Kalibrieren und Nachsehen."""
+    """Zeigt meine Ereignisse eines Replays in Ortszeit – zum Kalibrieren und Nachsehen.
+
+    Stufe 2: je Ereignis auch Waffe (GunType-ZAHL für [merkmale.waffen]), Bot (ja/nein/? = unbekannt) und die
+    verbleibenden Spieler (? ohne spieler_gesamt). So ordnet man die Zahlen an bekannten Kills zu (docs/PUBLIKUM.md)."""
     match, roh = replay.lies(Path(args.datei), konfig)
     zone = konfig.wert("zeit.zeitzone", "Europe/Berlin")
     ich = roh.get("ich") or {}
@@ -83,12 +92,16 @@ def _cmd_replay(args, konfig, con) -> int:
     print(f"Platz {match.platzierung} · Kills laut Replay {match.kills_stats}")
     print(f"Start {utc_zu_lokal(match.start_utc, zone):%d.%m.%Y %H:%M:%S} · Ende {utc_zu_lokal(match.ende_utc, zone):%H:%M:%S}")
     namen = {"kill": "Kill", "knock": "Knock", "tod": "gestorben", "knock_erlitten": "selbst am Boden"}
+    bot_text = {True: "ja", False: "nein", None: "?"}  # None = unbekannt (replay2json liefert null)
     for e in match.ereignisse:
         zeile = f"  {utc_zu_lokal(e.zeit_utc, zone):%H:%M:%S.%f}"[:-3] + f"  {namen.get(e.art, e.art)}"
         if e.art == "kill" and e.aktion_utc is not None and e.aktion_utc != e.zeit_utc:
             # Aktion = mein Umhauen: dort beginnt der Clip (beim Team-Wipe Sekunden vor dem Kill)
             vorher = (e.zeit_utc - e.aktion_utc).total_seconds()
             zeile += f"  (umgehauen {utc_zu_lokal(e.aktion_utc, zone):%H:%M:%S}, {vorher:.1f} s vorher)"
+        waffe = "?" if e.waffe is None else e.waffe
+        uebrig = "?" if e.verbleibend is None else e.verbleibend
+        zeile += f"  [Waffe {waffe} · Bot {bot_text[e.opfer_bot]} · {uebrig} übrig]"
         print(zeile)
     for w in match.warnungen:
         print(f"  ⚠️ {w}")
@@ -112,16 +125,22 @@ def _cmd_status(args, konfig, con) -> int:
 
 
 def _cmd_gewichte(args, konfig, con) -> int:
+    """`pipeline gewichte [--neu]`: dieselben Angaben wie /gewichte im Bot, als Klartext (Spec §8.3).
+    Die Zeilen unter der Tabelle (beide Sortier-Quoten, Paare je Quelle, ohne Mic-Analyse, „Du magst …“) kommen
+    aus lernen.anzeige_zeilen – eine Stelle für Bot und CLI. --neu speichert eine neue Version, wenn sich etwas
+    geändert hat."""
     version, e = lernen.aktualisiere(con, konfig) if args.neu else (None, lernen.berechne(con, konfig))
-    print(f"Datenbasis: {e.datenbasis} Bewertungen ({e.freigaben} Freigaben/Verwerfungen, {e.battles} Battles)")
+    print(lernen.datenbasis_text(e))
     print(f"Status: {e.grund} · Vertrauen {round(e.vertrauen * 100)} %")
     print(f"{'Merkmal':<16}{'Start':>8}{'Aktuell':>9}")
     for m in MERKMALE:
         print(f"{MERKMAL_NAMEN[m]:<16}{zahl(e.start[m], 2):>8}{zahl(e.werte[m], 2):>9}")
-    if e.trefferquote is not None:
-        print(f"Trefferquote {round(e.trefferquote * 100)} % (Start: {round((e.trefferquote_start or 0) * 100)} %)")
+    for zeile in lernen.anzeige_zeilen(e):
+        print(zeile)
     if version is not None:
         print(f"Gespeichert als Version {version}")
+    if text := erwartung.trefferquote_text(con, konfig):  # Spec §10.5 – leer, solange nichts zu zeigen ist
+        print(text)
     return 0
 
 
@@ -139,7 +158,8 @@ def _cmd_short(args, konfig, con) -> int:
     if zeile is None:
         raise KeyError(f"Clip {args.clip} unbekannt")
     ziel = shorts.ziel_fuer(konfig, zeile)
-    groesse = shorts.rendere(konfig.absolut(zeile["clip_pfad"]), ziel, konfig, layout=args.layout)
+    groesse = shorts.rendere(konfig.absolut(zeile["clip_pfad"]), ziel, konfig, layout=args.layout,
+                             stimmen=merkmale.stimmen_fuer_clip(con, args.clip))
     con.execute("UPDATE clips SET short_pfad = ? WHERE id = ?", (konfig.relativ(ziel), args.clip))
     _json({"clip": args.clip, "short": konfig.relativ(ziel), "mb": round(groesse / 1e6, 1)})
     return 0
@@ -271,6 +291,17 @@ def _cmd_lager(args, konfig, con) -> int:
     return 1 if ergebnis.get("fehler") or ergebnis.get("konflikte") or ergebnis.get("zu_jung") else 0
 
 
+def _cmd_sicherung(args, konfig, con) -> int:
+    """Datenbank sichern (sqlite3-Backup, B1): läuft unabhängig vom Betriebsmodus, auch ohne [lager] – anders als
+    der tägliche Lager-Abgleich, der die DB nur im getrennten Betrieb sichert (lager.sichere_datenbank). Reine
+    Datenbank-/Speicher-Arbeit: keine Pipeline-Sperre (sperren=False), nicht in WECKEN – weckt pve-big nie."""
+    from . import lager
+
+    pfad = lager.sichere_datenbank(con, konfig)
+    _json({"sicherung": pfad})
+    return 0
+
+
 def _cmd_puffer(args, konfig, con) -> int:
     """Morgenprüfung (E19): pruefen legt Meldungen an (je Thema und Tag eine), status zeigt nur. Weckt nie.
     Exit: 0 ok · 1 ein Thema ließ sich nicht prüfen · 2 kein getrennter Betrieb."""
@@ -291,8 +322,27 @@ def _cmd_puffer(args, konfig, con) -> int:
 
 
 def _cmd_stimmung(args, konfig, con) -> int:
+    if args.clips:  # Mic-Schritt (Spec §8.2): nur Clips, ohne Claude; ohne getrennten Betrieb lehnt main vorab ab
+        session = verarbeitung.pruefe_id(args.session) if args.session else None
+        _json(mikro.clips_nachziehen(con, konfig, session=session, maximal=args.max))
+        return 0
+    if args.session:
+        _json({"fehler": "--session gilt nur zusammen mit --clips"})
+        return 2
     _json(stimmung.analysiere(con, konfig, dateien=args.dateien, neu=args.neu, claude=not args.ohne_claude,
                               whisper=not args.ohne_whisper, maximal=args.max))
+    return 0
+
+
+def _cmd_merkmale(args, konfig, con) -> int:
+    """`pipeline merkmale nachtragen [--session ID]` (Stufe 2): Replay- und Mic-Merkmale für vorhandene Clips aus dem
+    Puffer nachrechnen (sessions/<ID>/replay.json, momente-Zeilen). Ohne Whisper, weckt nie, idempotent.
+    Punkte und Begründung werden bei jedem Status neu gerechnet (Rückfrage S2-R6). Exit: 0 ok · 1 ungültige Session-ID ·
+    2 kein getrennter Betrieb (lehnt main vorab ab)."""
+    session = verarbeitung.pruefe_id(args.session) if args.session else None
+    version, gewichte = lernen.aktuelle(con, konfig)  # einmal holen, durchreichen (Import-Regel, Leitplanke 7)
+    _json({"replay": merkmale.nachtragen_replay(con, konfig, gewichte, version, session=session),
+           "mic": mikro.nachtragen(con, konfig, gewichte, version, session=session)})
     return 0
 
 
@@ -327,7 +377,11 @@ def _cmd_musik(args, konfig, con) -> int:
                               kuenstler=args.kuenstler, quelle=args.quelle)
         _json({"id": t["id"], "datei": t["datei"], "bpm": t["bpm"], "energie": t["energie"]})
     elif args.aktion == "ncs":
-        neu = musik.ncs_laden(con, konfig, args.stimmung, args.anzahl)
+        if args.genre:  # 27.09.: nach Genre statt nach Stimmung, z. B. --genre techno,electronic-rock
+            genres = musik.HART if args.genre == "hart" else [g.strip() for g in args.genre.split(",") if g.strip()]
+            neu = musik.ncs_genres_laden(con, konfig, genres, args.anzahl)
+        else:
+            neu = musik.ncs_laden(con, konfig, args.stimmung, args.anzahl)
         _json({"neu": [{"titel": t["titel"], "kuenstler": t["kuenstler"], "bpm": t["bpm"], "energie": t["energie"]}
                        for t in neu]})
     else:
@@ -342,7 +396,7 @@ def _cmd_musik(args, konfig, con) -> int:
 def _cmd_compose(args, konfig, con) -> int:
     from . import regie, regie_lernen
 
-    parameter, ziel = regie_lernen.aktuelle(con, konfig)
+    parameter, ziel = regie_lernen.aktuelle(con, konfig, args.format)
     try:
         ergebnis = regie.erstelle(con, konfig, args.format, parameter=parameter, ziel=ziel, name=args.name)
     except regie.RegieFehler as e:
@@ -387,7 +441,7 @@ def _cmd_entwurf_neu(args, konfig, con) -> int:
     """compose + render-entwurf in einem Schritt (z. B. für einen Timer); der Lern-Bot schickt ihn dann."""
     from . import entwurf, regie, regie_lernen
 
-    parameter, ziel = regie_lernen.aktuelle(con, konfig)
+    parameter, ziel = regie_lernen.aktuelle(con, konfig, args.format)
     try:
         e = regie.erstelle(con, konfig, args.format, parameter=parameter, ziel=ziel)
     except regie.RegieFehler as fehler:
@@ -442,8 +496,13 @@ def _cmd_lernstand(args, konfig, con) -> int:
     from . import regie_lernen
 
     print(regie_lernen.lernstand_text(con, konfig), file=sys.stderr)
-    parameter, ziel = regie_lernen.aktuelle(con, konfig)
-    _json({"parameter": parameter, "musik_ziele": ziel})
+    # Zusatz wie HILFE_ZUSATZ: der Regie-Lernstand bleibt unverändert, die Trefferquote der Erwartung (Spec §10.5)
+    # kommt dahinter – nur, wenn es schon geurteilte Erwartungen gibt
+    if zusatz := erwartung.trefferquote_text(con, konfig):
+        print(zusatz, file=sys.stderr)
+    parameter, ziel = regie_lernen.aktuelle(con, konfig, "short")
+    _json({"parameter": parameter, "musik_ziele": ziel,  # Schnitt-Werte je Format (27.09.)
+           "parameter_zusammenschnitt": regie_lernen.aktuelle(con, konfig, "zusammenschnitt")[0]})
     return 0
 
 
@@ -476,7 +535,19 @@ def _cmd_publikum(args, konfig, con) -> int:
         log.error("%s", e)
         _json({"fehler": "konfig", "hinweis": str(e)})
         return 2
+    # Befund B-5: Die Meldung hängt nicht vom Lernen ab – deshalb VOR dem Lernen. Fliegt dort ein sqlite3-Fehler
+    # durch (z. B. IntegrityError, weil der Clip-Bot gleichzeitig dieselbe Gewichts-Version schrieb), ist sie schon da.
     ergebnis["meldung"] = lernbot_publikum.meldung_nach_bewerten(con, ergebnis, zeit)
+    if ergebnis["bewertet"]:
+        # Annahme S2-A12: neue Publikums-Scores sind neue Paare → gleich neu lernen (wie der Clip-Bot nach jeder
+        # Entscheidung). Nur ins Log – die JSON-Zeile bleibt, wie sie ist.
+        # Scheitert das Lernen an kaputten Daten, bleiben die Scores trotzdem gesetzt und die JSON-Zeile kommt (Vertrag
+        # mit dem Timer); sqlite3-Fehler fliegen wie überall durch.
+        try:
+            version, gelernt = lernen.aktualisiere(con, konfig)
+            log.info("Gewichte Version %s (%s)", version, gelernt.grund)
+        except (ValueError, KeyError, TypeError) as fehler:
+            log.warning("Lernen nach dem Bewerten fehlgeschlagen (%s: %s)", type(fehler).__name__, fehler)
     _json(ergebnis)
     return 1 if ergebnis["fehler"] else 0
 
@@ -558,6 +629,10 @@ def baue_parser() -> argparse.ArgumentParser:
     a.add_argument("--probelauf", action="store_true", help="nur zählen (weckt nicht, kopiert nichts)")
     s.set_defaults(fn=_cmd_lager, sperren=False)  # eigene Lager-Sperre statt der Pipeline-Sperre
 
+    s = unter.add_parser("sicherung", help="Datenbank sichern (sqlite3-Backup nach <speicher>/sicherung/, Rotation "
+                                            "[lager].sicherungen_behalten) – auch ohne getrennten Betrieb (B1)")
+    s.set_defaults(fn=_cmd_sicherung, sperren=False)  # reine DB-/Speicher-Arbeit: keine Pipeline-Sperre, nicht in WECKEN
+
     s = unter.add_parser("puffer", help="Puffer auf dem Mini (E19): pruefen (Morgenprüfung, Meldungen) | status")
     s.add_argument("aktion", choices=["pruefen", "status"])
     s.set_defaults(fn=_cmd_puffer, sperren=False)  # weckt nie, fasst das Lager nicht an
@@ -568,7 +643,18 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--ohne-claude", action="store_true")
     s.add_argument("--ohne-whisper", action="store_true")
     s.add_argument("--max", type=int, help="höchstens so viele (die besten zuerst), Rest beim nächsten Lauf")
+    s.add_argument("--clips", action="store_true",
+                   help="Mic-Schritt: Mic-Merkmale in die Clips übernehmen, fehlende per Whisper (ohne Claude, nur Puffer)")
+    s.add_argument("--session", help="mit --clips: diese Session zuerst")
     s.set_defaults(fn=_cmd_stimmung, sperren=True)
+
+    s = unter.add_parser("merkmale", help="Merkmale pflegen: nachtragen (Replay- und Mic-Merkmale für vorhandene "
+                                          "Clips, nur Puffer)")
+    merkmale_befehle = s.add_subparsers(dest="aktion", required=True)
+    a = merkmale_befehle.add_parser("nachtragen", help="fehlende Merkmale aus replay.json und momente nachrechnen "
+                                                       "(ohne Whisper, weckt nie)")
+    a.add_argument("--session", help="nur diese Session")
+    s.set_defaults(fn=_cmd_merkmale, sperren=False)  # reine DB-/Puffer-Arbeit, kurz: keine Pipeline-Sperre, nicht in WECKEN
 
     s = unter.add_parser("momente", help="Momente pflegen: nachschneiden (Multikills ab der ersten Aktion, nur Puffer)")
     momente_befehle = s.add_subparsers(dest="aktion", required=True)
@@ -587,6 +673,8 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--quelle", help="Quellenangabe/Lizenz – Pflicht beim Hinzufügen")
     s.add_argument("--stimmung", choices=["episch", "spannend", "lustig", "frustriert", "chill"], default="episch")
     s.add_argument("--anzahl", type=int, default=3)
+    s.add_argument("--genre", help="NCS-Genres, Komma-getrennt (techno, hardcore, electronic-rock, dance-rock, "
+                                   "midtempo-bass, phonk) oder „hart“ = alle außer phonk")
     s.set_defaults(fn=_cmd_musik, sperren=False)
 
     s = unter.add_parser("compose", help="Regisseur: Schnittliste mit Bogen, Musik, Schnitten auf dem Beat")
@@ -661,9 +749,12 @@ def _vorab_ablehnen(args, konfig) -> int | None:
     """Befehle, die in dieser Konfig nicht laufen dürfen, sofort ablehnen (Exit 2) – vor der Pipeline-Sperre.
     Sonst wartete z. B. ein noch aktiver clip-aufraeumen-Timer bis zu [sperre].warten_s auf einen laufenden render
     und endete dann mit „gesperrt“ (Exit 4, im Timer kein Fehler) statt mit dem Hinweis, ihn auszuschalten."""
-    if args.befehl == "momente" and not konfig.getrennt:
-        # Ohne getrennten Betrieb wäre [speicher].wurzel pve-big selbst – der Nachschnitt arbeitet nur im Puffer
-        hinweis = "kein getrennter Betrieb: [lager].wurzel leer – momente nachschneiden arbeitet nur im Puffer (E19)"
+    # Ohne getrennten Betrieb wäre [speicher].wurzel pve-big selbst – diese Befehle arbeiten nur im Puffer (E19)
+    nur_puffer = {"momente": "momente nachschneiden", "merkmale": "merkmale nachtragen"}
+    if args.befehl == "stimmung" and getattr(args, "clips", False):
+        nur_puffer["stimmung"] = "stimmung --clips"
+    if args.befehl in nur_puffer and not konfig.getrennt:
+        hinweis = f"kein getrennter Betrieb: [lager].wurzel leer – {nur_puffer[args.befehl]} arbeitet nur im Puffer (E19)"
         log.error("%s", hinweis)
         _json({"fehler": "konfig", "hinweis": hinweis})
         return 2

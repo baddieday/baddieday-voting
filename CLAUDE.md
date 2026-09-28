@@ -89,6 +89,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - YouTube/TikTok: Uploads über nicht geprüfte API-Apps sind nur privat sichtbar → Veröffentlichung zunächst **halbautomatisch** (fertiges Paket aus Video + Caption per Telegram), Audit später.
 - Musik nur aus einem lokal geprüften Ordner mit Lizenzvermerk je Titel. In Fortnite die lizenzierte Musik ausschalten.
 - `claude -p` zählt gegen meine Abo-Limits; die Regeln dafür können sich ändern.
+- VA-API-Render (iGPU) kann sporadisch hängen (26.09.: Zusammenschnitt, 40 min ohne Fortschritt, Sperre blockiert) →
+  jeder ffmpeg-Aufruf hat einen Wächter (180 s ohne CPU-Zeit = abbrechen), danach rendert der Rückfall auf der CPU.
 
 ## Stufen (grobe Reihenfolge)
 0. Fundament: Proxmox, LXC, Tailscale, SSH-Zugang für n8n (mache ich mit Anleitung selbst)
@@ -116,7 +118,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - 2026-09-23: Elo = Variante A aus clips_voter (Start 1500, K 48/32/24); Saison = 14 Tage ohne Elo-Reset.
 - 2026-09-23: Multikill = Kette (≤ 10 s zum vorherigen Kill), nur finale Eliminierungen; Victory-Royale-Bonus an die letzte Gruppe.
 - 2026-09-23: Status `gesendet` statt „bewertet“.
-- 2026-09-23: Jeder freigegebene Clip muss auf YouTube Shorts **und** TikTok (eigene Kanäle); danach Link auf clip-battle.de einreichen. Der Bot verfolgt das je Plattform nach und erinnert täglich.
+- 2026-09-23: ~~Jeder freigegebene Clip muss auf YouTube Shorts **und** TikTok (eigene Kanäle); danach Link auf clip-battle.de einreichen. Der Bot verfolgt das je Plattform nach und erinnert täglich.~~ – ersetzt am 26.09.
 - 2026-09-23: Python + sqlite3 + python-telegram-bot, schlanke Tests mit `unittest` (kein Test-Branch).
 - 2026-09-23: n8n-Vertrag umgesetzt und gegen `1-match-verarbeiten.json`, `2-highlight-video.json`, `3-fehler-alarm.json` geprüft. Kein KI-Agent in n8n.
 - 2026-09-23: ~~Die Pipeline weckt den großen Host selbst per Wake-on-LAN, wenn ein Schritt den Speicher braucht~~ – seit E19 weckt nur noch der tägliche Abgleich.
@@ -159,3 +161,75 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   selbstständig mit vermerkten Annahmen. Tests schlank (normaler Weg + wichtigster Fehlerfall), ein Prüfer, Gegenprüfung
   nur bei Blockierendem, volle Suite einmal je Stufe, Doku kurz. Gilt auch für den Sprint „Lernschleife“ und ersetzt
   dort das 5er-Panel und die Gegenprüfung je Befund aus dem Startauftrag. Ziel: ein selbst lernendes System.
+- 2026-09-26: **Einzelne Momente werden nicht hochgeladen** (Florian) – auch kein Triple Kill. Hochgeladen werden nur
+  die Shorts aus dem Lern-Bot und das Highlight-Video (1–2 Wochen). Der Clip-Bot zeigt nach der Freigabe keinen 📦-Knopf
+  mehr und erinnert nur noch an freigegebene Highlight-Videos, bis „✅ Hochgeladen“ getippt ist. Freigaben dienen
+  Bewertung, Lernen und der Highlight-Auswahl. `/paket` und `/link` bleiben für Ausnahmen (nicht mehr in der Hilfe).
+- 2026-09-26: **Stimmen im Upload nur, wenn der Moment sie braucht** (Lachen, Jubel, laute Mikro-Spitzen oder Stimmung
+  „lustig“ = Gag; `merkmale.stimmen_gebraucht`). Sonst nur Spur 0 (Spielton) – gilt für Entwürfe/Upload-Fassung,
+  Highlight-Video und Clip-Shorts (nur noch Ausnahme über /paket). Für die Bewertung zählen alle Stimmen; Vorschauen zum Bewerten behalten alle Spuren.
+- 2026-09-26: **Mic-Schritt als systemd-Dienst** `clip-mikro` (path + timer) statt Kindprozess von render; render schreibt
+  nur `/var/lib/clip-pipeline/mikro.anstoss`.
+- 2026-09-27: **Regisseur – Abwechslung mit Cooldown (3 Entwürfe) und Frische-Quote (50 %)**, weil der anteilige
+  Punkte-Abzug allein nur die Spitze rotieren ließ (Simulation: 18 von 120 Momenten in 20 Shorts, jetzt 83).
+  **Nachlegen nach dem Kürzen** (Ursache der kurzen Shorts seit „Multikills am Stück“), Grund **„⏱️ zu kurz“**
+  (dauer_faktor konnte nur fallen), Format-Dauern über `[regie.formate.<format>]`, Rückfall auf den Bot-Clip statt
+  stillem Wegfall bei fehlender Moment-Datei. Ursachenprüfung mit Gegenprüfern; Diagnose für den Mini: `docs/DIAGNOSE-SHORTS.md`.
+- 2026-09-27: **Lern-Bot: Schnitt lernt je Format, Lernen wird sichtbar** (Florian: „ich bewerte gefühlt ins Leere“).
+  Schnitt-Gründe wirken nur auf das bewertete Format, Inhalt (Momente, Stimmung, Musik) auf beide. Unter jedem Entwurf
+  „🔁 Schon bewertet“ je Moment und „🧠 Aus #n“ mit der Wirkung der letzten Bewertung; Kurzbefehl-Tastatur. Knöpfe werden
+  sofort beantwortet, Updates laufen nebenläufig (vorher strikt nacheinander – Ursache der trägen Knöpfe).
+- 2026-09-27: **Kurzbefehle als Knöpfe im Chat** (nicht als Ersatz-Tastatur, Florian). **Musik: Techno/Industrial und
+  Rock statt EDM** – NCS-Genre-Filter (`musik ncs --genre hart`: techno, hardcore, electronic-rock, dance-rock,
+  midtempo-bass; Metal führt NCS nicht), `tracks.genre`, Bonus 1,5 für `[musik].genres_bevorzugt`. Alte Titel bleiben.
+- 2026-09-27: **Lern-Bot spricht mit Telegram über IPv4** (`[lernbot].nur_ipv4`). Messung auf dem Mini: Bot je Klick
+  < 0,3 s, aber Klicks kamen gebündelt 15–20 s später an – die lange Warteabfrage über IPv6 (Fritz!Box/Telekom) hing.
+- 2026-09-27 (B3): **Vorbewertung lernt ab 10 statt 20 Bewertungen** (`[lernen].mindestens`); das Vertrauen wächst weiter
+  mit n bis 60, die Schranken bleiben. `/gewichte` zeigt eine Fortschrittszeile bis zum Lernen bzw. vollen Vertrauen.
+- 2026-09-28 (B4): **`claude -p`-Aufrufe vereinheitlicht** – `decide` (`verarbeitung.frage_claude`), `stimmung`
+  und `caption.ki_beschreibung` laufen jetzt über `claude_aufruf.frage_json` statt eigenem `subprocess.run`
+  (vorher ohne `stdin=DEVNULL`, ohne `--no-session-persistence`; `caption` sogar fest `"claude"` statt
+  `[decide].programm`). Rückgabeform je Aufrufer unverändert, n8n-Vertrag unangetastet. Neue Schemas
+  `momente_stimmung`, `beschreibung`.
+- 2026-09-28 (B5, Florian: „nicht jeden Clip freigeben und bewerten müssen – das kann eine KI schneller, sagen
+  will ich trotzdem, was hochgeladen wird“): **Lern-Bot filtert automatisch vor**, als Zusatz zum bestehenden
+  Bewertungsweg (nichts entfernt). Neu `[lernbot].auto_schwelle` (Standard 0,0 = aus): liegt die Erwartung
+  (`erwartung.py`, die schon vorhandene Vorhersage „gibst du 👍?“) eines frisch gebauten Entwurfs darunter, wird er
+  still verworfen (`entwuerfe.auto_verworfen`, kein Foto an dich) und der Bot baut automatisch den nächsten – bis zu
+  `auto_versuche_max` (Standard 3), danach kommt der letzte Versuch trotzdem durch. Neue Funktion
+  `erwartung.vorhersage` (wie `festschreiben`, aber ohne zu speichern) – ein still verworfener Entwurf bekommt
+  bewusst KEINE Zeile in `erwartungen`/`entwurf_bewertungen`, sonst würde die Erwartung ihr eigenes Urteil als
+  Treffer zählen (Zirkelschluss). Du siehst weiterhin jeden Entwurf, der die Schwelle schafft, mit den normalen
+  👍/👎-Knöpfen – die letzte Entscheidung bleibt bei dir. `/stand` zeigt zusätzlich, wie viele automatisch aussortiert
+  wurden.
+- 2026-09-28 (Regisseur 2.1, Florian: „immer die gleichen Übergänge, keine weiteren Effekte – das darf ruhig
+  ordentlich viral sein, mit Slowmo und beschleunigt, viele Spezialeffekte, keine doppelten“): **Mehr Effekte im
+  Spielbild, nichts doppelt.** Ersetzt „Spielbild clean“ vom 25.09. in diesem Punkt (Blitz, Wackeln und
+  Farbversatz-Stoß sind jetzt erlaubt); Texte bleiben außerhalb des Spielbilds, alles bleibt mit
+  `[regie.effekte] an = false` abschaltbar und über 🎆/💥/😵 lernbar. (1) **Übergangs-Mix:** Pool je Stimmung
+  (33 xfade-Arten im Schema, u. a. whip_up/whip_right, radial, circleclose, smooth*, diag*, hblur, cover/reveal,
+  flash = Weißblende), gemischte Runden ohne direkte Wiederholung, deterministisch aus der Momentfolge
+  (`effekte.Uebergangsmix`). (2) **Speed-Ramps:** Zeitlupe um den Finisher (0,5; episch mit Serie ≥ 3 oder
+  Victory 0,25) und Zeitraffer (2×) über einen langen Anlauf, beides im selben Segment möglich; die Zeitleiste
+  (Beats) bleibt, nur die Quelle wird angepasst; Deckel `max_lupen`/`max_raffer` = 2. Renderer: `setpts` vor
+  `fps`, Ton in Stücken. (3) **Impacts:** flash/shake/rgb, die Finisher wechseln den Stil (Punch · Punch+Blitz ·
+  Wackeln · Punch+RGB), der Tod wackelt und blitzt. Doku: `docs/REGIE.md`, Abschnitt „Effekte“.
+- 2026-09-28 (Regisseur 2.2, Florian: „das wird langweilig … mir ist egal, wie lange es rechnen muss, hauptsächlich
+  es kommt ein sehr gutes Video raus … keine doppelten“): **Rechenzeit ist Nebensache, Dichte und Vielfalt zählen.**
+  Effekt-Katalog im Spielbild (nur ffmpeg-Bordmittel, kein Paket): Negativ, Blur-Hit, Strobe, Farb-Pop,
+  Kontrast-Punch, Farbrad, Vignetten-Puls, Pixel-Hit, Dutch-Tilt, Zoom-Einzug, Ken-Burns-Drift – dazu Punch, Blitz,
+  Wackeln, RGB. Dichte: Einstieg auf jedem harten Schnitt, Drift auf jedem Segment, Beat-Effekte schon nach 0,8 s
+  Ruhe (statt 2,5 s), Zeitlupe auf bis zu 8 Momenten (statt 2). Keine Wiederholung: eigene Stil-Rotationen für
+  Finisher (11 Stile), Nebenkills, Beats und Schnitte, je Video an anderer Stelle beginnend (`effekte.Stilfolge`).
+  Große Filtergraphen gehen als Datei an ffmpeg (`-/filter_complex`), damit lange Zusammenschnitte nicht an der
+  Befehlszeile scheitern. Weiter über 🎆/💥/😵 lernbar und mit `[regie.effekte] an = false` abschaltbar.
+  Tailscale-Deploy aus der Cloud-Sitzung blockt der Berechtigungs-Check („Containment Escape“) – Einspielen bis zur
+  Freigabe per `regie-aktualisieren.sh` auf pve-mini.
+- 2026-09-28 (Update-Paket, Florian: „in 5 min alles daheim updaten, möglichst schnell und selbstständig“):
+  **Ein Befehl für alles:** `deploy/pve-mini/alles-aktualisieren.sh` auf pve-mini (curl aus `main`). Sichert
+  Code-Stand und Datenbank (`vor-update-<Zeit>.*` neben der DB, nie gelöscht), wartet bis 10 min auf die
+  Pipeline-Sperre, stellt Produktion auf `main` und den Lern-Bot auf den neueren von `main`/`lernschleife-publikum`,
+  legt eigene Änderungen per `git stash` beiseite, übernimmt geänderte Dienste nur, wenn sie nicht von Hand angepasst
+  sind, schaltet `clip-mikro` ein (`clip-aufraeumen` bleibt aus), startet beide Bots neu und schreibt ein
+  Rückweg-Skript. Dafür kam der Sprint-Stand Lernschleife (82 Commits, 26.–28.09.) nach `main` – ohne neue volle
+  Suite (letzte volle bei PR #19, danach breiter Lauf 255 Tests zu 2.1/2.2). Windows-Skript und pve-big unverändert.

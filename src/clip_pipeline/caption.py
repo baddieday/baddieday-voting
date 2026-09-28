@@ -6,9 +6,10 @@ import json
 import re
 import sqlite3
 import string
-import subprocess
+import tempfile
 import tomllib
 from datetime import datetime
+from pathlib import Path
 
 from .vorbewertung import gruppiere
 from .zeit import aus_iso
@@ -73,8 +74,12 @@ def pruefe_ki_text(text: str, f: dict, max_laenge: int) -> bool:
     return _zahlen(text) <= erlaubt
 
 
-def ki_beschreibung(f: dict, *, timeout_s: float, max_laenge: int) -> str | None:
-    """Fragt `claude -p` (Max-Abo, kein API-Key) nach einer Umformulierung. None bei jedem Problem."""
+def ki_beschreibung(f: dict, *, timeout_s: float, max_laenge: int, konfig) -> str | None:
+    """Fragt `claude -p` über claude_aufruf.frage_json (B4, 27.09.: vereinheitlicht – vorher fest "claude" statt
+    [decide].programm, ohne stdin=DEVNULL, ohne --no-session-persistence, ohne Arbeitsordner). None bei jedem
+    Problem (kein claude, Timeout, Schema, zu lang oder erfundene Zahl)."""
+    from . import claude_aufruf  # hier, nicht oben: claude_aufruf importiert verarbeitung, das importiert caption – Kreis vermeiden
+
     auftrag = (
         "Formuliere eine kurze, packende deutsche Beschreibung (max. "
         f"{max_laenge} Zeichen, 1 Emoji erlaubt) für einen Fortnite-Clip. Verwende AUSSCHLIESSLICH diese Fakten, "
@@ -82,18 +87,11 @@ def ki_beschreibung(f: dict, *, timeout_s: float, max_laenge: int) -> str | None
         + json.dumps(f, ensure_ascii=False)
         + ' Antworte nur mit JSON: {"beschreibung": "..."}'
     )
-    try:
-        ergebnis = subprocess.run(
-            ["claude", "-p", "--output-format", "json", "--allowedTools", "Read", auftrag],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s, check=False,
-        )
-        if ergebnis.returncode != 0:
-            return None
-        antwort = json.loads(ergebnis.stdout).get("result", "")
-        treffer = re.search(r"\{.*\}", antwort, re.DOTALL)
-        text = json.loads(treffer.group(0)).get("beschreibung", "").strip() if treffer else ""
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, AttributeError):
+    with tempfile.TemporaryDirectory() as tmp:
+        antwort = claude_aufruf.frage_json(konfig, auftrag, Path(tmp), schema_name="beschreibung", timeout_s=timeout_s)
+    if antwort.daten is None:
         return None
+    text = str(antwort.daten.get("beschreibung", "")).strip()
     return text if pruefe_ki_text(text, f, max_laenge) else None
 
 
@@ -103,7 +101,8 @@ def baue(clip: sqlite3.Row | dict, match: sqlite3.Row | dict | None, konfig) -> 
     beschreibung = (clip["beschreibung"] if "beschreibung" in clip.keys() else None) or None
     if not beschreibung and konfig.wert("caption.ki", False):
         beschreibung = ki_beschreibung(
-            f, timeout_s=float(konfig.wert("caption.ki_timeout_s", 90)), max_laenge=int(konfig.wert("caption.max_laenge", 150))
+            f, timeout_s=float(konfig.wert("caption.ki_timeout_s", 90)),
+            max_laenge=int(konfig.wert("caption.max_laenge", 150)), konfig=konfig,
         )
     if not beschreibung:
         bausteine = lade_beschreibungen(konfig.projektpfad(konfig.wert("caption.beschreibungen")))
