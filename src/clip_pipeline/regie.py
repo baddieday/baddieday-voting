@@ -2,7 +2,7 @@
 
 Formate:
   zusammenschnitt  16:9, 3–5 min je nach Material
-  short            9:16, 30–45 s, unscharfer Rand, Schriftzug "clip-battle.de"
+  short            9:16, 30–75 s (Ziel 45 s, lernbar), 4–10 Momente, unscharfer Rand, Schriftzug "clip-battle.de"
 
 Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der Konfig):
   1. Auswahl     Punkte je Moment: dieselbe Bewertung wie im Clip-Bot (Spec §8.2: vorbewertung.roh_score über
@@ -57,13 +57,16 @@ log = logging.getLogger("pipeline")
 
 FORMATE = {
     # Dauer gesamt, Segmentlänge, Serie am Stück (Multikill, Teile per Jump-Cut zusammen), Auflösung
-    "zusammenschnitt": {"min_s": 180.0, "max_s": 300.0, "seg_min_s": 3.0, "seg_max_s": 25.0, "serie_max_s": 30.0,
+    "zusammenschnitt": {"min_s": 180.0, "max_s": 300.0, "ziel_s": 300.0, "seg_min_s": 3.0, "seg_max_s": 25.0,
+                        "serie_max_s": 30.0,
                         "b": 1920, "h": 1080},
-    "short": {"min_s": 30.0, "max_s": 45.0, "seg_min_s": 2.5, "seg_max_s": 12.0, "serie_max_s": 20.0,
+    # 28.09. (Florian): Shorts 30–75 s aus 4–10 Momenten; Start-Ziel 45 s, „⏱️ zu kurz“/„⏳ zu lang“ verschieben es
+    "short": {"min_s": 30.0, "max_s": 75.0, "ziel_s": 45.0, "min_momente": 4, "max_momente": 10,
+              "seg_min_s": 2.5, "seg_max_s": 12.0, "serie_max_s": 20.0,
               "b": 1080, "h": 1920},
 }
 # Dauern je Format aus config/lokal.toml, z. B. [regie.formate.short] max_s = 60 (Sekunden, 5 … 600)
-FORMAT_SCHLUESSEL = ("min_s", "max_s", "seg_min_s", "seg_max_s", "serie_max_s")
+FORMAT_SCHLUESSEL = ("min_s", "max_s", "ziel_s", "seg_min_s", "seg_max_s", "serie_max_s")
 
 
 def format_regeln(konfig, fmt_name: str) -> tuple[dict, list[str]]:
@@ -86,17 +89,31 @@ def format_regeln(konfig, fmt_name: str) -> tuple[dict, list[str]]:
         hinweise.append(f"regie.formate.{fmt_name} unstimmig (min ≤ max, seg_min ≤ seg_max ≤ max, "
                         f"serie_max ≤ max) – Standardwerte")
         return dict(FORMATE[fmt_name]), hinweise
+    # Start-Ziel immer innerhalb min_s … max_s (z. B. nur max_s = 40 gesetzt: Ziel 40 statt 45)
+    fmt["ziel_s"] = min(fmt["max_s"], max(fmt["min_s"], float(fmt.get("ziel_s", fmt["max_s"]))))
     return fmt, hinweise
 
 
-def dauer_skaliert(fmt: dict, dauer_faktor: float) -> dict:
-    """Gelernte Ziel-Dauer über 100 % (28.09.): hebt Mindest- und Höchstdauer des Formats mit an. Vorher war max_s die
-    feste Decke (Short 45 s): „⏱️ zu kurz“ hob den Faktor nur bis 1,0, jede weitere Stimme verpuffte. Bis 100 % bleibt
-    das Format, wie es ist, und nur das Ziel darin sinkt („⏳ zu lang“). Segment- und Serien-Grenzen bleiben: länger
-    heißt mehr Momente, nicht längere Schnitte."""
-    if dauer_faktor <= 1.0:
-        return fmt
-    return {**fmt, "min_s": round(fmt["min_s"] * dauer_faktor, 1), "max_s": round(fmt["max_s"] * dauer_faktor, 1)}
+def dauer_grenzen(fmt: dict) -> tuple[float, float]:
+    """Bereich des gelernten dauer_faktor, in dem jede Längen-Stimme noch wirkt: min_s/ziel_s … max_s/ziel_s
+    (Short 30/45 … 75/45 = 0,667 … 1,667), höchstens 0,6 … 2,0. 28.09.: vorher fest 0,6 … 1,0 – bei 45 s war
+    Schluss, und über 100 „⏱️ zu kurz“ verpufften ohne Wirkung."""
+    z = float(fmt.get("ziel_s", fmt["max_s"]))
+    return round(max(0.6, fmt["min_s"] / z), 3), round(min(2.0, fmt["max_s"] / z), 3)
+
+
+def ziel_dauer(fmt: dict, dauer_faktor: float, vorrat: float | None = None) -> float:
+    """Ziel-Dauer in s: Start-Ziel (Short 45 s; bei wenig Material 80 % davon, nie unter min_s) × gelernter
+    dauer_faktor, immer innerhalb min_s … max_s (Short 30–75 s)."""
+    basis = float(fmt.get("ziel_s", fmt["max_s"]))
+    if vorrat is not None:
+        basis = min(basis, max(fmt["min_s"], 0.8 * vorrat))
+    return round(min(fmt["max_s"], max(fmt["min_s"], basis * float(dauer_faktor))), 1)
+
+
+def momente_grenzen(fmt: dict) -> tuple[int, int]:
+    """(mindestens, höchstens) Momente je Entwurf – Short 4–10 (28.09.), Zusammenschnitt ohne Grenze."""
+    return int(fmt.get("min_momente", 1)), int(fmt.get("max_momente", 10 ** 6))
 
 
 # Rangfolge der Stimmungen. Seit Stufe 2 (Spec §8.2) nicht mehr Teil der Momentstärke, nur noch Tiebreak bei der
@@ -113,7 +130,7 @@ PARAMETER = {
     "puffer_nach_s": 1.5,         # nach dem letzten Kill
     "seg_min_faktor": 1.0,        # Mindestlänge je Segment ("zu hektisch" -> länger)
     "beats_pro_schnitt": 1,       # nur auf jedem n-ten Beat schneiden ("zu hektisch" -> 2, 4)
-    "dauer_faktor": 1.0,          # Ziel-Gesamtdauer ("zu lang" -> kürzer, "zu kurz" -> länger, bis 2,0)
+    "dauer_faktor": 1.0,          # × Start-Ziel des Formats ("zu lang" kürzer, "zu kurz" länger; dauer_grenzen)
     "uebergang_faktor": 1.0,      # Länge der Übergänge
     "musik_pegel": 0.35,
     "stimmung_bonus": {},         # Stimmung -> Zusatzpunkte ("Stimmung getroffen" + 👍)
@@ -475,16 +492,15 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandid
     if hinweis:
         hinweise.append(hinweis)
     vorrat = sum(laenge(k) for k in auswahl)
-    # über 1,0 ist das Format selbst schon länger (dauer_skaliert) – hier wirkt nur noch der Teil unter 100 %
-    ziel = min(fmt["max_s"], max(fmt["min_s"], 0.8 * vorrat)) * min(1.0, float(p["dauer_faktor"]))
-    ziel = min(fmt["max_s"], max(fmt["min_s"], ziel))
+    ziel = ziel_dauer(fmt, float(p["dauer_faktor"]), vorrat)
+    min_m, max_m = momente_grenzen(fmt)
     if vorrat < fmt["min_s"]:
         hinweise.append(f"nur {vorrat:.0f} s Material – kürzer als {fmt['min_s']:.0f} s")
     max_je_match = int(p["max_je_match"])
     gewaehlt, summe, je_match = [], 0.0, {}
     nach_punkten = sorted(auswahl, key=lambda k: (-k.punkte, k.schluessel))
     for k in nach_punkten:
-        if summe >= ziel:
+        if (summe >= ziel and len(gewaehlt) >= min_m) or len(gewaehlt) >= max_m:
             break
         if k.match_id and je_match.get(k.match_id, 0) >= max_je_match:
             continue
@@ -778,7 +794,6 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     fmt, hinweise = format_regeln(konfig, fmt_name)
     hinweise = [*(hinweise_vorab or []), *hinweise]
     p = {**PARAMETER, **(parameter or {})}
-    fmt = dauer_skaliert(fmt, float(p["dauer_faktor"]))   # „⏱️ zu kurz“ über 100 %: Format wird länger (28.09.)
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
     fx, fx_hinweise = effekte.einstellungen(konfig)
     frueher = gezeigte_momente(con)
@@ -842,8 +857,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     def nachlegen(reihe: list[Kandidat], segmente: list[dict]) -> tuple[list[Kandidat], list[dict]]:
         """Beat-Raster kürzt Segmente -> bis zum Ziel nachlegen: erst mit Match-Grenze, notfalls ohne.
         Nur Momente, die unter max_s passen; die anderen merkt sich passt_nicht."""
+        min_m, max_m = momente_grenzen(fmt)
         for mit_grenze in (True, False):
-            while segmente and segmente[-1]["zeit_ende"] < ziel_s - 1e-6:
+            # bis zum Ziel – und bis mindestens min_momente (Short: 4), nie über max_momente (Short: 10)
+            while segmente and len(gewaehlt) < max_m and (segmente[-1]["zeit_ende"] < ziel_s - 1e-6
+                                                         or len(gewaehlt) < min_m):
                 je_match: dict[str, int] = {}
                 for k in reihe:
                     je_match[k.match_id or ""] = je_match.get(k.match_id or "", 0) + 1
@@ -894,6 +912,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     gesamt = segmente[-1]["zeit_ende"] if segmente else 0.0
     if gesamt < fmt["min_s"] - 1e-6:
         hinweise.append(f"Dauer {gesamt:.1f} s unter {fmt['min_s']:.0f} s – zu wenig Material")
+    if len(reihe) < momente_grenzen(fmt)[0]:
+        hinweise.append(f"nur {len(reihe)} Momente (Ziel mindestens {momente_grenzen(fmt)[0]}) – zu wenig passendes Material")
     # Gezählt werden Momente, nicht Segmente (ein Moment mit Jump-Cut hat mehrere Teile, der Hook wiederholt einen)
     momente = [s for s in segmente if s.get("teil", 1) == 1 and s.get("rolle") != "hook"]
     neu = sum(1 for s in momente if s["gezeigt"] == 0)

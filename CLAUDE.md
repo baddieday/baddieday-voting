@@ -233,9 +233,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   sind, schaltet `clip-mikro` ein (`clip-aufraeumen` bleibt aus), startet beide Bots neu und schreibt ein
   Rückweg-Skript. Dafür kam der Sprint-Stand Lernschleife (82 Commits, 26.–28.09.) nach `main` – ohne neue volle
   Suite (letzte volle bei PR #19, danach breiter Lauf 255 Tests zu 2.1/2.2). Windows-Skript und pve-big unverändert.
-- 2026-09-28 (Florian: „über 100-mal gesagt, dass die Shorts zu kurz sind“): **„⏱️ zu kurz“ wirkt jetzt über 45 s
-  hinaus.** Ursache: Der gelernte `dauer_faktor` war auf 1,0 gedeckelt, und die Short-Obergrenze 45 s stand nur in
-  `[regie.formate]` (lokal.toml) – nach 1–3 Stimmen war Schluss, jede weitere verpuffte ohne sichtbare Wirkung. Neu:
-  Deckel 2,0; über 1,0 wächst das Format mit (`regie.dauer_skaliert`: min_s und max_s × Faktor, Short bis 60–90 s,
-  Segment- und Serien-Grenzen bleiben – länger heißt mehr Momente). Alle gespeicherten Stimmen wirken sofort neu
-  (Lernen rechnet jedes Mal alles nach). `pipeline lernstand` zeigt immer „Short-Länge: n× zu kurz, n× zu lang …“.
+- 2026-09-28 (Florian: „über 100-mal gesagt, dass die Shorts zu kurz sind“ und „Shorts sollten aus 4–10 Moments
+  bestehen und zwischen 30 und 75 Sekunden liegen“): **Short = 30–75 s, 4–10 Momente, Start-Ziel 45 s.** Ursache der
+  wirkungslosen Stimmen: `dauer_faktor` war auf 1,0 gedeckelt und die Short-Obergrenze 45 s stand nur in lokal.toml –
+  nach 1–3 „⏱️ zu kurz“ war Schluss. Neu: `FORMATE["short"]` mit `ziel_s` 45, `min_momente` 4, `max_momente` 10;
+  „zu kurz“/„zu lang“ verschieben das Ziel bis an die Grenzen (`regie.dauer_grenzen`: 0,667–1,667 = 30–75 s), jede
+  Stimme wirkt. Auswahl und Nachlegen halten 4–10 Momente ein, Kürzen bleibt bei max_s. Alle gespeicherten Stimmen
+  wirken sofort. `pipeline lernstand` zeigt „Short-Länge: n× zu kurz, n× zu lang … → Ziel x s“. Zusammenschnitt unverändert.

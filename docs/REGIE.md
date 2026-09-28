@@ -102,7 +102,7 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 | 😵 zu hektisch | Segmente +15 % länger, Übergänge +10 %; ab +30 % nur jeder 2., ab +70 % jeder 4. Beat; dazu Hektik ×0,9 (Beat-Akzente schwächer, 0,3 … 1,3) |
 | 🎯 Stimmung getroffen | Hauptstimmung +0,5; Musikziel dieser Stimmung rückt 20 % zum benutzten Titel |
 | ⏳ zu lang | Ziel-Dauer −10 % (bis 60 %) |
-| ⏱️ zu kurz | Ziel-Dauer +11 % (bis 200 %) – hebt „zu lang“ wieder auf; beide zugleich: nichts. Über 100 % wächst das Format mit (28.09.): Short 30–45 s wird bis 60–90 s, Zusammenschnitt bis 10 min. Vorher war bei 100 % Schluss, jede weitere Stimme verpuffte. `pipeline lernstand` zeigt „Short-Länge: …“ mit deinen Stimmen |
+| ⏱️ zu kurz | Ziel-Dauer +11 % – hebt „zu lang“ wieder auf; beide zugleich: nichts. Short (28.09., Florian): Start 45 s, immer 30–75 s und 4–10 Momente; jede Stimme wirkt bis an diese Grenzen (vorher war bei 45 s Schluss). `pipeline lernstand` bzw. 🧠 Lernstand zeigt „Short-Länge: …“ mit deinen Stimmen |
 | ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills |
 | 🥱 Clips langweilig | jeder Moment dieses Entwurfs −1 Punkt (kommt seltener) |
 | 🎆 zu viele Effekte | Effekt-Stärke der Hauptstimmung ×0,85 (bis 0,1) – alle Effekte dieser Stimmung schwächer, schwache fallen unter die Schwelle weg |

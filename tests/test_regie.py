@@ -5,7 +5,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from clip_pipeline import regie, regie_lernen
+from clip_pipeline import lernen, regie, regie_lernen
 from clip_pipeline.konfig import Konfig
 
 from tests.hilfen import HAT_FFMPEG
@@ -42,7 +42,7 @@ class Regisseur(MitRegieMaterial):
         e = self.compose("short")
         liste = lies(e)
         self.assertEqual(regie.pruefe_liste(liste), [])
-        self.assertTrue(30 <= liste["dauer_s"] <= 45, liste["dauer_s"])
+        self.assertTrue(30 <= liste["dauer_s"] <= 75, liste["dauer_s"])               # 28.09.: Short 30–75 s
         self.assertEqual((liste["aufloesung"], liste["overlay"]), ([1080, 1920], "clip-battle.de"))
         self.assertEqual(liste["musik"]["track_id"], episch["id"])  # Hauptstimmung episch -> epische Musik
         self.assertEqual(liste["bogen"][-1], max(liste["bogen"]))  # Höhepunkt zum Schluss
@@ -265,7 +265,7 @@ class Abwechslung(MitRegieMaterial):
             liste = self.compose()
             self.assertEqual(regie.pruefe_liste(liste), [])
             self.assertGreaterEqual(liste["dauer_s"], 42.0, liste["dauer_s"])   # vorher ~37 s
-            self.assertLessEqual(liste["dauer_s"], 45.0 + 1e-6)
+            self.assertLessEqual(liste["dauer_s"], regie.FORMATE["short"]["max_s"] + 1e-6)
 
     def test_auswahl_zaehlt_alle_momente(self):
         # Passt beim Auffüllen kein Moment mehr hinein, bleibt die Auswahl trotzdem vollständig
@@ -293,12 +293,24 @@ class Abwechslung(MitRegieMaterial):
         regie_lernen.bewerte(self.con, musik["entwurf"], grund="musik")       # 👎 wegen Musik: nicht die Clips
         p, _ = regie_lernen.aktuelle(self.con, self.konfig)
         self.assertEqual({p["moment_bonus"][k] for k in m}, {0.0})
+        p_vorher = p
         regie_lernen.bewerte(self.con, langweilig["entwurf"], grund="langweilig")
         p, ziel = regie_lernen.aktuelle(self.con, self.konfig)
         self.assertEqual({p["moment_bonus"][k] for k in m}, {-1.0})
         self.assertIn("weniger gern gesehen", regie_lernen.lernstand_text(self.con, self.konfig))
-        danach = self.momente(lies(regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel)))
-        self.assertNotEqual(danach, m)                                        # andere Clips, obwohl ohne Abwechslung
+        # Wirkung auf die Rangfolge: genau −1 Punkt je langweiligem Moment. (Bis 28.09. stand hier „andere Clips im
+        # nächsten Entwurf“ – das hing am Kürzen auf 45 s; mit 75 s bleiben Momente mit 3,5+ Punkten vor denen mit 1,25.)
+        vorher, nachher = self.punkte(p_vorher), self.punkte(p)
+        # −1 je langweiligem Moment; das 👎 senkt zusätzlich die Hauptstimmung um 0,25 (alle Momente dieser Stimmung)
+        self.assertTrue(all(vorher[k] - nachher[k] >= 1.0 - 1e-9 for k in m), (vorher, nachher))
+        self.assertTrue(all(vorher[k] - nachher[k] <= 0.25 + 1e-9 for k in vorher if k not in m), (vorher, nachher))
+
+    def punkte(self, p):
+        _version, gewichte = lernen.aktuelle(self.con, self.konfig)
+        kill_tabelle = [float(x) for x in self.konfig.wert("vorbewertung.kill_punkte")]
+        alle, _ = regie.kandidaten_mit_bericht(self.con, p, regie.gezeigte_momente(self.con), gewichte=gewichte,
+                                               kill_tabelle=kill_tabelle, konfig=self.konfig)
+        return {k.schluessel: k.punkte for k in alle}
 
 
 class Auswahl(unittest.TestCase):
@@ -336,18 +348,20 @@ class Auswahl(unittest.TestCase):
         self.assertTrue(all(k.punkte == 10.0 for k in gewaehlt))                        # keine Quote: nur die besten
 
 
-    def test_gelernt_laenger_hebt_die_short_decke(self):
-        """28.09.: dauer_faktor 2,0 (viele „⏱️ zu kurz“) → Short 60–90 s statt 30–45 s; mehr Momente statt längerer."""
+    def test_short_4_bis_10_momente_30_bis_75_s(self):
+        """28.09. (Florian): Shorts aus 4–10 Momenten, 30–75 s; Start-Ziel 45 s, gelernt bis an die Grenzen."""
         fmt, p = regie.FORMATE["short"], {**regie.PARAMETER, "abwechslung": 0.0}
-        alle = [self.k(f"m{i}", 10.0 - i, match=f"a{i}") for i in range(20)]          # je 8 s Material
-        _, ziel, _ = regie.waehle(alle, fmt, p)
-        self.assertEqual(ziel, 45.0)
-        lang = regie.dauer_skaliert(fmt, 2.0)
-        self.assertEqual((lang["min_s"], lang["max_s"], lang["seg_max_s"]), (60.0, 90.0, fmt["seg_max_s"]))
-        gewaehlt, ziel, _ = regie.waehle(alle, lang, {**p, "dauer_faktor": 2.0})
-        self.assertEqual(ziel, 90.0)
-        self.assertGreaterEqual(len(gewaehlt), 11)
-        self.assertIs(regie.dauer_skaliert(fmt, 0.8), fmt)                            # unter 100 %: Format bleibt
+        acht = [self.k(f"m{i}", 20.0 - i, match=f"a{i}") for i in range(20)]           # je 8 s Material
+        gewaehlt, ziel, _ = regie.waehle(acht, fmt, p)
+        self.assertEqual((ziel, len(gewaehlt)), (45.0, 6))
+        gewaehlt, ziel, _ = regie.waehle(acht, fmt, {**p, "dauer_faktor": regie.dauer_grenzen(fmt)[1]})
+        self.assertEqual((ziel, len(gewaehlt)), (75.0, 10))                            # viele „zu kurz“: 75 s
+        winzig = [self.k(f"w{i}", 20.0 - i, match=f"b{i}", kern=(4.0, 6.0)) for i in range(20)]
+        self.assertEqual(len(regie.waehle(winzig, fmt, p)[0]), 10)                      # nie mehr als 10 Momente
+        lang = [self.k(f"l{i}", 20.0 - i, match=f"c{i}", kern=(2.0, 16.0)) for i in range(8)]
+        gewaehlt, ziel, _ = regie.waehle(lang, fmt, {**p, "dauer_faktor": regie.dauer_grenzen(fmt)[0]})
+        self.assertEqual((ziel, len(gewaehlt)), (30.0, 4))                             # 3 reichten für 30 s – mind. 4
+        self.assertEqual(regie.dauer_grenzen(regie.FORMATE["zusammenschnitt"]), (0.6, 1.0))  # Zusammenschnitt wie bisher
 
 
 class FormatRegeln(unittest.TestCase):
@@ -548,22 +562,24 @@ class EffekteLernen(MitRegieMaterial):
                          [("effekte_viel", "🎆 zu viele Effekte"), ("action", "💥 mehr Action"), ("kurz", "⏱️ zu kurz")])
 
     def test_zu_kurz_hebt_zu_lang_wieder_auf(self):
-        """27.09.: „⏳ zu lang“ ×0,9 hatte kein Gegenstück. 28.09.: „⏱️ zu kurz“ ÷0,9 bis 2,0 statt nur bis 1,0 – vorher
-        verpuffte jedes weitere „zu kurz“ bei 45 s. Beide Gründe zugleich heben sich auf."""
+        """27.09.: „⏳ zu lang“ ×0,9 hatte kein Gegenstück. 28.09.: „⏱️ zu kurz“ ÷0,9 bis an die Grenze des Formats
+        (Short 75 s = Faktor 1,667) statt nur bis 1,0 = 45 s. Beide Gründe zugleich heben sich auf."""
+        short = lambda: regie_lernen.aktuelle(self.con, self.konfig, "short")[0]["dauer_faktor"]  # noqa: E731
         self.entwurf("episch", ["lang"])
-        self.assertEqual(self.p()["dauer_faktor"], 0.9)
+        self.assertEqual(short(), 0.9)
         self.entwurf("episch", ["kurz"])
-        self.assertEqual(self.p()["dauer_faktor"], 1.0)
-        self.entwurf("episch", ["kurz"])                                  # jetzt über 1,0: das Format wird länger
-        self.assertEqual(self.p()["dauer_faktor"], 1.111)
+        self.assertEqual(short(), 1.0)
+        self.entwurf("episch", ["kurz"])                                  # über 1,0: Short wird länger als 45 s
+        self.assertEqual(short(), 1.111)
         self.entwurf("episch", ["lang", "kurz"])
-        self.assertEqual(self.p()["dauer_faktor"], 1.111)
+        self.assertEqual(short(), 1.111)
         for _ in range(10):
             self.entwurf("episch", ["kurz"])
-        self.assertEqual(self.p()["dauer_faktor"], 2.0)                   # Deckel
+        self.assertEqual(short(), 1.667)                                  # Grenze: 75 s
         text = regie_lernen.lernstand_text(self.con, self.konfig)
-        self.assertIn("12× „⏱️ zu kurz“, 1× „⏳ zu lang“, 1× beides (hebt sich auf) → Ziel-Dauer 200% (Höchstwert", text)
-        self.assertIn("short: 60–90 s", text)
+        self.assertIn("12× „⏱️ zu kurz“, 1× „⏳ zu lang“, 1× beides (hebt sich auf) → Ziel 75 s (Start 45 s, "
+                      "erlaubt 30–75 s) – Höchstwert", text)
+        self.assertIn("short: 30–75 s, Ziel jetzt 75 s, 4–10 Momente", text)
         self.assertEqual((regie.PARAMETER["effekt_staerke"], regie.PARAMETER["effekt_hektik"]), ({}, 1.0))
 
     def test_vorgaben_mit_grenzen(self):
