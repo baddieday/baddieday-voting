@@ -186,3 +186,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   < 0,3 s, aber Klicks kamen gebündelt 15–20 s später an – die lange Warteabfrage über IPv6 (Fritz!Box/Telekom) hing.
 - 2026-09-27 (B3): **Vorbewertung lernt ab 10 statt 20 Bewertungen** (`[lernen].mindestens`); das Vertrauen wächst weiter
   mit n bis 60, die Schranken bleiben. `/gewichte` zeigt eine Fortschrittszeile bis zum Lernen bzw. vollen Vertrauen.
+- 2026-09-28 (B4): **`claude -p`-Aufrufe vereinheitlicht** – `decide` (`verarbeitung.frage_claude`), `stimmung`
+  und `caption.ki_beschreibung` laufen jetzt über `claude_aufruf.frage_json` statt eigenem `subprocess.run`
+  (vorher ohne `stdin=DEVNULL`, ohne `--no-session-persistence`; `caption` sogar fest `"claude"` statt
+  `[decide].programm`). Rückgabeform je Aufrufer unverändert, n8n-Vertrag unangetastet. Neue Schemas
+  `momente_stimmung`, `beschreibung`.

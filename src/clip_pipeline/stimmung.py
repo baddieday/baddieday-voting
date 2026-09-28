@@ -35,9 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shutil
 import sqlite3
-import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -359,32 +357,24 @@ Stütze dich nur auf diese Daten. Antworte ausschließlich mit JSON:
 
 
 def frage_claude(konfig: Konfig, kandidaten: list[dict]) -> tuple[dict[str, str], str | None]:
-    programm = shutil.which(str(konfig.wert("decide.programm", "claude")))
-    if not programm:
-        return {}, "claude nicht gefunden – Regeln gelten"
+    """Fragt claude -p über claude_aufruf.frage_json (B4, 27.09.: vereinheitlicht – vorher ohne stdin=DEVNULL und
+    ohne --no-session-persistence). Das Schema prüft nur die Grobform; welche Einträge gültig sind (bekannte id,
+    erlaubte Stimmung), entscheidet weiterhin diese Funktion – ein einzelner unbrauchbarer Eintrag verwirft nicht
+    die ganze Antwort."""
+    from . import claude_aufruf  # hier, nicht oben: claude_aufruf importiert verarbeitung, das importiert caption – Kreis vermeiden
+
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / "momente.json").write_text(json.dumps(kandidaten, ensure_ascii=False, indent=1), encoding="utf-8")
-        try:
-            lauf = subprocess.run([programm, "-p", "--output-format", "json", "--allowedTools", "Read", AUFTRAG],
-                                  cwd=tmp, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                  timeout=float(konfig.wert("stimmung.claude_timeout_s", 180)), check=False)
-        except (OSError, subprocess.TimeoutExpired) as e:
-            return {}, f"claude nicht nutzbar ({type(e).__name__}) – Regeln gelten"
-    if lauf.returncode != 0:
-        return {}, f"claude Exit {lauf.returncode} – Regeln gelten"
-    try:
-        huelle = json.loads(lauf.stdout)
-    except json.JSONDecodeError:
-        return {}, "claude-Ausgabe kein JSON – Regeln gelten"
-    antwort = _json_aus_text(str(huelle.get("result", ""))) if not huelle.get("is_error") else None
-    if not isinstance(antwort, dict) or not isinstance(antwort.get("momente"), list):
-        return {}, "claude-Antwort unbrauchbar – Regeln gelten"
+        antwort = claude_aufruf.frage_json(konfig, AUFTRAG, Path(tmp), schema_name="momente_stimmung",
+                                           timeout_s=float(konfig.wert("stimmung.claude_timeout_s", 180)))
+    if antwort.daten is None:
+        return {}, f"{antwort.hinweis} – Regeln gelten"
     erlaubt = {k["id"] for k in kandidaten}
     gueltig = {}
-    for eintrag in antwort["momente"]:
+    for eintrag in antwort.daten["momente"]:
         if isinstance(eintrag, dict) and eintrag.get("id") in erlaubt and eintrag.get("stimmung") in STIMMUNGEN:
             gueltig[eintrag["id"]] = eintrag["stimmung"]
-    verworfen = len(antwort["momente"]) - len(gueltig)
+    verworfen = len(antwort.daten["momente"]) - len(gueltig)
     return gueltig, (f"{verworfen} Claude-Antwort(en) verworfen" if verworfen else None)
 
 
