@@ -186,6 +186,30 @@ class LernBot(MitRegieMaterial):
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 2)
         self.assertEqual(list((self.konfig.wurzel / ".aktiv").glob("*")) if (self.konfig.wurzel / ".aktiv").exists() else [], [])
 
+    def test_neuer_entwurf_sortiert_automatisch_aus(self):
+        # B5: pruefe_auto_verwerfen sagt "verwirf" für den ersten Versuch, der letzte Versuch kommt immer durch
+        from unittest import mock
+        self.momente_anlegen(MOMENTE[:8])
+        self.musik_anlegen(150, "episch")
+        self.konfig.daten["lernbot"].update(auto_schwelle=0.5, auto_versuche_max=2)
+        with mock.patch.object(lernbot, "pruefe_auto_verwerfen", return_value="Erwartung 10 % unter Schwelle 50 %"):
+            eid = asyncio.run(lernbot.neuer_entwurf(self.app, "short"))
+        zeilen = self.con.execute("SELECT id, auto_verworfen FROM entwuerfe ORDER BY id").fetchall()
+        self.assertEqual(len(zeilen), 2)
+        self.assertIsNotNone(zeilen[0]["auto_verworfen"])   # erster Versuch: aussortiert
+        self.assertIsNone(zeilen[1]["auto_verworfen"])      # letzter Versuch: kommt trotzdem durch
+        self.assertEqual(eid, zeilen[1]["id"])
+        self.assertEqual(len(self.bot.videos), 1)           # nur der zweite wurde geschickt
+        self.assertTrue(any("automatisch aussortiert" in t for _, t in self.bot.texte))
+
+    def test_ohne_auto_schwelle_wie_bisher(self):
+        self.momente_anlegen(MOMENTE[:8])
+        self.musik_anlegen(150, "episch")   # auto_schwelle 0.0 (Standard) = aus
+        asyncio.run(lernbot.neuer_entwurf(self.app, "short"))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 1)
+        self.assertEqual(len(self.bot.videos), 1)
+        self.assertFalse(any("automatisch aussortiert" in t for _, t in self.bot.texte))
+
     def test_vor_dem_entwurf_weitere_clips_analysieren(self):
         from unittest import mock
         self.momente_anlegen(MOMENTE[:8])
@@ -454,6 +478,32 @@ class ErwartungImLernBot(MitErwartung):
         update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
         asyncio.run(lernbot.cmd_lernstand(update, self.context))
         self.assertEqual(antworten, [regie_lernen.lernstand_text(self.con, self.konfig)])
+
+
+@unittest.skipIf(lernbot is None, "python-telegram-bot fehlt")
+class AutoVerwerfen(ErwartungImLernBot):
+    """B5 ([lernbot].auto_schwelle): pruefe_auto_verwerfen entscheidet, ohne etwas in erwartungen zu speichern –
+    das bleibt festschreiben beim tatsächlichen Senden vorbehalten (sonst zählt die Erwartung ihr eigenes
+    still-verworfenes Urteil als Treffer)."""
+
+    def test_unter_schwelle_nennt_den_grund(self):
+        self.urteile_entwuerfe()
+        self.konfig.daten["lernbot"]["auto_schwelle"] = 0.9   # so hoch, dass ein Double-Kill-Entwurf durchfällt
+        eid = self.gerendert(["datei:1"])
+        grund = lernbot.pruefe_auto_verwerfen(self.con, self.konfig, eid)
+        self.assertIsNotNone(grund)
+        self.assertIn("unter Schwelle 90 %", grund)
+        self.assertIsNone(erwartung.gespeichert(self.con, "entwurf", eid))  # nichts gespeichert
+
+    def test_schwelle_aus_laesst_immer_durch(self):
+        self.urteile_entwuerfe()
+        eid = self.gerendert(["datei:2"])   # der schwache Moment – ohne Schwelle trotzdem None
+        self.assertIsNone(lernbot.pruefe_auto_verwerfen(self.con, self.konfig, eid))
+
+    def test_ohne_modell_laesst_immer_durch(self):
+        self.konfig.daten["lernbot"]["auto_schwelle"] = 0.9
+        eid = self.gerendert(["datei:1"])   # nur 0 Urteile bisher – keine Erwartung möglich
+        self.assertIsNone(lernbot.pruefe_auto_verwerfen(self.con, self.konfig, eid))
 
 
 @unittest.skipIf(lernbot is None, "python-telegram-bot fehlt")

@@ -307,6 +307,26 @@ class Festschreiben(MitErwartung):
             erwartung.gespeichert(self.con, "post", 1)
 
 
+class Vorhersage(MitErwartung):
+    """B5: vorhersage() rechnet wie festschreiben, speichert aber nichts – für die Vorabprüfung vor dem Senden
+    ([lernbot].auto_schwelle), damit ein automatisch verworfener Entwurf nie eine Zeile in erwartungen bekommt."""
+
+    def test_rechnet_ohne_zu_speichern(self):
+        self.urteile_clips()
+        neu = self.clip("vorbewertet", 10.0, gesendet=False)
+        p = erwartung.vorhersage(self.con, self.konfig, "clip", neu)
+        self.assertGreater(p, 0.5)
+        self.assertIsNone(self.zeile("clip", neu))
+        self.assertIsNone(erwartung.gespeichert(self.con, "clip", neu))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM erwartungen").fetchone()[0], 0)
+
+    def test_unter_mindest_keine_erwartung(self):
+        self.urteile_clips(gut=5, schlecht=4)
+        neu = self.clip("vorbewertet", 10.0, gesendet=False)
+        self.assertIsNone(erwartung.vorhersage(self.con, self.konfig, "clip", neu))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM erwartungen").fetchone()[0], 0)
+
+
 class Trefferquote(MitErwartung):
     def erwartung_anlegen(self, art: str, ziel_id: int, wahrschein: float, minute: int) -> None:
         self.con.execute("INSERT INTO erwartungen (art, ziel_id, wahrschein, grundlage, erstellt) VALUES (?, ?, ?, '{}', ?)",

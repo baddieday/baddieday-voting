@@ -169,8 +169,12 @@ def stand_satz(con: sqlite3.Connection) -> str:
         "SELECT SUM(CASE WHEN daumen > 0 THEN 1 ELSE 0 END) AS gut, COUNT(*) AS n FROM entwurf_bewertungen").fetchone()
     momente = con.execute("SELECT COUNT(*) FROM momente").fetchone()[0]
     tracks = con.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-    return (f"📋 Stand: {momente} Momente mit Stimmung, {tracks} Musiktitel, {e['n'] or 0} Entwürfe, "
+    text = (f"📋 Stand: {momente} Momente mit Stimmung, {tracks} Musiktitel, {e['n'] or 0} Entwürfe, "
             f"davon {daumen['n'] or 0} bewertet ({daumen['gut'] or 0} 👍).")
+    # B5: Transparenz, was der Auto-Filter schon allein entschieden hat (0, solange [lernbot].auto_schwelle aus ist)
+    if auto := con.execute("SELECT COUNT(*) FROM entwuerfe WHERE auto_verworfen IS NOT NULL").fetchone()[0]:
+        text += f" {auto} automatisch aussortiert (niedrige Erwartung)."
+    return text
 
 
 def stuecke(text: str, groesse: int = TEXT_MAX) -> list[str]:
@@ -255,6 +259,22 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
         con.close()
 
 
+def pruefe_auto_verwerfen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> str | None:
+    """B5 ([lernbot].auto_schwelle, Florian: „nicht jeden Entwurf bewerten müssen, sagen will ich trotzdem, was
+    hochgeladen wird“): None = normal senden, sonst der Grund, warum der Entwurf still aussortiert wird – kein
+    Foto an dich, kein Eintrag in entwurf_bewertungen (sonst würde die Erwartung ihr eigenes Urteil bestätigen,
+    statt an deinem gemessen zu werden). Schwelle 0 (Standard) oder ohne Modell (zu wenige Urteile,
+    [erwartung].mindest_urteile) lässt immer durch.
+    Beispiel: Schwelle 0,5, Erwartung 32 % → "Erwartung 32 % unter Schwelle 50 %"."""
+    schwelle = float(konfig.wert("lernbot.auto_schwelle", 0.0))
+    if schwelle <= 0:
+        return None
+    wahrschein = erwartung.vorhersage(con, konfig, "entwurf", entwurf_id)
+    if wahrschein is None or wahrschein >= schwelle:
+        return None
+    return f"Erwartung {round(100 * wahrschein)} % unter Schwelle {round(100 * schwelle)} %"
+
+
 def nimm_musik(konfig: Konfig, datei: Path, bildunterschrift: str, dateiname: str) -> dict:
     con = db.verbinde(konfig.datenbank)
     try:
@@ -300,7 +320,8 @@ async def sende_entwuerfe(app) -> int:
 async def _sende_entwuerfe(app) -> int:
     con, chat, konfig = app.bot_data["con"], app.bot_data["erlaubt"], app.bot_data["konfig"]
     gesendet = 0
-    for z in con.execute("SELECT * FROM entwuerfe WHERE status = 'gerendert' ORDER BY id").fetchall():
+    for z in con.execute(
+            "SELECT * FROM entwuerfe WHERE status = 'gerendert' AND auto_verworfen IS NULL ORDER BY id").fetchall():
         pfad = Path(z["datei"] or "")
         if not pfad.is_file():
             log.warning("Entwurf #%s: Datei fehlt (%s)", z["id"], pfad)
@@ -415,19 +436,36 @@ async def cmd_musik(update, context) -> None:
 
 
 async def neuer_entwurf(app, fmt: str) -> int | None:
-    """Baut einen Entwurf und schickt ihn – für /entwurf und automatisch nach jeder fertigen Bewertung."""
+    """Baut einen Entwurf und schickt ihn – für /entwurf und automatisch nach jeder fertigen Bewertung.
+
+    [lernbot].auto_schwelle > 0 (B5): baut bis zu auto_versuche_max Entwürfe, verwirft dabei jeden mit zu
+    niedriger Erwartung still (pruefe_auto_verwerfen, kein Foto an dich) und zeigt dir nur den ersten, der die
+    Schwelle schafft. Schafft es keiner, kommt trotzdem der letzte Versuch – sonst bekämst du irgendwann nie mehr
+    etwas zu sehen, nur weil der Regisseur gerade schwach dasteht."""
     chat = app.bot_data["erlaubt"]
     if app.bot_data.get("arbeitet"):
         await app.bot.send_message(chat, "⏳ Ich baue gerade schon einen Entwurf.")
         return None
     app.bot_data["arbeitet"] = True
     try:
-        konfig = app.bot_data["konfig"]
+        konfig, con = app.bot_data["konfig"], app.bot_data["con"]
         wach = await asyncio.to_thread(speicher_da, konfig)
         await app.bot.send_message(chat, f"🎬 Baue einen {FORMAT_NAMEN[fmt]} …"
                                    + ("" if wach else " 💤 pve-big schläft – ich wecke ihn (bis zu 3 min)."),
                                    reply_markup=ohne_tastatur())
-        eid = await asyncio.to_thread(baue_entwurf, konfig, fmt)
+        versuche_max = max(1, int(konfig.wert("lernbot.auto_versuche_max", 3)))
+        aussortiert = []
+        for versuch in range(versuche_max):
+            eid = await asyncio.to_thread(baue_entwurf, konfig, fmt)
+            grund = None if versuch == versuche_max - 1 else pruefe_auto_verwerfen(con, konfig, eid)
+            if grund is None:
+                break
+            con.execute("UPDATE entwuerfe SET auto_verworfen = ? WHERE id = ?", (grund, eid))
+            log.info("Entwurf #%s automatisch aussortiert: %s", eid, grund)
+            aussortiert.append(eid)
+        if aussortiert:
+            wort = "Entwurf" if len(aussortiert) == 1 else "Entwürfe"
+            await app.bot.send_message(chat, f"🤖 {len(aussortiert)} {wort} automatisch aussortiert (niedrige Erwartung)")
         t = time.monotonic()
         await sende_entwuerfe(app)
         log.info("Entwurf #%s gesendet in %.0f s", eid, time.monotonic() - t)

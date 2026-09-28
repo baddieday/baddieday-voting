@@ -38,6 +38,11 @@ MIGRATIONEN += [("highlights", "hochgeladen", "TEXT")]
 # 27.09.: Genre aus dem NCS-Genre-Filter (Techno, Electronic Rock …) – der Regisseur bevorzugt [musik].genres_bevorzugt
 MIGRATIONEN += [("tracks", "genre", "TEXT")]
 
+# B5 (28.09.): Grund, warum ein Entwurf automatisch aussortiert wurde, bevor er dir gezeigt wurde ([lernbot].
+# auto_schwelle), NULL = normal. Eigene Spalte statt neuem Status – die CHECK-Liste von entwuerfe.status ließe
+# sich nur mit Tabellen-Umbau ändern (wie schon bei highlights.hochgeladen).
+MIGRATIONEN += [("entwuerfe", "auto_verworfen", "TEXT")]
+
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)
     if str(pfad) != ":memory:":

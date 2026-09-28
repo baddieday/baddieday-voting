@@ -246,23 +246,9 @@ def modell(con: sqlite3.Connection, konfig: Konfig, art: str) -> dict | None:
 
 # --- Festschreiben und Lesen ------------------------------------------------------------------------------------
 
-def festschreiben(con: sqlite3.Connection, konfig: Konfig, art: str, ziel_id: int) -> float | None:
-    """Erwartung beim Senden festschreiben (INSERT … ON CONFLICT (art, ziel_id) DO NOTHING).
-
-    Gibt den GESPEICHERTEN Wert zurück (auch beim zweiten Aufruf den ersten); None unter mindest_urteile (dann keine
-    Zeile).
-
-    Gibt es schon eine Zeile, wird nichts gerechnet (nur gelesen). Sonst: Gewichte einmal per lernen.aktuelle,
-    Modell schätzen, Moment-Score des Objekts gegen dieselbe Basis standardisieren, p = σ(a·z + b·0 + c), Zeile mit
-    grundlage = JSON {score, z, a, b, c, rezept, gewichte_version, n_urteile, median, mad} und erstellt = jetzt
-    (ISO-UTC) anlegen. Aufrufer: Clip-Bot (sende_outbox) und Lern-Bot (_sende_entwuerfe), jeweils VOR send_video.
-    Rückgabe: Wahrscheinlichkeit 0..1 oder None (zu wenige Urteile, noch nichts gesendet, Objekt ohne Score).
-    Fehler: ValueError bei unbekannter Art/fehlender Konfig; sqlite3-Fehler gehen an den Aufrufer.
-    Beispiel: a = 1,1, c = −0,2, z = 1,35 → σ(1,285) ≈ 0,78 → im Bot „Erwartung: ✅ 78 %“.
-    """
-    _pruefe_art(art)
-    if (vorhanden := gespeichert(con, art, ziel_id)) is not None:
-        return vorhanden
+def _berechne(con: sqlite3.Connection, konfig: Konfig, art: str, ziel_id: int) -> tuple[float, dict] | None:
+    """Wahrscheinlichkeit + grundlage für ein Objekt, frisch gerechnet (nichts gespeichert). None wie festschreiben
+    (zu wenige Urteile, Objekt ohne Score). Gemeinsamer Kern von festschreiben und vorhersage."""
     version, gewichte = lernen.aktuelle(con, konfig)  # einmal holen, durchreichen (Leitplanke 7)
     ergebnis = _modell(con, konfig, art, version, gewichte)
     if ergebnis is None:
@@ -275,11 +261,53 @@ def festschreiben(con: sqlite3.Connection, konfig: Konfig, art: str, ziel_id: in
     wahrschein = _sigma(m["a"] * z + m["b"] * REZEPT + m["c"])
     grundlage = {"score": score, "z": z, "a": m["a"], "b": m["b"], "c": m["c"], "rezept": 0,
                  "gewichte_version": version, "n_urteile": m["n_urteile"], "median": median, "mad": mad}
+    return wahrschein, grundlage
+
+
+def festschreiben(con: sqlite3.Connection, konfig: Konfig, art: str, ziel_id: int) -> float | None:
+    """Erwartung beim Senden festschreiben (INSERT … ON CONFLICT (art, ziel_id) DO NOTHING).
+
+    Gibt den GESPEICHERTEN Wert zurück (auch beim zweiten Aufruf den ersten); None unter mindest_urteile (dann keine
+    Zeile).
+
+    Gibt es schon eine Zeile, wird nichts gerechnet (nur gelesen). Sonst: _berechne (Gewichte einmal per
+    lernen.aktuelle, Modell schätzen, Moment-Score des Objekts gegen dieselbe Basis standardisieren,
+    p = σ(a·z + b·0 + c)), dann Zeile mit grundlage = JSON {score, z, a, b, c, rezept, gewichte_version, n_urteile,
+    median, mad} und erstellt = jetzt (ISO-UTC) anlegen. Aufrufer: Clip-Bot (sende_outbox) und Lern-Bot
+    (_sende_entwuerfe), jeweils VOR send_video.
+    Rückgabe: Wahrscheinlichkeit 0..1 oder None (zu wenige Urteile, noch nichts gesendet, Objekt ohne Score).
+    Fehler: ValueError bei unbekannter Art/fehlender Konfig; sqlite3-Fehler gehen an den Aufrufer.
+    Beispiel: a = 1,1, c = −0,2, z = 1,35 → σ(1,285) ≈ 0,78 → im Bot „Erwartung: ✅ 78 %“.
+    """
+    _pruefe_art(art)
+    if (vorhanden := gespeichert(con, art, ziel_id)) is not None:
+        return vorhanden
+    ergebnis = _berechne(con, konfig, art, ziel_id)
+    if ergebnis is None:
+        return None
+    wahrschein, grundlage = ergebnis
     con.execute(
         """INSERT INTO erwartungen (art, ziel_id, wahrschein, grundlage, erstellt) VALUES (?, ?, ?, ?, ?)
            ON CONFLICT (art, ziel_id) DO NOTHING""",
         (art, ziel_id, wahrschein, json.dumps(grundlage, sort_keys=True), iso(jetzt())))
     return gespeichert(con, art, ziel_id)  # der gespeicherte Wert – war ein anderer schneller, gilt dessen Zahl
+
+
+def vorhersage(con: sqlite3.Connection, konfig: Konfig, art: str, ziel_id: int) -> float | None:
+    """Wie festschreiben, aber OHNE zu speichern – für eine Vorabprüfung, bevor ein Objekt überhaupt gesendet wird
+    ([lernbot].auto_schwelle, B5: Entwürfe mit niedriger Erwartung automatisch aussortieren, bevor du sie siehst).
+
+    Gibt es schon eine festgeschriebene Erwartung für dieses Objekt, liefert sie dieselbe Zahl (gespeichert geht
+    vor). Sonst wird bei JEDEM Aufruf neu gerechnet (_berechne) – anders als festschreiben ändert das nichts in der
+    Datenbank, ruft man es also mehrfach auf ein unbewertetes Objekt, kann die Zahl leicht schwanken, wenn sich
+    zwischendurch die Vergleichsbasis (zuletzt gesendete) ändert.
+    Rückgabe: Wahrscheinlichkeit 0..1 oder None (zu wenige Urteile, Objekt ohne Score).
+    Fehler: ValueError bei unbekannter Art/fehlender Konfig."""
+    _pruefe_art(art)
+    if (vorhanden := gespeichert(con, art, ziel_id)) is not None:
+        return vorhanden
+    ergebnis = _berechne(con, konfig, art, ziel_id)
+    return None if ergebnis is None else ergebnis[0]
 
 
 def gespeichert(con: sqlite3.Connection, art: str, ziel_id: int) -> float | None:
