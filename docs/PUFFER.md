@@ -562,6 +562,9 @@ anderen Fehler ab.
   der beim letzten Abgleich gemessene – `/status` weckt pve-big dafür nie; ist er nicht von heute, steht „(Stand …)“
   dabei.
 - **Meldungen** kommen höchstens einmal am Tag je Thema, montags ein Lebenszeichen – Stille heißt: alles gut.
+  Ausnahme **„PC still“**: Kommt seit über 3 Tagen (`[puffer].pc_still_tage`) weder ein Bericht des PCs noch ein
+  Replay an, meldet sich die Morgenprüfung mit einer Prüfliste – danach höchstens alle 3 Tage. Nur nicht gespielt:
+  ignorieren.
 - **Exit-Codes** von `pipeline lager …`: 0 ok (auch: in der Nachtruhe übersprungen) · 1 einzelne Dateien
   fehlgeschlagen (beim nächsten Abgleich wieder) · 2 Aufruf oder Konfiguration (z. B. Puffer und Lager verwechselbar
   – dann wurde **nichts** kopiert – oder eine ungültige Nachtruhe) · 3 Lager offline bzw. pve-big nicht wach

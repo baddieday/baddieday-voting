@@ -82,6 +82,11 @@ pool_alarm_prozent = 90
 lager_spaetestens_h = 36       # offene Dateien, aber seit so vielen Stunden kein erfolgreicher Abgleich → Meldung
 pc_status_datei = "sitzungen/pc-status.json"   # schreibt der Gaming-PC (Uebertragung.ps1)
 pc_stau_h = 24                 # älteste nicht übertragene Datei auf dem PC älter → Meldung
+# „PC still“ (28.09.): seit so vielen Tagen weder eine frische pc-status.json noch ein neues Replay in replays/ →
+# Meldung mit Prüfliste (Freigabe, smbd, Aufgabe, psd1), danach höchstens alle so viele Tage erneut. 0 = aus.
+# Fehlt die Freigabe, schreibt der PC gar keine pc-status.json – ohne diese Prüfung bliebe es still.
+pc_still_tage = 3
+ct_ip = "192.168.178.93"       # IP des CT mit der Samba-Freigabe \\<ct_ip>\clips – nur für den Text dieser Meldung
 
 [material]
 # Lokale Kopie auf dem Mini (pipeline material): gleiche Ordner wie in der Speicher-Wurzel.
