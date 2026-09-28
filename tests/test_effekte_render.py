@@ -34,6 +34,28 @@ class Render(MitSpeicher):
         self.assertAlmostEqual(d["audio"], liste["dauer_s"], delta=0.05)
         return ziel
 
+    def test_tempo_laenge_von_bild_und_ton_stimmt(self):
+        # 28.09.: Zeitraffer (2 s -> 1 s) und Zeitlupe (0,8 s -> 1,6 s) im zweiten Segment: das Video ist genau so
+        # lang wie die Zeitleiste sagt (rendere prüft Bild und Ton), der Übergang liegt weiter auf 3,0 s
+        r = rampe_video(self.tmp / "r.mp4", dauer=8.0)
+        liste = mini_liste([(r, 1.0, 4.0, ("schnitt", 0.0)), (r, 1.0, 7.0, ("whip", 0.25))], tempo={2: {
+            "raffer": {"ab_s": 1.5, "bis_s": 3.5, "faktor": 2.0, "ton": "tempo"},
+            "lupe": {"ab_s": 4.5, "bis_s": 5.3, "faktor": 0.5, "ton": "tief"}}})
+        self.assertAlmostEqual(liste["dauer_s"], 3 + 6 - 1 + 0.8)
+        self.rendere(liste, "tempo")
+
+    def test_flash_hellt_nur_das_spielbild_auf(self):
+        # 28.09.: Blitz bei 2,0 s (0,12 s) – das Spielbild wird deutlich heller, der unscharfe Rand bleibt
+        q = quadrat_video(self.tmp / "q.mp4")
+        liste = mini_liste([(q, 1.0, 5.0, ("schnitt", 0.0))], ereignisse=[(1, "flash", 2.0, {"dauer_s": 0.12})])
+        video = self.rendere(liste, "flash")
+        oben, unten = effekt_filter.spielbild(720, 1280)
+        f = {n: x.astype(int) for n, x in bilder(video, [45, 61]).items()}   # 1,5 s / 2,03 s (Blitz bei ~70 %)
+        spiel = lambda bild: bild[oben + 5:unten - 5].mean()   # noqa: E731
+        rand = lambda bild: bild[: oben - 5].mean()            # noqa: E731
+        self.assertGreater(spiel(f[61]) - spiel(f[45]), 40)
+        self.assertLess(abs(rand(f[61]) - rand(f[45])), 3)
+
     def test_short_zoom_nur_spielbild_texte_daneben_klaenge_auf_zeit(self):
         # Zeitleiste: Segment 1 0–3 s, Blende (dissolve 0,6 s) um 3,0, Segment 2 3–7 s.
         # Bei 4,95: Punch (Scheitel 5,0), Bass-Hit, DOUBLE KILL und „KILLS 2“; Whoosh mit Spitze auf dem Schnitt.

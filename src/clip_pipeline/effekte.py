@@ -5,10 +5,12 @@ Plan ≠ Render: Nur plane() (aufgerufen in regie.erstelle) entscheidet. Jedes E
 nur – über zeitleiste() und uebergangs_fenster() – und liest nie liste["parameter"]. auf_zeitleiste()/auf_quelle()
 sind die EINZIGE Umrechnung zwischen Quelle und Zeitleiste.
 
-Spielbild clean (Entscheidung 25.09.): Im Spielbild gibt es nur Übergänge, Zoom (punch, akzent, meme), später die
-Zeitlupe und den Farblook – keinen Blitz, kein Wackeln, keinen Glitch-Stoß (Glitch nur als Übergangsart). Texte
-liegen außerhalb des Spielbilds: im Short Kill-Titel und Zähler im unscharfen Rand, im 16:9-Zusammenschnitt kein
-Zähler und ein Kill-Titel nur während der Übergangsblende direkt nach dem Segment mit der Serie.
+Im Spielbild (28.09., Florian: „ruhig viral, viele Effekte, keine doppelten“ – ersetzt „Spielbild clean“ vom
+25.09. in diesem Punkt): Übergänge (Uebergangsmix), Zoom (punch, akzent, meme), Tempo (plane_tempo: Zeitlupe,
+Zeitraffer), Farblook und die Impacts flash (Blitz), shake (Wackeln), rgb (Farbversatz-Stoß). Die Finisher
+wechseln den Stil (STILE, finisher_stil) – kein Kill sieht aus wie der vorige. Texte liegen weiter außerhalb des
+Spielbilds: im Short Kill-Titel und Zähler im unscharfen Rand, im 16:9-Zusammenschnitt kein Zähler und ein
+Kill-Titel nur während der Übergangsblende direkt nach dem Segment mit der Serie.
 
 Anker = die sichtbare Aktion: mein Umhauen (merkmale.aktion_sekunden), sonst der Kill. Gezählt wird wie in der
 Vorbewertung: Kette = Kills mit ≤ [vorbewertung].multikill_fenster_s Abstand (nach Kill-Zeit).
@@ -16,14 +18,15 @@ Vorbewertung: Kette = Kills mit ≤ [vorbewertung].multikill_fenster_s Abstand (
 plane() in dieser Reihenfolge:
    1. sichtbar     Anker ≥ 0,1 s vom Segmentrand bzw. vom Übergangs-Griff entfernt -> segment["kill_s"]
    2. Ketten       über alle Kills des Moments; Ereignisse nur an sichtbaren Ankern
-   3. Finisher     die letzte Aktion einer Kette: Punch + Bass-Hit; die anderen Kills: Mini-Punch + Tick
+   3. Finisher     die letzte Aktion einer Kette: Stil aus der Rotation (Punch · Punch + Blitz · Wackeln ·
+                   Punch + RGB-Stoß, nur Stile mit Stärke im Profil) + Bass-Hit; die anderen Kills: Mini-Punch + Tick
    4. Titel        einmal je Kette ab titel_ab_kette Kills, am Ende der Kette (DOUBLE … PENTA, ab 6 MULTI KILL);
                    VICTORY ROYALE ersetzt überlappende Titel. 16:9: nur in der Blende nach dem Moment (nach seinem
                    letzten Teil – Jump-Cuts liegen innerhalb der Serie)
    5. Zähler       „KILLS n“ je sichtbarem Kill, laufende Summe im Video (nur Short). Short: Titel und Zähler enden
                    spätestens am Anfang einer Zoom-Blende (xfade zoomin vergrößert das ganze Bild, das Spielbild
                    wüchse unter den Text)
-   6. Tod          Punch + Einschlag (nur frustriert hat dafür Stärke), kein Titel
+   6. Tod          Wackeln (Stärke tod_punch) + Blitz + Einschlag (nur frustriert hat dafür Stärke), kein Titel
    7. Jubel        Meme-Zoom + Pop auf der ersten Jubel-Spitze (nur lustig)
    8. Riser        endet auf dem ersten Kill des Höhepunkts (wenn davor ≥ 1,5 s Video liegen)
    9. Whoosh       auf jedem weichen Übergang (nicht Schnitt, nicht Abblende über Schwarz)
@@ -32,13 +35,15 @@ plane() in dieser Reihenfolge:
   11. Akzente      kleiner Zoom auf einem Musik-Beat, wenn max_ruhe_s lang weder Schnitt noch Zoom war
   12. Stärke unter der Schwelle fällt weg, Zeiten auf ms
 Übergänge haben immer Stärke 1 (§4), auch der Glitch-Übergang.
-Gelernt (regie_lernen): effekt_staerke[stimmung] wirkt auf alle Effekte, effekt_hektik nur auf HEKTISCH (Beat-Akzente).
+Gelernt (regie_lernen): effekt_staerke[stimmung] wirkt auf alle Effekte, effekt_hektik nur auf HEKTISCH (Beat-Akzente
+und die Impacts flash, shake, rgb).
 """
 
 from __future__ import annotations
 
 import bisect
 import copy
+import random
 from dataclasses import dataclass
 
 from . import schema
@@ -47,6 +52,9 @@ from .konfig import Konfig
 RAND_S = 0.1             # sichtbar: so weit weg vom Segmentrand bzw. vom Übergangs-Griff
 PUNCH_S = 0.35
 AKZENT_S = 0.2
+FLASH_S = 0.12           # Blitz: kurz, fällt linear ab
+SHAKE_S = 0.25           # Wackeln (mit leichtem Zoom, damit kein Rand erscheint)
+RGB_S = 0.15             # Farbversatz-Stoß
 MEME_S = 0.83            # 0,08 s hinein, 0,6 s halten, 0,15 s zurück
 TITEL_VERSATZ_S = 0.1    # Titel kurz nach der Aktion
 TITEL_MAX_S = 1.2
@@ -66,44 +74,83 @@ VICTORY = "VICTORY ROYALE"
 LOOKS = ("neutral", "cinematic", "kalt", "warm", "entsaettigt", "soft")
 LOOK_JE_STIMMUNG = {"episch": "cinematic", "spannend": "kalt", "lustig": "warm", "frustriert": "entsaettigt",
                     "chill": "soft"}
-ZOOM = ("punch", "akzent", "meme")    # wirkt nur auf das Spielbild
-HEKTISCH = {"akzent"}                 # gedämpft durch effekt_hektik („zu hektisch“); Blitz/Wackeln gibt es nicht (Ü1)
+ZOOM = ("punch", "akzent", "meme", "shake")   # wirkt nur auf das Spielbild (shake = Zoom 1,10 + Versatz)
+HEKTISCH = {"akzent", "flash", "shake", "rgb"}   # gedämpft durch effekt_hektik („zu hektisch“)
+# Finisher-Stile in Rotation (28.09.): je Kill der nächste – Stile, deren Extra im Profil keine Stärke hat, fehlen
+STILE = (("punch",), ("punch", "flash"), ("shake",), ("punch", "rgb"))
 VERGROESSERND = {"zoom"}              # Übergänge, die das GANZE Bild vergrößern (xfade zoomin) – Short: Texte enden davor
 # Zoom-Budget: wer gewinnt bei zu engem Abstand (Tod-Punch zählt wie ein Finisher)
 RANG_FINISHER, RANG_MEME, RANG_PUNCH, RANG_AKZENT = 3, 2, 1, 0
 
 _GEMEINSAM = {"mini_faktor": 0.5, "titel_ab_kette": 2}
-# Stärken 0..1 je Stimmung (0 = aus). uebergaenge: Rotation (Art, Dauer s) für die Übergänge IN Momente dieser Stimmung.
+# Stärken 0..1 je Stimmung (0 = aus). uebergaenge: Pool (Art, Dauer s) für die Übergänge IN Momente dieser Stimmung –
+# der Uebergangsmix zieht daraus in gemischten Runden ohne direkte Wiederholung (28.09., Florian: „immer die gleichen
+# Übergänge, das ist langweilig“); ohne Mix (Tests, alte Aufrufer) gilt die Reihenfolge als Rotation.
 PROFIL = {
     "episch": {**_GEMEINSAM, "punch": 0.7, "titel": 1.0, "zaehler": 1.0, "akzent": 0.5, "max_ruhe_s": 2.5,
                "meme": 0.0, "tod_punch": 0.0, "basshit": 0.9, "tick": 0.5, "whoosh": 0.6, "pop": 0.0,
                "einschlag": 0.0, "riser": 0.6, "lupe": 0.8, "look": ("cinematic", 0.8),
-               "uebergaenge": [("schnitt", 0.0), ("whip", 0.25), ("schnitt", 0.0), ("zoom", 0.3)]},
+               "uebergaenge": [("schnitt", 0.0), ("whip", 0.25), ("zoom", 0.3), ("schnitt", 0.0), ("whip_up", 0.25),
+                               ("flash", 0.15), ("radial", 0.3), ("smoothleft", 0.3), ("glitch", 0.2),
+                               ("coverleft", 0.3)]},
     "spannend": {**_GEMEINSAM, "punch": 0.5, "titel": 1.0, "zaehler": 0.8, "akzent": 0.4, "max_ruhe_s": 2.5,
                  "meme": 0.0, "tod_punch": 0.0, "basshit": 0.7, "tick": 0.4, "whoosh": 0.6, "pop": 0.0,
                  "einschlag": 0.0, "riser": 0.5, "lupe": 0.5, "look": ("kalt", 0.6),
-                 "uebergaenge": [("whip", 0.25), ("schnitt", 0.0), ("glitch", 0.2), ("schnitt", 0.0)]},
+                 "uebergaenge": [("whip", 0.25), ("schnitt", 0.0), ("glitch", 0.2), ("zoom", 0.3), ("whip_right", 0.25),
+                                 ("hblur", 0.3), ("circleclose", 0.3), ("schnitt", 0.0), ("diagtl", 0.3),
+                                 ("flash", 0.12)]},
     "lustig": {**_GEMEINSAM, "punch": 0.3, "titel": 1.0, "zaehler": 0.4, "akzent": 0.3, "max_ruhe_s": 3.0,
                "meme": 0.8, "tod_punch": 0.0, "basshit": 0.0, "tick": 0.3, "whoosh": 0.4, "pop": 0.5,
                "einschlag": 0.0, "riser": 0.0, "lupe": 0.0, "look": ("warm", 0.5),
-               "uebergaenge": [("wipeleft", 0.3), ("squeeze", 0.3), ("slideleft", 0.3)]},
+               "uebergaenge": [("wipeleft", 0.3), ("squeeze", 0.3), ("slideleft", 0.3), ("wipeup", 0.3),
+                               ("squeezev", 0.3), ("circleopen", 0.35), ("slidedown", 0.3), ("revealright", 0.3),
+                               ("diagbr", 0.3)]},
     "frustriert": {**_GEMEINSAM, "punch": 0.3, "titel": 0.0, "zaehler": 0.6, "akzent": 0.0, "max_ruhe_s": None,
                    "meme": 0.0, "tod_punch": 0.3, "basshit": 0.4, "tick": 0.3, "whoosh": 0.0, "pop": 0.0,
                    "einschlag": 0.7, "riser": 0.0, "lupe": 0.6, "look": ("entsaettigt", 0.7),
-                   "uebergaenge": [("fadeblack", 0.5), ("glitch", 0.2)]},
+                   "uebergaenge": [("fadeblack", 0.5), ("glitch", 0.2), ("hblur", 0.4), ("fade", 0.4),
+                                   ("smoothdown", 0.4)]},
     "chill": {**_GEMEINSAM, "punch": 0.0, "titel": 1.0, "zaehler": 0.0, "akzent": 0.0, "max_ruhe_s": None,
               "meme": 0.0, "tod_punch": 0.0, "basshit": 0.0, "tick": 0.0, "whoosh": 0.25, "pop": 0.0,
               "einschlag": 0.0, "riser": 0.0, "lupe": 0.0, "look": ("soft", 0.3),
-              "uebergaenge": [("fade", 0.8), ("dissolve", 0.6)]},
+              "uebergaenge": [("fade", 0.8), ("dissolve", 0.6), ("smoothright", 0.8), ("circleopen", 0.7)]},
 }
 STAERKEN = {"mini_faktor", "punch", "titel", "zaehler", "akzent", "meme", "tod_punch", "basshit", "tick", "whoosh",
-            "pop", "einschlag", "riser", "lupe"}
+            "pop", "einschlag", "riser", "lupe", "raffer", "flash", "shake", "rgb"}
+# 28.09.: Zeitraffer im Anlauf (plane_tempo) und die Impacts (Blitz, Wackeln, RGB-Stoß) je Stimmung, 0 = keiner
+NEU_2_1 = {"episch": {"raffer": 0.6, "flash": 0.7, "shake": 0.6, "rgb": 0.5},
+           "spannend": {"raffer": 0.7, "flash": 0.6, "shake": 0.7, "rgb": 0.6},
+           "lustig": {"raffer": 0.3, "flash": 0.3, "shake": 0.5, "rgb": 0.0},
+           "frustriert": {"raffer": 0.0, "flash": 0.5, "shake": 0.6, "rgb": 0.0},
+           "chill": {"raffer": 0.0, "flash": 0.0, "shake": 0.0, "rgb": 0.0}}
+for _st, _werte in NEU_2_1.items():
+    PROFIL[_st].update(_werte)
+
+
+def finisher_stil(pr: dict, k: int) -> tuple[str, ...]:
+    """Stil des k-ten Finishers im Video aus STILE, reihum – nur Stile, deren Extras (alles außer punch) im Profil
+    Stärke haben. Beispiel episch: k 0 → ("punch",), 1 → ("punch", "flash"), 2 → ("shake",), 3 → ("punch", "rgb"),
+    4 → wieder ("punch",); lustig (rgb 0): drei Stile im Wechsel."""
+    moeglich = [s for s in STILE if all(float(pr.get(a, 0.0)) > 0 for a in s if a != "punch")] or [STILE[0]]
+    return moeglich[k % len(moeglich)]
 
 # [regie.effekte]: Standardwerte und Grenzen. Weitere Schlüssel (z. B. für Export oder Hook) lesen andere Module selbst.
 STANDARD = {"an": True, "profil_version": 1, "schwelle": 0.15, "effekt_abstand_s": 0.4, "max_glitch": 1,
+            "max_lupen": 2, "max_raffer": 2,
             "sfx_ordner": "/var/lib/clip-pipeline/sfx", "sfx_pegel": 0.8, "titel_zeichenbreite": 0.75}
 GRENZEN = {"profil_version": (1, 99), "schwelle": (0.0, 1.0), "effekt_abstand_s": (0.0, 5.0), "max_glitch": (0, 20),
-           "sfx_pegel": (0.0, 2.0), "titel_zeichenbreite": (0.3, 1.5)}
+           "max_lupen": (0, 10), "max_raffer": (0, 10), "sfx_pegel": (0.0, 2.0), "titel_zeichenbreite": (0.3, 1.5)}
+
+# Tempo (28.09., Florian: „ruhig viral, mit slowmo und beschleunigt“) – Fenster in Quellsekunden
+LUPE_VOR_S, LUPE_NACH_S = 0.35, 0.45   # um den Finisher: 0,8 s -> 1,6 s im Video (Faktor 0,5)
+LUPE_DRAMA_S = 0.2                     # Faktor 0,25 (episch, Serie ≥ 3 oder Victory): ±0,2 s -> 1,6 s im Video
+LUPE_MIN_S = 0.3                       # kleiner wird das Fenster nicht geschrumpft, dann fällt die Lupe weg
+LUPE_MAX_S = 1.5                       # Prüfer: längstes Zeitlupen-Fenster
+RAFFER_MAX_S = 4.0                     # längstes Zeitraffer-Fenster -> 2 s im Video (Faktor 2)
+RAFFER_MIN_S = 1.5                     # kürzer lohnt kein Raffer
+RAFFER_ANLAUF_S = 3.0                  # erst ab so viel Anlauf vor der ersten Aktion
+RAFFER_ABSTAND_S = 0.8                 # der Raffer endet so weit vor der ersten Aktion – die sieht man normal
+QUELLE_REST_S = 0.25                   # am Dateiende bleibt so viel frei (wie regie.plane_zeitleiste: nutzbar)
 
 
 @dataclass
@@ -253,17 +300,58 @@ def kills_mit_anker(mk: dict) -> list[tuple[float, float]]:
 
 # --- Übergänge -----------------------------------------------------------------------------
 
+class Uebergangsmix:
+    """Zieht die Übergänge eines Entwurfs aus dem Pool je Stimmung (Profil „uebergaenge“).
+
+    Deterministisch aus einem Seed (regie: die Momentfolge) – derselbe Entwurf wird immer gleich gebaut, ein anderer
+    bekommt andere Übergänge. Gemischte Runden: jede Art des Pools kommt einmal dran, bevor eine wiederkommt; nie
+    zweimal dieselbe weiche Art nacheinander (harte Schnitte dürfen sich folgen); höchstens max_glitch Glitches,
+    danach die nächste Art der Runde. Beispiel: Pool [whip, schnitt, glitch] → z. B. glitch, whip, schnitt | schnitt,
+    whip, (glitch gesperrt) …"""
+
+    def __init__(self, seed: str):
+        self._rnd = random.Random(seed)
+        self._runden: dict[str, list[tuple[str, float]]] = {}
+        self.letzte: str | None = None
+
+    def waehle(self, stimmung: str, pool: list[tuple[str, float]], glitch_zaehler: int,
+               max_glitch: int) -> tuple[str, float]:
+        def ohne_gedeckelte(runde: list[tuple[str, float]]) -> list[tuple[str, float]]:
+            return [x for x in runde if x[0] != "glitch"] if glitch_zaehler >= max_glitch else runde
+
+        rest = ohne_gedeckelte(self._runden.get(stimmung) or [])
+        if not rest:  # Runde aufgebraucht (oder nur Gedeckeltes übrig): neue Runde mischen
+            rest = list(pool)
+            self._rnd.shuffle(rest)
+            rest = ohne_gedeckelte(rest)
+        if not rest:  # Pool besteht nur aus Glitch
+            self._runden[stimmung], self.letzte = rest, "whip"
+            return "whip", 0.25
+        # nie dieselbe weiche Art nacheinander; geht es nicht anders (winziger Pool), die erste der Runde
+        n = next((n for n, (art, _) in enumerate(rest) if art == "schnitt" or art != self.letzte), 0)
+        art, dauer = rest.pop(n)
+        self._runden[stimmung] = rest
+        self.letzte = art
+        return art, dauer
+
+
 def uebergang(stimmung: str, index: int, ist_hoehepunkt: bool, p: dict, an: bool, glitch_zaehler: int, *,
-              profil_: dict | None = None, max_glitch: int = STANDARD["max_glitch"]) -> tuple[str, float]:
-    """Übergang in einen Moment: (Art, Dauer s). Aus: regie.UEBERGANG wie bisher. An: Rotation aus dem Profil
-    (index = frühere Momente derselben Stimmung); in einen epischen/spannenden Höhepunkt harter Schnitt auf den
-    Drop; mehr als max_glitch Glitches -> Whip. Dauer × uebergang_faktor."""
+              profil_: dict | None = None, max_glitch: int = STANDARD["max_glitch"],
+              mix: Uebergangsmix | None = None) -> tuple[str, float]:
+    """Übergang in einen Moment: (Art, Dauer s). Aus: regie.UEBERGANG wie bisher. An: aus dem Pool des Profils –
+    mit mix (regie.plane_zeitleiste) gemischt ohne Wiederholung (Uebergangsmix), ohne mix als Rotation
+    (index = frühere Momente derselben Stimmung, mehr als max_glitch Glitches -> Whip); in einen
+    epischen/spannenden Höhepunkt harter Schnitt auf den Drop. Dauer × uebergang_faktor."""
     if not an:
         from .regie import UEBERGANG
 
         art, dauer = UEBERGANG[stimmung]
     elif ist_hoehepunkt and stimmung in ("episch", "spannend"):
         art, dauer = "schnitt", 0.0
+        if mix is not None:
+            mix.letzte = art
+    elif mix is not None:
+        art, dauer = mix.waehle(stimmung, (profil_ or PROFIL[stimmung])["uebergaenge"], glitch_zaehler, max_glitch)
     else:
         folge = (profil_ or PROFIL[stimmung])["uebergaenge"]
         art, dauer = folge[index % len(folge)]
@@ -290,30 +378,36 @@ def _in_fenster(t: float, fenster: list[tuple[float, float]]) -> bool:
 
 # --- Zeit: die einzige Umrechnung Quelle <-> Zeitleiste ----------------------------------------------
 
+def tempo_fenster(seg: dict) -> list[tuple[float, float, float]]:
+    """(ab, bis, faktor) der Tempo-Fenster eines Segments in Quellzeit, aufsteigend – der Zeitraffer (raffer, im
+    Anlauf) liegt vor der Zeitlupe (lupe, um den Finisher). Leer ohne beides."""
+    return sorted((float(w["ab_s"]), float(w["bis_s"]), float(w["faktor"]))
+                  for w in (seg.get("raffer"), seg.get("lupe")) if w)
+
+
 def _zuschlag(seg: dict, t_q: float) -> float:
-    lupe = seg.get("lupe")
-    if not lupe or t_q <= lupe["ab_s"]:
-        return 0.0
-    return (min(t_q, lupe["bis_s"]) - lupe["ab_s"]) * (1 / lupe["faktor"] - 1)
+    return sum((min(t_q, bis) - ab) * (1 / f - 1) for ab, bis, f in tempo_fenster(seg) if t_q > ab)
 
 
 def auf_zeitleiste(seg: dict, t_q: float) -> float:
-    """Quellzeit (Sekunden in der Moment-Datei) -> Zeit im Video. Eine Zeitlupe dehnt ab_s … bis_s um 1/faktor."""
+    """Quellzeit (Sekunden in der Moment-Datei) -> Zeit im Video. Ein Tempo-Fenster dehnt (Zeitlupe, Faktor < 1)
+    bzw. staucht (Zeitraffer, Faktor > 1) ab_s … bis_s um 1/faktor."""
     return seg["zeit_start"] + (t_q - seg["quelle_start_s"]) + _zuschlag(seg, t_q)
 
 
 def auf_quelle(seg: dict, t_z: float) -> float:
     """Umkehrung von auf_zeitleiste."""
-    u = t_z - seg["zeit_start"]
-    lupe = seg.get("lupe")
-    if lupe:
-        ab, f = lupe["ab_s"] - seg["quelle_start_s"], lupe["faktor"]
-        gedehnt = (lupe["bis_s"] - lupe["ab_s"]) / f
-        if ab < u <= ab + gedehnt:
-            return lupe["ab_s"] + (u - ab) * f
-        if u > ab + gedehnt:
-            return seg["quelle_start_s"] + u - (lupe["bis_s"] - lupe["ab_s"]) * (1 / f - 1)
-    return seg["quelle_start_s"] + u
+    u, q = t_z - seg["zeit_start"], seg["quelle_start_s"]   # Rest im Segment, laufende Quellposition
+    for ab, bis, f in tempo_fenster(seg):
+        if u <= ab - q:
+            return q + u
+        u -= ab - q
+        gedehnt = (bis - ab) / f
+        if u <= gedehnt:
+            return ab + u * f
+        u -= gedehnt
+        q = bis
+    return q + u
 
 
 def zeitleiste(liste: dict) -> list[Ereignis]:
@@ -346,15 +440,121 @@ def _r_hinten(segmente: list[dict], i: int) -> float:
     return u["dauer_s"] / 2 if u["art"] != "schnitt" else 0.0
 
 
+def _wo(grenzen: list[tuple[float, float]], idx: list[int], t_q: float) -> int | None:
+    """Das Segment aus idx, in dessen sichtbarem Quellfenster t_q liegt (None: in keinem)."""
+    return next((i for i in idx if grenzen[i][0] - 1e-6 <= t_q <= grenzen[i][1] + 1e-6), None)
+
+
+def _je_moment(segmente: list[dict]) -> dict[str, list[int]]:
+    """Moment -> seine Segment-Indizes (ohne Hook, der plant selbst)."""
+    ergebnis: dict[str, list[int]] = {}
+    for i, s in enumerate(segmente):
+        if s.get("rolle") != "hook":
+            ergebnis.setdefault(s["moment"], []).append(i)
+    return ergebnis
+
+
+# --- Tempo: Zeitlupe und Zeitraffer -----------------------------------------------------------
+
+def _lupe_setzen(segmente: list[dict], grenzen: list, i: int, ab: float, bis: float, faktor: float) -> bool:
+    """Zeitlupe ab … bis (Quelle) in Segment i. Die Zeitleiste bleibt: die Quelle wird hinten um den Zuschlag
+    gekürzt – nie in die Muss-Zone, nie ins Fenster, nie in den hinteren Griff. Passt es nicht, schrumpft das
+    Fenster um den Anker (bis LUPE_MIN_S), sonst keine Lupe. Rückgabe: gesetzt?"""
+    s = segmente[i]
+    ab, bis = max(ab, grenzen[i][0]), min(bis, grenzen[i][1])
+    mitte = (ab + bis) / 2
+    for _ in range(4):
+        if bis - ab < LUPE_MIN_S - 1e-9:
+            return False
+        zuschlag = (bis - ab) * (1 / faktor - 1)
+        qe_neu = s["quelle_ende_s"] - zuschlag
+        if qe_neu >= max(s["muss"][1], bis + RAND_S + _r_hinten(segmente, i)) - 1e-6:
+            s["lupe"] = {"ab_s": round(ab, 3), "bis_s": round(bis, 3), "faktor": faktor, "ton": "tief"}
+            s["quelle_ende_s"] = round(qe_neu, 3)
+            return True
+        ab, bis = mitte - (mitte - ab) * 0.7, mitte + (bis - mitte) * 0.7
+    return False
+
+
+def _raffer_setzen(segmente: list[dict], i: int, ab: float, bis: float) -> bool:
+    """Zeitraffer (Faktor 2) ab … bis (Quelle) in Segment i: das Fenster wird halb so lang, dafür nimmt das Segment
+    hinten die andere Hälfte mehr Quelle – nur so weit, wie die Datei (QUELLE_REST_S, hinterer Griff) und ein
+    folgender Teil desselben Moments es hergeben. Bleibt weniger als RAFFER_MIN_S Fenster, kein Raffer."""
+    s = segmente[i]
+    frei = s["quelle_dauer_s"] - QUELLE_REST_S - _r_hinten(segmente, i) - s["quelle_ende_s"]
+    if i + 1 < len(segmente) and segmente[i + 1]["moment"] == s["moment"] and segmente[i + 1].get("teil", 1) > 1:
+        frei = min(frei, segmente[i + 1]["quelle_start_s"] - s["quelle_ende_s"])
+    if lupe := s.get("lupe"):  # der Raffer endet vor der Zeitlupe
+        bis = min(bis, lupe["ab_s"])
+    laenge = min(bis - ab, RAFFER_MAX_S, 2 * frei)
+    if laenge < RAFFER_MIN_S - 1e-9:
+        return False
+    s["raffer"] = {"ab_s": round(bis - laenge, 3), "bis_s": round(bis, 3), "faktor": 2.0, "ton": "tempo"}
+    s["quelle_ende_s"] = round(s["quelle_ende_s"] + laenge / 2, 3)
+    return True
+
+
+def plane_tempo(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: str) -> dict:
+    """Speed-Ramps in die Segmente (Felder lupe und raffer, vor effekte.plane): Zeitlupe um den Finisher der
+    längsten Kette je Moment (Faktor 0,5; episch mit Serie ≥ 3 oder Victory 0,25), Zeitraffer (Faktor 2) über einen
+    langen Anlauf vor der ersten Aktion – beides darf im selben Segment liegen (schnell hin, langsam auf den Kill).
+    Höchstens [regie.effekte].max_lupen bzw. max_raffer je Video – Vorrang: der
+    Höhepunkt, dann die längere Serie, dann mehr Punkte; Raffer: der längere Anlauf. Stärke wie jeder Effekt:
+    Profil (lupe, raffer) × gelernte effekt_staerke, unter der Schwelle keiner. Die Zeitleiste (Beats) bleibt –
+    _lupe_setzen/_raffer_setzen passen nur die Quelle an. Rückgabe {"lupen": n, "raffer": n}."""
+    e, _ = einstellungen(konfig)
+    prof, schwelle = e["profile"], e["schwelle"]
+    kette_s = float(konfig.wert("vorbewertung.multikill_fenster_s", 10.0))
+    momente = {k.schluessel: k for k in reihe}
+    for s in segmente:  # neu planen = von vorn
+        s.pop("lupe", None)
+        s.pop("raffer", None)
+    grenzen = [_sichtbar(segmente, i) for i in range(len(segmente))]
+    lupen: list[tuple[tuple, int, float, float, float]] = []
+    raffer: list[tuple[float, int, float, float]] = []
+    for moment, idx in _je_moment(segmente).items():
+        k = momente.get(moment)
+        paare = kills_mit_anker(k.merkmale if k is not None else {})
+        if not paare:
+            continue
+        alle = _ketten(paare, kette_s)
+        kette = alle[max(range(len(alle)), key=lambda j: (len(alle[j]), j))]
+        a = max(anker for _, anker in kette)  # der Finisher: die letzte Aktion der längsten Kette
+        if (i := _wo(grenzen, idx, a)) is not None:
+            st = segmente[i]["stimmung"]
+            if staerke(prof[st]["lupe"], p, st, "lupe", schwelle) > 0:
+                anzahl = max(len(kette), int(k.max_gruppe or 0))
+                drama = st == "episch" and (anzahl >= 3 or bool(k.victory))
+                faktor, vor, nach = (0.25, LUPE_DRAMA_S, LUPE_DRAMA_S) if drama else (0.5, LUPE_VOR_S, LUPE_NACH_S)
+                lupen.append(((0 if k is reihe[-1] else 1, -anzahl, -float(k.punkte), i), i, a - vor, a + nach, faktor))
+        erster = min(anker for _, anker in paare)
+        if (i := _wo(grenzen, idx, erster)) is not None:
+            st = segmente[i]["stimmung"]
+            if staerke(prof[st]["raffer"], p, st, "raffer", schwelle) > 0:
+                ab, bis = grenzen[i][0], erster - RAFFER_ABSTAND_S
+                if bis - ab >= RAFFER_ANLAUF_S - 1e-9:
+                    raffer.append((bis - ab, i, ab, bis))
+    n_lupen = n_raffer = 0
+    for _vorrang, i, ab, bis, faktor in sorted(lupen, key=lambda x: x[0]):
+        if n_lupen >= int(e["max_lupen"]):
+            break
+        n_lupen += _lupe_setzen(segmente, grenzen, i, ab, bis, faktor)
+    for _anlauf, i, ab, bis in sorted(raffer, key=lambda x: (-x[0], x[1])):
+        if n_raffer >= int(e["max_raffer"]):
+            break
+        n_raffer += _raffer_setzen(segmente, i, ab, bis)
+    return {"lupen": n_lupen, "raffer": n_raffer}
+
+
 def _wichtig(e: _Plan) -> int:
     """Was bei zu vielen Ereignissen (Schema-Grenzen) zuletzt wegfällt."""
     if e.art == "titel":
         return 7
     if e.art == "sfx":
         return {"basshit": 6, "einschlag": 6, "riser": 5, "whoosh": 5, "pop": 4}.get(e.klang or "", 1)
-    if e.art == "punch":
+    if e.art in ("punch", "shake"):
         return 6 if e.rang >= RANG_FINISHER else 2
-    return {"meme": 4, "zaehler": 3}.get(e.art, 0)
+    return {"meme": 4, "zaehler": 3, "flash": 3, "rgb": 3}.get(e.art, 0)
 
 
 def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: str, fps: int,
@@ -384,18 +584,17 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
     for s in segmente:  # neu planen = von vorn
         s.pop("kill_s", None)
         s.pop("effekte", None)
-    je_moment: dict[str, list[int]] = {}
-    for i, s in enumerate(segmente):
-        if s.get("rolle") != "hook":  # Hook (Stufe 4) plant seine Ereignisse selbst
-            je_moment.setdefault(s["moment"], []).append(i)
+    je_moment = _je_moment(segmente)  # Hook (Stufe 4) plant seine Ereignisse selbst
     grenzen = [_sichtbar(segmente, i) for i in range(len(segmente))]
 
     def wo(idx: list[int], t_q: float) -> int | None:
-        return next((i for i in idx if grenzen[i][0] - 1e-6 <= t_q <= grenzen[i][1] + 1e-6), None)
+        return _wo(grenzen, idx, t_q)
 
     titel: list[_Plan] = []
     victory: list[_Plan] = []
     gezaehlt: list[tuple[float, int]] = []   # (Zeit, Segment) je sichtbarem Kill
+    finisher = 0                             # Zähler für die Stil-Rotation (finisher_stil)
+    impact_dauer = {"punch": PUNCH_S, "shake": SHAKE_S, "flash": FLASH_S, "rgb": RGB_S}
     for moment, idx in je_moment.items():
         k = momente.get(moment)
         mk = k.merkmale if k is not None else {}
@@ -414,7 +613,10 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
                     continue
                 pr, t = prof[segmente[i]["stimmung"]], auf_zeitleiste(segmente[i], a)
                 if n == fin:
-                    dazu(plan, "punch", i, t, stark(i, pr["punch"], "punch"), dauer=PUNCH_S, rang=RANG_FINISHER)
+                    for art in finisher_stil(pr, finisher):  # Stil-Rotation: kein Kill wie der vorige
+                        dazu(plan, art, i, t, stark(i, pr[art], art), dauer=impact_dauer[art],
+                             rang=RANG_FINISHER if art in ZOOM else 0)
+                    finisher += 1
                     dazu(plan, "sfx", i, t, stark(i, pr["basshit"], "basshit"), klang="basshit")
                 else:
                     dazu(plan, "punch", i, t, stark(i, pr["punch"] * pr["mini_faktor"], "punch"), dauer=PUNCH_S,
@@ -444,7 +646,8 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
         # 6. Tod, 7. Jubel
         if (tod := mk.get("tod_sekunde")) is not None and (i := wo(idx, float(tod))) is not None:
             pr, t = prof[segmente[i]["stimmung"]], auf_zeitleiste(segmente[i], float(tod))
-            dazu(plan, "punch", i, t, stark(i, pr["tod_punch"], "punch"), dauer=PUNCH_S, rang=RANG_FINISHER)
+            dazu(plan, "shake", i, t, stark(i, pr["tod_punch"], "shake"), dauer=SHAKE_S, rang=RANG_FINISHER)
+            dazu(plan, "flash", i, t, stark(i, pr["flash"], "flash"), dauer=FLASH_S)
             dazu(plan, "sfx", i, t, stark(i, pr["einschlag"], "einschlag"), klang="einschlag")
         for jubel in sorted(float(x) for x in mk.get("jubel_laut_s") or []):
             if (i := wo(idx, jubel)) is not None:

@@ -202,3 +202,15 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Treffer zählen (Zirkelschluss). Du siehst weiterhin jeden Entwurf, der die Schwelle schafft, mit den normalen
   👍/👎-Knöpfen – die letzte Entscheidung bleibt bei dir. `/stand` zeigt zusätzlich, wie viele automatisch aussortiert
   wurden.
+- 2026-09-28 (Regisseur 2.1, Florian: „immer die gleichen Übergänge, keine weiteren Effekte – das darf ruhig
+  ordentlich viral sein, mit Slowmo und beschleunigt, viele Spezialeffekte, keine doppelten“): **Mehr Effekte im
+  Spielbild, nichts doppelt.** Ersetzt „Spielbild clean“ vom 25.09. in diesem Punkt (Blitz, Wackeln und
+  Farbversatz-Stoß sind jetzt erlaubt); Texte bleiben außerhalb des Spielbilds, alles bleibt mit
+  `[regie.effekte] an = false` abschaltbar und über 🎆/💥/😵 lernbar. (1) **Übergangs-Mix:** Pool je Stimmung
+  (33 xfade-Arten im Schema, u. a. whip_up/whip_right, radial, circleclose, smooth*, diag*, hblur, cover/reveal,
+  flash = Weißblende), gemischte Runden ohne direkte Wiederholung, deterministisch aus der Momentfolge
+  (`effekte.Uebergangsmix`). (2) **Speed-Ramps:** Zeitlupe um den Finisher (0,5; episch mit Serie ≥ 3 oder
+  Victory 0,25) und Zeitraffer (2×) über einen langen Anlauf, beides im selben Segment möglich; die Zeitleiste
+  (Beats) bleibt, nur die Quelle wird angepasst; Deckel `max_lupen`/`max_raffer` = 2. Renderer: `setpts` vor
+  `fps`, Ton in Stücken. (3) **Impacts:** flash/shake/rgb, die Finisher wechseln den Stil (Punch · Punch+Blitz ·
+  Wackeln · Punch+RGB), der Tod wackelt und blitzt. Doku: `docs/REGIE.md`, Abschnitt „Effekte“.

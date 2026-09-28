@@ -1,8 +1,8 @@
-"""Regisseur 2.0, Effekt-Planer (effekte.py) und Schnittliste v4 – ohne Video, bis auf die compose-Klasse am Ende.
+"""Regisseur 2.0/2.1, Effekt-Planer (effekte.py) und Schnittliste v4 – ohne Video, bis auf die compose-Klasse am Ende.
 
-Spielbild clean (25.09.): nur Zoom (punch, akzent, meme), Übergänge und Look im Bild – kein Blitz, kein Wackeln, kein
-Glitch-Ereignis. Titel/Zähler im Short im unscharfen Rand, im 16:9 kein Zähler und der Titel nur in der Blende.
-Anker = mein Umhauen (aktion_sekunden), sonst der Kill; ein Titel je Serie an ihrem Ende."""
+Im Spielbild: Zoom (punch, akzent, meme, shake), Übergänge (Mix), Tempo (Zeitlupe/Zeitraffer), Look und seit 28.09.
+die Impacts flash/shake/rgb mit Stil-Rotation. Titel/Zähler im Short im unscharfen Rand, im 16:9 kein Zähler und
+der Titel nur in der Blende. Anker = mein Umhauen (aktion_sekunden), sonst der Kill; ein Titel je Serie an ihrem Ende."""
 
 import copy
 import json
@@ -17,8 +17,8 @@ from clip_pipeline.medien import MedienFehler
 from tests.regie_hilfen import MOMENTE, MitRegieMaterial
 from tests.test_regie_serie import BEATS, WIPE, kandidat, liste_um
 
-ERLAUBT = {"punch", "akzent", "meme", "titel", "zaehler", "sfx"}
-ZOOM = {"punch", "akzent", "meme"}
+ERLAUBT = {"punch", "akzent", "meme", "flash", "shake", "rgb", "titel", "zaehler", "sfx"}
+ZOOM = {"punch", "akzent", "meme", "shake"}
 
 
 def seg(nr, moment, qs, qe, zs, *, art="schnitt", d=0.0, stimmung="episch", teil=None, dauer=40.0):
@@ -197,7 +197,8 @@ class Plan(unittest.TestCase):
         frust = ein_moment({"kill_sekunden": [6.0, 8.0], "tod_sekunde": 12.0}, stimmung="frustriert")
         self.assertEqual(titel(frust), [])                                     # kein Titel
         self.assertEqual({(e["t_s"], e["art"], e.get("klang"), e["staerke"]) for _, e in ereignisse(frust)
-                          if e["t_s"] == 12.0}, {(12.0, "punch", None, 0.3), (12.0, "sfx", "einschlag", 0.7)})
+                          if e["t_s"] == 12.0},   # 28.09.: Tod = Wackeln (Stärke tod_punch) + Blitz + Einschlag
+                         {(12.0, "shake", None, 0.3), (12.0, "flash", None, 0.5), (12.0, "sfx", "einschlag", 0.7)})
         self.assertIn((8.0, "basshit", 0.4),
                       [(e["t_s"], e["klang"], e["staerke"]) for _, e in ereignisse(frust, "sfx")])
         chill = ein_moment({"kill_sekunden": [6.0, 8.0]}, stimmung="chill")
@@ -311,22 +312,49 @@ class Uebergaenge(unittest.TestCase):
         self.assertEqual(effekte.uebergang("spannend", 2, False, p, True, 0), ("glitch", 0.2))
         self.assertEqual(effekte.uebergang("spannend", 2, False, p, True, 1), ("whip", 0.25))  # max_glitch 1
         self.assertEqual(effekte.uebergang("spannend", 0, True, p, True, 0), ("schnitt", 0.0))  # in den Höhepunkt
-        self.assertEqual(effekte.uebergang("lustig", 4, True, p, True, 0), ("squeeze", 0.3))
+        self.assertEqual(effekte.uebergang("lustig", 4, True, p, True, 0), ("squeezev", 0.3))
         self.assertEqual(effekte.uebergang("episch", 1, False, {**p, "uebergang_faktor": 2.0}, True, 0), ("whip", 0.5))
         for s, (art, d) in regie.UEBERGANG.items():  # aus = wie bisher
             self.assertEqual(effekte.uebergang(s, 1, True, p, False, 5), (art, d))
-        ks = [kandidat(f"m{i}", {"kill_sekunden": [6.0]}, stimmung="spannend", dauer=20.0) for i in range(9)]
-        fx, _ = effekte.einstellungen(fx_konfig())
-        segs = regie.plane_zeitleiste(ks, BEATS, regie.FORMATE["zusammenschnitt"], dict(regie.PARAMETER), 60, fx)
-        arten = [s["uebergang"]["art"] for s in segs]
-        self.assertEqual(arten.count("glitch"), 1)
-        self.assertEqual(arten[-1], "schnitt")
-        self.assertIn("whip", arten)
+
+    def test_mix_ohne_wiederholung_deterministisch(self):
+        # 28.09. (Florian: „immer die gleichen Übergänge“): plane_zeitleiste mischt den Pool je Stimmung – jede Art
+        # einmal je Runde, nie dieselbe weiche Art zweimal nacheinander, höchstens ein Glitch, Höhepunkt = Schnitt
+        def arten_fuer(ks):
+            fx, _ = effekte.einstellungen(fx_konfig())
+            segs = regie.plane_zeitleiste(ks, BEATS, regie.FORMATE["zusammenschnitt"], dict(regie.PARAMETER), 60, fx)
+            return [s["uebergang"]["art"] for s in segs]
+
+        ks = [kandidat(f"m{i}", {"kill_sekunden": [6.0]}, stimmung="spannend", dauer=20.0) for i in range(14)]
+        arten = arten_fuer(ks)
+        pool = {a for a, _ in effekte.PROFIL["spannend"]["uebergaenge"]}
+        self.assertEqual(arten[0], "schnitt")                  # erstes Segment: immer Schnitt
+        self.assertEqual(arten[-1], "schnitt")                 # spannender Höhepunkt: harter Schnitt
+        self.assertEqual(arten.count("glitch"), 1)             # max_glitch 1, in der ersten Runde einmal gezogen
+        self.assertEqual(set(arten[1:-1]), pool)               # 12 Züge aus 10 Arten: jede kam dran
+        for a, b in zip(arten[1:-1], arten[2:-1]):
+            if a != "schnitt":
+                self.assertNotEqual(a, b, arten)               # keine doppelte weiche Art
+        self.assertEqual(arten_fuer(ks), arten)                # deterministisch (Seed = Momentfolge)
+        anders = arten_fuer([ks[0], *reversed(ks[1:])])
+        self.assertEqual(len(anders), len(arten))
+        self.assertNotEqual(anders, arten)                     # andere Momentfolge -> anderer Mix
+        # Der Mix selbst mit winzigem Pool: genau ein Glitch (Deckel), danach bleibt nur die andere Art – und er
+        # bleibt nie auf dem Whip-Rückfall hängen (den gibt es nur, wenn der Pool allein aus Glitch besteht)
+        mix, folge, glitches = effekte.Uebergangsmix("x"), [], 0
+        for _ in range(6):
+            art, _d = mix.waehle("frustriert", [("glitch", 0.2), ("fadeblack", 0.5)], glitches, 1)
+            glitches += art == "glitch"
+            folge.append(art)
+        self.assertEqual((folge.count("glitch"), folge.count("fadeblack")), (1, 5))
+        nur_glitch = effekte.Uebergangsmix("y")
+        self.assertEqual(nur_glitch.waehle("spannend", [("glitch", 0.2)], 0, 1), ("glitch", 0.2))
+        self.assertEqual(nur_glitch.waehle("spannend", [("glitch", 0.2)], 1, 1), ("whip", 0.25))
 
     def test_hektik_daempft_nur_akzent(self):
-        # Ü1: kein Blitz/Wackeln/Glitch-Ereignis mehr – „zu hektisch“ dämpft nur die Beat-Akzente. Übergänge, auch
-        # der Glitch-Übergang, haben immer Stärke 1 (§4)
-        self.assertEqual(effekte.HEKTISCH, {"akzent"})
+        # „zu hektisch“ dämpft die Beat-Akzente und (28.09.) die Impacts flash/shake/rgb – nicht Punch, Titel,
+        # Zähler, Klänge. Übergänge, auch der Glitch-Übergang, haben immer Stärke 1 (§4)
+        self.assertEqual(effekte.HEKTISCH, {"akzent", "flash", "shake", "rgb"})
         segs = [seg(1, "a", 0.0, 10.0, 0.0, stimmung="spannend"),
                 seg(2, "b", 2.0, 10.0, 10.0, art="glitch", d=0.2, stimmung="spannend"),
                 seg(3, "c", 2.0, 10.0, 18.0, art="whip", d=0.25, stimmung="spannend")]
@@ -339,7 +367,7 @@ class Uebergaenge(unittest.TestCase):
         self.assertEqual(effekte.uebergangs_fenster(ruhig), effekte.uebergangs_fenster(voll))
         self.assertEqual([f[3] for f in effekte.uebergangs_fenster(ruhig)], [1.0, 1.0])   # Glitch, Whip
         self.assertEqual({e["staerke"] for _, e in ereignisse(ruhig, "akzent")}, {0.2})  # 0,4 × 0,5
-        nicht_hektisch = lambda l: [(nr, e) for nr, e in ereignisse(l) if e["art"] != "akzent"]  # noqa: E731
+        nicht_hektisch = lambda l: [(nr, e) for nr, e in ereignisse(l) if e["art"] not in effekte.HEKTISCH]  # noqa: E731
         self.assertEqual(nicht_hektisch(ruhig), nicht_hektisch(voll))      # Punch, Titel, Zähler, Klänge gleich
         # „zu viele Effekte“ für spannend: keine Ereignisse mehr, der Übergang bleibt, wie er ist
         wenig = plane(copy.deepcopy(segs), reihe, p={"effekt_staerke": {"spannend": 0.1}}, stimmung="spannend")
@@ -430,6 +458,83 @@ class Zeit(unittest.TestCase):
                 self.assertAlmostEqual(schritt, 0.01, delta=1e-9)                 # Steigung 1 nach der Lupe
 
 
+class Impacts(unittest.TestCase):
+    """28.09.: Blitz, Wackeln, RGB-Stoß im Spielbild; die Finisher wechseln den Stil – kein Kill sieht aus wie der vorige."""
+
+    def test_finisher_stile_rotieren(self):
+        kills = [5.0, 17.0, 29.0, 41.0]   # vier Ketten (> 10 s auseinander) -> vier Finisher, vier Stile
+        liste = plane([seg(1, "m", 0.0, 50.0, 0.0, dauer=60.0)], [moment("m", {"kill_sekunden": kills}, dauer=60.0)])
+        je_kill = {k: sorted(e["art"] for _, e in ereignisse(liste)
+                             if abs(e["t_s"] - k) < 1e-6 and e["art"] not in ("sfx", "titel", "zaehler"))
+                   for k in kills}
+        self.assertEqual(je_kill, {5.0: ["punch"], 17.0: ["flash", "punch"], 29.0: ["shake"], 41.0: ["punch", "rgb"]})
+        self.assertTrue(all(e["dauer_s"] > 0 for _, e in ereignisse(liste) if e["art"] in ("flash", "shake", "rgb")))
+        self.assertEqual([e["klang"] for _, e in ereignisse(liste, "sfx")].count("basshit"), 4)   # Bass-Hit bleibt
+        # lustig hat keinen RGB-Stoß (drei Stile im Wechsel), chill nur den (wirkungslosen) Punch
+        self.assertEqual([effekte.finisher_stil(effekte.PROFIL["lustig"], k) for k in range(4)],
+                         [("punch",), ("punch", "flash"), ("shake",), ("punch",)])
+        self.assertEqual(effekte.finisher_stil(effekte.PROFIL["chill"], 1), ("punch",))
+
+    def test_tod_wackelt_und_blitzt(self):
+        liste = ein_moment({"kill_sekunden": [], "tod_sekunde": 10.0}, stimmung="frustriert")
+        self.assertEqual(sorted(e["art"] for _, e in ereignisse(liste) if e["art"] != "sfx"), ["flash", "shake"])
+        self.assertEqual([e["klang"] for _, e in ereignisse(liste, "sfx")], ["einschlag"])
+        self.assertEqual({e["t_s"] for _, e in ereignisse(liste)}, {10.0})
+
+
+class Tempo(unittest.TestCase):
+    """28.09.: Zeitlupe um den Finisher, Zeitraffer über den Anlauf (effekte.plane_tempo) – die Zeitleiste (Beats)
+    bleibt, nur die Quelle wird gekürzt bzw. verlängert; danach plant effekte.plane wie gehabt, die Liste ist gültig."""
+
+    @staticmethod
+    def material():
+        segs = [seg(1, "a", 0.0, 20.0, 0.0), seg(2, "e", 2.0, 20.0, 20.0, art="whip", d=0.25)]
+        segs[0]["muss"], segs[1]["muss"] = [7.0, 9.5], [9.0, 12.5]  # wie regie._kern: erster Kill − 1 … letzter + 0,5
+        reihe = [moment("a", {"kill_sekunden": [8.0, 9.0]}, max_gruppe=2),               # Double -> Faktor 0,5
+                 moment("e", {"kill_sekunden": [10.0, 11.0, 12.0]}, max_gruppe=3)]       # Triple, Höhepunkt -> 0,25
+        return segs, reihe
+
+    def test_lupe_auf_dem_finisher_raffer_im_anlauf(self):
+        segs, reihe = self.material()
+        n = effekte.plane_tempo(segs, reihe, dict(regie.PARAMETER), fx_konfig(), "short")
+        self.assertEqual(n, {"lupen": 2, "raffer": 2})
+        a, e = segs
+        self.assertEqual(a["lupe"], {"ab_s": 8.65, "bis_s": 9.45, "faktor": 0.5, "ton": "tief"})
+        self.assertEqual(a["raffer"], {"ab_s": 3.2, "bis_s": 7.2, "faktor": 2.0, "ton": "tempo"})   # 4 s vor 8,0 − 0,8
+        self.assertEqual(e["lupe"], {"ab_s": 11.8, "bis_s": 12.2, "faktor": 0.25, "ton": "tief"})   # dramatisch
+        self.assertEqual(e["raffer"], {"ab_s": 5.2, "bis_s": 9.2, "faktor": 2.0, "ton": "tempo"})
+        # Zeitleiste unverändert; Quelle: −0,8 (Lupe) + 2,0 (Raffer) bzw. −1,2 + 2,0
+        self.assertEqual((a["zeit_start"], a["zeit_ende"], e["zeit_start"], e["zeit_ende"]), (0.0, 20.0, 20.0, 38.0))
+        self.assertEqual((a["quelle_ende_s"], e["quelle_ende_s"]), (21.2, 20.8))
+        self.assertAlmostEqual(effekte.auf_zeitleiste(a, 9.0), 9.0 - 2.0 + 0.35)   # Finisher im Video
+        liste = plane(segs, reihe)                                                 # plane + pruefe_liste
+        self.assertEqual([t for _, t in [(nr, e_["t_s"]) for nr, e_ in ereignisse(liste, "punch")]][:1], [8.0])
+        self.assertTrue(all(0 <= z.t <= liste["dauer_s"] for z in effekte.zeitleiste(liste)))
+
+    def test_grenzen_schwelle_und_ohne_platz(self):
+        segs, reihe = self.material()
+        k = fx_konfig(max_lupen=1, max_raffer=0)
+        self.assertEqual(effekte.plane_tempo(segs, reihe, dict(regie.PARAMETER), k, "short"), {"lupen": 1, "raffer": 0})
+        self.assertTrue(segs[1].get("lupe") and not segs[0].get("lupe"))           # Vorrang: der Höhepunkt
+        self.assertFalse([s for s in segs if s.get("raffer")])
+        # „zu viele Effekte“ bis unter die Schwelle: nichts; lustig/chill haben keine Lupe im Profil
+        segs, reihe = self.material()
+        self.assertEqual(effekte.plane_tempo(segs, reihe, {**regie.PARAMETER, "effekt_staerke": {"episch": 0.1}},
+                                             fx_konfig(), "short"), {"lupen": 0, "raffer": 0})
+        segs = [seg(1, "l", 0.0, 20.0, 0.0, stimmung="lustig")]   # lustig: keine Lupe, aber ein leichter Raffer
+        reihe = [moment("l", {"kill_sekunden": [9.0]}, stimmung="lustig")]
+        self.assertEqual(effekte.plane_tempo(segs, reihe, dict(regie.PARAMETER), fx_konfig(), "short"),
+                         {"lupen": 0, "raffer": 1})
+        self.assertNotIn("lupe", segs[0])
+        self.assertEqual(segs[0]["raffer"]["bis_s"], 9.0 - effekte.RAFFER_ABSTAND_S)
+        # Muss-Zone bis ans Segmentende: die Quelle darf nicht gekürzt werden -> keine Lupe; kurzer Anlauf -> kein Raffer
+        segs = [seg(1, "a", 0.0, 20.0, 0.0)]                                        # muss = [0, 20]
+        reihe = [moment("a", {"kill_sekunden": [2.0, 19.0]}, max_gruppe=2)]
+        self.assertEqual(effekte.plane_tempo(segs, reihe, dict(regie.PARAMETER), fx_konfig(), "short"),
+                         {"lupen": 0, "raffer": 0})
+        self.assertEqual(segs[0]["quelle_ende_s"], 20.0)
+
+
 class SchemaV4(unittest.TestCase):
     def setUp(self):
         self.gut = ein_moment({"kill_sekunden": [6.0, 8.0, 10.0]})
@@ -455,7 +560,7 @@ class SchemaV4(unittest.TestCase):
         faelle = {
             "art injiziert": lambda l: erstes(l).update(art="blitz:enable=between(t,0,1)"),
             "blitz": lambda l: erstes(l).update(art="blitz"),
-            "shake": lambda l: erstes(l).update(art="shake"),
+            "wackeln": lambda l: erstes(l).update(art="wackeln"),
             "glitch-Ereignis": lambda l: erstes(l).update(art="glitch"),
             "staerke Text": lambda l: erstes(l).update(staerke="1:x"),
             "staerke riesig": lambda l: erstes(l).update(staerke=1e9),
@@ -497,24 +602,35 @@ class SchemaV4(unittest.TestCase):
             {**liste_um([seg(i + 1, "m", 0.0, 1.0, float(i)) for i in range(201)])})))
 
     def test_lupe(self):
-        def mit_lupe(ab, bis, faktor=0.5, laenge=None):
+        def mit_lupe(ab, bis, faktor=0.5, laenge=None, feld="lupe", ton="tief"):
             s = seg(1, "a", 2.0, 10.0, 0.0)
-            s["lupe"] = {"ab_s": ab, "bis_s": bis, "faktor": faktor, "ton": "tief"}
-            s["zeit_ende"] = laenge if laenge is not None else 8.0 + (bis - ab)
+            s[feld] = {"ab_s": ab, "bis_s": bis, "faktor": faktor, "ton": ton}
+            s["zeit_ende"] = laenge if laenge is not None else round(8.0 + (bis - ab) * (1 / faktor - 1), 3)
             return {**liste_um([s]), "version": 4}
         self.assertEqual(regie.pruefe_liste(mit_lupe(6.0, 7.2)), [])                  # 8 s + 1,2 s Zuschlag
+        self.assertEqual(regie.pruefe_liste(mit_lupe(6.6, 7.0, faktor=0.25)), [])     # 28.09.: dramatisch, +1,2 s
         self.assertTrue(regie.pruefe_liste(mit_lupe(6.0, 7.2, laenge=8.0)))           # Länge ohne Zuschlag
-        self.assertTrue(regie.pruefe_liste(mit_lupe(6.0, 7.2, faktor=0.25)))          # nicht im enum
+        self.assertTrue(regie.pruefe_liste(mit_lupe(6.0, 7.2, faktor=0.3)))           # nicht im enum
         self.assertTrue(regie.pruefe_liste(mit_lupe(7.2, 6.0)))                       # ab ≥ bis
         self.assertTrue(regie.pruefe_liste(mit_lupe(9.5, 9.95)))                      # zu nah am Ende
         self.assertTrue(regie.pruefe_liste(mit_lupe(4.0, 6.0)))                       # länger als 1,5 s
+        # Zeitraffer (28.09.): eigenes Feld, Faktor 1,5/2, bis 4 s, Zeitleiste kürzer
+        self.assertEqual(regie.pruefe_liste(mit_lupe(2.5, 6.5, faktor=2.0, feld="raffer", ton="tempo")), [])
+        self.assertTrue(regie.pruefe_liste(mit_lupe(2.5, 7.0, faktor=2.0, feld="raffer", ton="tempo")))   # > 4 s
+        self.assertTrue(regie.pruefe_liste(mit_lupe(2.5, 6.5, faktor=0.5, feld="raffer", ton="tempo")))   # kein Raffer-Faktor
+        beides = mit_lupe(6.0, 7.0)
+        beides["segmente"][0]["raffer"] = {"ab_s": 2.5, "bis_s": 5.5, "faktor": 2.0, "ton": "tempo"}
+        beides["segmente"][0]["zeit_ende"] = beides["dauer_s"] = round(8.0 + 1.0 - 1.5, 3)
+        self.assertEqual(regie.pruefe_liste(beides), [])
+        beides["segmente"][0]["raffer"]["bis_s"] = 6.5                                # Raffer ragt in die Lupe
+        self.assertIn("vor der Zeitlupe", " ".join(regie.pruefe_liste(beides)))
         zwei = mit_lupe(6.0, 7.0)
         s2 = {**copy.deepcopy(zwei["segmente"][0]), "nr": 2, "moment": "b"}
         s2["zeit_start"], s2["zeit_ende"] = zwei["segmente"][0]["zeit_ende"], zwei["segmente"][0]["zeit_ende"] + 9.0
         zwei["segmente"].append(s2)
         zwei["dauer_s"] = s2["zeit_ende"]
-        self.assertIn("2 Zeitlupen", " ".join(regie.pruefe_liste(zwei)))
-        self.assertEqual(regie.pruefe_liste(zwei, max_lupen=2), [])
+        self.assertIn("2 Zeitlupen", " ".join(regie.pruefe_liste(zwei, max_lupen=1)))
+        self.assertEqual(regie.pruefe_liste(zwei), [])                                # Standard: 2 (28.09.)
 
     def test_hook(self):
         def mit_hook(pos=0, laenge=1.5, moment_="e", kill_s=(6.0,), zwei=False):

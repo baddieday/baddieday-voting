@@ -75,6 +75,11 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # punch = 0.5               # sanfterer Zoom auf dem Finisher (Standard 0.7)
 # look = "warm"             # Farblook: neutral, cinematic, kalt, warm, entsaettigt, soft
 # look_staerke = 0.4
-# uebergaenge = [["whip", 0.25], ["schnitt", 0]]   # Rotation der Übergänge in epische Momente
+# uebergaenge = [["whip", 0.25], ["schnitt", 0], ["radial", 0.3]]   # Pool der Übergänge in epische Momente (gemischt)
+# flash = 0.4               # 28.09.: Blitz, Wackeln, RGB-Stoß auf den Finishern (0 = ohne diesen Stil)
+# shake = 0.3
+# rgb = 0
+# lupe = 0.5                # Zeitlupe um den Finisher (Standard 0.8), raffer = Zeitraffer im Anlauf (0.6)
+# raffer = 0
 # [regie.effekte.lustig]
 # max_ruhe_s = 0            # keine Beat-Akzente (Zoom auf dem Beat nach so vielen Sekunden Ruhe)

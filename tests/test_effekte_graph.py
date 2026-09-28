@@ -443,6 +443,65 @@ class LookUndBlenden(unittest.TestCase):
                                  "noise=alls=30:allf=t:all_seed=1:enable='between(t,1,1.2)+between(t,9,9.2)'"])
 
 
+class Impacts(unittest.TestCase):
+    """28.09.: Blitz (eq nur aufs Spielbild), Wackeln (Versatz im Zoom-Overlay), RGB-Stoß (chromashift-Fenster)."""
+
+    def test_flash_shake_rgb_im_graphen(self):
+        q = Path("/x/q.mp4")
+        liste = mini_liste([(q, 1.0, 7.0, ("schnitt", 0.0))], ereignisse=[
+            (1, "flash", 1.5, {"dauer_s": 0.12}), (1, "shake", 2.5, {"dauer_s": 0.25}), (1, "rgb", 3.5, {"dauer_s": 0.15})])
+        g = graph(liste)
+        zoom = beginnt_mit(g, "[zo0]")   # Spielbild: Zoom-Overlay mit Wackeln, danach der Blitz, dann [vgs0]
+        self.assertIn("overlay=x='(W-w)/2+between(t,2.5,2.75)*0.025*W*sin(87.9645*(t-2.5))*pow(1-(t-2.5)/0.25,2)'"
+                      ":y='(H-h)/2+between(t,2.5,2.75)*0.02*H*cos(69.115*(t-2.5))*pow(1-(t-2.5)/0.25,2)'"
+                      ":enable='between(t,2.5,2.75)',eq=brightness='between(t,1.5,1.62)*0.6*(1-(t-1.5)/0.12)':eval=frame"
+                      "[vgs0]", zoom)
+        self.assertNotIn("eq=brightness='between", beginnt_mit(g, "[hg0]"))      # nie auf dem Hintergrund
+        self.assertIn("chromashift=cbh=-7:crh=7:enable='between(t,3.5,3.65)'", g)
+        self.assertNotIn("noise=", g)                                            # Rauschen nur beim Glitch-Übergang
+        self.assertIn("between(t,2.5,2.75)*0.1*min(", beginnt_mit(g, "[zs0]"))   # Wackeln: Zoom 1,10 verdeckt den Rand
+        # ohne Wackeln bleibt der Zoom-Baustein wie vorher
+        nur_punch = graph(mini_liste([(q, 1.0, 7.0, ("schnitt", 0.0))], ereignisse=[(1, "punch", 2.0, {"dauer_s": 0.35})]))
+        self.assertIn("overlay=(W-w)/2:(H-h)/2:enable=", nur_punch)
+        self.assertNotIn("eq=brightness='between", nur_punch)
+
+
+class Tempo(unittest.TestCase):
+    """28.09.: Zeitlupe/Zeitraffer im Graphen – setpts vor fps (stückweise linear in T), der Ton in Stücken."""
+
+    def test_zeitlupe_setpts_vor_fps_und_ton_in_stuecken(self):
+        q = Path("/x/q.mp4")
+        liste = mini_liste([(q, 1.0, 4.0, ("schnitt", 0.0)), (q, 1.0, 5.0, ("dissolve", 0.6))],
+                           tempo={2: {"lupe": {"ab_s": 2.0, "bis_s": 2.8, "faktor": 0.5, "ton": "tief"}}})
+        self.assertAlmostEqual(liste["dauer_s"], 3 + 4 + 0.8)
+        g = graph(liste)
+        # Eingang 2 beginnt bei 1,0 − 0,3 (Griff) = 0,7 s: Fenster 1,3 … 2,1 s des Eingangs, danach +0,8 s
+        self.assertTrue(beginnt_mit(g, "[1:v]").startswith(
+            "[1:v]setpts='if(lt(T,1.3),T,if(lt(T,2.1),1.3+(T-1.3)/0.5,T+0.8))/TB',fps=30,split=2"), g)
+        self.assertIn("aformat=sample_fmts=fltp:channel_layouts=stereo,asplit=3[tp1_0][tp1_1][tp1_2];"
+                      "[tp1_0]atrim=0:1.3,asetpts=PTS-STARTPTS[tq1_0];"
+                      "[tp1_1]atrim=1.3:2.1,asetpts=PTS-STARTPTS,asetrate=24000,aresample=48000[tq1_1];"
+                      "[tp1_2]atrim=2.1,asetpts=PTS-STARTPTS[tq1_2];"
+                      "[tq1_0][tq1_1][tq1_2]concat=n=3:v=0:a=1,apad,atrim=0:5.100[a1]", g)
+        self.assertNotIn("setpts", beginnt_mit(g, "[0:v]"))
+        self.assertNotIn("concat", beginnt_mit(g, "[0:a:0]"))
+
+    def test_raffer_und_lupe_im_selben_segment(self):
+        q = Path("/x/q.mp4")
+        liste = mini_liste([(q, 0.5, 6.5, ("schnitt", 0.0))], tempo={1: {
+            "raffer": {"ab_s": 1.0, "bis_s": 3.0, "faktor": 2.0, "ton": "tempo"},
+            "lupe": {"ab_s": 4.0, "bis_s": 4.8, "faktor": 0.5, "ton": "tief"}}})
+        self.assertAlmostEqual(liste["dauer_s"], 6.0 - 1.0 + 0.8)
+        g = graph(liste)
+        self.assertIn("setpts='if(lt(T,0.5),T,if(lt(T,2.5),0.5+(T-0.5)/2,if(lt(T,3.5),T-1,"
+                      "if(lt(T,4.3),2.5+(T-3.5)/0.5,T-0.2))))/TB'", g)
+        self.assertIn("asplit=5[tp0_0][tp0_1][tp0_2][tp0_3][tp0_4]", g)
+        self.assertIn("atrim=0.5:2.5,asetpts=PTS-STARTPTS,atempo=2[tq0_1]", g)
+        self.assertIn("atrim=3.5:4.3,asetpts=PTS-STARTPTS,asetrate=24000,aresample=48000[tq0_3]", g)
+        self.assertIn("concat=n=5:v=0:a=1,apad,atrim=0:5.800[a0]", g)
+        self.assertEqual(effekt_filter.tempo_video([], 0.0), "")
+
+
 class Groesse(unittest.TestCase):
     @staticmethod
     def zusammenschnitt_40() -> dict:

@@ -151,7 +151,8 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         impacts = sum(len(s.get("effekte") or []) for s in liste["segmente"])
         teile.append(f"✨ Look {escape(str(fx.get('look', 'neutral')))} · {impacts} Impacts"
                      + (" · Hook ✓" if fx.get("hook") else "")
-                     + (" · Zeitlupe ✓" if any(s.get("lupe") for s in liste["segmente"]) else ""))
+                     + (" · Zeitlupe ✓" if any(s.get("lupe") for s in liste["segmente"]) else "")
+                     + (" · Zeitraffer ✓" if any(s.get("raffer") for s in liste["segmente"]) else ""))
     teile.append(f"🔮 {_erwartung_anzeige(erwartung, ja='👍', nein='👎')}")
     for h in liste.get("hinweise", [])[:3]:
         teile.append(f"⚠️ {escape(h)}")

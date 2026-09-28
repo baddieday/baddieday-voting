@@ -23,12 +23,21 @@ from pathlib import Path
 
 from . import effekte, shorts
 
-# Eigene Übergangsnamen -> xfade. Harter Schnitt = fade über ein einziges Bild (siehe entwurf.schnitt_dauer)
-XFADE = {"schnitt": "fade", "whip": "slideleft", "zoom": "zoomin", "glitch": "pixelize", "squeeze": "squeezeh",
-         "dissolve": "dissolve"}
+# Eigene Übergangsnamen -> xfade. Harter Schnitt = fade über ein einziges Bild (siehe entwurf.schnitt_dauer).
+# Alle anderen Arten des Schemas heißen wie bei xfade. flash = kurze Weißblende (Florian 28.09.: „ruhig viral“).
+XFADE = {"schnitt": "fade", "whip": "slideleft", "whip_up": "slideup", "whip_right": "slideright", "zoom": "zoomin",
+         "glitch": "pixelize", "squeeze": "squeezeh", "dissolve": "dissolve", "flash": "fadewhite"}
+# Whip-Arten mit Bewegungsunschärfe in der Blende: waagrecht (Schwenk nach links/rechts) bzw. senkrecht
+WHIP_WAAGRECHT = ("whip", "whip_right")
+WHIP_SENKRECHT = ("whip_up",)
 
-# Zoom je Art: (Zoom je Stärke 1, hinein s, halten s) – zurück in der restlichen Dauer, weich ((1−u)²)
-ZOOM_FORM = {"punch": (0.25, 0.05, 0.0), "akzent": (0.06, 0.05, 0.0), "meme": (0.20, 0.08, 0.60)}
+# Zoom je Art: (Zoom je Stärke 1, hinein s, halten s) – zurück in der restlichen Dauer, weich ((1−u)²).
+# shake (28.09.): Zoom 1,10 hält fast bis zum Ende, damit der Versatz nie einen Rand zeigt (Versatz ≤ 2,5 % der
+# Breite, Rand 5 %; beide klingen ab)
+ZOOM_FORM = {"punch": (0.25, 0.05, 0.0), "akzent": (0.06, 0.05, 0.0), "meme": (0.20, 0.08, 0.60),
+             "shake": (0.10, 0.02, 0.15)}
+SHAKE = {"x": (0.025, 14, "sin", "W"), "y": (0.02, 11, "cos", "H")}   # Anteil, Hz, Schwingung, Bezug je Achse
+FLASH_HELLE = 0.6                                                     # eq-Helligkeit je Stärke 1 (Bereich −1 … 1)
 
 # Looks: eq-Werte (1 = neutral, brightness 0 = neutral) und Farbstich (colorcorrect: Verschiebung von Rot-/Blau-Anteil
 # rl/bl in den Schatten, rh/bh in den Lichtern, dazwischen gleitend). Beides rechnet direkt in YUV – curves rechnete
@@ -90,16 +99,106 @@ def zoom_faktor(zooms: list[tuple[str, float, float, float]]) -> str:
     return f"if(isnan(t),1,1+{'+'.join(teile)})"
 
 
+def _versatz(shakes: list[tuple[str, float, float, float]], achse: str) -> str:
+    """Wackeln: Σ Fenster · Anteil·Stärke · W bzw. H · Schwingung(2π·Hz·(t−k)) · (1−u)² – klingt quadratisch ab,
+    schneller als der Zoom, der den Rand verdeckt."""
+    anteil, hz, schwingung, bezug = SHAKE[achse]
+    teile = []
+    for _art, k, d, s in shakes:
+        k = max(0.0, k)
+        teile.append(f"between(t,{_z(k)},{_z(k + d)})*{_z(anteil * s)}*{bezug}*{schwingung}({_z(2 * 3.14159 * hz)}*"
+                     f"(t-{_z(k)}))*pow(1-(t-{_z(k)})/{_z(d)},2)")
+    return "+".join(teile)
+
+
 def zoom(i: int, zooms: list[tuple[str, float, float, float]]) -> str:
     """Filterkette, die das Bild vergrößert und wieder auf die alte Größe beschneidet (Mitte bleibt Mitte).
     scale mit eval=frame rechnet die Größe je Bild neu; overlay setzt das vergrößerte Bild mittig auf das
     unveränderte – das Ergebnis behält dessen Größe, was übersteht, fällt weg. (crop ginge nicht: crop kennt nur die
     Eingangsgröße vom Einrichten und schnitte dann links oben aus.) overlay arbeitet nur während eines Zooms
-    (enable), sonst reicht es das unveränderte Bild ohne Rechenarbeit durch."""
+    (enable), sonst reicht es das unveränderte Bild ohne Rechenarbeit durch.
+    shake (28.09.): das vergrößerte Bild wackelt um die Mitte (_versatz) – ohne Wackeln bleibt die Kette wie vorher."""
     an = "+".join(f"between(t,{_z(max(0.0, k))},{_z(max(0.0, k) + d)})" for _art, k, d, _s in zooms)
+    lage = "(W-w)/2:(H-h)/2"
+    if shakes := [z for z in zooms if z[0] == "shake"]:
+        lage = f"x='(W-w)/2+{_versatz(shakes, 'x')}':y='(H-h)/2+{_versatz(shakes, 'y')}'"
     return (f"split=2[zo{i}][zs{i}];"
             f"[zs{i}]scale=w='2*trunc(iw*{zoom_faktor(zooms)}/2)':h=-2:eval=frame[zg{i}];"
-            f"[zo{i}][zg{i}]overlay=(W-w)/2:(H-h)/2:enable='{an}'")
+            f"[zo{i}][zg{i}]overlay={lage}:enable='{an}'")
+
+
+def flash(flashes: list[tuple[str, float, float, float]]) -> str:
+    """Blitz auf dem Spielbild: eq=brightness je Bild (eval=frame), je Ereignis FLASH_HELLE·Stärke, linear abfallend.
+    Leer ohne Ereignisse."""
+    teile = []
+    for _art, k, d, s in flashes:
+        k = max(0.0, k)
+        teile.append(f"between(t,{_z(k)},{_z(k + d)})*{_z(FLASH_HELLE * s)}*(1-(t-{_z(k)})/{_z(d)})")
+    return f"eq=brightness='{'+'.join(teile)}':eval=frame" if teile else ""
+
+
+# --- Tempo: Zeitlupe (lupe) und Zeitraffer (raffer) je Segment --------------------------------------------
+
+ATEMPO = {0.25: "atempo=0.5,atempo=0.5", 0.5: "atempo=0.5", 1.5: "atempo=1.5", 2.0: "atempo=2"}
+
+
+def _vorzeichen(z: float) -> str:
+    """„+0.8“ / „-1.5“ / „“ (0) – für T±Zuschlag im Ausdruck; ein „T+-1.5“ soll nie entstehen."""
+    if abs(z) < 5e-5:
+        return ""
+    return ("+" if z > 0 else "-") + _z(abs(z))
+
+
+def tempo_video(fenster: list[tuple[float, float, float]], eingang_start: float) -> str:
+    """setpts VOR fps: die Tempo-Fenster (effekte.tempo_fenster, Quellzeit) als stückweise lineare Zeit in T
+    (Sekunden des Segment-Eingangs, der bei eingang_start = quelle_start_s − vorderer Griff beginnt). Ein Fenster
+    ab … bis mit Faktor f läuft 1/f-mal so lang (0,5: doppelt, 2: halb); davor normal, danach um den Zuschlag
+    versetzt. Beispiel: ein Fenster 1,3 … 2,1 s, Faktor 0,5 →
+    setpts='if(lt(T,1.3),T,if(lt(T,2.1),1.3+(T-1.3)/0.5,T+0.8))/TB'. Leer ohne Fenster."""
+    if not fenster:
+        return ""
+
+    def ab_hier(k: int, z: float) -> str:
+        if k == len(fenster):
+            return f"T{_vorzeichen(z)}"
+        ab, bis, f = fenster[k]
+        a, b = ab - eingang_start, bis - eingang_start
+        z_danach = z + (b - a) * (1 / f - 1)
+        return (f"if(lt(T,{_z(a)}),T{_vorzeichen(z)},if(lt(T,{_z(b)}),{_z(a + z)}+(T-{_z(a)})/{_z(f)},"
+                f"{ab_hier(k + 1, z_danach)}))")
+
+    return f"setpts='{ab_hier(0, 0.0)}/TB'"
+
+
+def tempo_ton(i: int, seg: dict, eingang_start: float) -> str:
+    """Filterkette für den Ton eines Segments mit Tempo-Fenstern (hinter der Einheit aresample/aformat, vor
+    apad/atrim): in Stücke schneiden, die Fenster wandeln, wieder zusammensetzen. ton je Fenster: tief = Tonhöhe
+    folgt dem Tempo (asetrate), tempo = Tonhöhe bleibt (atempo), stumm = Länge angepasst, aber still.
+    Leer ohne Fenster."""
+    fenster = effekte.tempo_fenster(seg)
+    if not fenster:
+        return ""
+    arten = {(float(w["ab_s"]), float(w["bis_s"])): w["ton"] for w in (seg.get("raffer"), seg.get("lupe")) if w}
+    grenzen: list[float] = []
+    wandel: list[str] = []
+    for ab, bis, f in fenster:
+        grenzen += [ab - eingang_start, bis - eingang_start]
+        ton = arten[(ab, bis)]
+        if ton == "tief":
+            wandel.append(f"asetrate={int(48000 * f)},aresample=48000")
+        else:
+            wandel.append(ATEMPO[f] + (",volume=0" if ton == "stumm" else ""))
+    n = len(grenzen) + 1  # Stücke: normal, Fenster, normal, …, normal
+    teile = [f"asplit={n}" + "".join(f"[tp{i}_{k}]" for k in range(n))]
+    for k in range(n):
+        von = grenzen[k - 1] if k else None
+        bis = grenzen[k] if k < len(grenzen) else None
+        trim = f"atrim={_z(von)}:{_z(bis)}" if von is not None and bis is not None else \
+            f"atrim=0:{_z(bis)}" if bis is not None else f"atrim={_z(von)}"
+        kette = [trim, "asetpts=PTS-STARTPTS"] + ([wandel[k // 2]] if k % 2 else [])
+        teile.append(f"[tp{i}_{k}]{','.join(kette)}[tq{i}_{k}]")
+    teile.append("".join(f"[tq{i}_{k}]" for k in range(n)) + f"concat=n={n}:v=0:a=1")
+    return ";".join(teile)
 
 
 # --- Look ------------------------------------------------------------------------------------
@@ -121,19 +220,26 @@ def _zeiten(fenster: list[tuple[float, float]]) -> str:
     return "+".join(f"between(t,{_z(a)},{_z(b)})" for a, b in fenster)
 
 
-def fenster(uebergaenge: list[tuple[str, float, float, float]], b: int) -> list[str]:
+def fenster(uebergaenge: list[tuple[str, float, float, float]], b: int,
+            rgb: list[tuple[float, float]] = ()) -> list[str]:
     """Whip: waagrechte Unschärfe (wie ein schneller Schwenk); Glitch: Farbanteile versetzt + Rauschen
     (all_seed=1: jedes Mal gleich). Ein Filter je Art, eingeschaltet nur in den Blenden (enable).
+    rgb (28.09.): Farbversatz-Stöße (Ereignis rgb, (von, bis) auf der Zeitleiste) – derselbe chromashift wie der
+    Glitch, ohne Rauschen.
     Alle rechnen in YUV: Ein RGB-Filter (rgbashift) ließe ffmpeg JEDES Bild umrechnen, auch außerhalb der Blende –
     gemessen 9 ms je Bild bei 720×1280, für 0,2 s Glitch. chromashift versetzt die Farbanteile direkt.
     Übergänge immer mit Stärke 1 (§4)."""
     teile = []
-    if whip := [(a, e) for art, a, e, _s in uebergaenge if art == "whip"]:
+    if whip := [(a, e) for art, a, e, _s in uebergaenge if art in WHIP_WAAGRECHT]:
         teile.append(f"avgblur=sizeX={max(1, round(48 * b / 1080))}:sizeY=1:enable='{_zeiten(whip)}'")
-    if glitch := [(a, e) for art, a, e, _s in uebergaenge if art == "glitch"]:
+    if whip_v := [(a, e) for art, a, e, _s in uebergaenge if art in WHIP_SENKRECHT]:
+        teile.append(f"avgblur=sizeX=1:sizeY={max(1, round(48 * b / 1080))}:enable='{_zeiten(whip_v)}'")
+    glitch = [(a, e) for art, a, e, _s in uebergaenge if art == "glitch"]
+    if stoesse := glitch + list(rgb):
         r = max(1, round(10 * b / 1080))  # in Farbanteil-Pixeln (halbe Breite): 20 Bildpunkte bei 1080
-        an = f"enable='{_zeiten(glitch)}'"
-        teile += [f"chromashift=cbh=-{r}:crh={r}:{an}", f"noise=alls=30:allf=t:all_seed=1:{an}"]
+        teile.append(f"chromashift=cbh=-{r}:crh={r}:enable='{_zeiten(stoesse)}'")
+    if glitch:
+        teile.append(f"noise=alls=30:allf=t:all_seed=1:enable='{_zeiten(glitch)}'")
     return teile
 
 
@@ -218,16 +324,21 @@ def texte(ereignisse: list, b: int, h: int, hochformat: bool, schrift: Path, zei
 
 # --- Alles zusammen ----------------------------------------------------------------------------------
 
-def zooms_je_segment(liste: dict, ereignisse: list, griffe: list[tuple[float, float]]) -> dict[int, list]:
-    """Segment-Index -> Zoom-Ereignisse (Art, Beginn, Dauer, Stärke) in der Zeit des Segment-Eingangs:
-    Zeitleiste − zeit_start + vorderer Griff (gilt auch mit Zeitlupe, die vor fps sitzt)."""
+def je_segment(liste: dict, ereignisse: list, griffe: list[tuple[float, float]], arten) -> dict[int, list]:
+    """Segment-Index -> Ereignisse der Arten (Art, Beginn, Dauer, Stärke) in der Zeit des Segment-Eingangs:
+    Zeitleiste − zeit_start + vorderer Griff (gilt auch mit Zeitlupe/Zeitraffer, die vor fps sitzen)."""
     index = {s.get("nr"): i for i, s in enumerate(liste["segmente"])}
     ergebnis: dict[int, list] = {}
     for e in ereignisse:
-        if e.art in effekte.ZOOM and e.staerke > 0 and (i := index.get(e.nr)) is not None:
+        if e.art in arten and e.staerke > 0 and (i := index.get(e.nr)) is not None:
             s = liste["segmente"][i]
             ergebnis.setdefault(i, []).append((e.art, e.t - s["zeit_start"] + griffe[i][0], e.dauer, e.staerke))
     return ergebnis
+
+
+def zooms_je_segment(liste: dict, ereignisse: list, griffe: list[tuple[float, float]]) -> dict[int, list]:
+    """Zoom-Ereignisse (punch, akzent, meme, shake) je Segment – siehe je_segment."""
+    return je_segment(liste, ereignisse, griffe, effekte.ZOOM)
 
 
 def look_der_liste(liste: dict) -> str:
@@ -247,7 +358,8 @@ def global_kette(liste: dict, ereignisse: list, b: int, h: int, schrift: Path | 
     if not fx.get("an"):
         return ""
     teile = [look_der_liste(liste) if liste["format"] != "short" else ""]
-    teile += fenster(effekte.uebergangs_fenster(liste), b)
+    rgb = [(e.t, round(e.t + e.dauer, 3)) for e in ereignisse if e.art == "rgb" and e.staerke > 0]
+    teile += fenster(effekte.uebergangs_fenster(liste), b, rgb)
     if schrift is not None:
         teile += texte(ereignisse, b, h, liste["format"] == "short", schrift, zeichenbreite, spiel_h)
     return ",".join(t for t in teile if t)

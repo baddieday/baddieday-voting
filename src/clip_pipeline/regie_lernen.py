@@ -5,7 +5,7 @@ berechnet (deterministisch, jederzeit nachvollziehbar). Jede Regel verschiebt ei
 begrenzten Schritt:
 
   zu hektisch         Segmente länger (+15 %), Übergänge länger (+10 %); ab +30 % nur jeden 2., ab +70 % jeden 4. Beat;
-                      effekt_hektik ×0,9 (0,3 … 1,3): Beat-Akzente schwächer
+                      effekt_hektik ×0,9 (0,3 … 1,3): Beat-Akzente und Impacts (Blitz, Wackeln, RGB) schwächer
   zu lang             Ziel-Dauer −10 % (höchstens bis 60 %)
   abgeschnitten       mehr Vorlauf (+0,5 s) und Nachlauf (+0,3 s) um die Kills
   Musik passt nicht   dieser Titel bekommt einen Abzug (−1 je Nennung)
