@@ -137,12 +137,16 @@ lernen_ab = 3
 final_halten_min = 60
 
 [regie.effekte]
-# Regisseur 2.0: Der Regisseur schreibt einen Effekt-Plan in die Schnittliste (src/clip_pipeline/effekte.py), der
-# Renderer setzt ihn nur um. Spielbild clean: im Bild nur Übergänge, Zoom und Farblook; Kill-Titel und Zähler im Short
+# Regisseur 2.0/2.1: Der Regisseur schreibt einen Effekt-Plan in die Schnittliste (src/clip_pipeline/effekte.py), der
+# Renderer setzt ihn nur um. Im Spielbild: Übergänge (gemischt ohne Wiederholung), Zoom, Zeitlupe/Zeitraffer, Farblook
+# und seit 28.09. die Impacts Blitz/Wackeln/RGB-Stoß mit wechselndem Stil je Kill; Kill-Titel und Zähler im Short
 # nur im unscharfen Rand, im Zusammenschnitt kein Zähler. Profile je Stimmung: effekte.PROFIL, anpassbar in
 # config/lokal.toml unter [regie.effekte.<stimmung>] (Beispiele in config/lokal.beispiel.toml).
 # Aus = wie vorher (gleiche Übergänge, gleicher Filtergraph):
 an = true
+# Höchstens so viele Zeitlupen bzw. Zeitraffer je Video (28.09.; 0 = keine)
+max_lupen = 2
+max_raffer = 2
 # steigt, wenn sich die Profilwerte im Code ändern (steht in jeder Schnittliste)
 profil_version = 1
 # Effekte schwächer als das fallen weg (Stärke 0..1 = Profilwert × gelernte Effekt-Stärke)

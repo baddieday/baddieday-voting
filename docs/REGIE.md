@@ -212,17 +212,22 @@ Umhauen 8,0   Umhauen 11,8           ……… 17 s nichts ………           W
 | chill | keine Kills, wenig los, leise | weiche Überblendung 0,8 s |
 
 Die Mitte jedes Übergangs liegt genau auf dem Beat; kein Kill wird angeschnitten (fachliche Prüfung der
-Schnittliste vor dem Speichern). Mit Effekten (unten) wechseln die Übergänge je Stimmung nach einer festen Rotation.
+Schnittliste vor dem Speichern). Mit Effekten (unten) zieht der Regisseur die Übergänge je Stimmung aus einem
+**Pool** – gemischt in Runden (jede Art einmal, bevor eine wiederkommt), nie dieselbe weiche Art zweimal
+nacheinander, deterministisch aus der Momentfolge (`effekte.Uebergangsmix`, 28.09.: „immer die gleichen Übergänge“).
 
 ## Effekte (Regisseur 2.0) – der Plan
 Der Regisseur schreibt für jeden Entwurf einen **Effekt-Plan** in die Schnittliste (`version 4`): welcher Effekt
 wann (Quellzeit `t_s`) und wie stark (0 … 1). Der Renderer setzt den Plan nur um – so lässt sich alles ohne Video
 prüfen (`tests/test_effekte_plan.py`). Code: `src/clip_pipeline/effekte.py`, Werte je Stimmung in `effekte.PROFIL`.
 
-Deine Vorgaben vom 25.09. (gehen der ursprünglichen Planung vor):
-1. **Spielbild clean:** im Spielbild nur Übergänge, **Zoom** (Punch, Beat-Akzent, Meme), später die Zeitlupe und
-   der **Farblook** – kein Blitz, kein Wackeln, kein Glitch-Stoß (Glitch nur als Übergangsart). Der Zoom wirkt nur
-   auf das Spielbild: im Short nie auf den unscharfen Hintergrund, nie auf Texte. Tod (frustriert): nur Punch +
+Deine Vorgaben (25.09., Punkt 1 am 28.09. ersetzt – „ruhig viral, Slowmo und beschleunigt, viele Effekte, keine
+doppelten“):
+1. **Im Spielbild:** Übergänge (Mix), **Zoom** (Punch, Beat-Akzent, Meme), **Zeitlupe/Zeitraffer**, der
+   **Farblook** und die **Impacts** Blitz (`flash`), Wackeln (`shake`, mit Zoom 1,10, damit kein Rand erscheint) und
+   RGB-Stoß (`rgb`). Die Finisher wechseln den Stil (Punch · Punch + Blitz · Wackeln · Punch + RGB; nur Stile, deren
+   Extra im Profil Stärke hat) – kein Kill sieht aus wie der vorige. Zoom, Blitz und Wackeln wirken nur auf das
+   Spielbild: im Short nie auf den unscharfen Hintergrund, nie auf Texte. Tod (frustriert): Wackeln + Blitz +
    Einschlag.
 2. **Texte nur außerhalb des Spielbilds, animiert** (Pop-in über die Größe, Ein-/Ausblenden, leichtes
    Hineingleiten). Short (1080×1920, Spielbild mittig bei y 34–66 %): Zähler oben unter „clip-battle.de“ (bleibt
@@ -240,24 +245,30 @@ Deine Vorgaben vom 25.09. (gehen der ursprünglichen Planung vor):
 |---|---|
 | Anker | die sichtbare Aktion: **mein Umhauen** (`aktion_sekunden`), sonst der Kill; nur ≥ 0,1 s weg vom Schnitt bzw. außerhalb der Blende (steht als `kill_s` im Segment) |
 | Kette | Kills mit ≤ 10 s Abstand (`[vorbewertung].multikill_fenster_s`, gezählt wie Bot und Elo) |
-| Finisher (letzte Aktion der Kette) | Zoom-Punch + Bass-Hit; die Kills davor: Mini-Punch (halb so stark) + Tick |
+| Finisher (letzte Aktion der Kette) | Stil aus der Rotation (Punch · Punch + Blitz · Wackeln · Punch + RGB) + Bass-Hit; die Kills davor: Mini-Punch (halb so stark) + Tick |
+| Zeitlupe (`lupe`) | um den Finisher der längsten Kette je Moment: 0,35 s davor … 0,45 s danach mit Faktor 0,5 (→ 1,6 s im Video); episch mit Serie ≥ 3 oder Victory ±0,2 s mit 0,25. Höchstens `max_lupen` (2) je Video – Vorrang Höhepunkt, längere Serie, mehr Punkte. Ton tiefer (`asetrate`) |
+| Zeitraffer (`raffer`) | über einen Anlauf ≥ 3 s vor der ersten Aktion: die letzten ≤ 4 s davor (bis 0,8 s vor der Aktion) mit Faktor 2, Tonhöhe bleibt (`atempo`). Höchstens `max_raffer` (2), längerer Anlauf zuerst; darf im selben Segment wie die Zeitlupe liegen |
+| Zeitleiste bei Tempo | bleibt (Beats!): die Zeitlupe kürzt die Quelle hinten um den Zuschlag, der Zeitraffer verlängert sie – nie in Muss-Zone, Fenster oder Griff; passt es nicht, schrumpft das Fenster (Lupe ≥ 0,3 s, Raffer ≥ 1,5 s) oder fällt weg |
 | Kill-Titel | **einmal je Serie am Ende**: DOUBLE / TRIPLE / QUAD / PENTA KILL, ab 6 MULTI KILL – nie DOUBLE und TRIPLE nacheinander. Die längste Serie heißt wie `max_gruppe` des Moments |
 | VICTORY ROYALE | ab letztem Kill + 0,4 s bis Segmentende (mindestens 1 s), ersetzt einen überlappenden Kill-Titel |
 | Zähler „KILLS n“ | nur Short, bei jedem sichtbaren Kill, zählt über das ganze Video |
-| Tod (frustriert) | Punch + dumpfer Einschlag, kein Titel |
+| Tod (frustriert) | Wackeln (Stärke `tod_punch`) + Blitz + dumpfer Einschlag, kein Titel |
 | Jubel (lustig) | Meme-Zoom + Pop auf der ersten Jubel-Spitze |
 | Riser | endet auf dem ersten Kill des Höhepunkts |
 | Whoosh | auf jedem weichen Übergang (nicht bei Schnitt, Jump-Cut und Abblende über Schwarz) |
 | Budget | Zooms ≥ 0,4 s auseinander (Finisher vor Meme vor Punch vor Akzent), kein Zoom-Start in einer Blende, höchstens 1 Glitch-Übergang |
 | Beat-Akzent | kleiner Zoom auf einem Musik-Beat, wenn 2,5 s (lustig 3 s) weder Schnitt noch Zoom war |
 
-| Stimmung | Look | Übergänge (Rotation) | Besonderes |
-|---|---|---|---|
-| episch | cinematic 0,8 | Schnitt, Whip 0,25, Schnitt, Zoom 0,3 | Punch 0,7; in den Höhepunkt immer harter Schnitt |
-| spannend | kalt 0,6 | Whip 0,25, Schnitt, Glitch 0,2, Schnitt | Punch 0,5; in den Höhepunkt harter Schnitt |
-| lustig | warm 0,5 | Wischen, Squeeze, Schieben (je 0,3) | Meme-Zoom, kein Bass-Hit |
-| frustriert | entsättigt 0,7 | Abblende 0,5, Glitch 0,2 | kein Titel, keine Akzente |
-| chill | soft 0,3 | Blende 0,8, Dissolve 0,6 | kein Punch, kein Zähler |
+| Stimmung | Look | Übergänge (Pool, gemischt) | Impacts (Blitz/Wackeln/RGB) · Tempo (Lupe/Raffer) | Besonderes |
+|---|---|---|---|---|
+| episch | cinematic 0,8 | Schnitt ×2, Whip, Zoom, Whip ↑, Flash, Radial, Smooth, Glitch, Cover | 0,7/0,6/0,5 · 0,8/0,6 | Punch 0,7; in den Höhepunkt immer harter Schnitt |
+| spannend | kalt 0,6 | Whip, Schnitt ×2, Glitch, Zoom, Whip →, Blur, Circle, Diag, Flash | 0,6/0,7/0,6 · 0,5/0,7 | Punch 0,5; in den Höhepunkt harter Schnitt |
+| lustig | warm 0,5 | Wischen ←↑, Squeeze ↔↕, Schieben ←↓, Circle, Reveal, Diag | 0,3/0,5/– · –/0,3 | Meme-Zoom, kein Bass-Hit |
+| frustriert | entsättigt 0,7 | Abblende, Glitch, Blur, Blende, Smooth ↓ | 0,5/0,6/– · 0,6/– | kein Titel, keine Akzente |
+| chill | soft 0,3 | Blende 0,8, Dissolve, Smooth →, Circle | – · – | kein Punch, kein Zähler |
+
+Die Werte je Stimmung (`effekte.PROFIL`) sind Startwerte; `[regie.effekte.<stimmung>]` überschreibt sie (auch
+`uebergaenge` als Pool, `flash`, `shake`, `rgb`, `lupe`, `raffer`), `max_lupen`/`max_raffer` in `[regie.effekte]`.
 
 Der Look richtet sich nach der Hauptstimmung des Videos. Stärke = Profilwert × gelernte Effekt-Stärke; unter
 `schwelle` (0,15) fällt ein Effekt weg. **Ausschalten:** `[regie.effekte] an = false` – dann sind Schnitt und
@@ -282,9 +293,9 @@ Bewertungen – wie die anderen Regeln):
 | Parameter | Start | wirkt auf | lernt aus |
 |---|---|---|---|
 | `effekt_staerke[stimmung]` | 1,0 je Stimmung | **alle** Effekte von Segmenten dieser Stimmung (Zoom, Titel, Zähler, Klänge) und den Look, wenn sie die Hauptstimmung ist | 🎆 ×0,85 · 💥 ×1,15 für die **Hauptstimmung** des Entwurfs, Grenzen 0,1 … 1,5; beide zugleich: nichts; 👍/👎 ohne Grund: nichts |
-| `effekt_hektik` | 1,0 | nur die Beat-Akzente – Blitz und Wackeln gibt es nicht mehr | 😵 zu hektisch ×0,9, Grenzen 0,3 … 1,3 |
+| `effekt_hektik` | 1,0 | die Beat-Akzente und die Impacts Blitz, Wackeln, RGB-Stoß (28.09.) | 😵 zu hektisch ×0,9, Grenzen 0,3 … 1,3 |
 
-Stärke eines Effekts = Profilwert × `effekt_staerke[stimmung]` (× `effekt_hektik` bei Beat-Akzenten), höchstens 1;
+Stärke eines Effekts = Profilwert × `effekt_staerke[stimmung]` (× `effekt_hektik` bei Beat-Akzenten und Impacts), höchstens 1;
 unter `schwelle` (0,15) fällt er weg. Übergänge, auch der Glitch-Übergang, haben immer volle Stärke (Spezifikation §4).
 **Vorgaben:** `[regie.vorgaben] effekt_hektik = 0.8` und `[regie.vorgaben.effekt_staerke] chill = 0.5` (0 … 1,5;
 **0 = diese Stimmung ohne Effekte**, das bleibt auch nach „💥 mehr Action“ so). `/lernstand` zeigt die Zeile
@@ -297,8 +308,12 @@ liest nur `liste["effekte"]` und `segmente[].effekte`, nie die gelernten Paramet
 | Effekt | ffmpeg | Wo im Graphen |
 |---|---|---|
 | Zoom (Punch 1 + 0,25·s, Akzent 1 + 0,06·s, Meme 1 + 0,2·s) | `scale` mit `eval=frame`, mittig per `overlay` auf das unveränderte Bild (`overlay` rechnet nur während eines Zooms) | je Segment **nur auf dem Spielbild**: im Short vor dem Einsetzen in den unscharfen Hintergrund, im 16:9 vor dem Rand |
-| Übergänge Whip, Zoom, Glitch, Squeeze, Dissolve | `xfade` slideleft, zoomin, pixelize, squeezeh, dissolve | wie die alten Übergänge |
-| Whip / Glitch zusätzlich | waagrechte Unschärfe (`avgblur`) bzw. Farbversatz + Rauschen (`chromashift`, `noise`) | nur während der Blende (`enable`) |
+| Übergänge (33 Arten im Schema) | `xfade`; eigene Namen: whip/whip_right → slideleft/slideright, whip_up → slideup, zoom → zoomin, glitch → pixelize, squeeze → squeezeh, flash → fadewhite | wie die alten Übergänge |
+| Whip / Glitch zusätzlich | waagrechte (Whip ↑: senkrechte) Unschärfe (`avgblur`) bzw. Farbversatz + Rauschen (`chromashift`, `noise`) | nur während der Blende (`enable`) |
+| Zeitlupe / Zeitraffer | `setpts` **vor** `fps` (stückweise linear in T, auch zwei Fenster je Segment); Ton in Stücken (`asplit`, `atrim`, `asetrate`+`aresample` = tief bzw. `atempo` = Tonhöhe bleibt, `concat`) | je Segment am Eingang – eine 60-fps-Aufnahme bleibt bei 0,5 im 30-fps-Short flüssig |
+| Blitz (`flash`) | `eq=brightness` mit `eval=frame`, 0,6·Stärke linear abfallend über 0,12 s | je Segment nur auf dem Spielbild, nach dem Zoom, vor dem Look |
+| Wackeln (`shake`) | Versatz `x`/`y` im Zoom-`overlay` (sin 14 Hz / cos 11 Hz, 2,5 %/2 % der Größe, (1−u)²) bei Zoom 1,10 | wie der Zoom: nur das Spielbild |
+| RGB-Stoß (`rgb`) | derselbe `chromashift` wie der Glitch-Übergang, ohne Rauschen, 0,15 s | nach den Übergängen, vor den Texten |
 | Look | `eq` (Kontrast, Sättigung, Helligkeit) + `colorcorrect` (Farbstich in Schatten und Lichtern) | Short: je Segment auf Spielbild und kleinem Hintergrund (vor dem Hochskalieren); 16:9: einmal nach den Übergängen |
 | Kill-Titel, Zähler | `drawtext`, DejaVu Sans Bold (`[shorts].schriften`): wächst kurz über seine Größe (Pop-in), blendet ein und aus, gleitet leicht herein | nach dem Look (Schrift bleibt reinweiß); Short: Zähler zwischen clip-battle.de und Spielbild, Titel darunter (über den unteren 25 % für die App-Knöpfe) – auch beim Pop nie im Spielbild; die Höhe des Spielbilds misst `rendere` an den Quellen (4:3-Aufnahmen sind höher). 16:9: Titel mittig, nur in der Blende |
 | Klänge | selbst erzeugte WAVs (`sfx.py`), samplegenau verschoben | nach dem Ducking dazugemischt (die Musik weicht nur dem Spielton aus) |
