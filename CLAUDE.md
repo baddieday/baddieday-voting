@@ -225,3 +225,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Befehlszeile scheitern. Weiter über 🎆/💥/😵 lernbar und mit `[regie.effekte] an = false` abschaltbar.
   Tailscale-Deploy aus der Cloud-Sitzung blockt der Berechtigungs-Check („Containment Escape“) – Einspielen bis zur
   Freigabe per `regie-aktualisieren.sh` auf pve-mini.
+- 2026-09-28 (Update-Paket, Florian: „in 5 min alles daheim updaten, möglichst schnell und selbstständig“):
+  **Ein Befehl für alles:** `deploy/pve-mini/alles-aktualisieren.sh` auf pve-mini (curl aus `main`). Sichert
+  Code-Stand und Datenbank (`vor-update-<Zeit>.*` neben der DB, nie gelöscht), wartet bis 10 min auf die
+  Pipeline-Sperre, stellt Produktion auf `main` und den Lern-Bot auf den neueren von `main`/`lernschleife-publikum`,
+  legt eigene Änderungen per `git stash` beiseite, übernimmt geänderte Dienste nur, wenn sie nicht von Hand angepasst
+  sind, schaltet `clip-mikro` ein (`clip-aufraeumen` bleibt aus), startet beide Bots neu und schreibt ein
+  Rückweg-Skript. Dafür kam der Sprint-Stand Lernschleife (82 Commits, 26.–28.09.) nach `main` – ohne neue volle
+  Suite (letzte volle bei PR #19, danach breiter Lauf 255 Tests zu 2.1/2.2). Windows-Skript und pve-big unverändert.
