@@ -129,9 +129,10 @@ SPRUNG_NACH_S = 1.5
 SPRUNG_VOR_S = 2.0
 # Schnittliste version 4 (Regisseur 2.0): Grenzen der fachlichen Prüfung
 MAX_EREIGNISSE = 400
-MAX_LUPEN = 1                     # Standard von [regie.effekte].max_lupen
+MAX_LUPEN = 2                     # Standard von [regie.effekte].max_lupen (Zeitlupen, Faktor < 1)
+MAX_RAFFER = 2                    # Standard von [regie.effekte].max_raffer (Zeitraffer, Faktor > 1)
 HOOK_MAX_S = 2.5
-V4_FELDER = ("rolle", "kill_s", "lupe", "effekte")
+V4_FELDER = ("rolle", "kill_s", "lupe", "raffer", "effekte")
 
 
 class RegieFehler(RuntimeError):
@@ -678,18 +679,19 @@ def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: d
     return segmente
 
 
-def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN) -> list[str]:
+def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN, max_raffer: int = MAX_RAFFER) -> list[str]:
     """Schema plus fachliche Regeln: Zeitleiste lückenlos, Quelle im Video, kein Kill angeschnitten, Dauer im Rahmen,
     Teile eines Moments (Jump-Cut) direkt hintereinander, aus derselben Datei, vorwärts, mit hartem Schnitt.
     version 4 (Effekte): Ereignisse im Quellfenster ihres Segments mit ihren Pflichtfeldern, höchstens
-    MAX_EREIGNISSE; Zeitlupe im Segment (Länge mit Zuschlag), höchstens max_lupen; Hook nur vorn (Stufe 4)."""
+    MAX_EREIGNISSE; Tempo-Fenster (lupe) im Segment, Länge mit Zuschlag, Zeitlupe ≤ LUPE_MAX_S bzw. Zeitraffer
+    ≤ RAFFER_MAX_S, höchstens max_lupen Zeitlupen und max_raffer Zeitraffer; Hook nur vorn (Stufe 4)."""
     fehler = schema.pruefe(liste, schema.lade("regie"))
     if fehler:
         return fehler
     v4 = liste["version"] >= 4
     if not v4 and "effekte" in liste:
         fehler.append("effekte erst ab version 4")
-    t, vorher, ereignisse, lupen, hooks = 0.0, None, 0, 0, []
+    t, vorher, ereignisse, lupen, raffer, hooks = 0.0, None, 0, 0, 0, []
     for n, s in enumerate(liste["segmente"]):
         felder = [f for f in V4_FELDER if f in s]
         if not v4 and felder:
@@ -707,12 +709,15 @@ def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN) -> list[str]:
         if s["quelle_start_s"] > s["muss"][0] + 1e-3 or s["quelle_ende_s"] < s["muss"][1] - 1e-3:
             fehler.append(f"Segment {s['nr']}: schneidet die Action an")
         qs, qe, zuschlag = s["quelle_start_s"], s["quelle_ende_s"], 0.0
-        if lupe := s.get("lupe"):
-            lupen += 1
-            if not (qs + 0.1 - 1e-3 <= lupe["ab_s"] < lupe["bis_s"] <= qe - 0.1 + 1e-3) \
-                    or lupe["bis_s"] - lupe["ab_s"] > 1.5 + 1e-3:
-                fehler.append(f"Segment {s['nr']}: Zeitlupe außerhalb des Segments oder länger als 1,5 s")
-            zuschlag = (lupe["bis_s"] - lupe["ab_s"]) * (1 / lupe["faktor"] - 1)
+        for feld, name, laengste in (("lupe", "Zeitlupe", effekte.LUPE_MAX_S), ("raffer", "Zeitraffer", effekte.RAFFER_MAX_S)):
+            if w := s.get(feld):
+                lupen += feld == "lupe"
+                raffer += feld == "raffer"
+                if not (qs + 0.1 - 1e-3 <= w["ab_s"] < w["bis_s"] <= qe - 0.1 + 1e-3) or w["bis_s"] - w["ab_s"] > laengste + 1e-3:
+                    fehler.append(f"Segment {s['nr']}: {name} außerhalb des Segments oder länger als {laengste} s")
+                zuschlag += (w["bis_s"] - w["ab_s"]) * (1 / w["faktor"] - 1)
+        if s.get("lupe") and s.get("raffer") and s["raffer"]["bis_s"] > s["lupe"]["ab_s"] + 1e-3:
+            fehler.append(f"Segment {s['nr']}: Zeitraffer muss vor der Zeitlupe enden")
         if abs((s["zeit_ende"] - s["zeit_start"]) - ((qe - qs) + zuschlag)) > 1e-3:
             fehler.append(f"Segment {s['nr']}: Länge Quelle ≠ Zeitleiste")
         for k in s.get("kill_s") or []:
@@ -733,6 +738,8 @@ def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN) -> list[str]:
         fehler.append(f"{ereignisse} Effekt-Ereignisse – höchstens {MAX_EREIGNISSE}")
     if lupen > max_lupen:
         fehler.append(f"{lupen} Zeitlupen – höchstens {max_lupen}")
+    if raffer > max_raffer:
+        fehler.append(f"{raffer} Zeitraffer – höchstens {max_raffer}")
     for n, s in hooks:
         if n != 0 or len(hooks) > 1:
             fehler.append(f"Segment {s['nr']}: Hook nur als erstes Segment und höchstens einer")
@@ -885,6 +892,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     hinweise += [h for h in fx_hinweise if h not in hinweise]
     if fx["an"] and segmente:
         beats = [round(b - versatz, 3) for b in schlaege if 0 < b - versatz < gesamt]
+        effekte.plane_tempo(segmente, reihe, p, konfig, fmt_name)  # Zeitlupe/Zeitraffer zuerst: passt die Quelle an
         fx_plan = effekte.plane(segmente, reihe, p, konfig, fmt_name, fps, beats, stimmung=haupt)
     else:
         fx_plan = {"an": False}
@@ -919,7 +927,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     }
     if gelernt:  # 27.09.: was deine letzte Bewertung an diesem Entwurf geändert hat (regie_lernen.wirkung)
         liste["gelernt"] = gelernt
-    if fehler := pruefe_liste(liste, max_lupen=int(konfig.wert("regie.effekte.max_lupen", MAX_LUPEN))):
+    if fehler := pruefe_liste(liste, max_lupen=int(fx["max_lupen"]), max_raffer=int(fx["max_raffer"])):
         raise RegieFehler("Schnittliste ungültig: " + "; ".join(fehler[:3]))
     # Passt der Filtergraph samt Effekten auf die Befehlszeile? Sonst scheiterte erst das Rendern.
     if fx_plan["an"] and (fehler := entwurf.graph_fehler(liste, konfig)):

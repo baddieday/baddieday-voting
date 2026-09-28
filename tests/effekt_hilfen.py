@@ -14,11 +14,13 @@ RATE = 48000
 
 
 def mini_liste(teile: list[tuple], *, fmt: str = "short", ereignisse: list[tuple] = (), look=("neutral", 0.0),
-               fps: int = 30, an: bool = True, quelle_dauer: float = 8.0, musik: dict | None = None) -> dict:
+               fps: int = 30, an: bool = True, quelle_dauer: float = 8.0, musik: dict | None = None,
+               tempo: dict[int, dict] | None = None) -> dict:
     """Gültige Schnittliste version 4 aus wenigen Segmenten – ohne Datenbank und ohne compose.
 
     teile: (Datei, Quelle von, Quelle bis, (Übergangsart, Dauer) in dieses Segment) – beim ersten Segment egal.
     ereignisse: (Segment-nr, Art, t auf der ZEITLEISTE, Felder) – umgerechnet in Quellzeit über effekte.auf_quelle.
+    tempo: {Segment-nr: {"lupe": {...}} bzw. {"raffer": {...}}} – die Zeitleiste dehnt/staucht sich entsprechend.
     Für weiche Übergänge brauchen die Quellen Griffe: Quelle von ≥ Dauer/2, Quelle bis ≤ Dateilänge − Dauer/2."""
     segmente, t = [], 0.0
     for nr, (datei, von, bis, (art, d)) in enumerate(teile, 1):
@@ -28,6 +30,15 @@ def mini_liste(teile: list[tuple], *, fmt: str = "short", ereignisse: list[tuple
             "muss": [von, bis], "zeit_start": round(t, 3), "zeit_ende": round(t + bis - von, 3),
             "uebergang": {"art": art if nr > 1 else "schnitt", "dauer_s": d if nr > 1 else 0.0}})
         t += bis - von
+    if tempo:
+        versatz = 0.0
+        for s in segmente:
+            s["zeit_start"] = round(s["zeit_start"] + versatz, 3)
+            for feld, w in (tempo.get(s["nr"]) or {}).items():
+                s[feld] = dict(w)
+                versatz += (w["bis_s"] - w["ab_s"]) * (1 / w["faktor"] - 1)
+            s["zeit_ende"] = round(s["zeit_ende"] + versatz, 3)
+        t += versatz
     for nr, art, t_z, felder in ereignisse:
         s = segmente[nr - 1]
         eintrag = {"art": art, "t_s": round(effekte.auf_quelle(s, t_z), 3), "staerke": 1.0, **felder}

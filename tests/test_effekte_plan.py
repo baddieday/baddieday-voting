@@ -457,6 +457,59 @@ class Zeit(unittest.TestCase):
                 self.assertAlmostEqual(schritt, 0.01, delta=1e-9)                 # Steigung 1 nach der Lupe
 
 
+class Tempo(unittest.TestCase):
+    """28.09.: Zeitlupe um den Finisher, Zeitraffer über den Anlauf (effekte.plane_tempo) – die Zeitleiste (Beats)
+    bleibt, nur die Quelle wird gekürzt bzw. verlängert; danach plant effekte.plane wie gehabt, die Liste ist gültig."""
+
+    @staticmethod
+    def material():
+        segs = [seg(1, "a", 0.0, 20.0, 0.0), seg(2, "e", 2.0, 20.0, 20.0, art="whip", d=0.25)]
+        segs[0]["muss"], segs[1]["muss"] = [7.0, 9.5], [9.0, 12.5]  # wie regie._kern: erster Kill − 1 … letzter + 0,5
+        reihe = [moment("a", {"kill_sekunden": [8.0, 9.0]}, max_gruppe=2),               # Double -> Faktor 0,5
+                 moment("e", {"kill_sekunden": [10.0, 11.0, 12.0]}, max_gruppe=3)]       # Triple, Höhepunkt -> 0,25
+        return segs, reihe
+
+    def test_lupe_auf_dem_finisher_raffer_im_anlauf(self):
+        segs, reihe = self.material()
+        n = effekte.plane_tempo(segs, reihe, dict(regie.PARAMETER), fx_konfig(), "short")
+        self.assertEqual(n, {"lupen": 2, "raffer": 2})
+        a, e = segs
+        self.assertEqual(a["lupe"], {"ab_s": 8.65, "bis_s": 9.45, "faktor": 0.5, "ton": "tief"})
+        self.assertEqual(a["raffer"], {"ab_s": 3.2, "bis_s": 7.2, "faktor": 2.0, "ton": "tempo"})   # 4 s vor 8,0 − 0,8
+        self.assertEqual(e["lupe"], {"ab_s": 11.8, "bis_s": 12.2, "faktor": 0.25, "ton": "tief"})   # dramatisch
+        self.assertEqual(e["raffer"], {"ab_s": 5.2, "bis_s": 9.2, "faktor": 2.0, "ton": "tempo"})
+        # Zeitleiste unverändert; Quelle: −0,8 (Lupe) + 2,0 (Raffer) bzw. −1,2 + 2,0
+        self.assertEqual((a["zeit_start"], a["zeit_ende"], e["zeit_start"], e["zeit_ende"]), (0.0, 20.0, 20.0, 38.0))
+        self.assertEqual((a["quelle_ende_s"], e["quelle_ende_s"]), (21.2, 20.8))
+        self.assertAlmostEqual(effekte.auf_zeitleiste(a, 9.0), 9.0 - 2.0 + 0.35)   # Finisher im Video
+        liste = plane(segs, reihe)                                                 # plane + pruefe_liste
+        self.assertEqual([t for _, t in [(nr, e_["t_s"]) for nr, e_ in ereignisse(liste, "punch")]][:1], [8.0])
+        self.assertTrue(all(0 <= z.t <= liste["dauer_s"] for z in effekte.zeitleiste(liste)))
+
+    def test_grenzen_schwelle_und_ohne_platz(self):
+        segs, reihe = self.material()
+        k = fx_konfig(max_lupen=1, max_raffer=0)
+        self.assertEqual(effekte.plane_tempo(segs, reihe, dict(regie.PARAMETER), k, "short"), {"lupen": 1, "raffer": 0})
+        self.assertTrue(segs[1].get("lupe") and not segs[0].get("lupe"))           # Vorrang: der Höhepunkt
+        self.assertFalse([s for s in segs if s.get("raffer")])
+        # „zu viele Effekte“ bis unter die Schwelle: nichts; lustig/chill haben keine Lupe im Profil
+        segs, reihe = self.material()
+        self.assertEqual(effekte.plane_tempo(segs, reihe, {**regie.PARAMETER, "effekt_staerke": {"episch": 0.1}},
+                                             fx_konfig(), "short"), {"lupen": 0, "raffer": 0})
+        segs = [seg(1, "l", 0.0, 20.0, 0.0, stimmung="lustig")]   # lustig: keine Lupe, aber ein leichter Raffer
+        reihe = [moment("l", {"kill_sekunden": [9.0]}, stimmung="lustig")]
+        self.assertEqual(effekte.plane_tempo(segs, reihe, dict(regie.PARAMETER), fx_konfig(), "short"),
+                         {"lupen": 0, "raffer": 1})
+        self.assertNotIn("lupe", segs[0])
+        self.assertEqual(segs[0]["raffer"]["bis_s"], 9.0 - effekte.RAFFER_ABSTAND_S)
+        # Muss-Zone bis ans Segmentende: die Quelle darf nicht gekürzt werden -> keine Lupe; kurzer Anlauf -> kein Raffer
+        segs = [seg(1, "a", 0.0, 20.0, 0.0)]                                        # muss = [0, 20]
+        reihe = [moment("a", {"kill_sekunden": [2.0, 19.0]}, max_gruppe=2)]
+        self.assertEqual(effekte.plane_tempo(segs, reihe, dict(regie.PARAMETER), fx_konfig(), "short"),
+                         {"lupen": 0, "raffer": 0})
+        self.assertEqual(segs[0]["quelle_ende_s"], 20.0)
+
+
 class SchemaV4(unittest.TestCase):
     def setUp(self):
         self.gut = ein_moment({"kill_sekunden": [6.0, 8.0, 10.0]})
@@ -524,24 +577,35 @@ class SchemaV4(unittest.TestCase):
             {**liste_um([seg(i + 1, "m", 0.0, 1.0, float(i)) for i in range(201)])})))
 
     def test_lupe(self):
-        def mit_lupe(ab, bis, faktor=0.5, laenge=None):
+        def mit_lupe(ab, bis, faktor=0.5, laenge=None, feld="lupe", ton="tief"):
             s = seg(1, "a", 2.0, 10.0, 0.0)
-            s["lupe"] = {"ab_s": ab, "bis_s": bis, "faktor": faktor, "ton": "tief"}
-            s["zeit_ende"] = laenge if laenge is not None else 8.0 + (bis - ab)
+            s[feld] = {"ab_s": ab, "bis_s": bis, "faktor": faktor, "ton": ton}
+            s["zeit_ende"] = laenge if laenge is not None else round(8.0 + (bis - ab) * (1 / faktor - 1), 3)
             return {**liste_um([s]), "version": 4}
         self.assertEqual(regie.pruefe_liste(mit_lupe(6.0, 7.2)), [])                  # 8 s + 1,2 s Zuschlag
+        self.assertEqual(regie.pruefe_liste(mit_lupe(6.6, 7.0, faktor=0.25)), [])     # 28.09.: dramatisch, +1,2 s
         self.assertTrue(regie.pruefe_liste(mit_lupe(6.0, 7.2, laenge=8.0)))           # Länge ohne Zuschlag
-        self.assertTrue(regie.pruefe_liste(mit_lupe(6.0, 7.2, faktor=0.25)))          # nicht im enum
+        self.assertTrue(regie.pruefe_liste(mit_lupe(6.0, 7.2, faktor=0.3)))           # nicht im enum
         self.assertTrue(regie.pruefe_liste(mit_lupe(7.2, 6.0)))                       # ab ≥ bis
         self.assertTrue(regie.pruefe_liste(mit_lupe(9.5, 9.95)))                      # zu nah am Ende
         self.assertTrue(regie.pruefe_liste(mit_lupe(4.0, 6.0)))                       # länger als 1,5 s
+        # Zeitraffer (28.09.): eigenes Feld, Faktor 1,5/2, bis 4 s, Zeitleiste kürzer
+        self.assertEqual(regie.pruefe_liste(mit_lupe(2.5, 6.5, faktor=2.0, feld="raffer", ton="tempo")), [])
+        self.assertTrue(regie.pruefe_liste(mit_lupe(2.5, 7.0, faktor=2.0, feld="raffer", ton="tempo")))   # > 4 s
+        self.assertTrue(regie.pruefe_liste(mit_lupe(2.5, 6.5, faktor=0.5, feld="raffer", ton="tempo")))   # kein Raffer-Faktor
+        beides = mit_lupe(6.0, 7.0)
+        beides["segmente"][0]["raffer"] = {"ab_s": 2.5, "bis_s": 5.5, "faktor": 2.0, "ton": "tempo"}
+        beides["segmente"][0]["zeit_ende"] = beides["dauer_s"] = round(8.0 + 1.0 - 1.5, 3)
+        self.assertEqual(regie.pruefe_liste(beides), [])
+        beides["segmente"][0]["raffer"]["bis_s"] = 6.5                                # Raffer ragt in die Lupe
+        self.assertIn("vor der Zeitlupe", " ".join(regie.pruefe_liste(beides)))
         zwei = mit_lupe(6.0, 7.0)
         s2 = {**copy.deepcopy(zwei["segmente"][0]), "nr": 2, "moment": "b"}
         s2["zeit_start"], s2["zeit_ende"] = zwei["segmente"][0]["zeit_ende"], zwei["segmente"][0]["zeit_ende"] + 9.0
         zwei["segmente"].append(s2)
         zwei["dauer_s"] = s2["zeit_ende"]
-        self.assertIn("2 Zeitlupen", " ".join(regie.pruefe_liste(zwei)))
-        self.assertEqual(regie.pruefe_liste(zwei, max_lupen=2), [])
+        self.assertIn("2 Zeitlupen", " ".join(regie.pruefe_liste(zwei, max_lupen=1)))
+        self.assertEqual(regie.pruefe_liste(zwei), [])                                # Standard: 2 (28.09.)
 
     def test_hook(self):
         def mit_hook(pos=0, laenge=1.5, moment_="e", kill_s=(6.0,), zwei=False):

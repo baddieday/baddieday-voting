@@ -107,13 +107,29 @@ PROFIL = {
               "uebergaenge": [("fade", 0.8), ("dissolve", 0.6), ("smoothright", 0.8), ("circleopen", 0.7)]},
 }
 STAERKEN = {"mini_faktor", "punch", "titel", "zaehler", "akzent", "meme", "tod_punch", "basshit", "tick", "whoosh",
-            "pop", "einschlag", "riser", "lupe"}
+            "pop", "einschlag", "riser", "lupe", "raffer"}
+# Zeitraffer im Anlauf (plane_tempo), Stärke je Stimmung wie die anderen Effekte (0 = keiner)
+RAFFER = {"episch": 0.6, "spannend": 0.7, "lustig": 0.3, "frustriert": 0.0, "chill": 0.0}
+for _st, _wert in RAFFER.items():
+    PROFIL[_st]["raffer"] = _wert
 
 # [regie.effekte]: Standardwerte und Grenzen. Weitere Schlüssel (z. B. für Export oder Hook) lesen andere Module selbst.
 STANDARD = {"an": True, "profil_version": 1, "schwelle": 0.15, "effekt_abstand_s": 0.4, "max_glitch": 1,
+            "max_lupen": 2, "max_raffer": 2,
             "sfx_ordner": "/var/lib/clip-pipeline/sfx", "sfx_pegel": 0.8, "titel_zeichenbreite": 0.75}
 GRENZEN = {"profil_version": (1, 99), "schwelle": (0.0, 1.0), "effekt_abstand_s": (0.0, 5.0), "max_glitch": (0, 20),
-           "sfx_pegel": (0.0, 2.0), "titel_zeichenbreite": (0.3, 1.5)}
+           "max_lupen": (0, 10), "max_raffer": (0, 10), "sfx_pegel": (0.0, 2.0), "titel_zeichenbreite": (0.3, 1.5)}
+
+# Tempo (28.09., Florian: „ruhig viral, mit slowmo und beschleunigt“) – Fenster in Quellsekunden
+LUPE_VOR_S, LUPE_NACH_S = 0.35, 0.45   # um den Finisher: 0,8 s -> 1,6 s im Video (Faktor 0,5)
+LUPE_DRAMA_S = 0.2                     # Faktor 0,25 (episch, Serie ≥ 3 oder Victory): ±0,2 s -> 1,6 s im Video
+LUPE_MIN_S = 0.3                       # kleiner wird das Fenster nicht geschrumpft, dann fällt die Lupe weg
+LUPE_MAX_S = 1.5                       # Prüfer: längstes Zeitlupen-Fenster
+RAFFER_MAX_S = 4.0                     # längstes Zeitraffer-Fenster -> 2 s im Video (Faktor 2)
+RAFFER_MIN_S = 1.5                     # kürzer lohnt kein Raffer
+RAFFER_ANLAUF_S = 3.0                  # erst ab so viel Anlauf vor der ersten Aktion
+RAFFER_ABSTAND_S = 0.8                 # der Raffer endet so weit vor der ersten Aktion – die sieht man normal
+QUELLE_REST_S = 0.25                   # am Dateiende bleibt so viel frei (wie regie.plane_zeitleiste: nutzbar)
 
 
 @dataclass
@@ -341,30 +357,36 @@ def _in_fenster(t: float, fenster: list[tuple[float, float]]) -> bool:
 
 # --- Zeit: die einzige Umrechnung Quelle <-> Zeitleiste ----------------------------------------------
 
+def tempo_fenster(seg: dict) -> list[tuple[float, float, float]]:
+    """(ab, bis, faktor) der Tempo-Fenster eines Segments in Quellzeit, aufsteigend – der Zeitraffer (raffer, im
+    Anlauf) liegt vor der Zeitlupe (lupe, um den Finisher). Leer ohne beides."""
+    return sorted((float(w["ab_s"]), float(w["bis_s"]), float(w["faktor"]))
+                  for w in (seg.get("raffer"), seg.get("lupe")) if w)
+
+
 def _zuschlag(seg: dict, t_q: float) -> float:
-    lupe = seg.get("lupe")
-    if not lupe or t_q <= lupe["ab_s"]:
-        return 0.0
-    return (min(t_q, lupe["bis_s"]) - lupe["ab_s"]) * (1 / lupe["faktor"] - 1)
+    return sum((min(t_q, bis) - ab) * (1 / f - 1) for ab, bis, f in tempo_fenster(seg) if t_q > ab)
 
 
 def auf_zeitleiste(seg: dict, t_q: float) -> float:
-    """Quellzeit (Sekunden in der Moment-Datei) -> Zeit im Video. Eine Zeitlupe dehnt ab_s … bis_s um 1/faktor."""
+    """Quellzeit (Sekunden in der Moment-Datei) -> Zeit im Video. Ein Tempo-Fenster dehnt (Zeitlupe, Faktor < 1)
+    bzw. staucht (Zeitraffer, Faktor > 1) ab_s … bis_s um 1/faktor."""
     return seg["zeit_start"] + (t_q - seg["quelle_start_s"]) + _zuschlag(seg, t_q)
 
 
 def auf_quelle(seg: dict, t_z: float) -> float:
     """Umkehrung von auf_zeitleiste."""
-    u = t_z - seg["zeit_start"]
-    lupe = seg.get("lupe")
-    if lupe:
-        ab, f = lupe["ab_s"] - seg["quelle_start_s"], lupe["faktor"]
-        gedehnt = (lupe["bis_s"] - lupe["ab_s"]) / f
-        if ab < u <= ab + gedehnt:
-            return lupe["ab_s"] + (u - ab) * f
-        if u > ab + gedehnt:
-            return seg["quelle_start_s"] + u - (lupe["bis_s"] - lupe["ab_s"]) * (1 / f - 1)
-    return seg["quelle_start_s"] + u
+    u, q = t_z - seg["zeit_start"], seg["quelle_start_s"]   # Rest im Segment, laufende Quellposition
+    for ab, bis, f in tempo_fenster(seg):
+        if u <= ab - q:
+            return q + u
+        u -= ab - q
+        gedehnt = (bis - ab) / f
+        if u <= gedehnt:
+            return ab + u * f
+        u -= gedehnt
+        q = bis
+    return q + u
 
 
 def zeitleiste(liste: dict) -> list[Ereignis]:
@@ -395,6 +417,112 @@ def _r_hinten(segmente: list[dict], i: int) -> float:
         return 0.0
     u = segmente[i + 1]["uebergang"]
     return u["dauer_s"] / 2 if u["art"] != "schnitt" else 0.0
+
+
+def _wo(grenzen: list[tuple[float, float]], idx: list[int], t_q: float) -> int | None:
+    """Das Segment aus idx, in dessen sichtbarem Quellfenster t_q liegt (None: in keinem)."""
+    return next((i for i in idx if grenzen[i][0] - 1e-6 <= t_q <= grenzen[i][1] + 1e-6), None)
+
+
+def _je_moment(segmente: list[dict]) -> dict[str, list[int]]:
+    """Moment -> seine Segment-Indizes (ohne Hook, der plant selbst)."""
+    ergebnis: dict[str, list[int]] = {}
+    for i, s in enumerate(segmente):
+        if s.get("rolle") != "hook":
+            ergebnis.setdefault(s["moment"], []).append(i)
+    return ergebnis
+
+
+# --- Tempo: Zeitlupe und Zeitraffer -----------------------------------------------------------
+
+def _lupe_setzen(segmente: list[dict], grenzen: list, i: int, ab: float, bis: float, faktor: float) -> bool:
+    """Zeitlupe ab … bis (Quelle) in Segment i. Die Zeitleiste bleibt: die Quelle wird hinten um den Zuschlag
+    gekürzt – nie in die Muss-Zone, nie ins Fenster, nie in den hinteren Griff. Passt es nicht, schrumpft das
+    Fenster um den Anker (bis LUPE_MIN_S), sonst keine Lupe. Rückgabe: gesetzt?"""
+    s = segmente[i]
+    ab, bis = max(ab, grenzen[i][0]), min(bis, grenzen[i][1])
+    mitte = (ab + bis) / 2
+    for _ in range(4):
+        if bis - ab < LUPE_MIN_S - 1e-9:
+            return False
+        zuschlag = (bis - ab) * (1 / faktor - 1)
+        qe_neu = s["quelle_ende_s"] - zuschlag
+        if qe_neu >= max(s["muss"][1], bis + RAND_S + _r_hinten(segmente, i)) - 1e-6:
+            s["lupe"] = {"ab_s": round(ab, 3), "bis_s": round(bis, 3), "faktor": faktor, "ton": "tief"}
+            s["quelle_ende_s"] = round(qe_neu, 3)
+            return True
+        ab, bis = mitte - (mitte - ab) * 0.7, mitte + (bis - mitte) * 0.7
+    return False
+
+
+def _raffer_setzen(segmente: list[dict], i: int, ab: float, bis: float) -> bool:
+    """Zeitraffer (Faktor 2) ab … bis (Quelle) in Segment i: das Fenster wird halb so lang, dafür nimmt das Segment
+    hinten die andere Hälfte mehr Quelle – nur so weit, wie die Datei (QUELLE_REST_S, hinterer Griff) und ein
+    folgender Teil desselben Moments es hergeben. Bleibt weniger als RAFFER_MIN_S Fenster, kein Raffer."""
+    s = segmente[i]
+    frei = s["quelle_dauer_s"] - QUELLE_REST_S - _r_hinten(segmente, i) - s["quelle_ende_s"]
+    if i + 1 < len(segmente) and segmente[i + 1]["moment"] == s["moment"] and segmente[i + 1].get("teil", 1) > 1:
+        frei = min(frei, segmente[i + 1]["quelle_start_s"] - s["quelle_ende_s"])
+    if lupe := s.get("lupe"):  # der Raffer endet vor der Zeitlupe
+        bis = min(bis, lupe["ab_s"])
+    laenge = min(bis - ab, RAFFER_MAX_S, 2 * frei)
+    if laenge < RAFFER_MIN_S - 1e-9:
+        return False
+    s["raffer"] = {"ab_s": round(bis - laenge, 3), "bis_s": round(bis, 3), "faktor": 2.0, "ton": "tempo"}
+    s["quelle_ende_s"] = round(s["quelle_ende_s"] + laenge / 2, 3)
+    return True
+
+
+def plane_tempo(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: str) -> dict:
+    """Speed-Ramps in die Segmente (Felder lupe und raffer, vor effekte.plane): Zeitlupe um den Finisher der
+    längsten Kette je Moment (Faktor 0,5; episch mit Serie ≥ 3 oder Victory 0,25), Zeitraffer (Faktor 2) über einen
+    langen Anlauf vor der ersten Aktion – beides darf im selben Segment liegen (schnell hin, langsam auf den Kill).
+    Höchstens [regie.effekte].max_lupen bzw. max_raffer je Video – Vorrang: der
+    Höhepunkt, dann die längere Serie, dann mehr Punkte; Raffer: der längere Anlauf. Stärke wie jeder Effekt:
+    Profil (lupe, raffer) × gelernte effekt_staerke, unter der Schwelle keiner. Die Zeitleiste (Beats) bleibt –
+    _lupe_setzen/_raffer_setzen passen nur die Quelle an. Rückgabe {"lupen": n, "raffer": n}."""
+    e, _ = einstellungen(konfig)
+    prof, schwelle = e["profile"], e["schwelle"]
+    kette_s = float(konfig.wert("vorbewertung.multikill_fenster_s", 10.0))
+    momente = {k.schluessel: k for k in reihe}
+    for s in segmente:  # neu planen = von vorn
+        s.pop("lupe", None)
+        s.pop("raffer", None)
+    grenzen = [_sichtbar(segmente, i) for i in range(len(segmente))]
+    lupen: list[tuple[tuple, int, float, float, float]] = []
+    raffer: list[tuple[float, int, float, float]] = []
+    for moment, idx in _je_moment(segmente).items():
+        k = momente.get(moment)
+        paare = kills_mit_anker(k.merkmale if k is not None else {})
+        if not paare:
+            continue
+        alle = _ketten(paare, kette_s)
+        kette = alle[max(range(len(alle)), key=lambda j: (len(alle[j]), j))]
+        a = max(anker for _, anker in kette)  # der Finisher: die letzte Aktion der längsten Kette
+        if (i := _wo(grenzen, idx, a)) is not None:
+            st = segmente[i]["stimmung"]
+            if staerke(prof[st]["lupe"], p, st, "lupe", schwelle) > 0:
+                anzahl = max(len(kette), int(k.max_gruppe or 0))
+                drama = st == "episch" and (anzahl >= 3 or bool(k.victory))
+                faktor, vor, nach = (0.25, LUPE_DRAMA_S, LUPE_DRAMA_S) if drama else (0.5, LUPE_VOR_S, LUPE_NACH_S)
+                lupen.append(((0 if k is reihe[-1] else 1, -anzahl, -float(k.punkte), i), i, a - vor, a + nach, faktor))
+        erster = min(anker for _, anker in paare)
+        if (i := _wo(grenzen, idx, erster)) is not None:
+            st = segmente[i]["stimmung"]
+            if staerke(prof[st]["raffer"], p, st, "raffer", schwelle) > 0:
+                ab, bis = grenzen[i][0], erster - RAFFER_ABSTAND_S
+                if bis - ab >= RAFFER_ANLAUF_S - 1e-9:
+                    raffer.append((bis - ab, i, ab, bis))
+    n_lupen = n_raffer = 0
+    for _vorrang, i, ab, bis, faktor in sorted(lupen, key=lambda x: x[0]):
+        if n_lupen >= int(e["max_lupen"]):
+            break
+        n_lupen += _lupe_setzen(segmente, grenzen, i, ab, bis, faktor)
+    for _anlauf, i, ab, bis in sorted(raffer, key=lambda x: (-x[0], x[1])):
+        if n_raffer >= int(e["max_raffer"]):
+            break
+        n_raffer += _raffer_setzen(segmente, i, ab, bis)
+    return {"lupen": n_lupen, "raffer": n_raffer}
 
 
 def _wichtig(e: _Plan) -> int:
@@ -435,14 +563,11 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
     for s in segmente:  # neu planen = von vorn
         s.pop("kill_s", None)
         s.pop("effekte", None)
-    je_moment: dict[str, list[int]] = {}
-    for i, s in enumerate(segmente):
-        if s.get("rolle") != "hook":  # Hook (Stufe 4) plant seine Ereignisse selbst
-            je_moment.setdefault(s["moment"], []).append(i)
+    je_moment = _je_moment(segmente)  # Hook (Stufe 4) plant seine Ereignisse selbst
     grenzen = [_sichtbar(segmente, i) for i in range(len(segmente))]
 
     def wo(idx: list[int], t_q: float) -> int | None:
-        return next((i for i in idx if grenzen[i][0] - 1e-6 <= t_q <= grenzen[i][1] + 1e-6), None)
+        return _wo(grenzen, idx, t_q)
 
     titel: list[_Plan] = []
     victory: list[_Plan] = []

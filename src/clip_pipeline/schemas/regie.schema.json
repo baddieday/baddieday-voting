@@ -94,13 +94,26 @@
           "kill_s": {"type": "array", "maxItems": 20, "items": {"type": "number", "minimum": 0},
                      "$comment": "sichtbare eigene Kills (Anker: mein Umhauen, sonst der Kill) in Quellsekunden"},
           "lupe": {
+            "$comment": "Zeitlupe in Quellzeit (effekte.plane_tempo): die Zeitleiste dehnt sich um (bis−ab)·(1/faktor−1)",
             "type": ["object", "null"],
             "required": ["ab_s", "bis_s", "faktor", "ton"],
             "additionalProperties": false,
             "properties": {
               "ab_s": {"type": "number", "minimum": 0},
               "bis_s": {"type": "number", "minimum": 0},
-              "faktor": {"type": "number", "enum": [0.5]},
+              "faktor": {"type": "number", "enum": [0.25, 0.5]},
+              "ton": {"type": "string", "enum": ["tief", "tempo", "stumm"]}
+            }
+          },
+          "raffer": {
+            "$comment": "Zeitraffer im Anlauf (effekte.plane_tempo), liegt vor der Zeitlupe; die Zeitleiste staucht sich um (bis−ab)·(1−1/faktor)",
+            "type": ["object", "null"],
+            "required": ["ab_s", "bis_s", "faktor", "ton"],
+            "additionalProperties": false,
+            "properties": {
+              "ab_s": {"type": "number", "minimum": 0},
+              "bis_s": {"type": "number", "minimum": 0},
+              "faktor": {"type": "number", "enum": [1.5, 2.0]},
               "ton": {"type": "string", "enum": ["tief", "tempo", "stumm"]}
             }
           },

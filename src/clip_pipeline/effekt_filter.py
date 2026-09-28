@@ -106,6 +106,70 @@ def zoom(i: int, zooms: list[tuple[str, float, float, float]]) -> str:
             f"[zo{i}][zg{i}]overlay=(W-w)/2:(H-h)/2:enable='{an}'")
 
 
+# --- Tempo: Zeitlupe (lupe) und Zeitraffer (raffer) je Segment --------------------------------------------
+
+ATEMPO = {0.25: "atempo=0.5,atempo=0.5", 0.5: "atempo=0.5", 1.5: "atempo=1.5", 2.0: "atempo=2"}
+
+
+def _vorzeichen(z: float) -> str:
+    """„+0.8“ / „-1.5“ / „“ (0) – für T±Zuschlag im Ausdruck; ein „T+-1.5“ soll nie entstehen."""
+    if abs(z) < 5e-5:
+        return ""
+    return ("+" if z > 0 else "-") + _z(abs(z))
+
+
+def tempo_video(fenster: list[tuple[float, float, float]], eingang_start: float) -> str:
+    """setpts VOR fps: die Tempo-Fenster (effekte.tempo_fenster, Quellzeit) als stückweise lineare Zeit in T
+    (Sekunden des Segment-Eingangs, der bei eingang_start = quelle_start_s − vorderer Griff beginnt). Ein Fenster
+    ab … bis mit Faktor f läuft 1/f-mal so lang (0,5: doppelt, 2: halb); davor normal, danach um den Zuschlag
+    versetzt. Beispiel: ein Fenster 1,3 … 2,1 s, Faktor 0,5 →
+    setpts='if(lt(T,1.3),T,if(lt(T,2.1),1.3+(T-1.3)/0.5,T+0.8))/TB'. Leer ohne Fenster."""
+    if not fenster:
+        return ""
+
+    def ab_hier(k: int, z: float) -> str:
+        if k == len(fenster):
+            return f"T{_vorzeichen(z)}"
+        ab, bis, f = fenster[k]
+        a, b = ab - eingang_start, bis - eingang_start
+        z_danach = z + (b - a) * (1 / f - 1)
+        return (f"if(lt(T,{_z(a)}),T{_vorzeichen(z)},if(lt(T,{_z(b)}),{_z(a + z)}+(T-{_z(a)})/{_z(f)},"
+                f"{ab_hier(k + 1, z_danach)}))")
+
+    return f"setpts='{ab_hier(0, 0.0)}/TB'"
+
+
+def tempo_ton(i: int, seg: dict, eingang_start: float) -> str:
+    """Filterkette für den Ton eines Segments mit Tempo-Fenstern (hinter der Einheit aresample/aformat, vor
+    apad/atrim): in Stücke schneiden, die Fenster wandeln, wieder zusammensetzen. ton je Fenster: tief = Tonhöhe
+    folgt dem Tempo (asetrate), tempo = Tonhöhe bleibt (atempo), stumm = Länge angepasst, aber still.
+    Leer ohne Fenster."""
+    fenster = effekte.tempo_fenster(seg)
+    if not fenster:
+        return ""
+    arten = {(float(w["ab_s"]), float(w["bis_s"])): w["ton"] for w in (seg.get("raffer"), seg.get("lupe")) if w}
+    grenzen: list[float] = []
+    wandel: list[str] = []
+    for ab, bis, f in fenster:
+        grenzen += [ab - eingang_start, bis - eingang_start]
+        ton = arten[(ab, bis)]
+        if ton == "tief":
+            wandel.append(f"asetrate={int(48000 * f)},aresample=48000")
+        else:
+            wandel.append(ATEMPO[f] + (",volume=0" if ton == "stumm" else ""))
+    n = len(grenzen) + 1  # Stücke: normal, Fenster, normal, …, normal
+    teile = [f"asplit={n}" + "".join(f"[tp{i}_{k}]" for k in range(n))]
+    for k in range(n):
+        von = grenzen[k - 1] if k else None
+        bis = grenzen[k] if k < len(grenzen) else None
+        trim = f"atrim={_z(von)}:{_z(bis)}" if von is not None and bis is not None else \
+            f"atrim=0:{_z(bis)}" if bis is not None else f"atrim={_z(von)}"
+        kette = [trim, "asetpts=PTS-STARTPTS"] + ([wandel[k // 2]] if k % 2 else [])
+        teile.append(f"[tp{i}_{k}]{','.join(kette)}[tq{i}_{k}]")
+    teile.append("".join(f"[tq{i}_{k}]" for k in range(n)) + f"concat=n={n}:v=0:a=1")
+    return ";".join(teile)
+
+
 # --- Look ------------------------------------------------------------------------------------
 
 def look(name: str, staerke: float) -> str:
