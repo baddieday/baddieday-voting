@@ -6,6 +6,7 @@ Lager) und Samba sind ersetzt, damit das Ergebnis nicht vom Testrechner abhängt
 """
 
 import json
+import os
 import shutil
 import subprocess
 import unittest
@@ -40,7 +41,8 @@ class MitPuffer(MitAbgleich):
         self.pool_datei = self.tmp / "lvm-status.txt"
         self.konfig.daten["puffer"].update(pool_status=str(self.pool_datei), warnung_frei_gb=20, alarm_frei_gb=8,
                                            pool_warnung_prozent=85, pool_alarm_prozent=90, lager_spaetestens_h=36,
-                                           pc_stau_h=24, pc_status_datei="sitzungen/pc-status.json")
+                                           pc_stau_h=24, pc_status_datei="sitzungen/pc-status.json",
+                                           pc_still_tage=3, ct_ip="192.168.178.93")
         lager_platte = SimpleNamespace(f_frsize=4096, f_bavail=1000 * 10**9 // 4096, f_blocks=4000 * 10**9 // 4096)
         patcher = [mock.patch("shutil.disk_usage", return_value=Platte(500e9, 400e9, 100e9)),
                    mock.patch.object(puffer, "_samba_aktiv", return_value=None),
@@ -240,6 +242,31 @@ class Morgenpruefung(MitPuffer):
             self.assertIsNone(ECHT_SAMBA())  # kein systemd (z. B. Windows)
 
 
+class PcStill(MitPuffer):
+    """28.09.: Erreicht der PC die Freigabe nicht, schreibt er keine pc-status.json – dann zählt das neueste Replay."""
+
+    def replay(self, alter_tage: float) -> None:
+        pfad = self.puffer / "replays" / "UnsavedReplay-2026.09.23-20.15.33.replay"
+        pfad.write_bytes(b"r")
+        t = (self.zeit - timedelta(days=alter_tage)).timestamp()  # Dateizeit = Match-Ende (übernimmt der PC)
+        os.utime(pfad, (t, t))
+
+    def test_frisches_replay_keine_warnung(self):
+        self.replay(alter_tage=1)
+        self.assertEqual(self.pruefe(), [])
+
+    def test_still_warnt_mit_naechsten_schritten_nicht_jeden_tag(self):
+        self.replay(alter_tage=4)  # und keine pc-status.json
+        [schluessel] = self.pruefe()
+        text = self.text(schluessel)
+        for teil in ("seit 4 Tagen", "Test-NetConnection 192.168.178.93 -Port 445", "systemctl status smbd",
+                     "Clip-Pipeline Übertragung", "uebertragung.psd1", "Nichts verloren"):
+            self.assertIn(teil, text)
+        still = lambda tage: [s for s in self.pruefe(self.zeit + timedelta(days=tage)) if s.startswith("puffer:pc_still:")]
+        self.assertEqual(still(1), [])      # nichts geändert: nicht jeden Morgen
+        self.assertEqual(len(still(2)), 1)  # 3 Tage später (6 Tage still): einmal erinnern
+
+
 class LagerThema(MitPuffer):
     def test_offen_und_lange_kein_erfolg(self):
         self.datei(self.puffer, "eingang/a.mp4", b"x" * 1000)
@@ -284,6 +311,7 @@ class LagerThema(MitPuffer):
     def test_noch_nie_ein_abgleich(self):
         self.con.execute("DELETE FROM lager_laeufe")
         self.datei(self.puffer, "replays/r.replay", b"r")
+        self.pc()  # der PC meldet sich – sonst je nach Wochentag (self.zeit bis 6 Tage voraus) zusätzlich „PC still“
         self.assertEqual(self.pruefe(), [f"puffer:lager:{self.tag()}"])
         self.assertIn("noch nie ein Abgleich", self.text(f"puffer:lager:{self.tag()}"))
 

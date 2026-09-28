@@ -233,3 +233,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   sind, schaltet `clip-mikro` ein (`clip-aufraeumen` bleibt aus), startet beide Bots neu und schreibt ein
   Rückweg-Skript. Dafür kam der Sprint-Stand Lernschleife (82 Commits, 26.–28.09.) nach `main` – ohne neue volle
   Suite (letzte volle bei PR #19, danach breiter Lauf 255 Tests zu 2.1/2.2). Windows-Skript und pve-big unverändert.
+- 2026-09-28 (**PC still**): Seit E19 kam nichts mehr vom Gaming-PC an, und niemand wurde gewarnt – der PC schreibt
+  `pc-status.json` nur, wenn er das Ziel erreicht. Ursache: psd1 zeigte noch auf pve-big (R7 nie umgestellt, am
+  28.09. nachgeholt), danach falsches Samba-Passwort. Neu in der Morgenprüfung: Thema `pc_still` – seit über
+  `[puffer].pc_still_tage` (3) weder frische `pc-status.json` noch neues Replay in `replays/` (Dateizeit) → Meldung
+  mit Prüfliste (Port 445 + Anmeldung, smbd, Aufgabe, psd1); einmal je Stille, Erinnerung höchstens alle 3 Tage.
+  Spielpausen lösen sie auch aus (steht im Text); ganz ohne Lebenszeichen (frischer Puffer) bleibt sie still.

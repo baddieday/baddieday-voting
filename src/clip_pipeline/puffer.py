@@ -4,9 +4,10 @@ Nur im getrennten Betrieb. Weckt pve-big NIE und fasst das Lager nicht an – ge
 und `lager_laeufe` (dort auch der beim Abgleich gemessene Platz im Lager), der Puffer (lokal), die Pool-Datei des
 Hosts ([puffer].pool_status) und sitzungen/pc-status.json vom Gaming-PC.
 
-Themen: lager · platz · lager_platz · pool · pc · samba. Je Thema und Tag höchstens eine Meldung
+Themen: lager · platz · lager_platz · pool · pc · pc_still · samba. Je Thema und Tag höchstens eine Meldung
 (Schlüssel puffer:<thema>:<Datum>), montags ein Lebenszeichen (puffer:woche:<JJJJ-Www>) – so heißt Stille eindeutig
-„alles in Ordnung“.
+„alles in Ordnung“. Ausnahme pc_still: einmal je Stille und höchstens alle [puffer].pc_still_tage
+(puffer:pc_still:<Datum des letzten Lebenszeichens>:<Stufe>).
 Verschickt werden die Meldungen vom Clip-Bot, in der Ruhezeit ([telegram].leise_von/leise_bis) erst danach.
 """
 
@@ -24,11 +25,11 @@ from typing import Callable
 
 from . import db, lager
 from .konfig import Konfig, KonfigFehler
-from .zeit import aus_iso, jetzt, utc_zu_lokal
+from .zeit import UTC, aus_iso, iso, jetzt, utc_zu_lokal
 
 log = logging.getLogger("pipeline")
 
-THEMEN = ("lager", "platz", "lager_platz", "pool", "pc", "samba")
+THEMEN = ("lager", "platz", "lager_platz", "pool", "pc", "pc_still", "samba")
 POOL_ALT_H = 2       # ältere Pool-Datei: Host-Timer steht o. Ä. – still übergehen, kein Fehlalarm
 # Ältere pc-status.json (PC aus): schon geprüft – nicht jeden Morgen wiederholen. 26 statt 24 h: 2 h Spielraum
 # für den Timer. Ein Bericht kurz vor der Prüfung kommt so an höchstens zwei Morgen, aber nie gar nicht.
@@ -218,6 +219,45 @@ def _pc(konfig: Konfig, zeit: datetime) -> Befund:
                    "noch geöffnet? erreicht der PC den Puffer?)")
 
 
+def _pc_still(konfig: Konfig, zeit: datetime) -> Befund:
+    """Vom Gaming-PC kommt nichts mehr: seit über pc_still_tage weder eine frische pc-status.json noch ein neues Replay.
+    Warum nötig (28.09.): Der PC schreibt pc-status.json nur, wenn er die Freigabe erreicht – ist sie weg, fehlt genau
+    der Bericht, der den Fehler zeigen würde, und _pc schweigt. Replays zählen mit ihrer Dateizeit (übernimmt der PC
+    beim Kopieren, ≈ Match-Ende). Noch gar kein Lebenszeichen (frischer Puffer) → still. Längere Spielpausen melden
+    sich auch – darum sagt der Text das dazu und erinnert nur alle pc_still_tage (zustand, siehe melde)."""
+    grenze = float(konfig.wert("puffer.pc_still_tage", 3))
+    if grenze <= 0:
+        return {"hinweis": "aus ([puffer].pc_still_tage = 0)"}, None
+    zeichen: list[tuple[datetime, str]] = []
+    pfad = konfig.wurzel / str(konfig.wert("puffer.pc_status_datei", "sitzungen/pc-status.json"))
+    try:
+        zeichen.append((aus_iso(json.loads(pfad.read_text(encoding="utf-8-sig"))["zeit_utc"]), "pc-status.json"))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass  # fehlt (der Fall hier) oder unlesbar (zeigt _pc) – dann zählen nur die Replays
+    zeichen += [(datetime.fromtimestamp(p.stat().st_mtime, UTC), "Replay")
+                for p in konfig.ordner("replays").glob("*.replay")]
+    if not zeichen:
+        return {"hinweis": "noch nichts vom Gaming-PC im Puffer"}, None
+    letztes, quelle = max(zeichen)
+    still = zeit - letztes
+    stand = {"letztes": iso(letztes), "quelle": quelle, "still_tage": round(still / timedelta(days=1), 1),
+             "grenze_tage": grenze}
+    if still <= timedelta(days=grenze):
+        return stand, None
+    stand["zustand"] = f"{_datum(konfig, letztes).isoformat()}:{int(still / timedelta(days=grenze))}"
+    ip = str(konfig.wert("puffer.ct_ip", "192.168.178.93"))
+    return stand, (
+        f"🖥️ Vom Gaming-PC kommt seit {still.days} Tagen nichts mehr an "
+        f"(letztes Lebenszeichen: {quelle} vom {_wann(konfig, iso(letztes))}).\n"
+        "Hast du so lange nicht gespielt oder war der PC aus, ist alles in Ordnung.\n"
+        "Nichts verloren – hängt die Übertragung, warten die Aufnahmen auf dem PC und kommen nach, sobald sie läuft.\n"
+        f"Nächster Schritt: 1) am PC Test-NetConnection {ip} -Port 445 (TcpTestSucceeded : True?) und "
+        f"Test-Path '\\\\{ip}\\clips\\.clip-speicher' (False = Anmeldung: cmdkey /add:{ip} /user:gamingpc /pass) · "
+        "2) im CT systemctl status smbd (active?) · 3) am PC Get-ScheduledTask 'Clip-Pipeline Übertragung' "
+        f"(nicht Disabled?) · 4) windows\\uebertragung.psd1: Ziel = '\\\\{ip}\\clips', ZielHost = '{ip}', "
+        "WakeOnLanMac = '' (docs/PUFFER.md, R7). Log am PC: %LOCALAPPDATA%\\ClipPipeline\\uebertragung.log")
+
+
 def _samba_aktiv() -> bool | None:
     """True/False = smbd läuft (nicht). None = kein systemd oder kein Samba installiert – dann gibt es nichts zu prüfen."""
     if not shutil.which("systemctl"):
@@ -260,7 +300,7 @@ def status(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None
     pruefungen: dict[str, Callable[[], Befund]] = {
         "lager": lambda: _lager(con, konfig, zeit), "platz": lambda: _platz(konfig),
         "lager_platz": lambda: _lager_platz(con, konfig), "pool": lambda: _pool(konfig, zeit),
-        "pc": lambda: _pc(konfig, zeit), "samba": _samba,
+        "pc": lambda: _pc(konfig, zeit), "pc_still": lambda: _pc_still(konfig, zeit), "samba": _samba,
     }
     stand: dict = {"getrennt": True, "befunde": {}, "fehler": []}
     for thema in THEMEN:
@@ -301,7 +341,9 @@ def melde(con: sqlite3.Connection, konfig: Konfig, stand: dict, zeit: datetime |
     for thema, text in stand["befunde"].items():
         if thema == "lager" and _abgleich_hat_gemeldet(con, stand, tag):
             continue
-        schluessel = f"puffer:{thema}:{tag.isoformat()}"
+        # je Tag – außer das Thema bringt einen eigenen Zustand mit (pc_still: dieselbe Stille nicht jeden Morgen)
+        zustand = (stand.get(thema) or {}).get("zustand") or tag.isoformat()
+        schluessel = f"puffer:{thema}:{zustand}"
         if db.meldung(con, schluessel, text):
             log.warning("%s", text.replace("\n", " "))
             neu.append(schluessel)
