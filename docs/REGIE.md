@@ -245,7 +245,10 @@ doppelten“):
 |---|---|
 | Anker | die sichtbare Aktion: **mein Umhauen** (`aktion_sekunden`), sonst der Kill; nur ≥ 0,1 s weg vom Schnitt bzw. außerhalb der Blende (steht als `kill_s` im Segment) |
 | Kette | Kills mit ≤ 10 s Abstand (`[vorbewertung].multikill_fenster_s`, gezählt wie Bot und Elo) |
-| Finisher (letzte Aktion der Kette) | Stil aus der Rotation (Punch · Punch + Blitz · Wackeln · Punch + RGB) + Bass-Hit; die Kills davor: Mini-Punch (halb so stark) + Tick |
+| Finisher (letzte Aktion der Kette) | Stil aus der Rotation (11 Stile: Punch · Punch + Blitz · Wackeln + RGB · Punch + Negativ · Tilt + Blitz · Punch + Blur · Punch + Strobe · Wackeln + Farbrad · Punch + Pixel · Punch + Kontrast + Vignette · Tilt + Farb-Pop) + Bass-Hit; die Kills davor: eigene Rotation (Punch, Punch + Kontrast, Puls + Farb-Pop, Punch + Vignette, Wackeln) halb so stark + Tick |
+| Einstieg (2.2) | jeder harte Schnitt, auch Jump-Cut und ganz vorn: Einzug (Bild startet 18 % vergrößert und zieht auf), mit Blitz, RGB oder Farb-Pop, oder Blur / Negativ / Pixel – Rotation |
+| Drift (2.2) | jedes Segment zoomt langsam 6 % hinein bzw. heraus (abwechselnd) – das Bild steht nie still |
+| Beat-Effekte (2.2) | auf den Musik-Beats nach 0,8 s Ruhe (lustig 1,2, frustriert 2, chill 2,5): Zoom-Puls, Farb-Pop, Vignette, Blur, Kontrast, Farbrad, Blitz – Rotation, Stärke × `akzent` |
 | Zeitlupe (`lupe`) | um den Finisher der längsten Kette je Moment: 0,35 s davor … 0,45 s danach mit Faktor 0,5 (→ 1,6 s im Video); episch mit Serie ≥ 3 oder Victory ±0,2 s mit 0,25. Höchstens `max_lupen` (2) je Video – Vorrang Höhepunkt, längere Serie, mehr Punkte. Ton tiefer (`asetrate`) |
 | Zeitraffer (`raffer`) | über einen Anlauf ≥ 3 s vor der ersten Aktion: die letzten ≤ 4 s davor (bis 0,8 s vor der Aktion) mit Faktor 2, Tonhöhe bleibt (`atempo`). Höchstens `max_raffer` (2), längerer Anlauf zuerst; darf im selben Segment wie die Zeitlupe liegen |
 | Zeitleiste bei Tempo | bleibt (Beats!): die Zeitlupe kürzt die Quelle hinten um den Zuschlag, der Zeitraffer verlängert sie – nie in Muss-Zone, Fenster oder Griff; passt es nicht, schrumpft das Fenster (Lupe ≥ 0,3 s, Raffer ≥ 1,5 s) oder fällt weg |
@@ -311,7 +314,10 @@ liest nur `liste["effekte"]` und `segmente[].effekte`, nie die gelernten Paramet
 | Übergänge (33 Arten im Schema) | `xfade`; eigene Namen: whip/whip_right → slideleft/slideright, whip_up → slideup, zoom → zoomin, glitch → pixelize, squeeze → squeezeh, flash → fadewhite | wie die alten Übergänge |
 | Whip / Glitch zusätzlich | waagrechte (Whip ↑: senkrechte) Unschärfe (`avgblur`) bzw. Farbversatz + Rauschen (`chromashift`, `noise`) | nur während der Blende (`enable`) |
 | Zeitlupe / Zeitraffer | `setpts` **vor** `fps` (stückweise linear in T, auch zwei Fenster je Segment); Ton in Stücken (`asplit`, `atrim`, `asetrate`+`aresample` = tief bzw. `atempo` = Tonhöhe bleibt, `concat`) | je Segment am Eingang – eine 60-fps-Aufnahme bleibt bei 0,5 im 30-fps-Short flüssig |
-| Blitz (`flash`) | `eq=brightness` mit `eval=frame`, 0,6·Stärke linear abfallend über 0,12 s | je Segment nur auf dem Spielbild, nach dem Zoom, vor dem Look |
+| Blitz, Strobe, Kontrast, Farb-Pop | ein `eq` mit `eval=frame` (brightness 0,6·(1−u) bzw. an/aus mit 7,5 Hz; contrast/saturation 1 + Wert·(1−u)²) | je Segment nur auf dem Spielbild, nach dem Zoom, vor dem Look – wie alle Katalog-Filter nur in ihren Fenstern (`enable`) |
+| Farbrad, Negativ, Blur, Pixel, Vignette | `hue=h` (eine Umdrehung), `negate`, `gblur` (erst σ 14, dann 6 bei 1080 Breite), `pixelize` (24 px), `vignette` (Winkel im sin-Bogen) | wie oben, Reihenfolge eq → hue → negate → gblur → pixelize → vignette |
+| Tilt / Einzug / Drift | `rotate` vor dem Hochskalieren im Zoom-Zweig (bis ≈ 2,3°, Zoom 1,12 deckt die Ecken); Einzug und Drift als Summanden im Zoom-Faktor; mit Drift arbeitet das Zoom-`overlay` durchgehend | nur Spielbild |
+| Großer Graph | ab 100 KB als Datei: `-/filter_complex <datei>` (ffmpeg ≥ 7) bzw. `-filter_complex_script` | Notbremse erst bei 4 MB |
 | Wackeln (`shake`) | Versatz `x`/`y` im Zoom-`overlay` (sin 14 Hz / cos 11 Hz, 2,5 %/2 % der Größe, (1−u)²) bei Zoom 1,10 | wie der Zoom: nur das Spielbild |
 | RGB-Stoß (`rgb`) | derselbe `chromashift` wie der Glitch-Übergang, ohne Rauschen, 0,15 s | nach den Übergängen, vor den Texten |
 | Look | `eq` (Kontrast, Sättigung, Helligkeit) + `colorcorrect` (Farbstich in Schatten und Lichtern) | Short: je Segment auf Spielbild und kleinem Hintergrund (vor dem Hochskalieren); 16:9: einmal nach den Übergängen |

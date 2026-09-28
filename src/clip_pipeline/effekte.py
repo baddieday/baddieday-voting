@@ -5,12 +5,14 @@ Plan ≠ Render: Nur plane() (aufgerufen in regie.erstelle) entscheidet. Jedes E
 nur – über zeitleiste() und uebergangs_fenster() – und liest nie liste["parameter"]. auf_zeitleiste()/auf_quelle()
 sind die EINZIGE Umrechnung zwischen Quelle und Zeitleiste.
 
-Im Spielbild (28.09., Florian: „ruhig viral, viele Effekte, keine doppelten“ – ersetzt „Spielbild clean“ vom
-25.09. in diesem Punkt): Übergänge (Uebergangsmix), Zoom (punch, akzent, meme), Tempo (plane_tempo: Zeitlupe,
-Zeitraffer), Farblook und die Impacts flash (Blitz), shake (Wackeln), rgb (Farbversatz-Stoß). Die Finisher
-wechseln den Stil (STILE, finisher_stil) – kein Kill sieht aus wie der vorige. Texte liegen weiter außerhalb des
-Spielbilds: im Short Kill-Titel und Zähler im unscharfen Rand, im 16:9-Zusammenschnitt kein Zähler und ein
-Kill-Titel nur während der Übergangsblende direkt nach dem Segment mit der Serie.
+Im Spielbild (28.09., Florian: „ruhig viral, viele Effekte, keine doppelten … egal wie lange es rechnet“ – ersetzt
+„Spielbild clean“ vom 25.09. in diesem Punkt): Übergänge (Uebergangsmix), Zoom (punch, akzent, meme, shake, tilt,
+einzug), Drift (Ken-Burns je Segment), Tempo (plane_tempo: Zeitlupe, Zeitraffer), Farblook und der Katalog BILD
+(Blitz, Strobe, Farb-Pop, Kontrast, Farbrad, Negativ, Blur, Pixel, Vignette) plus RGB-Stoß. Finisher, Nebenkills,
+Beats und Schnitte ziehen ihre Stile aus eigenen Rotationen (Stilfolge) – nie zweimal derselbe Stil nacheinander,
+je Video an anderer Stelle beginnend. Texte liegen weiter außerhalb des Spielbilds: im Short Kill-Titel und Zähler
+im unscharfen Rand, im 16:9-Zusammenschnitt kein Zähler und ein Kill-Titel nur während der Übergangsblende direkt
+nach dem Segment mit der Serie.
 
 Anker = die sichtbare Aktion: mein Umhauen (merkmale.aktion_sekunden), sonst der Kill. Gezählt wird wie in der
 Vorbewertung: Kette = Kills mit ≤ [vorbewertung].multikill_fenster_s Abstand (nach Kill-Zeit).
@@ -18,8 +20,8 @@ Vorbewertung: Kette = Kills mit ≤ [vorbewertung].multikill_fenster_s Abstand (
 plane() in dieser Reihenfolge:
    1. sichtbar     Anker ≥ 0,1 s vom Segmentrand bzw. vom Übergangs-Griff entfernt -> segment["kill_s"]
    2. Ketten       über alle Kills des Moments; Ereignisse nur an sichtbaren Ankern
-   3. Finisher     die letzte Aktion einer Kette: Stil aus der Rotation (Punch · Punch + Blitz · Wackeln ·
-                   Punch + RGB-Stoß, nur Stile mit Stärke im Profil) + Bass-Hit; die anderen Kills: Mini-Punch + Tick
+   3. Finisher     die letzte Aktion einer Kette: Stil aus STILE (11 Stile, nur mit Stärke im Profil) + Bass-Hit;
+                   die anderen Kills: Stil aus NEBEN_STILE × mini_faktor + Tick
    4. Titel        einmal je Kette ab titel_ab_kette Kills, am Ende der Kette (DOUBLE … PENTA, ab 6 MULTI KILL);
                    VICTORY ROYALE ersetzt überlappende Titel. 16:9: nur in der Blende nach dem Moment (nach seinem
                    letzten Teil – Jump-Cuts liegen innerhalb der Serie)
@@ -30,9 +32,12 @@ plane() in dieser Reihenfolge:
    7. Jubel        Meme-Zoom + Pop auf der ersten Jubel-Spitze (nur lustig)
    8. Riser        endet auf dem ersten Kill des Höhepunkts (wenn davor ≥ 1,5 s Video liegen)
    9. Whoosh       auf jedem weichen Übergang (nicht Schnitt, nicht Abblende über Schwarz)
-  10. Budget       Zoom-Ereignisse ≥ effekt_abstand_s auseinander (Vorrang Finisher > Meme > Punch > Akzent),
+   9b. Einstieg    auf jedem harten Schnitt (auch Jump-Cut, auch ganz vorn): Stil aus EINSTIEG_STILE × einstieg
+   9c. Drift       jedes Segment zoomt langsam hinein bzw. heraus (abwechselnd), Stärke drift – ohne Budget
+  10. Budget       Zoom-Ereignisse ≥ effekt_abstand_s auseinander (Vorrang Finisher > Meme > Punch/Einstieg > Akzent),
                    kein Zoom-Start in einer Übergangsblende
-  11. Akzente      kleiner Zoom auf einem Musik-Beat, wenn max_ruhe_s lang weder Schnitt noch Zoom war
+  11. Beats        Beat-Effekt aus BEAT_STILE × akzent auf einem Musik-Beat, wenn max_ruhe_s lang kein Schnitt und
+                   kein anderer Treffer war
   12. Stärke unter der Schwelle fällt weg, Zeiten auf ms
 Übergänge haben immer Stärke 1 (§4), auch der Glitch-Übergang.
 Gelernt (regie_lernen): effekt_staerke[stimmung] wirkt auf alle Effekte, effekt_hektik nur auf HEKTISCH (Beat-Akzente
@@ -56,6 +61,11 @@ FLASH_S = 0.12           # Blitz: kurz, fällt linear ab
 SHAKE_S = 0.25           # Wackeln (mit leichtem Zoom, damit kein Rand erscheint)
 RGB_S = 0.15             # Farbversatz-Stoß
 MEME_S = 0.83            # 0,08 s hinein, 0,6 s halten, 0,15 s zurück
+# Dauer im Video je Effekt-Art (Regisseur 2.2, 28.09.: „mehr Effekte, keine doppelten, egal wie lange es rechnet“)
+DAUER = {"punch": PUNCH_S, "akzent": AKZENT_S, "meme": MEME_S, "shake": SHAKE_S, "flash": FLASH_S, "rgb": RGB_S,
+         "negativ": 0.1, "blur": 0.22, "strobe": 0.4, "farbpop": 0.45, "kontrast": 0.35, "hue": 0.5,
+         "vignette": 0.6, "pixel": 0.12, "tilt": 0.5, "einzug": 0.35}
+DAUER_MAX_S = 30.0       # Schema: dauer_s ≤ 30 (Drift läuft über ein ganzes Segment)
 TITEL_VERSATZ_S = 0.1    # Titel kurz nach der Aktion
 TITEL_MAX_S = 1.2
 TITEL_MIN_S = 0.4        # kürzer würde er nur aufblitzen -> weglassen
@@ -65,8 +75,8 @@ TEXT_MAX_S = 3.0         # Schema: dauer_s ≤ 3
 ZAEHLER_MAX_S = 1.5
 RISER_S = 1.5
 MAX_KILL_S = 20          # Schema: kill_s maxItems
-MAX_JE_SEGMENT = 24      # Schema: effekte maxItems
-MAX_JE_LISTE = 400       # regie.pruefe_liste
+MAX_JE_SEGMENT = 60      # Schema: effekte maxItems
+MAX_JE_LISTE = 1500      # regie.pruefe_liste (MAX_EREIGNISSE)
 
 TITEL = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUAD KILL", 5: "PENTA KILL"}
 MULTI = "MULTI KILL"      # ab 6
@@ -74,10 +84,28 @@ VICTORY = "VICTORY ROYALE"
 LOOKS = ("neutral", "cinematic", "kalt", "warm", "entsaettigt", "soft")
 LOOK_JE_STIMMUNG = {"episch": "cinematic", "spannend": "kalt", "lustig": "warm", "frustriert": "entsaettigt",
                     "chill": "soft"}
-ZOOM = ("punch", "akzent", "meme", "shake")   # wirkt nur auf das Spielbild (shake = Zoom 1,10 + Versatz)
-HEKTISCH = {"akzent", "flash", "shake", "rgb"}   # gedämpft durch effekt_hektik („zu hektisch“)
-# Finisher-Stile in Rotation (28.09.): je Kill der nächste – Stile, deren Extra im Profil keine Stärke hat, fehlen
-STILE = (("punch",), ("punch", "flash"), ("shake",), ("punch", "rgb"))
+# Zoom-Arten (Overlay auf dem Spielbild, mit Budget): Punch, Beat-Akzent, Meme, Wackeln (Zoom 1,10 + Versatz),
+# Tilt (Dutch Angle: Kippen + Zoom 1,12), Einzug (Schnitt beginnt vergrößert und zieht auf)
+ZOOM = ("punch", "akzent", "meme", "shake", "tilt", "einzug")
+DRIFT = ("drift_ein", "drift_aus")   # Ken-Burns über ein ganzes Segment – auch Overlay, aber ohne Budget
+# Filter nur auf dem Spielbild je Segment (effekt_filter.bildfilter); rgb wirkt nach den Übergängen aufs ganze Bild
+BILD = ("flash", "strobe", "farbpop", "kontrast", "hue", "negativ", "blur", "pixel", "vignette")
+# gedämpft durch effekt_hektik („zu hektisch“) – alles außer Titel, Zähler, Klängen und Drift
+HEKTISCH = {"akzent", "flash", "shake", "rgb", "negativ", "blur", "strobe", "farbpop", "kontrast", "hue", "vignette",
+            "pixel", "tilt", "einzug"}
+# Profil-Schlüssel, wenn er anders heißt als die Art
+SCHLUESSEL = {"einzug": "einstieg", "drift_ein": "drift", "drift_aus": "drift"}
+# Stil-Rotationen (keine zwei gleichen nacheinander; nur Stile, deren Arten im Profil Stärke haben; Start je Video
+# aus der Momentfolge). Finisher = letzte Aktion einer Kette, Neben = Kills davor (× mini_faktor), Beat = Akzente auf
+# der Musik (× akzent), Einstieg = jeder harte Schnitt (× einstieg)
+STILE = (("punch",), ("punch", "flash"), ("shake", "rgb"), ("punch", "negativ"), ("tilt", "flash"),
+         ("punch", "blur"), ("punch", "strobe"), ("shake", "hue"), ("punch", "pixel"),
+         ("punch", "kontrast", "vignette"), ("tilt", "farbpop"))
+NEBEN_STILE = (("punch",), ("punch", "kontrast"), ("akzent", "farbpop"), ("punch", "vignette"), ("shake",))
+BEAT_STILE = (("akzent",), ("farbpop",), ("akzent", "vignette"), ("blur",), ("akzent", "kontrast"), ("hue",),
+              ("akzent", "flash"))
+EINSTIEG_STILE = (("einzug",), ("einzug", "flash"), ("blur",), ("einzug", "rgb"), ("negativ",),
+                  ("einzug", "farbpop"), ("pixel",))
 VERGROESSERND = {"zoom"}              # Übergänge, die das GANZE Bild vergrößern (xfade zoomin) – Short: Texte enden davor
 # Zoom-Budget: wer gewinnt bei zu engem Abstand (Tod-Punch zählt wie ein Finisher)
 RANG_FINISHER, RANG_MEME, RANG_PUNCH, RANG_AKZENT = 3, 2, 1, 0
@@ -116,30 +144,76 @@ PROFIL = {
               "uebergaenge": [("fade", 0.8), ("dissolve", 0.6), ("smoothright", 0.8), ("circleopen", 0.7)]},
 }
 STAERKEN = {"mini_faktor", "punch", "titel", "zaehler", "akzent", "meme", "tod_punch", "basshit", "tick", "whoosh",
-            "pop", "einschlag", "riser", "lupe", "raffer", "flash", "shake", "rgb"}
-# 28.09.: Zeitraffer im Anlauf (plane_tempo) und die Impacts (Blitz, Wackeln, RGB-Stoß) je Stimmung, 0 = keiner
-NEU_2_1 = {"episch": {"raffer": 0.6, "flash": 0.7, "shake": 0.6, "rgb": 0.5},
-           "spannend": {"raffer": 0.7, "flash": 0.6, "shake": 0.7, "rgb": 0.6},
-           "lustig": {"raffer": 0.3, "flash": 0.3, "shake": 0.5, "rgb": 0.0},
-           "frustriert": {"raffer": 0.0, "flash": 0.5, "shake": 0.6, "rgb": 0.0},
-           "chill": {"raffer": 0.0, "flash": 0.0, "shake": 0.0, "rgb": 0.0}}
-for _st, _werte in NEU_2_1.items():
+            "pop", "einschlag", "riser", "lupe", "raffer", "flash", "shake", "rgb", "negativ", "blur", "strobe",
+            "farbpop", "kontrast", "hue", "vignette", "pixel", "tilt", "einstieg", "drift"}
+# Regisseur 2.1/2.2 (28.09.): Tempo, Impacts, Katalog und Dichte je Stimmung (0 = aus). Florian: „das wird langweilig –
+# mir ist egal, wie lange es rechnet, hauptsächlich es kommt ein sehr gutes Video raus“. Beat-Akzente kommen darum
+# schon nach max_ruhe_s 0,8 s statt 2,5 s, jeder harte Schnitt bekommt einen Einstieg, jedes Segment einen Drift.
+NEU = {
+    "episch": {"raffer": 0.6, "flash": 0.7, "shake": 0.6, "rgb": 0.5, "negativ": 0.6, "blur": 0.7, "strobe": 0.5,
+               "farbpop": 0.7, "kontrast": 0.7, "hue": 0.4, "vignette": 0.7, "pixel": 0.4, "tilt": 0.7,
+               "einstieg": 0.8, "drift": 0.6, "akzent": 0.8, "max_ruhe_s": 0.8},
+    "spannend": {"raffer": 0.7, "flash": 0.6, "shake": 0.7, "rgb": 0.6, "negativ": 0.7, "blur": 0.6, "strobe": 0.6,
+                 "farbpop": 0.5, "kontrast": 0.8, "hue": 0.5, "vignette": 0.8, "pixel": 0.6, "tilt": 0.6,
+                 "einstieg": 0.8, "drift": 0.5, "akzent": 0.8, "max_ruhe_s": 0.8},
+    "lustig": {"raffer": 0.3, "flash": 0.3, "shake": 0.5, "rgb": 0.0, "negativ": 0.0, "blur": 0.3, "strobe": 0.3,
+               "farbpop": 0.9, "kontrast": 0.5, "hue": 0.8, "vignette": 0.3, "pixel": 0.5, "tilt": 0.8,
+               "einstieg": 0.6, "drift": 0.4, "akzent": 0.6, "max_ruhe_s": 1.2, "lupe": 0.4},
+    "frustriert": {"raffer": 0.0, "flash": 0.5, "shake": 0.6, "rgb": 0.0, "negativ": 0.5, "blur": 0.6, "strobe": 0.0,
+                   "farbpop": 0.0, "kontrast": 0.6, "hue": 0.0, "vignette": 0.9, "pixel": 0.3, "tilt": 0.4,
+                   "einstieg": 0.5, "drift": 0.5, "akzent": 0.4, "max_ruhe_s": 2.0},
+    "chill": {"raffer": 0.0, "flash": 0.0, "shake": 0.0, "rgb": 0.0, "negativ": 0.0, "blur": 0.3, "strobe": 0.0,
+              "farbpop": 0.4, "kontrast": 0.0, "hue": 0.0, "vignette": 0.4, "pixel": 0.0, "tilt": 0.0,
+              "einstieg": 0.3, "drift": 0.8, "akzent": 0.3, "max_ruhe_s": 2.5},
+}
+for _st, _werte in NEU.items():
     PROFIL[_st].update(_werte)
 
 
+def schluessel(art: str) -> str:
+    """Profil-Schlüssel einer Effekt-Art (einzug -> einstieg, drift_* -> drift, sonst die Art selbst)."""
+    return SCHLUESSEL.get(art, art)
+
+
+def moegliche_stile(pool: tuple, pr: dict) -> list[tuple[str, ...]]:
+    """Stile aus pool, deren Arten im Profil alle Stärke haben (punch beim Finisher zählt immer – er trägt den Bass-Hit).
+    Leer, wenn keiner geht."""
+    return [s for s in pool if all(a == "punch" or float(pr.get(schluessel(a), 0.0)) > 0 for a in s)]
+
+
+class Stilfolge:
+    """Reihum durch einen Stil-Pool, Start je Video aus dem Seed – nie zweimal derselbe Stil nacheinander, auch wenn
+    zwischendurch die Stimmung (und damit die Auswahl) wechselt. Beispiel episch, Finisher: punch · punch+flash ·
+    shake+rgb · punch+negativ · tilt+flash … (je Video an anderer Stelle beginnend)."""
+
+    def __init__(self, pool: tuple, seed: str):
+        self.pool, self.k, self.letzter = pool, random.Random(seed).randrange(len(pool)), None
+
+    def naechster(self, pr: dict) -> tuple[str, ...]:
+        moeglich = moegliche_stile(self.pool, pr)
+        if not moeglich:
+            return ()
+        for _ in range(len(moeglich)):
+            stil = moeglich[self.k % len(moeglich)]
+            self.k += 1
+            if stil != self.letzter or len(moeglich) == 1:
+                break
+        self.letzter = stil
+        return stil
+
+
 def finisher_stil(pr: dict, k: int) -> tuple[str, ...]:
-    """Stil des k-ten Finishers im Video aus STILE, reihum – nur Stile, deren Extras (alles außer punch) im Profil
-    Stärke haben. Beispiel episch: k 0 → ("punch",), 1 → ("punch", "flash"), 2 → ("shake",), 3 → ("punch", "rgb"),
-    4 → wieder ("punch",); lustig (rgb 0): drei Stile im Wechsel."""
-    moeglich = [s for s in STILE if all(float(pr.get(a, 0.0)) > 0 for a in s if a != "punch")] or [STILE[0]]
+    """Stil des k-ten Finishers aus STILE ohne Seed (Rotation ab dem ersten) – für Übersichten und Tests; plane()
+    nutzt Stilfolge (Start je Video verschieden). Fallback ohne passenden Stil: ("punch",)."""
+    moeglich = moegliche_stile(STILE, pr) or [STILE[0]]
     return moeglich[k % len(moeglich)]
 
 # [regie.effekte]: Standardwerte und Grenzen. Weitere Schlüssel (z. B. für Export oder Hook) lesen andere Module selbst.
-STANDARD = {"an": True, "profil_version": 1, "schwelle": 0.15, "effekt_abstand_s": 0.4, "max_glitch": 1,
-            "max_lupen": 2, "max_raffer": 2,
+STANDARD = {"an": True, "profil_version": 2, "schwelle": 0.15, "effekt_abstand_s": 0.4, "max_glitch": 1,
+            "max_lupen": 8, "max_raffer": 6,
             "sfx_ordner": "/var/lib/clip-pipeline/sfx", "sfx_pegel": 0.8, "titel_zeichenbreite": 0.75}
 GRENZEN = {"profil_version": (1, 99), "schwelle": (0.0, 1.0), "effekt_abstand_s": (0.0, 5.0), "max_glitch": (0, 20),
-           "max_lupen": (0, 10), "max_raffer": (0, 10), "sfx_pegel": (0.0, 2.0), "titel_zeichenbreite": (0.3, 1.5)}
+           "max_lupen": (0, 20), "max_raffer": (0, 20), "sfx_pegel": (0.0, 2.0), "titel_zeichenbreite": (0.3, 1.5)}
 
 # Tempo (28.09., Florian: „ruhig viral, mit slowmo und beschleunigt“) – Fenster in Quellsekunden
 LUPE_VOR_S, LUPE_NACH_S = 0.35, 0.45   # um den Finisher: 0,8 s -> 1,6 s im Video (Faktor 0,5)
@@ -552,9 +626,11 @@ def _wichtig(e: _Plan) -> int:
         return 7
     if e.art == "sfx":
         return {"basshit": 6, "einschlag": 6, "riser": 5, "whoosh": 5, "pop": 4}.get(e.klang or "", 1)
-    if e.art in ("punch", "shake"):
+    if e.art in ("punch", "shake", "tilt"):
         return 6 if e.rang >= RANG_FINISHER else 2
-    return {"meme": 4, "zaehler": 3, "flash": 3, "rgb": 3}.get(e.art, 0)
+    return {"meme": 4, "zaehler": 3, "flash": 3, "rgb": 3, "negativ": 3, "blur": 3, "strobe": 3, "pixel": 3,
+            "einzug": 2, "hue": 2, "farbpop": 2, "kontrast": 2, "vignette": 2, "drift_ein": 1, "drift_aus": 1
+            }.get(e.art, 0)
 
 
 def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: str, fps: int,
@@ -593,8 +669,21 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
     titel: list[_Plan] = []
     victory: list[_Plan] = []
     gezaehlt: list[tuple[float, int]] = []   # (Zeit, Segment) je sichtbarem Kill
-    finisher = 0                             # Zähler für die Stil-Rotation (finisher_stil)
-    impact_dauer = {"punch": PUNCH_S, "shake": SHAKE_S, "flash": FLASH_S, "rgb": RGB_S}
+    # Stil-Rotationen, je Video an anderer Stelle beginnend (Seed = Momentfolge, deterministisch)
+    seed = "|".join(s["moment"] for s in segmente)
+    finisher = Stilfolge(STILE, "fin" + seed)
+    neben = Stilfolge(NEBEN_STILE, "neb" + seed)
+
+    def stil_setzen(ziel: list, stil: tuple, i: int, t: float, basis: float | None, rang: int) -> None:
+        """Alle Arten eines Stils zur Zeit t. basis None: jede Art mit ihrer Profil-Stärke; sonst basis × Profil-Stärke
+        (die Art, deren Schlüssel die Basis selbst liefert – akzent, einstieg –, bekommt nur die Basis)."""
+        pr = prof[segmente[i]["stimmung"]]
+        for art in stil:
+            wert = float(pr[schluessel(art)])
+            if basis is not None:
+                wert = basis if schluessel(art) in ("akzent", "einstieg") else basis * wert
+            dazu(ziel, art, i, t, stark(i, wert, art), dauer=DAUER[art], rang=rang if art in ZOOM else 0)
+
     for moment, idx in je_moment.items():
         k = momente.get(moment)
         mk = k.merkmale if k is not None else {}
@@ -612,15 +701,11 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
                 if (i := wo(idx, a)) is None:
                     continue
                 pr, t = prof[segmente[i]["stimmung"]], auf_zeitleiste(segmente[i], a)
-                if n == fin:
-                    for art in finisher_stil(pr, finisher):  # Stil-Rotation: kein Kill wie der vorige
-                        dazu(plan, art, i, t, stark(i, pr[art], art), dauer=impact_dauer[art],
-                             rang=RANG_FINISHER if art in ZOOM else 0)
-                    finisher += 1
+                if n == fin:  # Stil-Rotation: kein Kill sieht aus wie der vorige
+                    stil_setzen(plan, finisher.naechster(pr) or ("punch",), i, t, None, RANG_FINISHER)
                     dazu(plan, "sfx", i, t, stark(i, pr["basshit"], "basshit"), klang="basshit")
                 else:
-                    dazu(plan, "punch", i, t, stark(i, pr["punch"] * pr["mini_faktor"], "punch"), dauer=PUNCH_S,
-                         rang=RANG_PUNCH)
+                    stil_setzen(plan, neben.naechster(pr) or ("punch",), i, t, float(pr["mini_faktor"]), RANG_PUNCH)
                     dazu(plan, "sfx", i, t, stark(i, pr["tick"], "tick"), klang="tick")
                 gezaehlt.append((t, i))
             # 4. Titel: einmal je Kette, an ihrem Ende. Die längste Kette des Moments heißt wie seine Serie
@@ -670,6 +755,17 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
     for i, s in enumerate(segmente[1:], 1):
         if s["uebergang"]["art"] not in ("schnitt", "fadeblack") and s["uebergang"]["dauer_s"] > 0:
             dazu(plan, "sfx", i, s["zeit_start"], stark(i, prof[s["stimmung"]]["whoosh"], "whoosh"), klang="whoosh")
+    # 9b. Einstieg auf jedem harten Schnitt (auch Jump-Cut und ganz vorn) und 9c. Drift über jedes Segment
+    einstieg = Stilfolge(EINSTIEG_STILE, "ein" + seed)
+    for i, s in enumerate(segmente):
+        if s.get("rolle") == "hook":
+            continue
+        pr = prof[s["stimmung"]]
+        if (i == 0 or s["uebergang"]["art"] == "schnitt") and (stil := einstieg.naechster(pr)):
+            stil_setzen(plan, stil, i, s["zeit_start"], float(pr["einstieg"]), RANG_PUNCH)
+        art = DRIFT[i % 2]   # abwechselnd hinein und heraus
+        dazu(plan, art, i, s["zeit_start"], stark(i, pr["drift"], art),
+             dauer=min(DAUER_MAX_S, s["zeit_ende"] - s["zeit_start"]))
     # 10. Budget: Zoom nie in einer Blende, Abstand ≥ effekt_abstand_s; gleichzeitige Treffer-Klänge nur einmal
     zooms = []
     for z in sorted((z for z in plan if z.art in ZOOM and not _in_fenster(z.t, fenster)),
@@ -677,9 +773,10 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
         if all(abs(z.t - b.t) >= abstand - 1e-9 for b in zooms):
             zooms.append(z)
     plan = _klaenge_einmal([z for z in plan if z.art not in ZOOM], gleich) + zooms
-    # 11. Beat-Akzente
+    # 11. Beat-Effekte (Rotation) – nicht direkt vor/nach einem anderen Treffer
     if beats:
-        plan += _akzente(beats, segmente, prof, stark, [z.t for z in zooms], fenster, abstand)
+        belegt = [z.t for z in plan if z.art in ZOOM or z.art in BILD or z.art == "rgb"]
+        plan += _akzente(beats, segmente, prof, stark, belegt, fenster, abstand, Stilfolge(BEAT_STILE, "beat" + seed))
     _speichern([z for z in plan if z.staerke > 0], segmente)
 
     look, look_staerke = prof[stimmung]["look"]
@@ -767,31 +864,40 @@ def _klaenge_einmal(ereignisse: list[_Plan], gleich: float) -> list[_Plan]:
     return behalten
 
 
-def _akzente(beats: list[float], segmente: list[dict], prof: dict, stark, zoom_t: list[float],
-             fenster: list[tuple[float, float]], abstand: float) -> list[_Plan]:
-    """Kleiner Zoom auf einem Beat, wenn max_ruhe_s lang weder ein Schnitt noch ein Zoom war – nicht in einer
-    Blende, nicht kurz vor einem anderen Zoom, nicht über das Segmentende hinaus."""
+def _akzente(beats: list[float], segmente: list[dict], prof: dict, stark, belegt: list[float],
+             fenster: list[tuple[float, float]], abstand: float, folge: Stilfolge | None = None) -> list[_Plan]:
+    """Beat-Effekt auf einem Musik-Beat, wenn max_ruhe_s lang kein Schnitt und kein anderer Treffer war – nicht in
+    einer Blende, nicht kurz vor einem anderen Treffer, nicht über das Segmentende hinaus. Der Stil kommt aus der
+    Rotation (folge, BEAT_STILE: Zoom-Puls, Farb-Pop, Vignette, Blur, Kontrast, Farbrad, Blitz …); ohne folge wie
+    früher nur der kleine Zoom. Stärke: akzent × Profil-Stärke der Art (der Zoom-Puls: akzent)."""
     starts = [s["zeit_start"] for s in segmente]
     dauer = segmente[-1]["zeit_ende"] if segmente else 0.0
-    zoom_t = sorted(zoom_t)
-    ergebnis = []
+    belegt = sorted(belegt)
+    ergebnis: list[_Plan] = []
     for b in sorted({round(float(x), 3) for x in beats}):
         if not 0 < b < dauer:
             continue
         i = bisect.bisect_right(starts, b) - 1
         s = segmente[i]
         pr = prof[s["stimmung"]]
-        wert = stark(i, pr["akzent"], "akzent")
-        if s.get("rolle") == "hook" or pr["max_ruhe_s"] is None or wert <= 0:
+        basis = float(pr["akzent"])
+        if s.get("rolle") == "hook" or pr["max_ruhe_s"] is None or stark(i, basis, "akzent") <= 0:
             continue
         ruhe = pr["max_ruhe_s"]
-        k = bisect.bisect_right(zoom_t, b)
-        if (b - s["zeit_start"] < ruhe - 1e-6 or (k and b - zoom_t[k - 1] < ruhe - 1e-6)
-                or (k < len(zoom_t) and zoom_t[k] - b < abstand - 1e-9)
-                or b + AKZENT_S > s["zeit_ende"] - _r_hinten(segmente, i) + 1e-6 or _in_fenster(b, fenster)):
+        k = bisect.bisect_right(belegt, b)
+        ende = s["zeit_ende"] - _r_hinten(segmente, i) + 1e-6
+        if (b - s["zeit_start"] < ruhe - 1e-6 or (k and b - belegt[k - 1] < ruhe - 1e-6)
+                or (k < len(belegt) and belegt[k] - b < abstand - 1e-9)
+                or b + AKZENT_S > ende or _in_fenster(b, fenster)):
             continue
-        ergebnis.append(_Plan("akzent", i, b, wert, dauer=AKZENT_S, rang=RANG_AKZENT))
-        bisect.insort(zoom_t, b)
+        stil = folge.naechster(pr) if folge is not None else ("akzent",)
+        for art in stil:
+            if b + DAUER[art] > ende:  # passt nicht mehr ins Segment
+                continue
+            wert = basis if art == "akzent" else basis * float(pr[schluessel(art)])
+            if (w := stark(i, wert, art)) > 0:
+                ergebnis.append(_Plan(art, i, b, w, dauer=DAUER[art], rang=RANG_AKZENT))
+        bisect.insort(belegt, b)
     return ergebnis
 
 
@@ -809,7 +915,7 @@ def _speichern(ereignisse: list[_Plan], segmente: list[dict]) -> None:
                          "t_s": round(min(max(auf_quelle(s, z.t), s["quelle_start_s"]), s["quelle_ende_s"]), 3),
                          "staerke": round(z.staerke, 3)}
         if z.dauer is not None:
-            eintrag["dauer_s"] = round(max(0.0, min(TEXT_MAX_S, z.dauer)), 3)
+            eintrag["dauer_s"] = round(max(0.0, min(DAUER_MAX_S, z.dauer)), 3)
         for feld in ("text", "zahl", "klang"):
             if getattr(z, feld) is not None:
                 eintrag[feld] = getattr(z, feld)

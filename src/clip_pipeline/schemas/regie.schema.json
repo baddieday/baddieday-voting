@@ -118,17 +118,19 @@
             }
           },
           "effekte": {
-            "$comment": "Effekt-Plan (effekte.plane): t_s = Quellzeit, dauer_s = Dauer im Video. Im Spielbild: Zoom (punch, akzent, meme), Impacts flash/shake/rgb (28.09.); Texte nie im Spielbild",
+            "$comment": "Effekt-Plan (effekte.plane): t_s = Quellzeit, dauer_s = Dauer im Video. Im Spielbild: Zoom/Drift und der Katalog (effekte.BILD, 28.09.); Texte nie im Spielbild",
             "type": "array",
-            "maxItems": 24,
+            "maxItems": 60,
             "items": {
               "type": "object",
               "required": ["art", "t_s", "staerke"],
               "additionalProperties": false,
               "properties": {
-                "art": {"type": "string", "enum": ["punch", "akzent", "meme", "flash", "shake", "rgb", "titel", "zaehler", "sfx"]},
+                "art": {"type": "string", "enum": ["punch", "akzent", "meme", "shake", "tilt", "einzug", "drift_ein", "drift_aus",
+                                                    "flash", "strobe", "farbpop", "kontrast", "hue", "negativ", "blur", "pixel",
+                                                    "vignette", "rgb", "titel", "zaehler", "sfx"]},
                 "t_s": {"type": "number", "minimum": 0},
-                "dauer_s": {"type": "number", "minimum": 0, "maximum": 3},
+                "dauer_s": {"type": "number", "minimum": 0, "maximum": 30},
                 "staerke": {"type": "number", "minimum": 0, "maximum": 1},
                 "text": {"type": "string", "enum": ["DOUBLE KILL", "TRIPLE KILL", "QUAD KILL", "PENTA KILL", "MULTI KILL",
                                                      "VICTORY ROYALE"]},

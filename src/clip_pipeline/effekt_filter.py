@@ -35,9 +35,21 @@ WHIP_SENKRECHT = ("whip_up",)
 # shake (28.09.): Zoom 1,10 hält fast bis zum Ende, damit der Versatz nie einen Rand zeigt (Versatz ≤ 2,5 % der
 # Breite, Rand 5 %; beide klingen ab)
 ZOOM_FORM = {"punch": (0.25, 0.05, 0.0), "akzent": (0.06, 0.05, 0.0), "meme": (0.20, 0.08, 0.60),
-             "shake": (0.10, 0.02, 0.15)}
+             "shake": (0.10, 0.02, 0.15), "tilt": (0.12, 0.03, 0.35)}
 SHAKE = {"x": (0.025, 14, "sin", "W"), "y": (0.02, 11, "cos", "H")}   # Anteil, Hz, Schwingung, Bezug je Achse
 FLASH_HELLE = 0.6                                                     # eq-Helligkeit je Stärke 1 (Bereich −1 … 1)
+# Regisseur 2.2 (28.09.): Einzug = der Schnitt beginnt um 18 % vergrößert und zieht weich auf 1 (×(1−u)²);
+# Drift = Ken-Burns über das ganze Segment, 6 % hinein bzw. heraus (davor/danach gehalten, keine Sprünge im Griff)
+EINZUG, DRIFT = 0.18, 0.06
+# Tilt (Dutch Angle): Winkel = TILT·Stärke·sin(π·u)·(1−u) – Spitze ≈ 2,3° bei u ≈ 0,35, am Ende 0; der Zoom 1,12
+# hält, solange gekippt ist (nachgerechnet für 16:9 und 4:3: keine schwarzen Ecken)
+TILT = 0.07
+# Spielbild-Katalog (bildfilter): Stärke 1 ->
+STROBE_HELLE, STROBE_HZ = 0.35, 7.5  # Helligkeit, Blinken je Sekunde (bei 30 fps: 2 Bilder an, 2 aus)
+KONTRAST, FARBPOP = 0.6, 1.2         # eq contrast bzw. saturation: 1 + Wert·(1−u)²
+BLUR_SIGMA = (14, 6)                 # gblur erst stark, dann schwach (je Hälfte), bei 1080 Breite
+PIXEL = 24                           # Kantenlänge der Pixel-Blöcke bei 1080 Breite
+VIGNETTE = 0.9                       # vignette angle (0 = aus, höchstens π/2), sin-Bogen über die Dauer
 
 # Looks: eq-Werte (1 = neutral, brightness 0 = neutral) und Farbstich (colorcorrect: Verschiebung von Rot-/Blau-Anteil
 # rl/bl in den Schatten, rh/bh in den Lichtern, dazwischen gleitend). Beides rechnet direkt in YUV – curves rechnete
@@ -88,8 +100,19 @@ def zoom_faktor(zooms: list[tuple[str, float, float, float]]) -> str:
     einmal aus, vielleicht mit t = NAN – dann gilt Z = 1 (isnan)."""
     teile = []
     for art, k, d, s in zooms:
-        a, ein, halten = ZOOM_FORM[art]
         k = max(0.0, k)
+        d = max(0.01, d)
+        u = f"(t-{_z(k)})/{_z(d)}"
+        if art == "einzug":      # vergrößert auf dem Schnitt, zieht weich auf
+            teile.append(f"between(t,{_z(k)},{_z(k + d)})*{_z(EINZUG * s)}*pow(1-{u},2)")
+            continue
+        if art == "drift_ein":   # davor 0, danach gehalten – im Griff der nächsten Blende kein Sprung
+            teile.append(f"{_z(DRIFT * s)}*clip({u},0,1)")
+            continue
+        if art == "drift_aus":
+            teile.append(f"{_z(DRIFT * s)}*(1-clip({u},0,1))")
+            continue
+        a, ein, halten = ZOOM_FORM[art]
         aus = max(0.01, d - ein - halten)
         hinein = f"(t-{_z(k)})/{_z(ein)}"
         if halten > 0:
@@ -97,6 +120,21 @@ def zoom_faktor(zooms: list[tuple[str, float, float, float]]) -> str:
         zurueck = f"pow(1-(t-{_z(k + ein + halten)})/{_z(aus)},2)"
         teile.append(f"between(t,{_z(k)},{_z(k + d)})*{_z(a * s)}*min({hinein},{zurueck})")
     return f"if(isnan(t),1,1+{'+'.join(teile)})"
+
+
+def _kippen(tilts: list[tuple[str, float, float, float]]) -> str:
+    """rotate vor dem Hochskalieren (konstante Größe): Σ Fenster · TILT·Stärke · sin(π·u) · (1−u), abwechselnd
+    nach links und rechts. Die Ecken bleiben schwarz, liegen aber außerhalb des Bildes – der Zoom 1,12 (ZOOM_FORM)
+    deckt sie. Leer ohne Tilt."""
+    teile = []
+    for n, (_art, k, d, s) in enumerate(tilts):
+        k, d = max(0.0, k), max(0.01, d)
+        u = f"(t-{_z(k)})/{_z(d)}"
+        teile.append(f"between(t,{_z(k)},{_z(k + d)})*{_z(TILT * s * (1 if n % 2 == 0 else -1))}*sin(PI*{u})*(1-{u})")
+    if not teile:
+        return ""
+    an = "+".join(f"between(t,{_z(max(0.0, k))},{_z(max(0.0, k) + d)})" for _a, k, d, _s in tilts)
+    return f"rotate=a='{'+'.join(teile)}':c=black:enable='{an}',"
 
 
 def _versatz(shakes: list[tuple[str, float, float, float]], achse: str) -> str:
@@ -118,23 +156,82 @@ def zoom(i: int, zooms: list[tuple[str, float, float, float]]) -> str:
     Eingangsgröße vom Einrichten und schnitte dann links oben aus.) overlay arbeitet nur während eines Zooms
     (enable), sonst reicht es das unveränderte Bild ohne Rechenarbeit durch.
     shake (28.09.): das vergrößerte Bild wackelt um die Mitte (_versatz) – ohne Wackeln bleibt die Kette wie vorher."""
-    an = "+".join(f"between(t,{_z(max(0.0, k))},{_z(max(0.0, k) + d)})" for _art, k, d, _s in zooms)
     lage = "(W-w)/2:(H-h)/2"
     if shakes := [z for z in zooms if z[0] == "shake"]:
         lage = f"x='(W-w)/2+{_versatz(shakes, 'x')}':y='(H-h)/2+{_versatz(shakes, 'y')}'"
+    # Drift läuft über das ganze Segment: dann arbeitet overlay immer (kein enable); sonst nur in den Fenstern
+    if any(z[0] in ("drift_ein", "drift_aus") for z in zooms):
+        an = ""
+    else:
+        an = ":enable='" + "+".join(f"between(t,{_z(max(0.0, k))},{_z(max(0.0, k) + d)})"
+                                    for _art, k, d, _s in zooms) + "'"
+    kippen = _kippen([z for z in zooms if z[0] == "tilt"])
     return (f"split=2[zo{i}][zs{i}];"
-            f"[zs{i}]scale=w='2*trunc(iw*{zoom_faktor(zooms)}/2)':h=-2:eval=frame[zg{i}];"
-            f"[zo{i}][zg{i}]overlay={lage}:enable='{an}'")
+            f"[zs{i}]{kippen}scale=w='2*trunc(iw*{zoom_faktor(zooms)}/2)':h=-2:eval=frame[zg{i}];"
+            f"[zo{i}][zg{i}]overlay={lage}{an}")
+
+
+def _fenster_text(ereignisse: list[tuple[str, float, float, float]], teil: tuple[float, float] = (0.0, 1.0)) -> str:
+    """„between(t,a,b)+…“ über die Ereignisse; teil: nur dieser Anteil jeder Dauer (z. B. (0, 0.4) = erste 40 %)."""
+    return "+".join(f"between(t,{_z(max(0.0, k) + d * teil[0])},{_z(max(0.0, k) + d * teil[1])})"
+                    for _a, k, d, _s in ereignisse)
+
+
+def _summe(ereignisse: list[tuple[str, float, float, float]], wert: float, form: str) -> str:
+    """Σ between(t,k,k+d) · wert·Stärke · form mit den Platzhaltern {u} = (t−k)/d und {dt} = (t−k)."""
+    teile = []
+    for _art, k, d, s in ereignisse:
+        k, d = max(0.0, k), max(0.01, d)
+        form_ = form.format(u=f"(t-{_z(k)})/{_z(d)}", dt=f"(t-{_z(k)})")
+        teile.append(f"between(t,{_z(k)},{_z(k + d)})*{_z(wert * s)}*{form_}")
+    return "+".join(teile)
+
+
+def bildfilter(ereignisse: list[tuple[str, float, float, float]], b: int) -> str:
+    """Der Spielbild-Katalog (effekte.BILD) eines Segments als Filterkette – nach dem Zoom, vor dem Look, nur auf dem
+    Spielbild (im Short nie auf dem unscharfen Hintergrund). Jeder Filter arbeitet nur in seinen Fenstern (enable).
+      eq      Blitz (Helligkeit, fällt linear ab), Strobe (Helligkeit an/aus, STROBE_HZ), Kontrast-Punch und Farb-Pop
+              (1 + Wert·(1−u)²) – ein eq mit eval=frame
+      hue     Farbrad: eine volle Umdrehung über die Dauer
+      negate  Negativ-Blitz
+      gblur   Blur-Hit: erste 40 % stark, danach schwach
+      pixelize  Pixel-Hit
+      vignette  Vignetten-Puls (Winkel im sin-Bogen)
+    ereignisse: (Art, Beginn, Dauer, Stärke) in der Zeit des Segment-Eingangs (je_segment). Leer ohne Ereignisse."""
+    art = {name: [e for e in ereignisse if e[0] == name] for name in effekte.BILD}
+    teile = []
+    hell = "+".join(x for x in (_summe(art["flash"], FLASH_HELLE, "(1-{u})"),
+                                _summe(art["strobe"], STROBE_HELLE, "lt(mod({dt}*" + _z(STROBE_HZ) + ",1),0.5)")) if x)
+    eq = []
+    if hell:
+        eq.append(f"brightness='{hell}'")
+    if art["kontrast"]:
+        eq.append(f"contrast='1+{_summe(art['kontrast'], KONTRAST, 'pow(1-{u},2)')}'")
+    if art["farbpop"]:
+        eq.append(f"saturation='1+{_summe(art['farbpop'], FARBPOP, 'pow(1-{u},2)')}'")
+    if eq:
+        wann = art["flash"] + art["strobe"] + art["kontrast"] + art["farbpop"]
+        teile.append(f"eq={':'.join(eq)}:eval=frame:enable='{_fenster_text(wann)}'")
+    if art["hue"]:
+        teile.append(f"hue=h='{_summe(art['hue'], 360, '{u}')}':enable='{_fenster_text(art['hue'])}'")
+    if art["negativ"]:
+        teile.append(f"negate=enable='{_fenster_text(art['negativ'])}'")
+    if art["blur"]:
+        stark_, schwach = (max(1, round(x * b / 1080)) for x in BLUR_SIGMA)
+        teile.append(f"gblur=sigma={stark_}:enable='{_fenster_text(art['blur'], (0.0, 0.4))}'")
+        teile.append(f"gblur=sigma={schwach}:enable='{_fenster_text(art['blur'], (0.4, 1.0))}'")
+    if art["pixel"]:
+        px = max(2, round(PIXEL * b / 1080))
+        teile.append(f"pixelize=w={px}:h={px}:enable='{_fenster_text(art['pixel'])}'")
+    if art["vignette"]:
+        teile.append(f"vignette=angle='{_summe(art['vignette'], VIGNETTE, 'sin(PI*{u})')}':eval=frame:"
+                     f"enable='{_fenster_text(art['vignette'])}'")
+    return ",".join(teile)
 
 
 def flash(flashes: list[tuple[str, float, float, float]]) -> str:
-    """Blitz auf dem Spielbild: eq=brightness je Bild (eval=frame), je Ereignis FLASH_HELLE·Stärke, linear abfallend.
-    Leer ohne Ereignisse."""
-    teile = []
-    for _art, k, d, s in flashes:
-        k = max(0.0, k)
-        teile.append(f"between(t,{_z(k)},{_z(k + d)})*{_z(FLASH_HELLE * s)}*(1-(t-{_z(k)})/{_z(d)})")
-    return f"eq=brightness='{'+'.join(teile)}':eval=frame" if teile else ""
+    """Nur der Blitz (für ältere Aufrufer) – siehe bildfilter."""
+    return bildfilter([("flash", k, d, s) for _a, k, d, s in flashes], 1080)
 
 
 # --- Tempo: Zeitlupe (lupe) und Zeitraffer (raffer) je Segment --------------------------------------------
@@ -337,8 +434,8 @@ def je_segment(liste: dict, ereignisse: list, griffe: list[tuple[float, float]],
 
 
 def zooms_je_segment(liste: dict, ereignisse: list, griffe: list[tuple[float, float]]) -> dict[int, list]:
-    """Zoom-Ereignisse (punch, akzent, meme, shake) je Segment – siehe je_segment."""
-    return je_segment(liste, ereignisse, griffe, effekte.ZOOM)
+    """Zoom- und Drift-Ereignisse je Segment (effekte.ZOOM + effekte.DRIFT) – siehe je_segment."""
+    return je_segment(liste, ereignisse, griffe, effekte.ZOOM + effekte.DRIFT)
 
 
 def look_der_liste(liste: dict) -> str:

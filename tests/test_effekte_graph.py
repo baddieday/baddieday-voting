@@ -181,7 +181,7 @@ class Aufbau(unittest.TestCase):
             g = graph(voll(fmt), musik=True)
             with self.subTest(fmt=fmt):
                 self.assertIsNone(re.search(r"\d[eE][-+]?\d", g))
-                for verboten in ("minterpolate", "lut3d", "colorbalance", "vignette", "vibrance", "zoompan",
+                for verboten in ("minterpolate", "lut3d", "colorbalance", "vibrance", "zoompan",
                                  "custom", "rgbashift", "curves", "fade=t=in:st", ":color=white"):
                     self.assertNotIn(verboten, g)
 
@@ -455,7 +455,7 @@ class Impacts(unittest.TestCase):
         self.assertIn("overlay=x='(W-w)/2+between(t,2.5,2.75)*0.025*W*sin(87.9645*(t-2.5))*pow(1-(t-2.5)/0.25,2)'"
                       ":y='(H-h)/2+between(t,2.5,2.75)*0.02*H*cos(69.115*(t-2.5))*pow(1-(t-2.5)/0.25,2)'"
                       ":enable='between(t,2.5,2.75)',eq=brightness='between(t,1.5,1.62)*0.6*(1-(t-1.5)/0.12)':eval=frame"
-                      "[vgs0]", zoom)
+                      ":enable='between(t,1.5,1.62)'[vgs0]", zoom)
         self.assertNotIn("eq=brightness='between", beginnt_mit(g, "[hg0]"))      # nie auf dem Hintergrund
         self.assertIn("chromashift=cbh=-7:crh=7:enable='between(t,3.5,3.65)'", g)
         self.assertNotIn("noise=", g)                                            # Rauschen nur beim Glitch-Übergang
@@ -464,6 +464,63 @@ class Impacts(unittest.TestCase):
         nur_punch = graph(mini_liste([(q, 1.0, 7.0, ("schnitt", 0.0))], ereignisse=[(1, "punch", 2.0, {"dauer_s": 0.35})]))
         self.assertIn("overlay=(W-w)/2:(H-h)/2:enable=", nur_punch)
         self.assertNotIn("eq=brightness='between", nur_punch)
+
+
+class Katalog2(unittest.TestCase):
+    """Regisseur 2.2: Spielbild-Katalog, Tilt, Einzug, Drift und große Graphen als Datei."""
+
+    def test_katalog_nur_aufs_spielbild_in_fester_reihenfolge(self):
+        q = Path("/x/q.mp4")
+        liste = mini_liste([(q, 1.0, 7.0, ("schnitt", 0.0))], ereignisse=[
+            (1, "negativ", 1.0, {"dauer_s": 0.1}), (1, "blur", 1.5, {"dauer_s": 0.2}),
+            (1, "strobe", 2.0, {"dauer_s": 0.4}), (1, "farbpop", 3.0, {"dauer_s": 0.45}),
+            (1, "hue", 4.0, {"dauer_s": 0.5}), (1, "pixel", 5.0, {"dauer_s": 0.1}),
+            (1, "vignette", 5.5, {"dauer_s": 0.6}), (1, "kontrast", 3.0, {"dauer_s": 0.35})])
+        g = graph(liste)
+        spiel = beginnt_mit(g, "[vg0]")
+        reihenfolge = [spiel.index(f) for f in ("eq=", "hue=h=", "negate=", "gblur=sigma=9:", "gblur=sigma=4:",
+                                               "pixelize=w=16:h=16:", "vignette=angle=")]
+        self.assertEqual(reihenfolge, sorted(reihenfolge))
+        self.assertIn("negate=enable='between(t,1,1.1)'", spiel)
+        self.assertIn("gblur=sigma=9:enable='between(t,1.5,1.58)'", spiel)            # erste 40 % stark
+        self.assertIn("lt(mod((t-2)*7.5,1),0.5)", spiel)                                # Strobe 7,5 Hz
+        self.assertIn("saturation='1+between(t,3,3.45)*1.2*pow(1-(t-3)/0.45,2)'", spiel)
+        self.assertIn("contrast='1+between(t,3,3.35)*0.6*pow(1-(t-3)/0.35,2)'", spiel)
+        for f in ("negate", "gblur", "pixelize", "vignette", "hue="):                     # nie auf dem Hintergrund
+            self.assertNotIn(f, beginnt_mit(g, "[hg0]"))
+
+    def test_tilt_einzug_drift(self):
+        z = effekt_filter.zoom(0, [("einzug", 0.0, 0.35, 1.0), ("drift_aus", 0.0, 6.0, 1.0), ("tilt", 2.0, 0.5, 1.0)])
+        self.assertIn("[zs0]rotate=a='between(t,2,2.5)*0.07*sin(PI*(t-2)/0.5)*(1-(t-2)/0.5)':c=black:"
+                      "enable='between(t,2,2.5)',scale=", z)                                # kippen vor dem Skalieren
+        self.assertIn("between(t,0,0.35)*0.18*pow(1-(t-0)/0.35,2)", z)                     # Einzug
+        self.assertIn("0.06*(1-clip((t-0)/6,0,1))", z)                                     # Drift heraus
+        self.assertTrue(z.endswith("overlay=(W-w)/2:(H-h)/2"))                             # Drift: overlay immer an
+        # Tilt-Ränder: bei jeder Phase deckt der Zoom die gekippten Ecken (16:9, Stärke 1)
+        import math
+        a, ein, halten = effekt_filter.ZOOM_FORM["tilt"]
+        for n in range(51):
+            u = n / 50
+            t = u * 0.5
+            winkel = effekt_filter.TILT * math.sin(math.pi * u) * (1 - u)
+            aus = 0.5 - ein - halten
+            zoom = 1 + a * min(min(t / ein, 1), (1 - (t - ein - halten) / aus) ** 2)
+            self.assertLessEqual(8 * math.sin(winkel) + 4.5 * math.cos(winkel), 4.5 * zoom + 1e-3, u)
+            self.assertLessEqual(8 * math.cos(winkel) + 4.5 * math.sin(winkel), 8 * zoom + 1e-3, u)
+
+    def test_grosser_graph_geht_als_datei(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as ordner:
+            datei = Path(ordner) / "g.txt"
+            self.assertEqual(entwurf._graph_argumente("klein", datei), ["-filter_complex", "klein"])
+            self.assertFalse(datei.exists())
+            with mock.patch.object(entwurf, "MAX_INLINE", 3), \
+                    mock.patch.object(entwurf, "_ffmpeg_hauptversion", return_value=7):
+                self.assertEqual(entwurf._graph_argumente("gross", datei), ["-/filter_complex", str(datei)])
+            self.assertEqual(datei.read_text(encoding="utf-8"), "gross")
+            with mock.patch.object(entwurf, "MAX_INLINE", 3), \
+                    mock.patch.object(entwurf, "_ffmpeg_hauptversion", return_value=6):
+                self.assertEqual(entwurf._graph_argumente("gross", datei), ["-filter_complex_script", str(datei)])
 
 
 class Tempo(unittest.TestCase):

@@ -44,6 +44,25 @@ class Render(MitSpeicher):
         self.assertAlmostEqual(liste["dauer_s"], 3 + 6 - 1 + 0.8)
         self.rendere(liste, "tempo")
 
+    def test_negativ_und_tilt_im_echten_bild(self):
+        # Regisseur 2.2: Negativ kehrt nur das Spielbild um; Tilt kippt es, ohne schwarze Ecken (Zoom 1,12 deckt sie)
+        q = quadrat_video(self.tmp / "q.mp4")
+        liste = mini_liste([(q, 1.0, 5.0, ("schnitt", 0.0))], ereignisse=[
+            (1, "negativ", 1.0, {"dauer_s": 0.1}), (1, "tilt", 2.0, {"dauer_s": 0.5})])
+        video = self.rendere(liste, "katalog")
+        oben, unten = effekt_filter.spielbild(720, 1280)
+        f = {n: x.astype(int) for n, x in bilder(video, [15, 31, 65, 90]).items()}   # 0,5 / 1,03 / 2,17 / 3,0 s
+        spiel = lambda bild: bild[oben + 20:unten - 20, 40:680]   # noqa: E731
+        self.assertGreater(spiel(f[31]).mean() - spiel(f[15]).mean(), 60)             # grau (≈ 70) -> hell (≈ 180)
+        self.assertLess(abs(f[31][: oben - 5].mean() - f[15][: oben - 5].mean()), 3)  # Rand bleibt
+        ecken = [f[65][oben + 2, 2], f[65][oben + 2, 717], f[65][unten - 3, 2], f[65][unten - 3, 717]]
+        self.assertGreater(min(ecken), 40, ecken)                                     # gekippt, aber nie schwarz
+        mitte = (oben + unten) // 2   # Quadrat ≈ 113 px hoch (Zoom 1,12); 90 px auseinander bei ≈ 2,3° -> ≈ 3,6 px
+        weiss_oben = np.nonzero(f[65][mitte - 45] > 150)[0]
+        weiss_unten = np.nonzero(f[65][mitte + 45] > 150)[0]
+        self.assertGreater(abs(weiss_oben.mean() - weiss_unten.mean()), 2.5)           # das Quadrat steht schräg
+        self.assertAlmostEqual(spiel(f[90]).mean(), spiel(f[15]).mean(), delta=3)     # danach wie vorher
+
     def test_flash_hellt_nur_das_spielbild_auf(self):
         # 28.09.: Blitz bei 2,0 s (0,12 s) – das Spielbild wird deutlich heller, der unscharfe Rand bleibt
         q = quadrat_video(self.tmp / "q.mp4")
