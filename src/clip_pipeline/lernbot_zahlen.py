@@ -248,7 +248,7 @@ async def _speichern(app, post_id: int, werte: dict, quelle: str, roh: str | Non
     offenen Vorgang. Die Zeit ist `jetzt()` dieses Moduls (in Tests fest)."""
     con = app.bot_data["con"]
     with db.transaktion(con):
-        publikum.speichere_messung(con, post_id, werte, quelle, roh=roh, zeit=jetzt())
+        publikum.speichere_messung(con, post_id, werte, quelle, roh=roh, zeit=jetzt(), konfig=app.bot_data["konfig"])
     app.bot_data.pop(ZUSTAND, None)
     log.info("Zahlen für Post #%s gespeichert (%s)", post_id, quelle)
     await _sag(app, f"💾 #{post_id} gespeichert ({QUELLEN_NAMEN[quelle]}): {werte_text(werte)}")

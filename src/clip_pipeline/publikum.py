@@ -35,7 +35,7 @@ import sqlite3
 import statistics
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from . import db, shorts
 from .konfig import Konfig, KonfigFehler
@@ -44,7 +44,7 @@ from .zeit import aus_iso, iso, jetzt  # im Modul importiert, damit Tests `publi
 log = logging.getLogger("pipeline")
 
 # Plattformen, für die es Posts geben darf. clip-battle.de ist keine: dort wird eingereicht, nicht geschaut.
-PLATTFORMEN = ("tiktok", "youtube")
+PLATTFORMEN = ("tiktok", "youtube", "instagram")
 # Was ein Post sein kann (Spec §5, CHECK in publikum.sql): ein Einzelclip-Short oder ein Regisseur-Entwurf
 ARTEN = ("clip", "entwurf")
 # So heißen die Arten in Bot-Texten („Entwurf 41“, „Clip 88“) – eine Stelle für beide Lern-Bot-Module
@@ -56,6 +56,9 @@ QUELLEN = ("api", "screenshot", "hand")
 ZAEHLER = ("views", "likes", "kommentare", "shares", "saves")
 # Alle Felder einer Messung in der Reihenfolge des Screenshot-Schemas (schemas/publikum.schema.json)
 FELDER = (*ZAEHLER, "wiedergabe_s", "voll_prozent")
+# Die bisherigen sieben Eingabefelder bleiben für Screenshot und Hand-Eingabe
+# unverändert. Adapter speichern zusätzliche nullable Spalten strukturiert.
+MESSFELDER = (*FELDER, "impressions", "retention_prozent", "follows", "profilaufrufe", "rewatches", "skip_prozent")
 # So heißen die Zähler in Meldungen an dich (so stehen sie auch in der TikTok-Statistik)
 ZAEHLER_NAMEN = {"views": "Views", "likes": "Likes", "kommentare": "Kommentare", "shares": "Shares",
                  "saves": "Saves"}
@@ -243,7 +246,7 @@ def clip_post_daten(con: sqlite3.Connection, konfig: Konfig, clip_id: int) -> di
     # auf Millisekunden gerundet: mehr gibt die Schnittliste auch nicht her, und 22.0 statt 21.999999999
     dauer_s = round(shorts.gesamtdauer(clip_laenge, konfig), 3)
     moment = f"clip:{clip_id}"
-    return {"dauer_s": dauer_s, "rezept": rezept_fuer_clip(dauer_s),
+    return {"dauer_s": dauer_s, "format": "short", "rezept": rezept_fuer_clip(dauer_s),
             "merkmale": {"momente": [{"moment": moment, "clip_id": clip_id,
                                       "merkmale": json.loads(zeile["merkmale"])}],
                          "hook_moment": moment}}
@@ -281,7 +284,8 @@ def entwurf_post_daten(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int)
         momente.append({"moment": segment["moment"], "clip_id": segment.get("clip_id"),
                         "merkmale": _moment_merkmale(con, segment["moment"], segment.get("clip_id"))})
     musik = liste.get("musik")
-    return {"dauer_s": float(liste["dauer_s"]), "rezept": rezept_fuer_entwurf(zeile, liste),
+    return {"dauer_s": float(liste["dauer_s"]), "format": zeile["format"],
+            "schnittliste": liste, "rezept": rezept_fuer_entwurf(zeile, liste),
             "merkmale": {"momente": momente, "hook_moment": momente[0]["moment"] if momente else None,
                          "stimmung": liste.get("stimmung"),
                          "musik": {"titel": musik["titel"], "quelle": musik["quelle"]} if musik else None}}
@@ -297,10 +301,21 @@ def ziel(art: str, ziel_id: int) -> str:
 
 
 def video_id_aus_url(url: str) -> str | None:
-    """Video-ID aus einem TikTok-Link: "https://www.tiktok.com/@name/video/7300123456789" → "7300123456789".
-    Kurzlinks (vm.tiktok.com/…) und YouTube-Links → None (Stufe 4 ordnet dann per Zeit und Dauer zu)."""
+    """Offizielle TikTok- und YouTube-IDs, ohne Weiterleitungen abzurufen.
+
+    Instagram-Shortcodes sind KEINE numerischen Graph-Media-IDs und werden nicht
+    als solche gespeichert. Der Instagram-Import ordnet über die Post-Nummer zu.
+    """
     teile = urlsplit(url.strip())
     host = (teile.hostname or "").lower()
+    if host in ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"):
+        if host == "youtu.be":
+            kandidat = teile.path.strip("/")
+        elif teile.path.startswith(("/shorts/", "/embed/")):
+            kandidat = teile.path.split("/")[2]
+        else:
+            kandidat = parse_qs(teile.query).get("v", [""])[0]
+        return kandidat if re.fullmatch(r"[A-Za-z0-9_-]{11}", kandidat) else None
     if host != "tiktok.com" and not host.endswith(".tiktok.com"):  # www., m. – aber nicht „nichttiktok.com“
         return None
     treffer = TIKTOK_VIDEO_PFAD.match(teile.path)
@@ -334,6 +349,10 @@ def post_anlegen(con: sqlite3.Connection, *, art: str, ziel_id: int, plattform: 
          int(bool(rezept.get("experiment"))), zeitpunkt),
     )
     zeile = con.execute("SELECT id FROM posts WHERE plattform = ? AND ziel = ?", (plattform, schluessel)).fetchone()
+    if cursor.rowcount == 1:
+        from . import autonom
+
+        autonom.snapshot_speichern(con, int(zeile["id"]), daten)
     return int(zeile["id"]), cursor.rowcount == 1
 
 
@@ -465,7 +484,7 @@ def pruefe_plausibel(werte: dict, letzte: sqlite3.Row | dict | None, dauer_s: fl
 
 
 def speichere_messung(con: sqlite3.Connection, post_id: int, werte: dict, quelle: str, *, roh: str | None = None,
-                      zeit: datetime | None = None) -> int:
+                      zeit: datetime | None = None, konfig: Konfig | None = None) -> int:
     """Speichert eine (schon geprüfte oder von dir bestätigte) Messung. quelle: api | screenshot | hand.
     roh: Claude-JSON bzw. API-Antwort als Text (für Nachprüfungen; nie ins Log). Rückgabe: id der Messung.
     ValueError bei unbekannter quelle oder unbekanntem Post. Läuft in der Transaktion des Aufrufers.
@@ -475,13 +494,30 @@ def speichere_messung(con: sqlite3.Connection, post_id: int, werte: dict, quelle
     if post(con, post_id) is None:
         raise ValueError(f"Post #{post_id} gibt es nicht")
     zeitpunkt = iso(zeit or jetzt())
-    spalten = ", ".join(FELDER)
-    platzhalter = ", ".join("?" for _ in FELDER)
+    for feld in MESSFELDER:
+        wert = werte.get(feld)
+        if wert is not None and (isinstance(wert, bool) or not isinstance(wert, (int, float))
+                                 or not math.isfinite(wert) or wert < 0):
+            raise ValueError(f"{feld}: erwartet nichtnegative endliche Zahl oder null")
+    spalten = ", ".join(MESSFELDER)
+    platzhalter = ", ".join("?" for _ in MESSFELDER)
+    # Nur ein identischer Messzeitpunkt ist ein Duplikat. Spätere Messungen dürfen
+    # gleiche Zähler haben: das Messalter gehört zur historischen Beobachtung.
+    alt = con.execute("SELECT * FROM publikum_messungen WHERE post_id=? AND gemessen_utc=? AND quelle=?"
+                      " ORDER BY id DESC LIMIT 1", (post_id, zeitpunkt, quelle)).fetchone()
+    metriken = json.dumps(werte.get("metriken") or {}, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    if alt is not None and all(_feld(alt, f) == werte.get(f) for f in MESSFELDER) and _feld(alt, "metriken") == metriken:
+        return int(alt["id"])
     cursor = con.execute(
-        f"INSERT INTO publikum_messungen (post_id, gemessen_utc, quelle, {spalten}, roh, erstellt)"
-        f" VALUES (?, ?, ?, {platzhalter}, ?, ?)",
-        (post_id, zeitpunkt, quelle, *(werte.get(feld) for feld in FELDER), roh, zeitpunkt),
+        f"INSERT INTO publikum_messungen (post_id, gemessen_utc, quelle, {spalten}, metriken, roh, erstellt)"
+        f" VALUES (?, ?, ?, {platzhalter}, ?, ?, ?)",
+        (post_id, zeitpunkt, quelle, *(werte.get(feld) for feld in MESSFELDER), metriken, roh, zeitpunkt),
     )
+    from . import autonom
+
+    # Neue Publikumsdaten sind der Auslöser, nicht ein weiterer Bewertungs-Klick.
+    # Der Lerner benutzt SAVEPOINTs und funktioniert auch in der Bot-Transaktion.
+    autonom.aktualisieren(con, konfig)
     return int(cursor.lastrowid)
 
 

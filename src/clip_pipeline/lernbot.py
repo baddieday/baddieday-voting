@@ -3,7 +3,7 @@
 Was er tut:
   - nimmt Audiodateien als Musik an: Bildunterschrift = Quellenangabe (Pflicht), "#episch" o. ä. = Stimmung;
     misst Tempo und Energie und antwortet mit dem Ergebnis
-  - schickt Entwürfe (Short/Zusammenschnitt) mit 👍/👎; danach Gründe zum An-/Abwählen:
+  - schickt Entwürfe (Short/Zusammenschnitt) mit direktem Upload-Paket und optionalem 👍/👎-Feedback:
     Musik passt nicht · zu hektisch · Stimmung getroffen · zu lang · abgeschnitten · Clips langweilig ·
     zu viele Effekte · mehr Action (4 Reihen zu je 2 Knöpfen)
   - speichert die Bewertungen (entwurf_bewertungen) – der nächste `compose` lernt daraus (regie_lernen.py)
@@ -26,7 +26,7 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from . import big, db, einstellungen, entwurf, erwartung, musik, regie, regie_lernen, stimmung
+from . import autonom, big, db, einstellungen, entwurf, erwartung, musik, regie, regie_lernen, stimmung
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import iso, jetzt, utc_zu_lokal
@@ -35,13 +35,15 @@ log = logging.getLogger("lern-bot")
 TEXT_MAX = 4000
 FORMAT_NAMEN = {"short": "Short", "zusammenschnitt": "Zusammenschnitt"}
 
-HILFE = """<b>Lern-Bot des Regisseurs</b>
+HILFE = """<b>Autonomes Lernen des Regisseurs</b>
+Veröffentlichte Videos und ihre Publikumszahlen verbessern die nächsten Entwürfe automatisch.
+📦 Upload-Paket direkt am Entwurf öffnen, veröffentlichen und den Link senden. Eine Bewertung ist nicht nötig.
 🎵 <b>Musik schicken:</b> Audiodatei mit Bildunterschrift = Quellenangabe
    (z. B. „Song: Künstler - Titel / Music provided by NoCopyrightSounds / …“), optional <code>#episch</code>,
    <code>#spannend</code>, <code>#lustig</code>, <code>#frustriert</code> oder <code>#chill</code>.
 🎬 /entwurf <code>short</code> oder /entwurf <code>zusammenschnitt</code> – neuen Entwurf bauen
-👍/👎 unter jedem Entwurf, danach Gründe antippen und ✅ fertig. Ohne Grund lernt nur die Moment-Auswahl.
-/musik – Titel · /lernstand – was der Regisseur gelernt hat · /stand – kurzer Stand
+👍/👎 bleiben freiwilliges Zusatzfeedback; danach bei Bedarf Gründe antippen und ✅ fertig.
+/musik – Titel · /lernstand – autonomer Lernfortschritt · /stand – kurzer Stand
 ⚙️ /einstellungen – Clip-Auswahl (alle · neuester Spielabend · ein Match), Vorfilter, Effekte, Musik
 Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 
@@ -58,6 +60,15 @@ KREISE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"
 
 def knoepfe_daumen(eid: int) -> list[list[tuple[str, str]]]:
     return [[("👍", f"d:{eid}:1"), ("👎", f"d:{eid}:-1")]]
+
+
+def knoepfe_entwurf(eid: int, fmt: str) -> list[list[tuple[str, str]]]:
+    """Upload und nächsten Entwurf ohne Bewertungsrunde erreichen."""
+    from . import lernbot_paket
+
+    return [*(lernbot_paket.knoepfe_nach_fertig(eid, None, fmt) or []),
+            [("🎬 Nächster Entwurf", f"k:0:{fmt}"), ("🧠 Lernstand", "k:0:lernstand")],
+            *knoepfe_daumen(eid)]
 
 
 def knoepfe_gruende(eid: int, gewaehlt: list[str]) -> list[list[tuple[str, str]]]:
@@ -146,7 +157,13 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         if a.get("ohne_datei"):
             zeile += f" · {a['ohne_datei']} ohne Datei"
         teile.append(zeile)
-    teile += [z for z in (bewertet_zeile(liste), gelernt_zeile(liste)) if z]
+    auto = (liste.get("parameter") or {}).get("autonom") or {}
+    if auto.get("version"):
+        teile.append(f"🧠 Publikum: Lernstand v{auto['version']} · Vertrauen {round(100 * auto.get('confidence', 0))} %")
+        if exp := auto.get("exploration"):
+            teile.append("🔎 Gezielter Versuch: " + escape(exp["hypothese"]))
+    else:
+        teile += [z for z in (bewertet_zeile(liste), gelernt_zeile(liste)) if z]
     if m:
         teile.append(f"🎵 {escape(m['titel'])} – {escape(m.get('kuenstler') or '?')} ({m.get('bpm') or 0:.0f} BPM)")
     if (fx := liste.get("effekte") or {}).get("an"):  # Regisseur 2.0: Impacts = Ereignisse im Effekt-Plan
@@ -162,8 +179,24 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         gruende = [regie_lernen.GRUENDE[g] for g in json.loads(bewertung["gruende"])]
         teile.append(f"Bewertet: {'👍' if bewertung['daumen'] > 0 else '👎'}" + (" · " + ", ".join(gruende) if gruende else ""))
     else:
-        teile.append("Wie findest du ihn?")
+        teile.append("📦 Bereit zum Veröffentlichen · 👍/👎 optional")
     return "\n".join(teile)[:1000]  # Bildunterschrift: max. 1024 Zeichen
+
+
+def autonom_text(con: sqlite3.Connection) -> str:
+    stand = autonom.ueberblick(con)
+    version = stand.get("version")
+    zeilen = ["🧠 AUTONOMES LERNEN",
+              f"Veröffentlichte Videos: {stand['veroeffentlicht']}",
+              f"Ausgewertete Videos: {stand['ausgewertet']}",
+              f"Aktueller Lernstand: v{version}" if version else "Aktueller Lernstand: Startwissen",
+              f"Vertrauen: {round(100 * stand['confidence'])} %"]
+    if stand.get("erkenntnisse"):
+        zeilen += ["", "Zuletzt gelernt:", *[f"• {e}" for e in stand["erkenntnisse"][:3]]]
+    else:
+        zeilen += ["", "Noch keine belastbare Publikumstendenz. Mit weiteren gemessenen Videos lerne ich dazu."]
+    zeilen += ["", "Bewertungen sind optional. Neue Publikumszahlen lösen das Lernen automatisch aus."]
+    return "\n".join(zeilen)
 
 
 def stand_satz(con: sqlite3.Connection) -> str:
@@ -172,8 +205,8 @@ def stand_satz(con: sqlite3.Connection) -> str:
         "SELECT SUM(CASE WHEN daumen > 0 THEN 1 ELSE 0 END) AS gut, COUNT(*) AS n FROM entwurf_bewertungen").fetchone()
     momente = con.execute("SELECT COUNT(*) FROM momente").fetchone()[0]
     tracks = con.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-    text = (f"📋 Stand: {momente} Momente mit Stimmung, {tracks} Musiktitel, {e['n'] or 0} Entwürfe, "
-            f"davon {daumen['n'] or 0} bewertet ({daumen['gut'] or 0} 👍).")
+    text = (autonom_text(con) + f"\n\n📋 Stand: {momente} Momente mit Stimmung, {tracks} Musiktitel, "
+            f"{e['n'] or 0} Entwürfe. {daumen['n'] or 0} freiwillige Bewertungen als Start- und Zusatzwissen.")
     # B5: Transparenz, was der Auto-Filter schon allein entschieden hat (0, solange [lernbot].auto_schwelle aus ist)
     if auto := con.execute("SELECT COUNT(*) FROM entwuerfe WHERE auto_verworfen IS NOT NULL").fetchone()[0]:
         text += f" {auto} automatisch aussortiert (niedrige Erwartung)."
@@ -278,11 +311,11 @@ def pruefe_auto_verwerfen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: i
     """B5 ([lernbot].auto_schwelle, Florian: „nicht jeden Entwurf bewerten müssen, sagen will ich trotzdem, was
     hochgeladen wird“): None = normal senden, sonst der Grund, warum der Entwurf still aussortiert wird – kein
     Foto an dich, kein Eintrag in entwurf_bewertungen (sonst würde die Erwartung ihr eigenes Urteil bestätigen,
-    statt an deinem gemessen zu werden). Schwelle 0 (Standard) oder ohne Modell (zu wenige Urteile,
-    [erwartung].mindest_urteile) lässt immer durch.
+    statt an deinem gemessen zu werden). Sobald Publikumsevidenz vorhanden ist, entfällt dieser historische
+    Vorfilter. Schwelle 0 (Standard) oder ohne Modell (zu wenige Urteile, [erwartung].mindest_urteile) lässt durch.
     Beispiel: Schwelle 0,5, Erwartung 32 % → "Erwartung 32 % unter Schwelle 50 %"."""
     schwelle = float(konfig.wert("lernbot.auto_schwelle", 0.0))
-    if schwelle <= 0:
+    if schwelle <= 0 or autonom.ueberblick(con)["ausgewertet"] > 0:
         return None
     wahrschein = erwartung.vorhersage(con, konfig, "entwurf", entwurf_id)
     if wahrschein is None or wahrschein >= schwelle:
@@ -351,7 +384,7 @@ async def _sende_entwuerfe(app) -> int:
         with pfad.open("rb") as datei:
             nachricht = await app.bot.send_video(
                 chat_id=chat, video=datei, caption=entwurf_text(z, _liste(z), erwartung=wert), parse_mode="HTML",
-                reply_markup=_markup(knoepfe_daumen(z["id"])), supports_streaming=True,
+                reply_markup=_markup(knoepfe_entwurf(z["id"], z["format"])), supports_streaming=True,
                 read_timeout=300, write_timeout=300, connect_timeout=30,
             )
         con.execute("UPDATE entwuerfe SET status = 'gesendet', tg_nachricht_id = ? WHERE id = ?",
@@ -430,13 +463,7 @@ async def cmd_stand(update, context) -> None:
 
 
 async def cmd_lernstand(update, context) -> None:
-    con, konfig = context.bot_data["con"], context.bot_data["konfig"]
-    # Zusatz wie HILFE_ZUSATZ: der Regie-Lernstand bleibt unverändert, die Trefferquote der Erwartung (Spec §10.5)
-    # kommt dahinter – nur, wenn es schon geurteilte Erwartungen gibt
-    text = regie_lernen.lernstand_text(con, konfig)
-    if zusatz := erwartung.trefferquote_text(con, konfig):
-        text += "\n" + zusatz
-    await update.effective_message.reply_text(text)
+    await update.effective_message.reply_text(autonom_text(context.bot_data["con"]))
 
 
 async def cmd_musik(update, context) -> None:
@@ -612,7 +639,7 @@ async def bei_klick(update, context) -> None:
         bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
         from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
 
-        knoepfe = lernbot_paket.knoepfe_nach_fertig(eid, bewertung, zeile["format"])  # 👍-Short: „📦 Upload-Paket“
+        knoepfe = lernbot_paket.knoepfe_nach_fertig(eid, bewertung, zeile["format"])
         knoepfe = [*(knoepfe or []), *knoepfe_kurzbefehle()]  # 27.09.: Kurzbefehle nach dem Bewerten
         if weiter:  # Lernschleife: sofort der nächste Entwurf, schon mit dieser Bewertung eingerechnet
             context.application.create_task(neuer_entwurf(context.application, zeile["format"]))

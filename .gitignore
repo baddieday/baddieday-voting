@@ -2,6 +2,8 @@
 .env
 *.env
 !.env.example
+publikum-oauth.json
+.publikum-oauth-*.tmp
 windows/uebertragung.psd1
 config/lokal.toml
 

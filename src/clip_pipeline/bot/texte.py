@@ -151,6 +151,9 @@ def highlight_text(h) -> str:
         zeilen.append("Danach „✅ Hochgeladen“ tippen, dann erinnere ich nicht mehr daran.")
     elif h["status"] == "verworfen":
         zeilen.append("🗑️ <b>Verworfen</b> – die Clips sind wieder frei für das nächste Highlight")
+    if "entwurf_id" in h.keys() and h["entwurf_id"]:
+        zeilen.append(f"🧠 Autonomes Lernen: Im Lern-Bot <code>/link {h['entwurf_id']} &lt;Video-URL&gt;</code> "
+                      "schicken. Dort gibt es auch das Upload-Paket ohne Bewertung.")
     return "\n".join(zeilen)
 
 
