@@ -53,14 +53,17 @@ def _konfig(t: Path, quellen: list[str], **werte: str) -> None:
                               + "".join(f"        @{{ {q} }}\n" for q in quellen) + "    )\n}\n", encoding="utf-8")
 
 
-def _starte(t: Path, vorher: str = "") -> subprocess.CompletedProcess:
+def _starte(t: Path, vorher: str = "", *, probelauf: bool = False) -> subprocess.CompletedProcess:
     """Ein Lauf mit t/k.psd1, LOCALAPPDATA im Temp-Ordner, ohne Proxy (der Test-Webhook hört auf 127.0.0.1)."""
     env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
     env["LOCALAPPDATA"] = str(t / "appdata")
     if vorher:
-        befehl = [PWSH, "-NoProfile", "-Command", f"{vorher}& '{SKRIPT}' -Konfig '{t / 'k.psd1'}'; exit $LASTEXITCODE"]
+        probe = " -Probelauf" if probelauf else ""
+        befehl = [PWSH, "-NoProfile", "-Command", f"{vorher}& '{SKRIPT}' -Konfig '{t / 'k.psd1'}'{probe}; exit $LASTEXITCODE"]
     else:
         befehl = [PWSH, "-NoProfile", "-File", str(SKRIPT), "-Konfig", str(t / "k.psd1")]
+        if probelauf:
+            befehl.append("-Probelauf")
     return subprocess.run(befehl, capture_output=True, text=True, env=env, timeout=120)
 
 
@@ -190,6 +193,11 @@ class MatchIdVorErledigt(unittest.TestCase):
                 self.assertEqual(_zeilen(daten / "session.txt"), [REPLAY_ID])
                 self.assertEqual(_zeilen(daten / "uebertragen.tsv"), [])          # nicht als erledigt vermerkt
                 self.assertEqual(webhook.eingang, [])                             # gemeldet wurde noch nicht
+                berichte = [json.loads(p.read_text(encoding="utf-8"))
+                            for p in (t / "ziel" / "sitzungen" / "uebertragung").glob("*.json")]
+                self.assertTrue(berichte)
+                self.assertTrue(all(b["status"] == "abgebrochen" and b["fehler"] == 0 for b in berichte))
+                self.assertTrue(all(b["videos_kopiert"] == 0 for b in berichte))  # Replays sind keine Videos
 
             r = _starte(t)                                    # normaler Lauf: holt die Meldung nach
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -353,7 +361,8 @@ class PcStatus(unittest.TestCase):
                 [(quelle, anzahl, aelteste)] = offen()                            # … aber offen, mit der jungen
                 self.assertEqual((quelle, anzahl), (f"{t}/demos", 2))
                 self.assertLess(abs(aelteste - gesperrt.stat().st_mtime), 1)      # die ÄLTESTE, nicht die letzte
-                self.assertEqual([p.name for p in datei.parent.iterdir()], ["pc-status.json"])   # keine .teil-Reste
+                self.assertEqual({p.name for p in datei.parent.iterdir()}, {"pc-status.json", "uebertragung"})
+                self.assertEqual(list(datei.parent.rglob("*.teil")), [])   # keine halben Berichte
 
                 datei.unlink()                                # Lauf ohne Arbeit fasst das Ziel nicht an
                 self.assertEqual(_starte(t).returncode, 0)    # (hielte sonst pve-big per SMB wach)
@@ -365,6 +374,101 @@ class PcStatus(unittest.TestCase):
             [(quelle, anzahl, aelteste)] = offen()
             self.assertEqual((quelle, anzahl), (f"{t}/demos", 1))
             self.assertLess(abs(aelteste - jung.stat().st_mtime), 1)
+
+
+@unittest.skipIf(PWSH is None, "pwsh fehlt")
+class Uebertragungsberichte(unittest.TestCase):
+    def test_videos_start_ende_wiederholung_und_probelauf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            _ordner(t)
+            for name in ("a.mp4", "b.MKV", "c.mov", "bild.png", "match.replay", "vorhanden.mp4"):
+                datei = t / "demos" / name
+                datei.write_text(name)
+                _alt(datei)
+            (t / "ziel" / "eingang").mkdir()
+            (t / "ziel" / "eingang" / "vorhanden.mp4").write_text("vorhanden.mp4")
+            _konfig(t, ["Pfad = '%s/demos'; Muster = @('*'); Ziel = 'eingang'" % t])
+            lokal = t / "appdata" / "ClipPipeline" / "uebertragung"
+            ziel = t / "ziel" / "sitzungen" / "uebertragung"
+            r = _starte(t, probelauf=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertFalse(lokal.exists())
+            self.assertFalse(ziel.exists())
+            # Vor der ersten tatsächlichen Dateikopie ist der Start bereits im Puffer sichtbar.
+            pruefe_start = (
+                "function global:Copy-Item { param([string]$LiteralPath, [string]$Destination, [switch]$Force)\n"
+                f"  $berichte = @(Get-ChildItem -LiteralPath '{ziel}' -Filter '*.json' -File)\n"
+                "  if ($berichte.Count -ne 1) { throw 'Startbericht fehlt' }\n"
+                "  $b = [IO.File]::ReadAllText($berichte[0].FullName) | ConvertFrom-Json\n"
+                "  if ($b.status -ne 'laeuft' -or $b.ende_utc) { throw 'Start nicht sichtbar' }\n"
+                "  Microsoft.PowerShell.Management\\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force }\n")
+            r = _starte(t, vorher=pruefe_start)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            (datei,) = ziel.glob("*.json")
+            bericht = json.loads(datei.read_text(encoding="utf-8"))
+            self.assertEqual(set(bericht), {"id", "start_utc", "ende_utc", "videos_geplant", "videos_kopiert",
+                                           "dateien_kopiert", "fehler", "status"})
+            self.assertRegex(bericht["id"], r"^[a-f0-9]{32}$")
+            self.assertEqual(datei.stem, bericht["id"])
+            self.assertLessEqual(aus_iso(bericht["start_utc"]), aus_iso(bericht["ende_utc"]))
+            self.assertEqual((bericht["videos_geplant"], bericht["videos_kopiert"], bericht["dateien_kopiert"],
+                              bericht["fehler"], bericht["status"]), (4, 3, 5, 0, "fertig"))
+            self.assertEqual(list(lokal.glob("*.json")), [])
+            self.assertEqual(json.loads((lokal / "gemeldet" / datei.name).read_text(encoding="utf-8")), bericht)
+            stand = {p: p.stat().st_mtime_ns for p in (t / "ziel").rglob("*")}
+            r = _starte(t)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual({p: p.stat().st_mtime_ns for p in (t / "ziel").rglob("*")}, stand)
+            self.assertEqual(list(datei.parent.rglob("*.teil")), [])
+
+    def test_teilfehler_und_abbruch_werden_beim_naechsten_aktiven_lauf_nachgereicht(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            _ordner(t)
+            (t / "andere").mkdir()
+            gut, schlecht = t / "demos" / "a.mp4", t / "andere" / "b.mp4"
+            for datei in (gut, schlecht):
+                datei.write_text("video")
+                _alt(datei)
+            _konfig(t, ["Pfad = '%s/demos'; Muster = @('*.mp4'); Ziel = 'eingang'" % t,
+                        "Pfad = '%s/andere'; Muster = @('*.mp4'); Ziel = 'blockiert'" % t])
+            blockiert = t / "ziel" / "blockiert"
+            blockiert.write_text("kein Ordner")
+            lokal = t / "appdata" / "ClipPipeline" / "uebertragung"
+            ziel = t / "ziel" / "sitzungen" / "uebertragung"
+            r = _starte(t)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            (datei,) = ziel.glob("*.json")
+            fehler = json.loads(datei.read_text(encoding="utf-8"))
+            self.assertEqual((fehler["videos_kopiert"], fehler["dateien_kopiert"], fehler["fehler"], fehler["status"]),
+                             (1, 1, 1, "fehler"))
+            # Zielprüfung scheitert: nur lokal beenden, noch nicht als zugestellt markieren.
+            marke = t / "ziel" / ".clip-speicher"
+            marke.unlink()
+            r = _starte(t)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            (wartend,) = lokal.glob("*.json")
+            abbruch = json.loads(wartend.read_text(encoding="utf-8"))
+            self.assertEqual((abbruch["status"], abbruch["videos_kopiert"], abbruch["fehler"]), ("abgebrochen", 0, 1))
+            _alt(schlecht, 0)  # kein kopierbares Material: ein offener Bericht allein berührt das Ziel nicht
+            stand = {p: p.stat().st_mtime_ns for p in (t / "ziel").rglob("*")}
+            r = _starte(t)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue(wartend.exists())
+            self.assertEqual({p: p.stat().st_mtime_ns for p in (t / "ziel").rglob("*")}, stand)
+            blockiert.unlink()
+            marke.touch()
+            _alt(schlecht)
+            r = _starte(t)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            berichte = [json.loads(p.read_text(encoding="utf-8")) for p in ziel.glob("*.json")]
+            self.assertEqual(len(berichte), 3)
+            self.assertIn(abbruch, berichte)
+            (fertig,) = [b for b in berichte if b["status"] == "fertig"]
+            self.assertEqual((fertig["videos_kopiert"], fertig["dateien_kopiert"]), (1, 1))
+            self.assertEqual(list(lokal.glob("*.json")), [])
+            self.assertEqual(len(list((lokal / "gemeldet").glob("*.json"))), 3)
 
 
 # --- Stolperdraht: Der Gaming-PC startet die Skripte mit Windows PowerShell 5.1 -----------------------------------

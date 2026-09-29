@@ -41,6 +41,7 @@ $statusDatei = Join-Path $datenOrdner 'uebertragen.tsv'
 $meldeDatei = Join-Path $datenOrdner 'zu-melden.txt'
 $gemeldetDatei = Join-Path $datenOrdner 'gemeldet.txt'   # zuletzt an n8n gemeldete Match-IDs (gegen Doppelmeldungen)
 $sessionDatei = Join-Path $datenOrdner 'session.txt'   # Match-IDs seit dem letzten "Session vorbei"
+$berichtOrdner = Join-Path $datenOrdner 'uebertragung'   # Laufberichte bleiben bis zur nächsten aktiven Kopie lokal
 New-Item -ItemType Directory -Force -Path $datenOrdner | Out-Null
 
 function Log([string]$text) {
@@ -109,6 +110,49 @@ function Utc-Text([datetime]$zeit) {
 }
 
 function Datei-Schluessel($datei) { '{0}|{1}|{2}' -f $datei.FullName, $datei.Length, $datei.LastWriteTimeUtc.Ticks }
+
+function Ist-Video([string]$pfad) {
+    return [IO.Path]::GetExtension($pfad).ToLowerInvariant() -in @('.mp4', '.mkv', '.mov')
+}
+
+function Melde-Berichtsfehler([string]$text) {
+    # Auch ein volles/gesperrtes lokales Log darf die eigentliche Übertragung nicht abbrechen.
+    try { Log $text }
+    catch { Write-Warning -Message $text -WarningAction Continue }
+}
+
+function Schreibe-Laufbericht($bericht) {
+    New-Item -ItemType Directory -Force -Path $berichtOrdner | Out-Null
+    $ziel = Join-Path $berichtOrdner ($bericht.id + '.json')
+    $json = $bericht | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText("$ziel.teil", $json, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath "$ziel.teil" -Destination $ziel -Force
+}
+
+function Spiegle-Laufberichte($k) {
+    # Nur bei einem aktiven Kopierlauf und bereits erreichtem Ziel aufrufen; Berichte wecken niemals selbst.
+    if (-not (Test-Path -LiteralPath $berichtOrdner)) { return }
+    foreach ($datei in (Get-ChildItem -LiteralPath $berichtOrdner -Filter '*.json' -File | Sort-Object LastWriteTime)) {
+        if ($datei.BaseName -notmatch '^[a-f0-9]{32}$') { continue }
+        try {
+            $json = [IO.File]::ReadAllText($datei.FullName)
+            $bericht = $json | ConvertFrom-Json
+            $ordner = Join-Path (Join-Path $k.Ziel 'sitzungen') 'uebertragung'
+            New-Item -ItemType Directory -Force -Path $ordner | Out-Null
+            $ziel = Join-Path $ordner $datei.Name
+            [IO.File]::WriteAllText("$ziel.teil", $json, (New-Object System.Text.UTF8Encoding($false)))
+            Move-Item -LiteralPath "$ziel.teil" -Destination $ziel -Force
+            if ($bericht.ende_utc -and $bericht.status -ne 'laeuft') {
+                # Nicht löschen: erfolgreich zugestellte Endstände auf dem PC behalten, aber nicht neu senden.
+                $gemeldetOrdner = Join-Path $berichtOrdner 'gemeldet'
+                New-Item -ItemType Directory -Force -Path $gemeldetOrdner | Out-Null
+                Move-Item -LiteralPath $datei.FullName -Destination (Join-Path $gemeldetOrdner $datei.Name) -Force
+            }
+        } catch {
+            Melde-Berichtsfehler "Übertragungsbericht noch nicht zugestellt: $($_.Exception.Message)"
+        }
+    }
+}
 
 function Datei-Frei([string]$pfad) {
     # Hält noch ein Programm die Datei zum Schreiben offen (Fortnite während des Matches, Rekorder beim Speichern)?
@@ -210,6 +254,8 @@ if (-not $mutex.WaitOne(0)) { Write-Host 'Übertragung läuft bereits.'; exit 0 
 
 $zielErreichbar = $false   # erst dann gibt es eine pc-status.json (Läufe ohne Arbeit fassen das Ziel nicht an)
 $letzterFehler = $null
+$laufbericht = $null
+$laufAbgeschlossen = $false
 try {
     if (-not (Test-Path $Konfig)) { throw "Konfiguration fehlt: $Konfig (Vorlage: uebertragung.beispiel.psd1)" }
     $k = Import-PowerShellDataFile $Konfig
@@ -219,7 +265,7 @@ try {
     if (Test-Path $statusDatei) { Get-Content $statusDatei -Encoding UTF8 | ForEach-Object { [void]$erledigt.Add($_) } }
 
     $grenzeAlt = (Get-Date).AddDays(-[int]$k.MaxAlterTage)
-    $zaehler = @{ kopiert = 0; geloescht = 0; fehler = 0; bytes = 0 }
+    $zaehler = @{ kopiert = 0; videos = 0; geloescht = 0; fehler = 0; bytes = 0 }
     $zuMelden = New-Object 'System.Collections.Generic.List[string]'
     if (Test-Path $meldeDatei) { Get-Content $meldeDatei -Encoding UTF8 | Where-Object { $_ } | ForEach-Object { $zuMelden.Add($_) } }
     # Die letzten 500 gemeldeten IDs reichen: erneut an steht nur, was noch keinen tsv-Eintrag hat
@@ -257,6 +303,15 @@ try {
         Melde-Offene $k $zuMelden   # braucht nur n8n, nicht den Speicher
         exit 0                      # nichts zu kopieren: pve-big NICHT wecken
     }
+    if ($arbeit.Count -gt 0 -and -not $Probelauf) {
+        $laufbericht = [ordered]@{
+            id = [Guid]::NewGuid().ToString('N'); start_utc = Utc-Text (Get-Date); ende_utc = $null
+            videos_geplant = @($arbeit | Where-Object { Ist-Video $_.datei.Name }).Count
+            videos_kopiert = 0; dateien_kopiert = 0; fehler = 0; status = 'laeuft'
+        }
+        try { Schreibe-Laufbericht $laufbericht }
+        catch { Melde-Berichtsfehler "Übertragungsstart noch nicht gespeichert: $($_.Exception.Message)" }
+    }
 
     # --- Ziel erreichbar? Sonst wecken -------------------------------------------
     if ($k.ZielHost -and -not (Port-Offen $k.ZielHost 445)) {
@@ -271,6 +326,10 @@ try {
         throw "Im Ziel $($k.Ziel) fehlt die Datei .clip-speicher – falsches Laufwerk oder nicht verbunden?"
     }
     $zielErreichbar = $true
+    if ($laufbericht) {
+        try { Spiegle-Laufberichte $k }
+        catch { Melde-Berichtsfehler "Übertragungsberichte noch nicht zugestellt: $($_.Exception.Message)" }
+    }
 
     # --- Kopieren --------------------------------------------------------------------
     foreach ($eintrag in $arbeit) {
@@ -285,8 +344,9 @@ try {
                 Copy-Item -LiteralPath $datei.FullName -Destination "$ziel.teil" -Force
                 if ((Get-Item -LiteralPath "$ziel.teil").Length -ne $datei.Length) { throw 'Größe stimmt nicht' }
                 Move-Item -LiteralPath "$ziel.teil" -Destination $ziel -Force
-                (Get-Item -LiteralPath $ziel).LastWriteTimeUtc = $datei.LastWriteTimeUtc
                 $zaehler.kopiert++; $zaehler.bytes += $datei.Length
+                if (Ist-Video $datei.Name) { $zaehler.videos++ }
+                (Get-Item -LiteralPath $ziel).LastWriteTimeUtc = $datei.LastWriteTimeUtc
             }
             # Datei liegt vollständig im Ziel: Match-ID JETZT notieren, erst danach der tsv-Eintrag (Stolperfalle 14)
             if ($q.Melden) { Merke-Match (Session-Id $datei.Name) $k }
@@ -317,6 +377,7 @@ try {
     if ($zaehler.kopiert -or $zaehler.fehler -or $zaehler.geloescht) {
         Log ('kopiert {0} ({1:N0} MB), gelöscht {2}, Fehler {3}' -f $zaehler.kopiert, ($zaehler.bytes / 1MB), $zaehler.geloescht, $zaehler.fehler)
     }
+    $laufAbgeschlossen = $true
     if ($zaehler.fehler) { exit 1 }
 }
 catch {
@@ -326,6 +387,20 @@ catch {
     exit 2
 }
 finally {
+    if ($laufbericht) {
+        $laufbericht.ende_utc = Utc-Text (Get-Date)
+        $laufbericht.videos_kopiert = [int]$zaehler.videos
+        $laufbericht.dateien_kopiert = [int]$zaehler.kopiert
+        $laufbericht.fehler = [int]$zaehler.fehler
+        $laufbericht.status = if (-not $laufAbgeschlossen) { 'abgebrochen' }
+                             elseif ($zaehler.fehler) { 'fehler' } else { 'fertig' }
+        try { Schreibe-Laufbericht $laufbericht }
+        catch { Melde-Berichtsfehler "Übertragungsende noch nicht gespeichert: $($_.Exception.Message)" }
+        if ($zielErreichbar) {
+            try { Spiegle-Laufberichte $k }
+            catch { Melde-Berichtsfehler "Übertragungsberichte noch nicht zugestellt: $($_.Exception.Message)" }
+        }
+    }
     # Läuft auch nach exit 1/2. Nur wenn das Ziel in diesem Lauf erreichbar war – ein Schreibzugriff in Läufen
     # ohne Arbeit hielte pve-big wach (clip-leerlauf zählt Schreiben als Aktivität).
     if ($zielErreichbar -and -not $Probelauf) {

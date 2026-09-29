@@ -10,13 +10,13 @@ import shutil
 import subprocess
 import unittest
 from collections import namedtuple
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest import mock
 
 from clip_pipeline import db, lager, puffer
 from clip_pipeline.konfig import KonfigFehler
-from clip_pipeline.zeit import iso, jetzt, utc_zu_lokal
+from clip_pipeline.zeit import iso, jetzt, lokal_zu_utc, utc_zu_lokal
 
 from tests.test_lager import MitAbgleich
 
@@ -288,17 +288,33 @@ class LagerThema(MitPuffer):
         self.assertIn("noch nie ein Abgleich", self.text(f"puffer:lager:{self.tag()}"))
 
     def test_letzter_lauf_mit_fehlern_nicht_doppelt(self):
-        self.zeit = jetzt()  # der echte Abgleich meldet unter dem heutigen Datum
+        # In UTC noch Vortag: für die Wiederholung zählt der konfigurierte Ortstag.
+        self.zeit = lokal_zu_utc(datetime(2026, 9, 30, 0, 30), "Europe/Berlin")
         self.datei(self.puffer, "eingang/b.mp4", b"y")
-        with mock.patch.object(lager, "kopiere_geprueft", side_effect=PermissionError("nein")):
+        with mock.patch.object(lager, "kopiere_geprueft", side_effect=PermissionError("nein")), \
+                mock.patch.object(lager, "jetzt", return_value=self.zeit):
             self.assertEqual(self.lauf("lager", "abgleich")[0], 1)
         self.geweckt.clear()
-        self.assertTrue(self.text(f"lager:{self.tag()}"))  # der Abgleich hat sich schon selbst gemeldet
-        ohne_woche = lambda neu: [s for s in neu if not s.startswith("puffer:woche:")]  # heute evtl. Montag
-        self.assertEqual(ohne_woche(self.pruefe()), [])  # … die Morgenprüfung wiederholt es nicht
-        self.con.execute("DELETE FROM meldungen")
-        self.assertEqual(ohne_woche(self.pruefe()), [f"puffer:lager:{self.tag()}"])
+        lauf = self.con.execute("SELECT id FROM lager_laeufe ORDER BY id DESC LIMIT 1").fetchone()[0]
+        ende = f"uebertragung:lager:{lauf}:ende"
+        self.assertTrue(self.text(ende))  # der Abgleich hat sich schon selbst gemeldet
+        self.assertEqual(self.pruefe(), [])  # … die Morgenprüfung wiederholt es heute nicht
+        morgen = self.zeit + timedelta(days=1)
+        self.assertEqual(self.pruefe(morgen), [f"puffer:lager:{self.tag(morgen)}"])
+
+        # Ohne Abschluss (Start allein reicht nicht) bleibt die Warnung notwendig.
+        self.con.execute("DELETE FROM meldungen WHERE schluessel = ?", (ende,))
+        self.assertTrue(self.text(f"uebertragung:lager:{lauf}:start"))
+        self.assertEqual(self.pruefe(), [f"puffer:lager:{self.tag()}"])
         self.assertIn("nicht ins Lager gekommen", self.text(f"puffer:lager:{self.tag()}"))
+        self.con.execute("DELETE FROM meldungen WHERE schluessel = ?", (f"puffer:lager:{self.tag()}",))
+        db.meldung(self.con, ende, "Abschluss")
+        # Ein neuerer Fehlerlauf ohne eigene Abschlussmeldung wird nicht vom vorherigen verdeckt.
+        self.lauf_eintragen(0, ok=False, fehler=2)
+        self.assertEqual(self.pruefe(), [f"puffer:lager:{self.tag()}"])
+        self.con.execute("DELETE FROM meldungen WHERE schluessel = ?", (f"puffer:lager:{self.tag()}",))
+        db.meldung(self.con, f"lager:{self.tag()}", "Alte Tageswarnung")
+        self.assertEqual(self.pruefe(), [])  # vorhandene Meldungen älterer Versionen gelten weiter
 
     def test_puffer_pruefung_fehlgeschlagen(self):
         (self.puffer / ".clip-puffer").unlink()
@@ -310,10 +326,15 @@ class LagerThema(MitPuffer):
     def test_konflikt_meldung_verschluckt_puffer_pruefung_nicht(self):
         """Hat der Abgleich heute nur Rohdaten-Konflikte gemeldet, kommt eine danach fehlgeschlagene Puffer-Prüfung
         trotzdem gleich – nicht erst mit dem nächsten Abgleich."""
-        db.meldung(self.con, f"lager:{self.tag()}", "🗄️ Lager-Abgleich: 1 Rohdatei(en) lagen im Lager schon …")
+        self.lauf_eintragen(0)
+        lauf = self.con.execute("SELECT id FROM lager_laeufe ORDER BY id DESC LIMIT 1").fetchone()[0]
         (self.puffer / ".clip-puffer").unlink()
-        self.assertEqual(self.pruefe(), [f"puffer:lager:{self.tag()}"])
-        self.assertIn("Puffer-Prüfung fehlgeschlagen", self.text(f"puffer:lager:{self.tag()}"))
+        for schluessel in (f"lager:{self.tag()}", f"uebertragung:lager:{lauf}:ende"):
+            with self.subTest(schluessel=schluessel):
+                self.con.execute("DELETE FROM meldungen")
+                db.meldung(self.con, schluessel, "🗄️ Lager-Abgleich: Rohdaten-Konflikt als neue Fassung gesichert")
+                self.assertEqual(self.pruefe(), [f"puffer:lager:{self.tag()}"])
+                self.assertIn("Puffer-Prüfung fehlgeschlagen", self.text(f"puffer:lager:{self.tag()}"))
 
     def test_puffer_pruefung_nicht_doppelt(self):
         """Ist der Abgleich heute an derselben Puffer-Prüfung gescheitert, hat er es schon selbst gemeldet."""
