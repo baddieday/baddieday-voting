@@ -18,7 +18,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
 
-from .. import caption, db, erwartung, highlight, lernen, merkmale, publikum, shorts
+from .. import caption, db, erwartung, highlight, lernen, merkmale, publikum, shorts, uebertragung
 from ..konfig import Konfig, SpeicherOffline
 from ..medien import MedienFehler
 from ..zeit import aus_iso, iso, jetzt
@@ -75,9 +75,15 @@ async def sende_meldungen(app: Application) -> int:
     """Kurze Hinweise (z. B. Kills ohne Aufnahme) – brauchen keinen Speicher, gehen also immer.
     Meldungen aus Puffer/Lager (Morgenprüfung, Abgleich) warten die Ruhezeit ab ([telegram].leise_von/leise_bis)."""
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
+    try:
+        uebertragung.hole_meldungen(con, konfig)
+    except Exception:
+        # Ein kaputter/unzugänglicher PC-Bericht darf die übrige Outbox nicht blockieren.
+        log.exception("Übertragungsberichte konnten nicht eingelesen werden")
     gesendet = 0
     for m in aktionen.faellige_meldungen(con, konfig):
-        await app.bot.send_message(chat, m["text"])
+        optionen = {"disable_notification": aktionen.ruhezeit(konfig)} if m["schluessel"].startswith("uebertragung:") else {}
+        await app.bot.send_message(chat, m["text"], **optionen)
         con.execute("UPDATE meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
         gesendet += 1
     return gesendet
