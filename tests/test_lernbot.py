@@ -131,6 +131,24 @@ class LernBot(MitRegieMaterial):
         q = self.klick(f"g:{eid}:nix")                    # unbekannter Grund: klare Antwort statt Absturz
         self.assertEqual(q.antworten, ["Unbekannter Knopf."])
 
+    def test_clip_auswahl_ein_match(self):
+        # 29.09. (⚙️ Einstellungen): nur Momente aus dem gewählten Match; der Hinweis steht vorn im Entwurf
+        from clip_pipeline import einstellungen
+        from clip_pipeline.zeit import iso, jetzt
+
+        self.momente_anlegen(MOMENTE[:8])
+        self.musik_anlegen(150, "episch")
+        for n in range(1, 5):
+            self.con.execute("""INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, erstellt, geaendert)
+                                VALUES (?, ?, ?, ?, ?, ?)""", (f"m{n}", f"/r/m{n}.replay", f"2026-09-28T1{n}:00:00Z",
+                                                               f"2026-09-28T1{n}:20:00Z", iso(jetzt()), iso(jetzt())))
+        einstellungen.setze(self.con, "lernbot.quelle", "match:m2")
+        eid = lernbot.baue_entwurf(self.konfig, "short")
+        liste = json.loads(Path(self.con.execute("SELECT schnittliste FROM entwuerfe WHERE id = ?",
+                                                 (eid,)).fetchone()[0]).read_text(encoding="utf-8"))
+        self.assertEqual({s["moment"] for s in liste["segmente"]}, {"datei:2", "datei:5"})   # die beiden aus m2
+        self.assertTrue(liste["hinweise"][0].startswith("🎯 nur Match"), liste["hinweise"])
+
     def test_entwurf_senden_und_bewerten(self):
         self.momente_anlegen(MOMENTE[:8])
         track = self.musik_anlegen(150, "episch")
