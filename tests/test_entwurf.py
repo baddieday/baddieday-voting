@@ -46,9 +46,9 @@ class Entwurf(MitRegieMaterial):
         self.musik_anlegen(150, "episch")
         self.musik_anlegen(128, "spannend")
         liste = self.pruefe("short", [720, 1280])
-        self.assertTrue(30 <= liste["dauer_s"] <= 45)
+        self.assertTrue(30 <= liste["dauer_s"] <= 75)
         liste = self.pruefe("zusammenschnitt", [1280, 720])
-        self.assertTrue(180 <= liste["dauer_s"] <= 300)
+        self.assertTrue(75 <= liste["dauer_s"] <= 120)
         self.assertTrue(any(s["uebergang"]["art"] != "schnitt" for s in liste["segmente"]))
 
     def test_final_auftrag_schreibt_pfade_fuer_pve_big(self):
@@ -119,10 +119,7 @@ class Messen(MitRegieMaterial):
 
         self.momente_anlegen(MOMENTE[:6])
         e = regie.erstelle(self.con, self.konfig, "short")
-        schnittliste = Path(e["datei"])
-        liste = json.loads(schnittliste.read_text())
-        liste["segmente"] = liste["segmente"][:2]  # kurz halten: zwei Segmente reichen zum Messen
-        schnittliste.write_text(json.dumps(liste))
+        # Vollständigen gültigen Short messen; eine gekappte Segmentliste hätte eine falsche Gesamtdauer.
         dateien = sorted(regie.ordner(self.konfig).rglob("*"))
         tabelle = [tuple(z) for z in self.con.execute("SELECT * FROM entwuerfe")]
         ausgabe = io.StringIO()

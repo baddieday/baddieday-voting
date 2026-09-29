@@ -42,6 +42,12 @@ MIGRATIONEN += [("tracks", "genre", "TEXT")]
 # auto_schwelle), NULL = normal. Eigene Spalte statt neuem Status – die CHECK-Liste von entwuerfe.status ließe
 # sich nur mit Tabellen-Umbau ändern (wie schon bei highlights.hochgeladen).
 MIGRATIONEN += [("entwuerfe", "auto_verworfen", "TEXT")]
+MIGRATIONEN += [("highlights", "entwurf_id", "INTEGER")]
+
+# Additiv: historische Messungen und Bewertungen bleiben unverändert erhalten.
+MIGRATIONEN += [("publikum_messungen", name, typ) for name, typ in (
+    ("impressions", "INTEGER"), ("retention_prozent", "REAL"), ("follows", "INTEGER"),
+    ("profilaufrufe", "INTEGER"), ("rewatches", "INTEGER"), ("skip_prozent", "REAL"), ("metriken", "TEXT"))]
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)

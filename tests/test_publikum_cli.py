@@ -108,6 +108,8 @@ class CliBewerten(MitBewertung):
     def test_ohne_posts(self):
         code, ergebnis, _ = self.lauf()
         self.assertEqual(code, 0)
+        self.assertEqual(ergebnis.pop("api")["gespeichert"], 0)
+        self.assertEqual(ergebnis.pop("autonom"), {"geaendert": False, "version": 0})
         self.assertEqual(ergebnis, {"bewertet": 0, "ohne_messung": 0, "noch_zu_jung": 0, "fehler": 0, "posts": [],
                                     "meldung": False})
 
@@ -196,7 +198,7 @@ class NieWecken(MitBewertung):
             text = lernbot_publikum.publikum_text(self.con, self.konfig, zeit=tag(8))
             lernbot_publikum.faellige_lern_meldungen(self.con, self.konfig, tag(8))
         self.assertEqual(code, 0, aus.getvalue())
-        self.assertIn("Score 0", text)
+        self.assertIn("Publikumsscore", text)
         wol.assert_not_called()
         wach.assert_not_called()
         herz.assert_not_called()
@@ -330,6 +332,8 @@ class PublikumText(MitBewertung):
                                      zeit=gepostet)[0]
 
     def setze_score(self, post_id: int, score: float, **teile) -> None:
+        # Diese Fixtures bilden historische Wochen-Scores vor der autonomen Migration ab.
+        self.con.execute("DELETE FROM audience_ergebnisse WHERE post_id=?", (post_id,))
         self.con.execute("UPDATE posts SET score = ?, score_teile = ?, bewertet_utc = ? WHERE id = ?",
                          (score, json.dumps(teile), iso(self.JETZT), post_id))
 
@@ -354,13 +358,15 @@ class PublikumText(MitBewertung):
         neu = self.entwurf_post(41, self.JETZT - timedelta(days=4, hours=2))
         self.messung(neu, self.JETZT - timedelta(hours=1), views=1240, likes=61, wiedergabe_s=6.8)  # Alter 4 d 1 h
         zeilen = self.text()
-        self.assertEqual(zeilen[0], "📊 Publikum · 3 Posts, 1 mit Score (neueste zuerst)")
-        self.assertEqual(zeilen[1], f"#{neu} TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s (Tag 4) · "
-                                    "Score noch offen (ab 7 Tagen)")
-        self.assertEqual(zeilen[2], f"#{ohne_zahlen} TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Screenshot mit "
-                                    f"#{ohne_zahlen} schicken · Score offen (braucht eine Messung ab Tag 3 mit Views)")
-        self.assertEqual(zeilen[3], f"#{alt} TikTok · Clip 88 · 9 Tage · 👁 5 000 ❤️ 300 ⏱ 12 s (Tag 7) · "
-                                    "Score +0,8 (Wiedergabe über, Reaktionen je View unter, Views über deinem Median)")
+        self.assertEqual(zeilen[0], "📊 Publikum · 3 Posts, 2 mit Score (neueste zuerst)")
+        self.assertTrue(zeilen[1].startswith(f"#{neu} TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s (Tag 4) · "))
+        self.assertIn("Publikumsscore", zeilen[1])
+        self.assertIn("Vertrauen", zeilen[1])
+        self.assertNotIn("ab 7 Tagen", zeilen[1])
+        self.assertEqual(zeilen[2], f"#{ohne_zahlen} TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Plattformzugang "
+                                    f"oder optional Screenshot mit #{ohne_zahlen} · Score offen (braucht eine Messung ab Tag 3 mit Views)")
+        self.assertIn(f"#{alt} TikTok · Clip 88", zeilen[3])
+        self.assertIn("Publikumsscore", zeilen[3])  # spätere Messung hat auch ältere Posts autonom nachgetragen
         self.assertEqual(zeilen[-1], "🤖 Claude diese Woche: 0 Aufrufe")
 
     def test_youtube_heisst_wie_im_knopf_und_in_der_checkliste(self):
@@ -371,7 +377,7 @@ class PublikumText(MitBewertung):
         publikum.post_anlegen(self.con, art="entwurf", ziel_id=41, plattform="youtube", daten=daten,
                               zeit=self.JETZT - timedelta(days=1))
         self.assertTrue(self.text()[1].endswith(f"{aktionen.PLATTFORM_NAMEN['youtube']} · Entwurf 41 · 1 Tag · "
-                                                "noch keine Zahlen – Screenshot mit #1 schicken · "
+                                                "noch keine Zahlen – Plattformzugang oder optional Screenshot mit #1 · "
                                                 "Score noch offen (ab 7 Tagen)"), self.text()[1])
 
     def test_ganz_angesehen_mit_eigenem_zeichen(self):

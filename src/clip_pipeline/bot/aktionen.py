@@ -35,8 +35,8 @@ class Antwort:
     knoepfe: Knoepfe | None = None  # None = Knöpfe unverändert lassen
 
 
-PLATTFORM_KUERZEL = {"y": "youtube", "t": "tiktok", "c": "clipbattle"}
-PLATTFORM_NAMEN = {"youtube": "YouTube Shorts", "tiktok": "TikTok", "clipbattle": "clip-battle.de"}
+PLATTFORM_KUERZEL = {"y": "youtube", "t": "tiktok", "i": "instagram", "c": "clipbattle"}
+PLATTFORM_NAMEN = {"youtube": "YouTube Shorts", "tiktok": "TikTok", "instagram": "Instagram Reels", "clipbattle": "clip-battle.de"}
 
 
 def parse(daten: str) -> tuple[str, int, str]:
@@ -333,6 +333,7 @@ def _nicht_abgehakt(clip_id: int, plattform: str, fehler: Exception) -> Antwort:
 PLATTFORM_DOMAINS = {
     "youtube": ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"),
     "tiktok": ("tiktok.com", "www.tiktok.com", "vm.tiktok.com", "m.tiktok.com"),
+    "instagram": ("instagram.com", "www.instagram.com", "m.instagram.com"),
     "clipbattle": ("clip-battle.de", "www.clip-battle.de"),
 }
 

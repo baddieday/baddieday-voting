@@ -96,7 +96,7 @@ class LernBot(MitRegieMaterial):
         update = SimpleNamespace(callback_query=q, effective_message=q.message)
         asyncio.run(lernbot.bei_kurzknopf(update, self.context))
         self.assertEqual(q.antworten, [None])                                   # Spinner sofort weg
-        self.assertTrue(gesendet[0].startswith("🧠 Regie"))
+        self.assertTrue(gesendet[0].startswith("🧠 AUTONOMES LERNEN"))
         q = FakeQuery("k:0:zusammenschnitt")
         asyncio.run(lernbot.bei_kurzknopf(SimpleNamespace(callback_query=q, effective_message=None), self.context))
         self.assertEqual((q.antworten, len(self.aufgaben)), (["🎬 Zusammenschnitt kommt …"], 1))
@@ -136,7 +136,10 @@ class LernBot(MitRegieMaterial):
         from clip_pipeline import einstellungen
         from clip_pipeline.zeit import iso, jetzt
 
-        self.momente_anlegen(MOMENTE[:8])
+        # Genug Material innerhalb des gewählten Matches für einen zulässigen Short;
+        # die beiden fremden Momente dürfen trotz ihrer vorhandenen Dateien nicht hineinkommen.
+        self.momente_anlegen([(stimmung, serie, kills, "m2" if i < 6 else match)
+                              for i, (stimmung, serie, kills, match) in enumerate(MOMENTE[:8])])
         self.musik_anlegen(150, "episch")
         for n in range(1, 5):
             self.con.execute("""INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, erstellt, geaendert)
@@ -146,7 +149,11 @@ class LernBot(MitRegieMaterial):
         eid = lernbot.baue_entwurf(self.konfig, "short")
         liste = json.loads(Path(self.con.execute("SELECT schnittliste FROM entwuerfe WHERE id = ?",
                                                  (eid,)).fetchone()[0]).read_text(encoding="utf-8"))
-        self.assertEqual({s["moment"] for s in liste["segmente"]}, {"datei:2", "datei:5"})   # die beiden aus m2
+        ausgewaehlt = {s["moment"] for s in liste["segmente"]}
+        self.assertTrue(ausgewaehlt <= {f"datei:{i}" for i in range(1, 7)}, ausgewaehlt)
+        self.assertGreaterEqual(len(ausgewaehlt), 4)
+        self.assertGreaterEqual(liste["dauer_s"], 30)
+        self.assertLessEqual(liste["dauer_s"], 75)
         self.assertTrue(liste["hinweise"][0].startswith("🎯 nur Match"), liste["hinweise"])
 
     def test_entwurf_senden_und_bewerten(self):
@@ -160,7 +167,7 @@ class LernBot(MitRegieMaterial):
         self.assertIn(f"Entwurf #{eid}", video["caption"])
         self.assertIn("🆕 ", video["caption"])  # wie viele Momente neu sind
         daten = [b.callback_data for reihe in video["reply_markup"].inline_keyboard for b in reihe]
-        self.assertEqual(daten, [f"d:{eid}:1", f"d:{eid}:-1"])
+        self.assertEqual(daten, [f"pk:{eid}:", "k:0:short", "k:0:lernstand", f"d:{eid}:1", f"d:{eid}:-1"])
 
         self.assertEqual(self.klick(f"d:{eid}:-1", von=7).antworten, ["Nicht erlaubt."])  # fremde Person
         q = self.klick(f"d:{eid}:-1")
@@ -172,7 +179,7 @@ class LernBot(MitRegieMaterial):
         self.klick(f"g:{eid}:hektisch")  # abwählen
         q = self.klick(f"x:{eid}:")
         nach_fertig = [b.callback_data for reihe in q.bearbeitet[0]["reply_markup"].inline_keyboard for b in reihe]
-        self.assertEqual(nach_fertig, [d for reihe in lernbot.knoepfe_kurzbefehle() for _, d in reihe])  # nur Kurzbefehle
+        self.assertEqual(nach_fertig, [f"pk:{eid}:", *[d for reihe in lernbot.knoepfe_kurzbefehle() for _, d in reihe]])
         self.assertIn("Musik passt nicht", q.bearbeitet[0]["caption"])
         zeile = self.con.execute("SELECT * FROM entwurf_bewertungen").fetchone()
         self.assertEqual((zeile["daumen"], json.loads(zeile["gruende"])), (-1, ["musik"]))
@@ -484,8 +491,8 @@ class ErwartungImLernBot(MitErwartung):
 
         update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
         asyncio.run(lernbot.cmd_lernstand(update, self.context))
-        self.assertTrue(antworten[0].startswith(regie_lernen.lernstand_text(self.con, self.konfig)))
-        self.assertTrue(antworten[0].endswith("\nErwartung getroffen: Entwürfe 1/1 (100 %)"))
+        self.assertTrue(antworten[0].startswith("🧠 AUTONOMES LERNEN"))
+        self.assertIn("Bewertungen sind optional", antworten[0])
 
     def test_lernstand_ohne_quote_unveraendert(self):
         antworten = []
@@ -495,7 +502,7 @@ class ErwartungImLernBot(MitErwartung):
 
         update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
         asyncio.run(lernbot.cmd_lernstand(update, self.context))
-        self.assertEqual(antworten, [regie_lernen.lernstand_text(self.con, self.konfig)])
+        self.assertEqual(antworten, [lernbot.autonom_text(self.con)])
 
 
 @unittest.skipIf(lernbot is None, "python-telegram-bot fehlt")

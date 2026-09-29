@@ -509,9 +509,15 @@ class Schnitt(MitPuffer):
 
     def test_compose_short_mit_teilen(self):
         nachschnitt.nachschneiden(self.con, self.konfig, tage=14)
+        # Der nachgeschnittene Wipe allein ist kein vollständiger Short (11,7 s); weitere Momente füllen ihn.
+        for n in range(3):
+            cid = self.clip(sitzung=f"zusatz-{n}", bot_clip=self.bot_clip)
+            self.con.execute("UPDATE momente SET merkmale = ? WHERE clip_id = ?",
+                             (json.dumps({**MERKMALE, "kill_sekunden": [3.0, 6.0, 9.0]}), cid))
         e = regie.erstelle(self.con, self.konfig, "short")
         liste = json.loads(Path(e["datei"]).read_text(encoding="utf-8"))
         self.assertEqual(regie.pruefe_liste(liste), [])
+        self.assertTrue(30 <= liste["dauer_s"] <= 75)
         teile = [s for s in liste["segmente"] if s["moment"] == f"clip:{self.cid}"]
         self.assertEqual([s["teil"] for s in teile], [1, 2])  # erstes Umhauen … Lücke … Wipe
         self.assertEqual({s["datei"] for s in teile}, {str(self.ziel(self.cid))})

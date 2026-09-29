@@ -632,3 +632,13 @@ Stand beim Vertrag (25.09.). Die Bauer-Annahmen und die Befunde des Panels komme
 - **Stimmen (26.09.):** Bewertung mit allen Stimmen; im Upload Mikro/Chat (ab Spur 1) nur bei Lachen, Jubel,
   lauten Mikro-Spitzen oder Stimmung „lustig“. Annahme: ohne Mic-Analyse (nichts bekannt) → nur Spielton;
   schon gerenderte Shorts (`short_pfad`) werden nicht neu gerendert.
+
+### Autonomes Publikumslernen (29.09.2026)
+
+- Neue Bewertungen sind optional; Upload, nächste Planung und Lernen benötigen keinen Daumen.
+- Publikum trainiert einen getrennten, versionierten Regie-Champion. Historische Bewertungen bleiben als
+  schrumpfender Prior erhalten. Ganze Videogruppen werden zeitlich getrennt geprüft; mehrere Messungen sind
+  keine zusätzlichen Videos. Cold-Start-Exploration liefert auch vor dem ersten Champion neue Varianten.
+- Short 30–75 s (Startziel mindestens 45 s), Zusammenschnitt 75–120 s gelten in Planung und vollständigem Render.
+- Plattformzugänge müssen autorisiert sein. TikTok/YouTube werden abgeholt, Instagram wird importiert;
+  fehlende API-Metriken bleiben unbekannt. Details und Grenzen: `AUTONOMES_LERNEN.md`.

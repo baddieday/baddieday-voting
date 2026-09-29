@@ -1,8 +1,21 @@
 # Clip-Pipeline
 
-Fortnite-Aufnahmen → automatisch gefundene und vorbewertete Highlights → Bewertung per Telegram
-(Freigeben/Verwerfen, Battles mit Elo) → Shorts mit Werbung für **clip-battle.de** → Upload auf
-YouTube Shorts **und** TikTok → alle 2 Wochen ein Highlight-Video. Die Vorbewertung lernt aus deinen Entscheidungen.
+Fortnite-Aufnahmen → automatisch gefundene Highlights → Shorts und Zusammenschnitte mit Werbung für
+**clip-battle.de** → veröffentlichen → echte Publikumszahlen → automatisch bessere nächste Entwürfe.
+Manuelle Bewertungen und Battles bleiben freiwilliges Zusatzwissen; neue Bewertungen sind fürs Lernen nicht nötig.
+
+## Autonomes Lernen
+
+Im Lern-Bot einen **Short (30–75 s, zunächst bevorzugt 45–75 s)** oder **Zusammenschnitt (75–120 s)** erstellen,
+direkt **📦 Upload-Paket** öffnen und veröffentlichen. Danach `/link <entwurf> <url>` schicken. Ein 👍 ist weder
+für das Paket noch den Post nötig. `/lernstand` und `/stand` zeigen veröffentlichte und ausgewertete Videos,
+Lernversion, Vertrauen und aktuelle Tendenzen.
+
+Neue Messungen aktualisieren das Modell automatisch. Mit eingerichtetem Zugang holt der tägliche vorhandene
+`clip-publikum`-Dienst TikTok- und YouTube-Zahlen ab. TikTok Display liefert nur einen Teil der Kennzahlen;
+unbekannte Watchtime bleibt unbekannt. Instagram ist zunächst über den normalisierten Messungsimport angebunden.
+Screenshots und Eingaben bleiben eine Ergänzung. Ohne Plattformzugang oder Import kommen keine Zahlen von selbst.
+Einrichtung, Grenzen und Datenmodell: [Autonomes Lernen](docs/AUTONOMES_LERNEN.md).
 
 ## So läuft ein Abend ab
 
@@ -18,32 +31,33 @@ YouTube Shorts **und** TikTok → alle 2 Wochen ein Highlight-Video. Die Vorbewe
    - `decide` – `claude -p` justiert Schnitt und Beschreibung; Prüfung gegen Schema und Kill-Fakten,
      sonst Regel-Vorschlag → `schnittliste.json`
    - `render` – framegenau schneiden (feste Bildrate für CapCut), Lautstärke messen, Punkte, Vorschau < 50 MB
-4. Der Telegram-Bot schickt dir jeden Clip: **✅ Freigeben / 🗑️ Verwerfen** – ab 10 Urteilen mit der Zeile
-   „Erwartung: ✅ 78 %“ (was der Bot erwartet, festgeschrieben beim Senden).
+4. Der Clip-Bot bietet weiter **✅ Freigeben / 🗑️ Verwerfen** und Battles für freiwilliges Feedback an.
+   Der Regisseur erstellt Entwürfe auch ohne neue Einzelbewertungen.
 5. **Einzelne Momente werden nicht hochgeladen** (26.09.) – Freigaben dienen Bewertung, Lernen und dem
    Highlight-Video. Hochgeladen werden die Shorts aus dem Lern-Bot und das Highlight-Video (Erinnerung täglich,
    bis du am Video „✅ Hochgeladen“ tippst). Für Ausnahmen gibt es noch `/paket <nr>` und `/link <nr> <url>`.
-6. `/battle`: zwei freigegebene Clips, du wählst den besseren → Elo. Freigaben, Battles und die Publikums-Scores
-   der Posts justieren die Gewichte der Vorbewertung (`/gewichte` zeigt beide Sortier-Quoten: du und Publikum).
-7. Alle 14 Tage: `highlight` baut ein Video aus den besten Clips (Überblendungen, lizenzierte Musik mit Ducking)
-   und schickt eine Vorschau zur **Freigabe in den Bot**. Im Puffer-Betrieb (E19) arbeitet `highlight` nur im
-   Puffer – pve-big wird dafür nicht geweckt.
+6. Das Publikum liefert das Hauptsignal: Performance speichern → automatisch lernen → nächsten Entwurf planen.
+   Historische Freigaben und Battles bleiben erhalten und verlieren mit mehr Publikumsdaten relativ an Gewicht.
+7. Alle 14 Tage: `highlight` verwendet den gemeinsamen Regisseur für einen Zusammenschnitt (75–120 s),
+   einschließlich autonomer Parameter und verknüpftem Entwurf. Der Lern-Bot bietet dafür direkt das Upload-Paket;
+   im Clip-Bot bleibt die bisherige Vorschau. Im Puffer-Betrieb wird pve-big dafür nicht geweckt.
 8. Gelöscht wird nichts automatisch (Entscheidung 25.09.): Wird Platz knapp, warnt der Bot einmal am Tag.
 
 ## Regisseur (Sprint 09/2026)
 
 Automatische Zusammenschnitte (16:9) und Shorts (9:16) mit Musik, Schnitten auf dem Beat und Übergängen je
-Stimmung; Bewertung im eigenen **Lern-Bot**, der Regisseur lernt daraus. Dazu ein Sicherheitsnetz, das pve-big
+Stimmung; Veröffentlichung und optionales Feedback im eigenen **Lern-Bot**. Der Regisseur lernt aus der
+Publikumsperformance. Dazu ein Sicherheitsnetz, das pve-big
 herunterfährt, wenn nichts zu tun ist. Bedienung: `docs/REGIE.md` · Entscheidungen: `docs/ENTSCHEIDUNGEN.md` ·
 Stand und Host-Änderungen: `docs/ABSCHLUSSBERICHT.md`.
 
-## Lernschleife „Publikum“ (Sprint 09/2026, Stufe 1)
+## Bestehende Lernschleife „Publikum"
 
-Jeder gepostete Short wird ein **Post**; die TikTok-Zahlen kommen per Screenshot an den Lern-Bot (Claude liest sie,
-nur Leserecht) oder von Hand, und nach 7 Tagen (`[publikum].alter_tage`) setzt `pipeline publikum bewerten` (Timer
-`clip-publikum`, 10:00) einen **Publikums-Score** – verglichen mit deinen eigenen letzten Posts. `/publikum` im
-Lern-Bot zeigt Zahlen und Score. Weckt nie pve-big. Bedienung, Konfig und Installation: `docs/PUBLIKUM.md` · Spec:
-`docs/superpowers/specs/2026-09-25-lernschleife-publikum-design.md`.
+Jeder verknüpfte Entwurf wird ein **Post** mit eingefrorenen Merkmalen. Der neue Audience-Success-Score und der
+versionierte Lerner ergänzen die vorhandenen Tabellen. Der frühere Wochen-Score bleibt für ältere Auswertungen
+erhalten; er ist keine Wartebedingung für das neue Lernen. `/publikum` zeigt die Post-Details.
+Weckt nie pve-big. Frühere Bedienung und Installation: `docs/PUBLIKUM.md`; aktueller Ablauf:
+[Autonomes Lernen](docs/AUTONOMES_LERNEN.md).
 
 **Stufe 2 – Merkmale und eine Bewertung:** 17 statt 5 Merkmale (aus dem Replay: Platzierung, Sniper/Nahkampf,
 Bot-Opfer, Match-Phase, Endgame, Clutch; aus Mikro und Spielton: Lachen, Jubel, Frust, laute Spitzen), eine
@@ -65,7 +79,7 @@ misst ein Hintergrundschritt nach `render` (n8n wartet nicht). Installation: `do
 | `pipeline bot` | Telegram-Bot (läuft als Dienst) |
 | `pipeline merkmale nachtragen [--session ID]` | Replay- und Mic-Merkmale für vorhandene Clips nachrechnen (nur Puffer, ohne Whisper, weckt nie) |
 | `pipeline stimmung --clips [--session ID] [--max n]` | Mic-Schritt von Hand (Whisper, ohne Claude, nur Puffer) |
-| `pipeline publikum bewerten` | Publikums-Scores aller Posts setzen, die `[publikum].alter_tage` (Standard 7) Tage alt sind (Timer, weckt nie) |
+| `pipeline publikum bewerten` | verfügbare Plattformdaten holen, Scores und autonomes Modell aktualisieren (Timer, weckt nie) |
 
 Telegram: `/battle` `/rangliste` `/gewichte` `/uploads` `/offen` `/status` `/hilfe`
 Lern-Bot: `/entwurf` `/musik` `/lernstand` `/stand` `/publikum` `/link <entwurf> <url>` `/hilfe` · Screenshot mit `#<post>`
@@ -146,6 +160,6 @@ Abdeckung.
 **Wie viele KI-Agenten in n8n?** Keinen. n8n ist der Dirigent und stößt nur Skripte an. Die einzige
 KI-Entscheidung (`decide`) läuft per `claude -p` über dein Max-Abo auf dem Mini – ohne API-Key.
 
-**Warum lädt die Pipeline nicht selbst zu YouTube/TikTok hoch?** Uploads über ungeprüfte API-Apps sind bei
-beiden nur privat sichtbar. Bis die Apps geprüft sind, kommt das fertige Paket per Telegram, und der Bot achtet
-darauf, dass kein Clip auf einer Plattform fehlt.
+**Muss ich weiter bewerten?** Nein. Direkt das Upload-Paket öffnen, veröffentlichen und den Link zuordnen.
+Sobald Publikumszahlen eintreffen, lernt das System selbstständig. Die Entscheidung, was du veröffentlichst,
+bleibt bei dir; das Erstellen eines Pakets lädt noch nichts auf eine Plattform hoch.

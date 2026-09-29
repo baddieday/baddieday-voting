@@ -9,7 +9,7 @@
 # Von Hand: sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline publikum bewerten
 # Log ansehen: journalctl -u clip-publikum -n 50
 [Unit]
-Description=Clip-Pipeline: Publikums-Scores setzen (Lernschleife)
+Description=Clip-Pipeline: Publikumsdaten abholen und autonom lernen
 
 [Service]
 Type=oneshot

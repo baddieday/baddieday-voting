@@ -68,13 +68,14 @@ ZEICHEN_ZEILE = "Zeichen: " + " · ".join(f"{publikum.SYMBOLE[feld]} {ZEICHEN_NA
 
 # Anhang an lernbot.HILFE (HTML wie dort)
 HILFE_ZUSATZ = """
-📊 <b>Publikum (TikTok-Zahlen):</b>
-📦 Nach 👍 auf einen Short: „Upload-Paket“ – Video als Datei, Caption zum Kopieren, Häkchen je Plattform.
+📊 <b>Publikum:</b>
+📦 Direkt am Entwurf: „Upload-Paket“ – Video als Datei, Caption zum Kopieren, Häkchen je Plattform.
 🔗 /link <code>41 https://www.tiktok.com/@…/video/…</code> – Post zu Entwurf 41 anlegen, der Bot nennt die Post-Nummer.
+Bei eingerichtetem Plattformzugang kommen Zahlen automatisch. Screenshots und Eingaben bleiben als Ergänzung:
 📸 Screenshot der TikTok-Statistik mit Bildunterschrift <code>#17</code> (Post-Nummer) – Claude liest die Zahlen.
 ✏️ Von Hand: <code>#17 1240 61 6.8 34</code> = Views, Likes, Ø Wiedergabe (s), ganz angesehen (%), „–“ = unbekannt.
 ➕ Optional dahinter Kommentare, Shares, Saves: <code>#17 1240 61 6.8 34 3 5 2</code>
-/publikum – letzte Posts mit Zahlen und Score (sobald der Post alt genug ist – /publikum zeigt, ab wann).
+/publikum – letzte Posts mit Zahlen und Score · /lernstand – autonomer Lernfortschritt.
 """ + ZEICHEN_ZEILE
 
 
@@ -189,7 +190,7 @@ def _zahlen_text(zeile: sqlite3.Row, messung: sqlite3.Row | None) -> str:
     """Die letzte Messung kurz: „👁 1 240 ❤️ 61 ⏱ 6,8 s 🏁 34 % (Tag 4)“ – nur bekannte Werte, kompakt (anders als
     die Bestätigung nach dem Speichern, die jedes Feld zeigt); ohne Messung ein Hinweis, was zu tun ist."""
     if messung is None:
-        return f"noch keine Zahlen – Screenshot mit #{zeile['id']} schicken"
+        return f"noch keine Zahlen – Plattformzugang oder optional Screenshot mit #{zeile['id']}"
     teile = []
     for feld in ("views", "likes"):
         if messung[feld] is not None:
@@ -208,6 +209,10 @@ def _score_zustand(con: sqlite3.Connection, zeile: sqlite3.Row, konfig: Konfig, 
       jünger als alter_tage        → „Score noch offen (ab 7 Tagen)“
       alt genug, passende Messung  → „Score kommt beim nächsten Lauf“ (der Timer war noch nicht dran)
       alt genug, keine Messung     → „Score offen (braucht eine Messung ab Tag 3 mit Views)“"""
+    aktuell = con.execute("SELECT score,confidence FROM audience_ergebnisse WHERE post_id=?",
+                          (zeile["id"],)).fetchone()
+    if aktuell is not None:
+        return f"Publikumsscore {score_text(aktuell['score'])} · Vertrauen {round(100 * aktuell['confidence'])} %"
     if zeile["bewertet_utc"] is not None:
         worte = score_worte(_score_teile(zeile))
         return f"Score {score_text(zeile['score'])}" + (f" ({worte})" if worte else "")
@@ -234,9 +239,10 @@ def publikum_text(con: sqlite3.Connection, konfig: Konfig, grenze: int = PUBLIKU
     claude = claude_aufrufe_woche(con, konfig, zeitpunkt)
     fuss = f"🤖 Claude diese Woche: {claude} {'Aufruf' if claude == 1 else 'Aufrufe'}"
     # COUNT(bewertet_utc) zählt nur Zeilen, in denen die Spalte gesetzt ist – also die Posts mit Score
-    anzahl, bewertet = con.execute("SELECT COUNT(*), COUNT(bewertet_utc) FROM posts").fetchone()
+    anzahl, bewertet = con.execute("SELECT COUNT(*),COUNT(CASE WHEN p.bewertet_utc IS NOT NULL OR a.post_id IS NOT NULL "
+                                  "THEN 1 END) FROM posts p LEFT JOIN audience_ergebnisse a ON a.post_id=p.id").fetchone()
     if not anzahl:
-        return ("📊 Noch keine Posts. So entsteht einer: 👍 auf einen Short → ✅ fertig → 📦 Upload-Paket → auf "
+        return ("📊 Noch keine Posts. So entsteht einer: Entwurf → 📦 Upload-Paket → auf "
                 "TikTok posten → /link <entwurf> <TikTok-Link>. Im Clip-Bot zählt das Häkchen TikTok bzw. /link dort.\n"
                 + fuss)
     auswahl = "neueste zuerst" if anzahl <= grenze else f"die letzten {grenze}, neueste zuerst"

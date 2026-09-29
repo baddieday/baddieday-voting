@@ -263,15 +263,17 @@ class Auswahl(MitRegieMaterial):
         self.moment("clip:9", LANG, dauer=60.0)
         with self.assertRaisesRegex(regie.RegieFehler, "zu lang"):
             regie.erstelle(self.con, self.konfig, "short")
-        self.assertEqual(regie.pruefe_liste(self.lies(regie.erstelle(self.con, self.konfig, "zusammenschnitt"))), [])
+        with self.assertRaisesRegex(regie.RegieFehler, "75–120"):
+            regie.erstelle(self.con, self.konfig, "zusammenschnitt")
 
     def test_nachschnitt_mit_start_s(self):
         # Neu geschnittene Datei, Moment ab 5 s: Sekunden zählen ab Dateibeginn, die Datei ist bis ende_s nutzbar
         self.moment("clip:1", {k: [t + 5.0 for t in v] for k, v in WIPE.items()}, dauer=45.0)
+        self.alte_momente(8)
         self.con.execute("UPDATE momente SET start_s = 5.0 WHERE schluessel = 'clip:1'")
         liste = self.lies(regie.erstelle(self.con, self.konfig, "short"))
         self.assertEqual(regie.pruefe_liste(liste), [])
-        eins, zwei = liste["segmente"]
+        eins, zwei = [s for s in liste["segmente"] if s["moment"] == "clip:1"]
         self.assertEqual((eins["quelle_ende_s"], zwei["quelle_start_s"], zwei["quelle_dauer_s"]), (18.28, 31.74, 45.0))
         self.assertLessEqual(eins["quelle_start_s"], 12.0)
 
@@ -303,7 +305,7 @@ def zweifarbig(ziel: Path, erste: tuple[int, int, int], zweite: tuple[int, int, 
 @unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
 class Render(MitRegieMaterial):
     def test_entwurf_mit_jump_cut(self):
-        self.momente_anlegen(MOMENTE[:2], farbig=True)
+        self.momente_anlegen(MOMENTE[:3], farbig=True)
         # Wipe-Clip: bis 20 s gelb (erstes Umhauen), danach magenta (der Wipe); die Lücke dazwischen fällt weg
         datei = zweifarbig(self.tmp / "momente" / "wipe.mp4", FARBEN[3], FARBEN[4], 40.0)
         mk = {**WIPE, "kills": 3, "max_gruppe": 3}
