@@ -591,7 +591,7 @@ class Posts(MitPublikum):
         self.assertEqual(publikum.video_id_aus_url("https://tiktok.com/@x.y_z/video/42?is_from_webapp=1"), "42")
         self.assertEqual(publikum.video_id_aus_url("https://m.tiktok.com/@x/video/43/"), "43")
         self.assertIsNone(publikum.video_id_aus_url("https://vm.tiktok.com/ZMabc123/"))
-        self.assertIsNone(publikum.video_id_aus_url("https://youtube.com/shorts/abcDEF12345"))
+        self.assertEqual(publikum.video_id_aus_url("https://youtube.com/shorts/abcDEF12345"), "abcDEF12345")
         self.assertIsNone(publikum.video_id_aus_url("https://evil.example/@x/video/44"))
         self.assertIsNone(publikum.video_id_aus_url("kein link"))
 

@@ -188,7 +188,7 @@ class Aufbau(unittest.TestCase):
     @unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
     def test_alle_filter_und_uebergaenge_kennt_ffmpeg(self):
         text = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True).stdout
-        filter_ = {z.split()[1] for z in text.splitlines() if re.match(r"^ [T.][S.][C.] \S", z)}
+        filter_ = {z.split()[1] for z in text.splitlines() if re.match(r"^ [T.][S.][C.]? \S", z)}
         text = subprocess.run(["ffmpeg", "-hide_banner", "-h", "filter=xfade"], capture_output=True, text=True).stdout
         xfade = set(re.findall(r"^\s+(\w+)\s+-?\d+\s+\.\.FV", text, re.M))
         for fmt in ("short", "zusammenschnitt"):
@@ -242,10 +242,11 @@ class Befehl(unittest.TestCase):
 
             info = SimpleNamespace(tonspuren=[1, 2], dauer_s=8.0, breite=groesse[0], hoehe=groesse[1])
             with mock.patch.object(entwurf, "probe", return_value=info), \
+                    mock.patch.object(entwurf, "_pruefe_renderdauer", return_value=liste["dauer_s"]), \
                     mock.patch.object(entwurf, "fuehre_aus", side_effect=lauf), \
                     mock.patch.object(sfx, "datei", side_effect=lambda _k, name: Path("/sfx") / f"{name}.wav"), \
                     mock.patch.object(entwurf.shorts, "schrift", return_value=SCHRIFT):
-                r = entwurf.rendere(liste, tmp / "ziel.mp4", k)
+                r = entwurf.rendere(liste, tmp / "ziel.mp4", k, vollstaendig=False)
         return r, befehle[0]
 
     def test_4_zu_3_quelle_texte_neben_dem_hoeheren_spielbild(self):
@@ -271,7 +272,7 @@ class Befehl(unittest.TestCase):
         self.assertEqual(r["encoder"], "h264_vaapi")
         eingaenge = [befehl[i + 1] for i, x in enumerate(befehl) if x == "-i"]
         self.assertEqual(eingaenge, [liste["segmente"][n]["datei"] for n in range(3)]
-                         + [f"/sfx/{name}.wav" for name in ("basshit", "tick", "whoosh", "pop")])
+                         + [str(Path("/sfx") / f"{name}.wav") for name in ("basshit", "tick", "whoosh", "pop")])
         self.assertLess(befehl.index("-vaapi_device"), befehl.index("-i"))
         g = befehl[befehl.index("-filter_complex") + 1]
         self.assertEqual(g.count("[vout]"), 1)

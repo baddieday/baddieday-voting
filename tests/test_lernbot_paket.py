@@ -85,6 +85,7 @@ class MitLernPaket(MitSpeicher):
         self.context = SimpleNamespace(bot_data=self.app.bot_data, application=self.app, args=[])
         self.renders = []
         for p in (mock.patch.object(entwurf, "rendere", side_effect=self.falsches_rendere),
+                  mock.patch.object(entwurf, "_pruefe_renderdauer", side_effect=lambda liste, *_a, **_k: liste["dauer_s"]),
                   mock.patch.object(lernbot_paket, "jetzt", side_effect=lambda: self.uhr)):
             p.start()
             self.addCleanup(p.stop)
@@ -110,6 +111,8 @@ class MitLernPaket(MitSpeicher):
                         dauer_s: float = 31.0) -> int:
         """Entwurf wie aus regie.erstelle (Schnittliste v3), Moment-Dateien leer – rendere ist ersetzt."""
         self._nr += 1
+        if fmt == "zusammenschnitt" and dauer_s == 31.0:
+            dauer_s = 90.0
         name = f"{fmt}-test-{self._nr}"
         cid = self.clip_anlegen(status="freigegeben", max_gruppe=3, match_id=f"m{self._nr}")
         self.con.execute("UPDATE clips SET typ = 'triple' WHERE id = ?", (cid,))
@@ -195,7 +198,7 @@ class Knoepfe(unittest.TestCase):
         self.assertTrue(all(len(d.encode()) <= 64 for d in daten), daten)
 
     def test_kuerzel_ohne_clip_battle(self):
-        self.assertEqual(lernbot_paket.PLATTFORM_KUERZEL, {"y": "youtube", "t": "tiktok"})
+        self.assertEqual(lernbot_paket.PLATTFORM_KUERZEL, {"y": "youtube", "t": "tiktok", "i": "instagram"})
 
 
 class PaketErlaubt(MitLernPaket):
@@ -203,10 +206,10 @@ class PaketErlaubt(MitLernPaket):
         gut = self.entwurf_anlegen()
         self.assertIsNone(lernbot_paket.paket_erlaubt(self.con, gut))
         self.assertIn("gibt es nicht", lernbot_paket.paket_erlaubt(self.con, 999))
-        self.assertIn("nur für Shorts", lernbot_paket.paket_erlaubt(self.con, self.entwurf_anlegen(fmt="zusammenschnitt")))
+        self.assertIsNone(lernbot_paket.paket_erlaubt(self.con, self.entwurf_anlegen(fmt="zusammenschnitt")))
         schlecht = self.entwurf_anlegen(daumen=-1)
-        self.assertEqual(lernbot_paket.paket_erlaubt(self.con, schlecht), f"Entwurf #{schlecht} ist nicht mit 👍 bewertet.")
-        self.assertIn("nicht mit 👍", lernbot_paket.paket_erlaubt(self.con, self.entwurf_anlegen(daumen=None)))
+        self.assertIsNone(lernbot_paket.paket_erlaubt(self.con, schlecht))
+        self.assertIsNone(lernbot_paket.paket_erlaubt(self.con, self.entwurf_anlegen(daumen=None)))
 
 
 # --- ✅ fertig im Lern-Bot zeigt 📦 (lernbot.bei_klick, x-Zweig) ---------------------------------------------
@@ -222,9 +225,10 @@ class NachFertig(MitLernPaket):
         eid = self.entwurf_anlegen()
         self.assertEqual(self.fertig(eid), [f"pk:{eid}:"])
 
-    def test_daumen_runter_und_zusammenschnitt_ohne_paket(self):
-        self.assertEqual(self.fertig(self.entwurf_anlegen(daumen=-1)), [])
-        self.assertEqual(self.fertig(self.entwurf_anlegen(fmt="zusammenschnitt")), [])
+    def test_paket_unabhaengig_von_feedback_und_format(self):
+        for fmt, daumen in (("short", -1), ("short", None), ("zusammenschnitt", None)):
+            eid = self.entwurf_anlegen(fmt=fmt, daumen=daumen)
+            self.assertEqual(self.fertig(eid), [f"pk:{eid}:"])
 
 
 # --- 📦 Upload-Paket ----------------------------------------------------------------------------------------
@@ -272,8 +276,8 @@ class Paket(MitLernPaket):
         self.assertIn("schon gebaut", q.antworten[0])
         self.assertEqual(len(self.aufgaben), 1)
 
-    def test_kein_paket_fuer_daumen_runter_zusammenschnitt_oder_unbekannt(self):
-        for eid in (self.entwurf_anlegen(daumen=-1), self.entwurf_anlegen(fmt="zusammenschnitt"), 999):
+    def test_kein_paket_fuer_unbekannt(self):
+        for eid in (999,):
             q = self.klick(f"pk:{eid}:")
             self.assertTrue(q.antworten[0], eid)
             self.assertNotIn("📦", q.antworten[0])
@@ -342,12 +346,11 @@ class Haekchen(MitLernPaket):
         (p2,) = self.posts()
         self.assertEqual(p2["gepostet_utc"], iso(T0))                  # der erste Zeitpunkt bleibt
 
-    def test_kein_post_fuer_daumen_runter_und_zusammenschnitt(self):
-        for eid in (self.entwurf_anlegen(daumen=-1), self.entwurf_anlegen(fmt="zusammenschnitt")):
+    def test_post_unabhaengig_von_feedback_und_format(self):
+        for eid in (self.entwurf_anlegen(daumen=-1), self.entwurf_anlegen(fmt="zusammenschnitt", daumen=None)):
             q = self.klick(f"pt:{eid}:t")
-            self.assertNotIn("Post #", q.antworten[0])
-            self.assertEqual(q.texte, [])
-        self.assertEqual(self.posts(), [])
+            self.assertIn("Post #", q.antworten[0])
+        self.assertEqual(len(self.posts()), 2)
 
     def test_fehlende_schnittliste(self):
         # Startauftrag §5 „fehlende Dateien“: das Häkchen sagt es kurz, Details im Log, kein halber Post
@@ -410,12 +413,25 @@ class Link(MitLernPaket):
         self.assertIn("Unbekannter Link", c)
         self.assertEqual(self.posts(), [])
 
-    def test_kein_post_fuer_daumen_runter_zusammenschnitt_und_unbekannt(self):
+    def test_links_ohne_pflichtbewertung_unbekannt_bleibt_fehler(self):
         runter, zs = self.entwurf_anlegen(daumen=-1), self.entwurf_anlegen(fmt="zusammenschnitt")
-        self.assertIn("nicht mit 👍", self.link(str(runter), TIKTOK)[0])
-        self.assertIn("nur für Shorts", self.link(str(zs), TIKTOK)[0])
+        self.assertIn("Post #", self.link(str(runter), TIKTOK)[0])
+        self.assertIn("Post #", self.link(str(zs), TIKTOK.replace("7300123456789012345", "7300123456789012346"))[0])
         self.assertIn("gibt es nicht", self.link("999", TIKTOK)[0])
-        self.assertEqual(self.posts(), [])
+        self.assertEqual(len(self.posts()), 2)
+
+    def test_veroeffentlichungsweg_ohne_einzige_bewertung(self):
+        for fmt, dauer in (("short", 65), ("zusammenschnitt", 90)):
+            eid = self.entwurf_anlegen(fmt=fmt, daumen=None, dauer_s=dauer)
+            knoepfe = [d for reihe in lernbot.knoepfe_entwurf(eid, fmt) for _, d in reihe]
+            self.assertIn(f"pk:{eid}:", knoepfe)
+            self.assertIn(f"k:0:{fmt}", knoepfe)
+            self.klick(f"pk:{eid}:")
+            self.aufgaben_ausfuehren()
+            self.assertEqual(len(self.bot.dokumente), eid)
+            self.assertIn("Post #", self.link(str(eid), TIKTOK.replace("7300123456789012345", str(7300123456789012300 + eid)))[0])
+        self.assertEqual(len(self.posts()), 2)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwurf_bewertungen").fetchone()[0], 0)
 
     def test_falscher_aufruf(self):
         self.assertIn("Aufruf: /link", self.link()[0])

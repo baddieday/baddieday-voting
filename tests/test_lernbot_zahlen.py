@@ -729,7 +729,8 @@ class NieWecken(MitLernBot):
             self.text("2000 70 6,8 34")
             self.foto(None)
             asyncio.run(lernbot_zahlen.aufraeumen(self.app, T + timedelta(hours=1)))
-        self.assertEqual(len(self.messungen(pid)), 3)
+        # Derselbe Screenshot zur selben Messzeit ist jetzt idempotent.
+        self.assertEqual(len(self.messungen(pid)), 2)
         wol.assert_not_called()
         wach.assert_not_called()
 
@@ -743,6 +744,12 @@ class HandlerReihenfolge(MitClaudeKonfig):
         super().setUp()
         self.app = lernbot.baue_app(self.konfig, "123456:TEST", 42)
         self.addCleanup(self.app.bot_data["con"].close)
+
+    def tearDown(self):
+        # unittest-Cleanups laufen erst NACH tearDown; Windows benötigt die
+        # geschlossene zweite DB-Verbindung bereits vor dem Tempordner-Cleanup.
+        self.app.bot_data["con"].close()
+        super().tearDown()
 
     def erster_handler(self, update):
         for handler in self.app.handlers[0]:

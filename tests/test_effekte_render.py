@@ -28,7 +28,7 @@ class Render(MitSpeicher):
 
     def rendere(self, liste: dict, name: str):
         ziel = self.tmp / f"{name}.mp4"
-        entwurf.rendere(liste, ziel, self.konfig)
+        entwurf.rendere(liste, ziel, self.konfig, vollstaendig=False)
         d = dauern(ziel)
         self.assertAlmostEqual(d["video"], liste["dauer_s"], delta=2 / liste["fps"])
         self.assertAlmostEqual(d["audio"], liste["dauer_s"], delta=0.05)
@@ -211,7 +211,7 @@ class Render(MitSpeicher):
             liste = mini_liste(teile, ereignisse=ereignisse if an else [], look=("cinematic", 0.8), an=an,
                                quelle_dauer=48.0)
             start = time.monotonic()
-            entwurf.rendere(liste, self.tmp / f"leistung-{an}.mp4", self.konfig)
+            entwurf.rendere(liste, self.tmp / f"leistung-{an}.mp4", self.konfig, vollstaendig=False)
             zeiten[an] = time.monotonic() - start
         print(f"\n45-s-Short: ohne Effekte {zeiten[False]:.1f} s, mit {zeiten[True]:.1f} s")
         self.assertLessEqual(zeiten[True] / zeiten[False], 1.25)

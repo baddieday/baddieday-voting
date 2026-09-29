@@ -96,7 +96,7 @@ class LernBot(MitRegieMaterial):
         update = SimpleNamespace(callback_query=q, effective_message=q.message)
         asyncio.run(lernbot.bei_kurzknopf(update, self.context))
         self.assertEqual(q.antworten, [None])                                   # Spinner sofort weg
-        self.assertTrue(gesendet[0].startswith("🧠 Regie"))
+        self.assertTrue(gesendet[0].startswith("🧠 AUTONOMES LERNEN"))
         q = FakeQuery("k:0:zusammenschnitt")
         asyncio.run(lernbot.bei_kurzknopf(SimpleNamespace(callback_query=q, effective_message=None), self.context))
         self.assertEqual((q.antworten, len(self.aufgaben)), (["🎬 Zusammenschnitt kommt …"], 1))
@@ -484,8 +484,8 @@ class ErwartungImLernBot(MitErwartung):
 
         update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
         asyncio.run(lernbot.cmd_lernstand(update, self.context))
-        self.assertTrue(antworten[0].startswith(regie_lernen.lernstand_text(self.con, self.konfig)))
-        self.assertTrue(antworten[0].endswith("\nErwartung getroffen: Entwürfe 1/1 (100 %)"))
+        self.assertTrue(antworten[0].startswith("🧠 AUTONOMES LERNEN"))
+        self.assertIn("Bewertungen sind optional", antworten[0])
 
     def test_lernstand_ohne_quote_unveraendert(self):
         antworten = []
@@ -495,7 +495,7 @@ class ErwartungImLernBot(MitErwartung):
 
         update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
         asyncio.run(lernbot.cmd_lernstand(update, self.context))
-        self.assertEqual(antworten, [regie_lernen.lernstand_text(self.con, self.konfig)])
+        self.assertEqual(antworten, [lernbot.autonom_text(self.con)])
 
 
 @unittest.skipIf(lernbot is None, "python-telegram-bot fehlt")
