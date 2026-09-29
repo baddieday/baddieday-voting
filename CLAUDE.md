@@ -240,3 +240,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   „zu kurz“/„zu lang“ verschieben das Ziel bis an die Grenzen (`regie.dauer_grenzen`: 0,667–1,667 = 30–75 s), jede
   Stimme wirkt. Auswahl und Nachlegen halten 4–10 Momente ein, Kürzen bleibt bei max_s. Alle gespeicherten Stimmen
   wirken sofort. `pipeline lernstand` zeigt „Short-Länge: n× zu kurz, n× zu lang … → Ziel x s“. Zusammenschnitt unverändert.
+- 2026-09-29 (Florian: „nur Clips aus der neuesten Sitzung, optional aus einem Match – umstellbar“ und „viele Werte per
+  Hand … nicht immer über den Server“): **⚙️ Einstellungen im Lern-Bot** (`/einstellungen` oder Knopf). Werte liegen in
+  der Tabelle `einstellungen` und gehen vor lokal.toml und pipeline.toml; „↩️ Standard“ lässt wieder die Datei gelten.
+  Nur Schlüssel aus `einstellungen.KATALOG`: Clip-Auswahl (`lernbot.quelle`: alle · neuester Spielabend bis 06:00 ·
+  neuestes Match · ein Match per „📅 Match wählen“), Vorfilter (`lernbot.auto_schwelle`), Effekte an/aus, Musik
+  Techno/Rock bevorzugt. Die Clip-Auswahl wird je Entwurf neu aufgelöst, zieht zuerst die Stimmung der Clips dieser
+  Matches nach und steht als Hinweis vorn im Entwurf. Telegram statt Webseite: kein neuer Dienst, kein offener Port,
+  schon auf Florian beschränkt (Prinzip 7). Weitere Werte kommen einfach als Zeile in den Katalog.

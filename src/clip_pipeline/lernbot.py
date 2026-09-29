@@ -26,7 +26,7 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from . import big, db, entwurf, erwartung, musik, regie, regie_lernen, stimmung
+from . import big, db, einstellungen, entwurf, erwartung, musik, regie, regie_lernen, stimmung
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import iso, jetzt, utc_zu_lokal
@@ -42,13 +42,15 @@ HILFE = """<b>Lern-Bot des Regisseurs</b>
 🎬 /entwurf <code>short</code> oder /entwurf <code>zusammenschnitt</code> – neuen Entwurf bauen
 👍/👎 unter jedem Entwurf, danach Gründe antippen und ✅ fertig. Ohne Grund lernt nur die Moment-Auswahl.
 /musik – Titel · /lernstand – was der Regisseur gelernt hat · /stand – kurzer Stand
+⚙️ /einstellungen – Clip-Auswahl (alle · neuester Spielabend · ein Match), Vorfilter, Effekte, Musik
 Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 
 # Kurzbefehle (27.09.): Knöpfe im Chat wie beim Bewerten (Florian: „nicht die Tastatur ersetzen“). Callback k:0:<ziel>.
 # KURZBEFEHLE bleibt für Taps auf die alte Ersatz-Tastatur, bis sie weg ist (ReplyKeyboardRemove).
 KURZBEFEHLE = {"🎬 Short": "short", "🎞️ Zusammenschnitt": "zusammenschnitt", "🧠 Lernstand": "lernstand",
-               "📋 Stand": "stand", "📊 Publikum": "publikum", "🎵 Musik": "musik"}
-KURZ_REIHEN = [["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"], ["📊 Publikum", "🎵 Musik"]]
+               "📋 Stand": "stand", "📊 Publikum": "publikum", "🎵 Musik": "musik", "⚙️ Einstellungen": "einstellungen"}
+KURZ_REIHEN = [["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"], ["📊 Publikum", "🎵 Musik"],
+               ["⚙️ Einstellungen"]]
 KREISE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"
 
 
@@ -204,7 +206,7 @@ def speicher_da(konfig: Konfig) -> bool:
         return False
 
 
-def stimmung_nachziehen(con: sqlite3.Connection, konfig: Konfig) -> dict:
+def stimmung_nachziehen(con: sqlite3.Connection, konfig: Konfig, matches: set[str] | None = None) -> dict:
     """Vor jedem Entwurf die nächsten n Clips ohne Stimmung analysieren (die besten zuerst) – so wächst die
     Auswahl mit jeder Runde, ohne pve-big dafür extra wach zu halten. Ohne Claude (der zählt gegen dein Abo).
     Rückgabe {"analysiert": n, "hinweise": [...]}: Fehler und Clips ohne Datei kommen als Hinweis in den Entwurf
@@ -212,8 +214,11 @@ def stimmung_nachziehen(con: sqlite3.Connection, konfig: Konfig) -> dict:
     n = int(konfig.wert("lernbot.stimmung_je_entwurf", 10))
     if n <= 0:
         return {"analysiert": 0, "hinweise": []}
+    # Clip-Auswahl aktiv (⚙️, 29.09.): erst die Clips dieser Matches – sonst bliebe ein frischer Abend leer, weil die
+    # besten Clips insgesamt zuerst drankommen. Doppelt so viele wie sonst, der Rest folgt beim nächsten Entwurf.
+    nur = einstellungen.offene_clips(con, matches)[: 2 * n] if matches else None
     try:
-        e = stimmung.analysiere(con, konfig, claude=False, maximal=n)
+        e = stimmung.analysiere(con, konfig, claude=False, maximal=len(nur) if nur else n, nur_clips=nur or None)
     except Exception as fehler:  # der Entwurf ist wichtiger – mit den vorhandenen Momenten weitermachen
         log.exception("Stimmung nachziehen fehlgeschlagen")
         return {"analysiert": 0,
@@ -234,12 +239,14 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
     konfig.pruefe_speicher(wecken=True)  # wirft SpeicherOffline mit Grund, wenn Wecken nicht erlaubt ist
     con = db.verbinde(konfig.datenbank)
     try:
+        konfig = einstellungen.anwenden(con, konfig)            # ⚙️ im Bot gesetzte Werte vor den Dateien (29.09.)
+        nur_matches, quell_hinweis = einstellungen.quell_matches(con, konfig)
         # Rendern ist ein rechenintensiver Schritt: gleiche Sperre wie die Pipeline (nur einer gleichzeitig)
         t0 = time.monotonic()
         with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
                 big.herzschlag(konfig, "lernbot"):
             t1 = time.monotonic()
-            nachgezogen = stimmung_nachziehen(con, konfig)
+            nachgezogen = stimmung_nachziehen(con, konfig, nur_matches)
             t2 = time.monotonic()
             parameter, ziel = regie_lernen.aktuelle(con, konfig, fmt)
             try:  # nur eine Anzeige – ein Fehler hier darf den Entwurf nicht kosten
@@ -247,8 +254,15 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
             except Exception:
                 log.exception("Wirkung der letzten Bewertung")
                 gelernt = None
-            e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel, hinweise_vorab=nachgezogen["hinweise"],
-                               gelernt=gelernt)
+            try:
+                e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel, nur_matches=nur_matches,
+                                   hinweise_vorab=[*filter(None, [quell_hinweis]), *nachgezogen["hinweise"]],
+                                   gelernt=gelernt)
+            except regie.RegieFehler as fehler:
+                if not nur_matches:
+                    raise
+                raise regie.RegieFehler(f"{fehler} – {quell_hinweis}. In ⚙️ Einstellungen auf „alle Clips“ stellen.") \
+                    from fehler
             t3 = time.monotonic()
             entwurf.entwurf(con, konfig, e["entwurf"])
         # Wo die Wartezeit nach ✅ fertig bleibt (27.09.) – journalctl -u clip-lernbot | grep "gebaut in"
@@ -449,7 +463,8 @@ async def neuer_entwurf(app, fmt: str) -> int | None:
         return None
     app.bot_data["arbeitet"] = True
     try:
-        konfig, con = app.bot_data["konfig"], app.bot_data["con"]
+        con = app.bot_data["con"]
+        konfig = einstellungen.anwenden(con, app.bot_data["konfig"])   # ⚙️ Vorfilter usw. (29.09.)
         wach = await asyncio.to_thread(speicher_da, konfig)
         await app.bot.send_message(chat, f"🎬 Baue einen {FORMAT_NAMEN[fmt]} …"
                                    + ("" if wach else " 💤 pve-big schläft – ich wecke ihn (bis zu 3 min)."),
@@ -523,6 +538,10 @@ async def _kurzbefehl(ziel: str | None, update, context) -> None:
         from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
 
         await lernbot_publikum.cmd_publikum(update, context)
+    elif ziel == "einstellungen":
+        from . import lernbot_einstellungen
+
+        await lernbot_einstellungen.cmd_einstellungen(update, context)
 
 
 async def bei_audio(update, context) -> None:
@@ -669,9 +688,9 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     # Lernschleife „Publikum“ (Spec §7.1, §10.4, §14 Stufe 1): Screenshots/Hand-Eingabe, Upload-Paket und /link,
     # /publikum – eigene Module, hier nur eingehängt. VOR dem allgemeinen Klick-Handler: der liest jeden Knopf als
     # Entwurfs-Knopf; die Module melden ihre Knöpfe (pl/pm, pk/pt) mit eigenem Muster an.
-    from . import lernbot_paket, lernbot_publikum, lernbot_zahlen
+    from . import lernbot_einstellungen, lernbot_paket, lernbot_publikum, lernbot_zahlen
 
-    for modul in (lernbot_zahlen, lernbot_paket, lernbot_publikum):
+    for modul in (lernbot_zahlen, lernbot_paket, lernbot_publikum, lernbot_einstellungen):
         modul.registriere(app, nur_ich)
     app.add_handler(CallbackQueryHandler(bei_klick))
     app.add_error_handler(bei_fehler)

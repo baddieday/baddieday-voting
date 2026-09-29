@@ -95,3 +95,11 @@ CREATE TABLE IF NOT EXISTS sitzungen (
     hinweis     TEXT,
     verarbeitet TEXT NOT NULL
 );
+
+-- Einstellungen aus dem Lern-Bot (⚙️, 29.09.): gehen vor config/lokal.toml und pipeline.toml.
+-- Nur Schlüssel aus einstellungen.KATALOG werden angewendet; „↩️ Standard“ löscht die Zeile.
+CREATE TABLE IF NOT EXISTS einstellungen (
+    schluessel TEXT PRIMARY KEY,            -- Punkt-Pfad in der Konfig, z. B. lernbot.quelle
+    wert       TEXT NOT NULL,               -- JSON
+    geaendert  TEXT NOT NULL
+);
