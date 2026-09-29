@@ -119,10 +119,7 @@ class Messen(MitRegieMaterial):
 
         self.momente_anlegen(MOMENTE[:6])
         e = regie.erstelle(self.con, self.konfig, "short")
-        schnittliste = Path(e["datei"])
-        liste = json.loads(schnittliste.read_text())
-        liste["segmente"] = liste["segmente"][:2]  # kurz halten: zwei Segmente reichen zum Messen
-        schnittliste.write_text(json.dumps(liste))
+        # Vollständigen gültigen Short messen; eine gekappte Segmentliste hätte eine falsche Gesamtdauer.
         dateien = sorted(regie.ordner(self.konfig).rglob("*"))
         tabelle = [tuple(z) for z in self.con.execute("SELECT * FROM entwuerfe")]
         ausgabe = io.StringIO()
