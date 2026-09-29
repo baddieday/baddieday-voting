@@ -1,6 +1,8 @@
 # Rechner-eigene Einstellungen. Auf dem Server kopieren:
 #   cp config/lokal.beispiel.toml config/lokal.toml
 # lokal.toml steht in .gitignore und überschreibt nur die Werte, die hier drinstehen.
+# Vorrang (29.09.): Was du im Lern-Bot unter ⚙️ Einstellungen setzt (Clip-Auswahl, Vorfilter, Effekte, Musik),
+# geht vor dieser Datei. „↩️ Standard“ im Bot lässt wieder die Datei gelten.
 
 [speicher]
 # großer Proxmox-Host (pve-big): Erreichbarkeit prüfen und bei Bedarf per Wake-on-LAN wecken
