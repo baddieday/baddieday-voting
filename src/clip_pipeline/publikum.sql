@@ -1,4 +1,47 @@
 -- Lernschleife „Publikum“ (Spec §5): Posts, Publikumszahlen, Rezept-Stand, Hypothesen, Erwartungen.
+-- Autonomie: eingefrorene X, auswertbare y und unveränderliche Modellhistorie.
+CREATE TABLE IF NOT EXISTS video_lerndaten (
+    post_id INTEGER PRIMARY KEY REFERENCES posts(id),
+    video_gruppe TEXT NOT NULL,
+    snapshot TEXT NOT NULL,
+    features TEXT NOT NULL,
+    modellversion INTEGER NOT NULL DEFAULT 0,
+    erstellt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audience_ergebnisse (
+    post_id INTEGER PRIMARY KEY REFERENCES posts(id),
+    messung_id INTEGER NOT NULL REFERENCES publikum_messungen(id),
+    input_hash TEXT NOT NULL,
+    score REAL NOT NULL,
+    confidence REAL NOT NULL,
+    teile TEXT NOT NULL,
+    aktualisiert TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS lernstaende (
+    version INTEGER PRIMARY KEY,
+    erstellt TEXT NOT NULL,
+    input_hash TEXT NOT NULL UNIQUE,
+    vorgaenger INTEGER,
+    status TEXT NOT NULL CHECK(status IN ('champion', 'challenger', 'archiv')),
+    datenmenge INTEGER NOT NULL,
+    videos TEXT NOT NULL,
+    modell TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    validierung TEXT NOT NULL,
+    long_term_score REAL,
+    recent_score REAL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ein_champion ON lernstaende(status) WHERE status = 'champion';
+CREATE TABLE IF NOT EXISTS lern_experimente (
+    post_id INTEGER PRIMARY KEY REFERENCES posts(id),
+    hypothese TEXT NOT NULL,
+    variable TEXT NOT NULL,
+    erwartet REAL,
+    tatsaechlich REAL,
+    confidence_vorher REAL NOT NULL,
+    confidence_nachher REAL,
+    details TEXT NOT NULL
+);
 -- Wortgetreu aus der Spec übernommen. Portables SQL wie regie.sql (E3): INTEGER PRIMARY KEY ohne AUTOINCREMENT,
 -- Zeiten als ISO-UTC-Text, JSON als Text. Nur CREATE … IF NOT EXISTS – db.verbinde führt die Datei bei jeder
 -- Verbindung aus. Bestehende Tabellen und ihre CHECKs bleiben unverändert; neue Spalten an alten Tabellen stehen
