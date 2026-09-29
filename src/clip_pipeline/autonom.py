@@ -92,10 +92,10 @@ def _beispiele(con) -> list[dict]:
                 # Ein API-Zählerupdate verdrängt keine ältere Watchtime-Messung.
                 # Ganze Messungen auswählen, keine Zähler verschiedener Alter mischen.
                 coverage = sum(v["gewicht"] for k, v in s["components"].items() if k != "reichweite")
-                kandidaten.append((coverage, m["gemessen_utc"], m["id"], m, s))
+                kandidaten.append((s["confidence"], coverage, m["gemessen_utc"], m["id"], m, s))
         if not kandidaten:
             continue
-        _, _, _, m, s = max(kandidaten, key=lambda v: v[:3])
+        _, _, _, _, m, s = max(kandidaten, key=lambda v: v[:4])
         # Referenz nur früher veröffentlichte Videos; niemals dasselbe Video als Basis.
         basis.append({"post": p, "messung": m})
         h = _hash({k: v for k, v in m.items() if k not in ("id", "erstellt", "roh")})

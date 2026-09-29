@@ -358,15 +358,18 @@ def post_anlegen(con: sqlite3.Connection, *, art: str, ziel_id: int, plattform: 
 
 def link_nachtragen(con: sqlite3.Connection, post_id: int, url: str) -> None:
     """Setzt url und (falls ablesbar) video_id eines Posts. Ein vorhandener Link wird durch einen neuen ersetzt
-    (Tippfehler korrigieren), video_id nur überschrieben, wenn der neue Link eine enthält.
+    (Tippfehler korrigieren). Bei geändertem Link ohne erkennbare ID wird video_id unbekannt: sonst würde der
+    automatische Abruf weiterhin das alte Video messen. Nur derselbe Link darf eine bereits zugeordnete ID
+    behalten. Vorhandene historische Messungen bleiben erhalten.
 
     Läuft in der Transaktion des Aufrufers. ValueError bei leerem Link oder unbekanntem Post (dann ist nichts
     geändert). Welche Plattform ein Link ist, prüft der Aufrufer vorher (bot.aktionen.plattform_aus_url)."""
     url = url.strip()
     if not url:
         raise ValueError("Leerer Link")
-    cursor = con.execute("UPDATE posts SET url = ?, video_id = COALESCE(?, video_id) WHERE id = ?",
-                         (url, video_id_aus_url(url), post_id))
+    video_id = video_id_aus_url(url)
+    cursor = con.execute("UPDATE posts SET video_id = CASE WHEN url = ? THEN COALESCE(?, video_id) ELSE ? END,"
+                         " url = ? WHERE id = ?", (url, video_id, video_id, url, post_id))
     if cursor.rowcount != 1:
         raise ValueError(f"Post #{post_id} gibt es nicht")
 

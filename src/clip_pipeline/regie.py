@@ -395,7 +395,8 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     Clip-Momente rechnen mit clips.merkmale (Replay-Merkmale, Länge; Bot-Opfer senken die Stärke), Datei-Momente
     (ohne Clip) mit max_gruppe, Victory und den Mic-Werten (Annahme S2-A9). Die Stimmung zählt nicht mehr mit.
     Punkte (Auswahl) = Stärke + Stimmungs-Bonus (gelernt) + 1 (Clip freigegeben/veröffentlicht/im Highlight)
-    + (Elo − 1500)/100 + Moment-Bonus (gelernt) − Abwechslungs-Abzug.
+    + (Elo − 1500)/100 + Moment-Bonus (gelernt) − Abwechslungs-Abzug. Status- und Elo-Bonus schrumpfen
+    gemeinsam mit dem historischen Anteil des autonomen Modells (ohne Publikumsmodell unverändert).
 
     Parameter: con – offene Verbindung; p – Regie-Parameter (PARAMETER plus Gelerntes); frueher – Momente der
     letzten Entwürfe, neuester zuerst (gezeigte_momente); gewichte – Merkmal → Gewicht, holt der Aufrufer einmal per
@@ -409,6 +410,7 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     schon = abwechslung(frueher or [], anteil_ab)
     alter = zuletzt_gezeigt(frueher or [])
     cooldown = int(p.get("cooldown_entwuerfe", 0)) if anteil_ab > 0 else 0
+    historisch = max(0.0, min(1.0, float((p.get("autonom") or {}).get("historischer_anteil", 1.0))))
     bericht = {"ohne_datei": 0, "ersetzt": 0, "gesperrt": 0}
     zeilen = con.execute(
         """SELECT m.*, c.status AS clip_status, c.elo AS elo, c.merkmale AS clip_merkmale,
@@ -444,9 +446,9 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
         intensitaet = round(roh_score(fuer_moment(clip_mk, mk, kill_tabelle), gewichte), 2)
         punkte = intensitaet + float(p["stimmung_bonus"].get(z["stimmung"], 0.0))
         if z["clip_status"] in BEWERTET:  # freigegeben, veröffentlicht, im Highlight: von dir für gut befunden
-            punkte += 1.0
+            punkte += historisch
         if z["elo"] is not None:
-            punkte += (float(z["elo"]) - 1500.0) / 100.0
+            punkte += historisch * (float(z["elo"]) - 1500.0) / 100.0
         punkte += float(p.get("moment_bonus", {}).get(z["schluessel"], 0.0))
         anteil, gezeigt = schon.get(z["schluessel"], (0.0, 0))
         abzug = round(anteil * max(punkte, 1.0), 2)  # auch schwache Momente (< 1 Punkt) verlieren etwas

@@ -576,11 +576,16 @@ class Posts(MitPublikum):
         publikum.link_nachtragen(self.con, pid, TIKTOK_LINK)  # Tippfehler korrigiert
         zeile = publikum.post(self.con, pid)
         self.assertEqual((zeile["url"], zeile["video_id"]), (TIKTOK_LINK, "7300123456789012345"))
-        # Kurzlink ohne ablesbare ID: url ersetzt, video_id bleibt
+        messung_id = self.messung(pid, tag(3), views=100)
+        # Neuer Kurzlink ohne ablesbare ID darf keine Messungen vom alten Video abholen.
         publikum.link_nachtragen(self.con, pid, "https://vm.tiktok.com/ZMabc123/")
         zeile = publikum.post(self.con, pid)
-        self.assertEqual((zeile["url"], zeile["video_id"]), ("https://vm.tiktok.com/ZMabc123/",
-                                                             "7300123456789012345"))
+        self.assertEqual((zeile["url"], zeile["video_id"]), ("https://vm.tiktok.com/ZMabc123/", None))
+        self.assertEqual(publikum.letzte_messung(self.con, pid)["id"], messung_id)
+        # Ein bereits eindeutig zugeordneter Kurzlink behält seine ID beim Wiederholen.
+        self.con.execute("UPDATE posts SET video_id='777' WHERE id=?", (pid,))
+        publikum.link_nachtragen(self.con, pid, "https://vm.tiktok.com/ZMabc123/")
+        self.assertEqual(publikum.post(self.con, pid)["video_id"], "777")
 
     def test_link_fuer_unbekannten_post(self):
         with self.assertRaises(ValueError):

@@ -220,7 +220,10 @@ def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
     vor = iso(zeit - timedelta(hours=float(konfig.wert("publikum.api_intervall_stunden", 6))))
     posts = con.execute("""SELECT p.* FROM posts p WHERE p.gepostet_utc>=? AND NOT EXISTS
                            (SELECT 1 FROM publikum_messungen m WHERE m.post_id=p.id AND m.quelle='api'
-                            AND m.gemessen_utc>?) ORDER BY p.gepostet_utc DESC,p.id DESC LIMIT ?""",
+                            AND m.gemessen_utc>?)
+                           ORDER BY COALESCE((SELECT MAX(m.gemessen_utc) FROM publikum_messungen m
+                                              WHERE m.post_id=p.id AND m.quelle='api'),''),
+                                    p.gepostet_utc DESC,p.id DESC LIMIT ?""",
                         (seit, vor, int(konfig.wert("publikum.api_max_posts", 100)))).fetchall()
     tokens = {}
     for post in posts:

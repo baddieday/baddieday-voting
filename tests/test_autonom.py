@@ -114,6 +114,12 @@ class Autonom(MitRegieMaterial):
         publikum.speichere_messung(self.con, pid, {"views": 10000, "likes": 500, "shares": 100}, "api",
                                   zeit=self.start+timedelta(days=20))
         self.assertEqual(self.con.execute("SELECT messung_id FROM audience_ergebnisse WHERE post_id=?", (pid,)).fetchone()[0], mid)
+        # Ein fast unbeobachteter, vollständiger Frühscreenshot darf dagegen eine
+        # spätere, deutlich verlässlichere virale API-Messung nicht festhalten.
+        self.con.execute("UPDATE publikum_messungen SET views=1,likes=0,shares=0,saves=0,"
+                         "gemessen_utc=? WHERE id=?", (iso(self.start+timedelta(days=10, minutes=5)), mid))
+        autonom.aktualisieren(self.con)
+        self.assertNotEqual(self.con.execute("SELECT messung_id FROM audience_ergebnisse WHERE post_id=?", (pid,)).fetchone()[0], mid)
 
     def test_exploration_aendert_eine_variable_und_speichert_ergebnis(self):
         self.lernen()

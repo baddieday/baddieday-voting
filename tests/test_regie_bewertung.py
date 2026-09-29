@@ -112,6 +112,11 @@ class Kandidaten(MitMomenten):
         self.assertEqual((k.intensitaet, k.punkte, k.abzug), (1.0, 1.0 + 0.5 + 1.0 + 1.0 - 0.25, 0.0))
         k = self.kandidaten(p=p, frueher=[["clip:1"]])["clip:1"]              # im letzten Entwurf: −70 %
         self.assertEqual((k.abzug, k.punkte), (round(0.7 * 3.25, 2), round(3.25 - round(0.7 * 3.25, 2), 2)))
+        # Mehr Publikumsevidenz schwächt auch Freigabe- und Battle-Elo-Boni, ohne die gespeicherten Daten zu ändern.
+        k = self.kandidaten(p={**p, "autonom": {"historischer_anteil": 0.25}})["clip:1"]
+        self.assertEqual((k.intensitaet, k.punkte), (1.0, 1.0 + 0.5 + 0.25 + 0.25 - 0.25))
+        gespeicherter_clip = self.con.execute("SELECT status, elo FROM clips WHERE id = ?", (clip,)).fetchone()
+        self.assertEqual(tuple(gespeicherter_clip), ("freigegeben", 1600.0))
 
     def test_negativer_score_und_abzug(self):
         # Reiner Bot-Einzelkill: 1 − 2 = −1. Abwechslung zieht wie bisher mindestens anteil·1 ab

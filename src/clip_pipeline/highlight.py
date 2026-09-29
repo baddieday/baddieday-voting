@@ -15,7 +15,7 @@ from pathlib import Path
 
 from . import db, elo
 from .konfig import Konfig
-from .medien import vorschau
+from .medien import probe, vorschau
 from .verarbeitung import SessionFehler, pruefe_id
 from .zeit import iso, jetzt
 
@@ -150,6 +150,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, hid: str, tage: int) -> di
     ordner = konfig.ordner("highlights")
     video, info_datei = ordner / f"{hid}.mp4", ordner / f"{hid}.json"
     if video.is_file() and info_datei.is_file():  # idempotent
+        # Bestehende Dateien nie überschreiben; unzulässige alte Längen brauchen eine neue ID.
+        regie.pruefe_dauer("zusammenschnitt", probe(video).dauer_s)
         return {**json.loads(info_datei.read_text(encoding="utf-8")), "uebersprungen": True}
     konfig.pruefe_speicher()
     # Ein Urteil ist keine Eintrittskarte mehr. Bewusst verworfene Clips bleiben ausgeschlossen.

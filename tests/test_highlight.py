@@ -1,6 +1,7 @@
 import json
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from clip_pipeline import db, entwurf, highlight, regie, regie_lernen, stimmung
@@ -41,6 +42,7 @@ class Highlight(MitSpeicher):
                 mock.patch.object(regie_lernen, "aktuelle", return_value=({"ziel_dauer_s": 90}, {})), \
                 mock.patch.object(regie, "erstelle", side_effect=planen), \
                 mock.patch.object(entwurf, "rendere", side_effect=render) as renderer, \
+                mock.patch.object(highlight, "probe", return_value=SimpleNamespace(dauer_s=90)), \
                 mock.patch.object(highlight, "vorschau", side_effect=preview):
             e = highlight.erstelle(self.con, self.konfig, "2026-KW39", 14)
             self.assertEqual((e["clips"], e["dauer"], e["clip_ids"]), (1, "01:30", [cid]))
