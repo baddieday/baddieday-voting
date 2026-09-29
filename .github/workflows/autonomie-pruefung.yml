@@ -1,0 +1,28 @@
+name: Autonomie – gezielte Prüfung
+on:
+  push:
+    branches: [autonom-publikum-75-120]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Quellstand für die Codeprüfung
+        run: git archive --format=tar HEAD -o /tmp/quellstand.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quellstand
+          path: /tmp/quellstand.tar
+          retention-days: 1
+      - name: Gezielte Autonomie-Prüfungen
+        run: |
+          if test -f tests/test_autonom.py; then
+            python -m pip install -e .
+            python -m unittest tests.test_autonom -v
+          else
+            python -m compileall -q src/clip_pipeline
+          fi
