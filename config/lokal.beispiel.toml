@@ -61,13 +61,13 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # bpm = 150                 # für epische Momente schnellere Musik
 # energie = 0.9             # und energiereichere (Rang in deiner Bibliothek, 0 … 1)
 # --- Dauer je Format (27.09.) ------------------------------------------------------------------
-# Sekunden 5 … 600; min_s ≤ max_s, seg_max_s und serie_max_s ≤ max_s – sonst gilt der Standard (Hinweis im Entwurf).
-# Standard: Short 30–75 s, Ziel 45 s (lernbar), 4–10 Momente (Segment bis 12 s, Serie bis 20 s), Zusammenschnitt 180–300 s (25 s / 30 s).
+# Harte Grenzen: Short 30–75 s, Zusammenschnitt 75–120 s. Alte Werte außerhalb werden ignoriert.
+# Start: Short 45 s, bevorzugter Lernbereich 45–75 s, 4–10 Momente; Zusammenschnitt 100 s (Segment 25 s / Serie 30 s).
 # [regie.formate.short]
 # ziel_s = 60               # Start-Ziel 60 s statt 45 (bleibt zwischen min_s und max_s)
 # serie_max_s = 30          # eine Kill-Serie darf am Stück länger bleiben
 # [regie.formate.zusammenschnitt]
-# max_s = 360
+# ziel_s = 105
 # --- Effekte (Regisseur 2.0) ---------------------------------------------------------------
 # Ganz aus (Schnitt und Übergänge wie vorher):
 # [regie.effekte]

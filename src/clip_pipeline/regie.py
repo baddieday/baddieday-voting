@@ -1,7 +1,7 @@
 """Der Regisseur (`pipeline compose`): aus Momenten mit Stimmung wird eine Schnittliste (JSON).
 
 Formate:
-  zusammenschnitt  16:9, 3–5 min je nach Material
+  zusammenschnitt  16:9, 75–120 s (Ziel 100 s, lernbar)
   short            9:16, 30–75 s (Ziel 45 s, lernbar), 4–10 Momente, unscharfer Rand, Schriftzug "clip-battle.de"
 
 Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der Konfig):
@@ -57,7 +57,7 @@ log = logging.getLogger("pipeline")
 
 FORMATE = {
     # Dauer gesamt, Segmentlänge, Serie am Stück (Multikill, Teile per Jump-Cut zusammen), Auflösung
-    "zusammenschnitt": {"min_s": 180.0, "max_s": 300.0, "ziel_s": 300.0, "seg_min_s": 3.0, "seg_max_s": 25.0,
+    "zusammenschnitt": {"min_s": 75.0, "max_s": 120.0, "ziel_s": 100.0, "seg_min_s": 3.0, "seg_max_s": 25.0,
                         "serie_max_s": 30.0,
                         "b": 1920, "h": 1080},
     # 28.09. (Florian): Shorts 30–75 s aus 4–10 Momenten; Start-Ziel 45 s, „⏱️ zu kurz“/„⏳ zu lang“ verschieben es
@@ -65,7 +65,9 @@ FORMATE = {
               "seg_min_s": 2.5, "seg_max_s": 12.0, "serie_max_s": 20.0,
               "b": 1080, "h": 1920},
 }
-# Dauern je Format aus config/lokal.toml, z. B. [regie.formate.short] max_s = 60 (Sekunden, 5 … 600)
+# Dauergrenzen sind Produktregeln; lokale Vorgaben dürfen sie nur weiter einschränken.
+DAUER_GRENZEN = {"short": (30.0, 75.0), "zusammenschnitt": (75.0, 120.0)}
+# Dauern je Format aus config/lokal.toml, z. B. [regie.formate.short] max_s = 60
 FORMAT_SCHLUESSEL = ("min_s", "max_s", "ziel_s", "seg_min_s", "seg_max_s", "serie_max_s")
 
 
@@ -84,6 +86,11 @@ def format_regeln(konfig, fmt_name: str) -> tuple[dict, list[str]]:
             hinweise.append(f"regie.formate.{fmt_name}.{name} ignoriert (unbekannt oder nicht 5 … 600 s)")
             continue
         fmt[name] = float(wert)
+    unten, oben = DAUER_GRENZEN[fmt_name]
+    for name in ("min_s", "max_s", "ziel_s"):
+        if not unten <= fmt[name] <= oben:
+            hinweise.append(f"regie.formate.{fmt_name}.{name} außerhalb {unten:.0f}–{oben:.0f} s – Standardwert")
+            fmt[name] = FORMATE[fmt_name][name]
     if fmt["min_s"] > fmt["max_s"] or fmt["seg_min_s"] > fmt["seg_max_s"] or fmt["seg_max_s"] > fmt["max_s"] \
             or fmt["serie_max_s"] > fmt["max_s"]:
         hinweise.append(f"regie.formate.{fmt_name} unstimmig (min ≤ max, seg_min ≤ seg_max ≤ max, "
@@ -94,6 +101,14 @@ def format_regeln(konfig, fmt_name: str) -> tuple[dict, list[str]]:
     return fmt, hinweise
 
 
+def pruefe_dauer(fmt_name: str, dauer_s: float) -> None:
+    """Harte Grenzen für vollständige Videos; historische Listen bleiben weiterhin lesbar."""
+    unten, oben = DAUER_GRENZEN[fmt_name]
+    if not unten - 1e-6 <= dauer_s <= oben + 1e-6:
+        raise RegieFehler(f"{fmt_name}: {dauer_s:.2f} s außerhalb {unten:.0f}–{oben:.0f} s "
+                          "– mehr passendes Material wählen oder neu planen")
+
+
 def dauer_grenzen(fmt: dict) -> tuple[float, float]:
     """Bereich des gelernten dauer_faktor, in dem jede Längen-Stimme noch wirkt: min_s/ziel_s … max_s/ziel_s
     (Short 30/45 … 75/45 = 0,667 … 1,667), höchstens 0,6 … 2,0. 28.09.: vorher fest 0,6 … 1,0 – bei 45 s war
@@ -102,9 +117,11 @@ def dauer_grenzen(fmt: dict) -> tuple[float, float]:
     return round(max(0.6, fmt["min_s"] / z), 3), round(min(2.0, fmt["max_s"] / z), 3)
 
 
-def ziel_dauer(fmt: dict, dauer_faktor: float, vorrat: float | None = None) -> float:
+def ziel_dauer(fmt: dict, dauer_faktor: float, vorrat: float | None = None, *, ziel_s: float | None = None) -> float:
     """Ziel-Dauer in s: Start-Ziel (Short 45 s; bei wenig Material 80 % davon, nie unter min_s) × gelernter
     dauer_faktor, immer innerhalb min_s … max_s (Short 30–75 s)."""
+    if ziel_s is not None:
+        return round(min(fmt["max_s"], max(fmt["min_s"], float(ziel_s))), 1)
     basis = float(fmt.get("ziel_s", fmt["max_s"]))
     if vorrat is not None:
         basis = min(basis, max(fmt["min_s"], 0.8 * vorrat))
@@ -492,7 +509,7 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandid
     if hinweis:
         hinweise.append(hinweis)
     vorrat = sum(laenge(k) for k in auswahl)
-    ziel = ziel_dauer(fmt, float(p["dauer_faktor"]), vorrat)
+    ziel = ziel_dauer(fmt, float(p["dauer_faktor"]), vorrat, ziel_s=p.get("ziel_dauer_s"))
     min_m, max_m = momente_grenzen(fmt)
     if vorrat < fmt["min_s"]:
         hinweise.append(f"nur {vorrat:.0f} s Material – kürzer als {fmt['min_s']:.0f} s")
@@ -531,11 +548,13 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandid
 
 # --- 2. Spannungsbogen -----------------------------------------------------------------
 
-def bogen(gewaehlt: list[Kandidat], fmt_name: str) -> list[Kandidat]:
+def bogen(gewaehlt: list[Kandidat], fmt_name: str, *, hook_staerkster: bool = False) -> list[Kandidat]:
     if len(gewaehlt) <= 2:
-        return sorted(gewaehlt, key=lambda k: k.intensitaet)
+        return sorted(gewaehlt, key=lambda k: k.intensitaet, reverse=hook_staerkster)
     nach_staerke = sorted(gewaehlt, key=lambda k: (-k.intensitaet, k.schluessel))
     hoehepunkt, hook, rest = nach_staerke[0], nach_staerke[1], nach_staerke[2:]
+    if hook_staerkster:
+        hook, hoehepunkt = hoehepunkt, hook
     mitte = sorted(rest, key=lambda k: (k.intensitaet, k.schluessel))
     # Atempause: ruhigster lustiger/chilliger Moment an ca. 60 % der Mitte
     pausen = [k for k in mitte if k.stimmung in ("lustig", "chill")]
@@ -799,6 +818,13 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     frueher = gezeigte_momente(con)
     # Gewichte einmal holen und durchreichen (Leitplanke 7); die Kill-Tabelle ist dieselbe wie im Clip-Bot
     _version, gewichte = lernen.aktuelle(con, konfig)
+    if "historischer_anteil" in (p.get("autonom") or {}):
+        anteil = max(0.0, min(1.0, float(p["autonom"]["historischer_anteil"])))
+        basis = lernen.startgewichte(konfig)
+        gewichte = {k: basis.get(k, 0.0) + (w - basis.get(k, 0.0)) * anteil for k, w in gewichte.items()}
+    for merkmal, delta in (p.get("publikum_gewichte") or {}).items():
+        if merkmal in gewichte and isinstance(delta, (int, float)):
+            gewichte[merkmal] += max(-1.0, min(1.0, float(delta)))
     kill_tabelle = [float(x) for x in konfig.wert("vorbewertung.kill_punkte")]
     alle, bericht = kandidaten_mit_bericht(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle, konfig=konfig,
                                            nur_matches=nur_matches)
@@ -822,7 +848,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         hinweise.append(f"{len(zu_lang)} Serie(n) zu lang für Short (> {fmt['serie_max_s']:.0f} s am Stück)")
     # Nachlegen nimmt aus demselben Vorrat wie die Auswahl: ohne die Momente im Cooldown, außer der reichte nicht
     vorrat, _ = frei_von_cooldown(alle, fmt, p)
-    reihe = bogen(gewaehlt, fmt_name)
+    reihe = bogen(gewaehlt, fmt_name, hook_staerkster=bool(p.get("hook_staerkster", False)))
 
     # Vorherrschende Stimmung (nach Länge gewichtet) bestimmt die Musik
     anteile: dict[str, float] = {}
@@ -874,7 +900,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                 if frische and sum(1 for k in gewaehlt if k.gezeigt == 0) < frische_soll(len(gewaehlt) + 1, p):
                     rest = frische
                 naechster_ = max(rest, key=lambda k: (k.punkte, k.schluessel))
-                neue_reihe = bogen([*gewaehlt, naechster_], fmt_name)
+                neue_reihe = bogen([*gewaehlt, naechster_], fmt_name,
+                                   hook_staerkster=bool(p.get("hook_staerkster", False)))
                 neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
                 if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
                     passt_nicht.append(naechster_)
@@ -910,8 +937,10 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     for s in segmente:
         s["bewertet"] = schon_bewertet.get(s["moment"], 0)
     gesamt = segmente[-1]["zeit_ende"] if segmente else 0.0
-    if gesamt < fmt["min_s"] - 1e-6:
-        hinweise.append(f"Dauer {gesamt:.1f} s unter {fmt['min_s']:.0f} s – zu wenig Material")
+    pruefe_dauer(fmt_name, gesamt)
+    if gesamt < fmt["min_s"] - 1e-6 or gesamt > fmt["max_s"] + 1e-6:
+        raise RegieFehler(f"Dauer {gesamt:.1f} s außerhalb des konfigurierten Bereichs "
+                          f"{fmt['min_s']:.0f}–{fmt['max_s']:.0f} s – zu wenig passendes Material")
     if len(reihe) < momente_grenzen(fmt)[0]:
         hinweise.append(f"nur {len(reihe)} Momente (Ziel mindestens {momente_grenzen(fmt)[0]}) – zu wenig passendes Material")
     # Gezählt werden Momente, nicht Segmente (ein Moment mit Jump-Cut hat mehrere Teile, der Hook wiederholt einen)

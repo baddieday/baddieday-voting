@@ -134,7 +134,15 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None) ->
     Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzte vorher auch die Shorts. Was du inhaltlich magst
     (Momente, Stimmungen, Musik), gilt für beide. fmt None: alle Bewertungen wie bisher."""
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
-    return _falte(bewertungen(con), konfig, energien, fmt)
+    p, ziel = _falte(bewertungen(con), konfig, energien, fmt)
+    if fmt is not None:
+        from . import autonom
+
+        p, ziel = autonom.plan_parameter(con, konfig, fmt, p, ziel)
+        grenzen = format_regeln(konfig, fmt)[0]
+        if "ziel_dauer_s" in p:
+            p["ziel_dauer_s"] = ziel_dauer(grenzen, 1.0, ziel_s=p["ziel_dauer_s"])
+    return p, ziel
 
 
 def _falte(zeilen: list, konfig: Konfig, energien: list[float], fmt: str | None) -> tuple[dict, dict]:
@@ -277,14 +285,14 @@ def wirkung(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> dict | None:
             "aenderungen": _unterschiede(vorher, nachher)}
 
 
-def dauer_zeile(zeilen: list, dauer_faktor: float, fmt: dict) -> str:
+def dauer_zeile(zeilen: list, dauer_faktor: float, fmt: dict, *, ziel_s: float | None = None) -> str:
     """Auswertung deiner Längen-Stimmen für Shorts (28.09.): wie oft „zu kurz“/„zu lang“, wie oft beides zugleich
     (hebt sich auf) und welche Ziel-Dauer daraus folgt."""
     gruende_je = [set(json.loads(z["gruende"] or "[]")) for z in zeilen if z["format"] == "short"]
     kurz = sum(1 for g in gruende_je if "kurz" in g and "lang" not in g)
     lang = sum(1 for g in gruende_je if "lang" in g and "kurz" not in g)
     beide = sum(1 for g in gruende_je if "kurz" in g and "lang" in g)
-    jetzt = ziel_dauer(fmt, dauer_faktor)
+    jetzt = ziel_dauer(fmt, dauer_faktor, ziel_s=ziel_s)
     text = (f"Short-Länge: {len(gruende_je)} Short-Bewertungen, {kurz}× „⏱️ zu kurz“, {lang}× „⏳ zu lang“"
             + (f", {beide}× beides (hebt sich auf)" if beide else "")
             + f" → Ziel {jetzt:.0f} s (Start {fmt['ziel_s']:.0f} s, erlaubt {fmt['min_s']:.0f}–{fmt['max_s']:.0f} s)")
@@ -332,12 +340,14 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     teile.append(f"Zusammenschnitt ({n_zs} Bewertungen): dauer_faktor {zs['dauer_faktor']}, "
                  f"seg_min_faktor {zs['seg_min_faktor']}, puffer_vor_s {zs['puffer_vor_s']}, "
                  f"uebergang_faktor {zs['uebergang_faktor']}")
-    teile.append(dauer_zeile(zeilen, p["dauer_faktor"], format_regeln(konfig, "short")[0]))
-    for fmt_name, df in (("short", p["dauer_faktor"]), ("zusammenschnitt", zs["dauer_faktor"])):
+    teile.append(dauer_zeile(zeilen, p["dauer_faktor"], format_regeln(konfig, "short")[0],
+                            ziel_s=p.get("ziel_dauer_s")))
+    for fmt_name, parameter in (("short", p), ("zusammenschnitt", zs)):
         fmt, fmt_hinweise = format_regeln(konfig, fmt_name)
         standard = fmt == format_regeln(None, fmt_name)[0]
         min_m, max_m = momente_grenzen(fmt)
-        teile.append(f"{fmt_name}: {fmt['min_s']:.0f}–{fmt['max_s']:.0f} s, Ziel jetzt {ziel_dauer(fmt, df):.0f} s"
+        dauer = ziel_dauer(fmt, parameter["dauer_faktor"], ziel_s=parameter.get("ziel_dauer_s"))
+        teile.append(f"{fmt_name}: {fmt['min_s']:.0f}–{fmt['max_s']:.0f} s, Ziel jetzt {dauer:.0f} s"
                      + (f", {min_m}–{max_m} Momente" if max_m < 10 ** 6 else "")
                      + f", Segment bis {fmt['seg_max_s']:.0f} s, Serie bis {fmt['serie_max_s']:.0f} s"
                      + ("" if standard else " (deine Vorgabe [regie.formate])"))
