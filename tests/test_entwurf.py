@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from clip_pipeline import entwurf, medien, regie, regie_lernen
+from clip_pipeline import entwurf, konfig, medien, messung, regie, regie_lernen
 
 from tests.hilfen import HAT_FFMPEG
 from tests.regie_hilfen import FARBEN, MOMENTE, MitRegieMaterial, farbe_bei, naechste_farbe
@@ -39,6 +39,13 @@ class Entwurf(MitRegieMaterial):
             mitte = (s["zeit_start"] + s["zeit_ende"]) / 2
             self.assertEqual(naechste_farbe(farbe_bei(video, mitte)), farbe_von[s["moment"]], s)
         self.assertTrue(entwurf.entwurf(self.con, self.konfig, e["entwurf"])["uebersprungen"])
+        # 30.09. (Cutter-Maßstab): Sidecar mit Band und angeglichenem Ton, Stems im Kritik-Ordner (nur mit Musik)
+        sidecar = json.loads(video.with_suffix(".render.json").read_text())
+        self.assertTrue(sidecar["normiert"], sidecar)
+        self.assertLess(sidecar["band"][0], sidecar["band"][1])
+        self.assertEqual(len(sidecar["spiel_anteile"]), len(liste["segmente"]))
+        stems = video.parent / f"kritik-{e['entwurf']}" / "stems.mka"
+        self.assertEqual(stems.is_file(), bool(liste.get("musik")))
         return liste
 
     def test_short_und_zusammenschnitt(self):
@@ -251,3 +258,57 @@ class FinalPruefung(MitRegieMaterial):
             auftrag.write_text(json.dumps(liste))
             with self.assertRaises(entwurf.MedienFehler, msg=was):
                 entwurf.fuehre_final_aus(self.konfig, auftrag)
+
+
+def pakete(video: Path) -> list[str]:
+    """Prüfsummen der Videopakete – gleich, wenn der Videostrom nur kopiert wurde."""
+    text = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(video), "-map", "0:v", "-c", "copy",
+                           "-f", "framemd5", "-"], capture_output=True, text=True, check=True).stdout
+    return [z.split(",")[-1].strip() for z in text.splitlines() if z and not z.startswith("#")]
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class NormalisiereTon(unittest.TestCase):
+    """R1 (30.09.): zwei Pässe loudnorm auf −14 LUFS / −1,5 dBTP, das Bild bleibt Bit für Bit gleich."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.konfig = konfig.lade()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def video(self, name: str, ton: bool) -> Path:
+        ziel = self.tmp / name
+        befehl = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                  "testsrc=size=320x240:rate=30:duration=4"]
+        if ton:  # Sinus, rund −30 LUFS
+            befehl += ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=4", "-af",
+                       "volume=-11dB,aformat=channel_layouts=stereo", "-c:a", "aac"]
+        subprocess.run([*befehl, "-c:v", "libx264", "-preset", "ultrafast", "-t", "4", str(ziel)], check=True)
+        return ziel
+
+    def test_leise_wird_minus_14_lufs(self):
+        video = self.video("leise.mp4", ton=True)
+        vorher = messung.loudnorm_messen(video, -14, -1.5)
+        self.assertLess(vorher["input_i"], -25)
+        bild = pakete(video)
+        r = entwurf.normalisiere_ton(video, self.konfig)
+        self.assertTrue(r["normiert"], r)
+        self.assertGreater(r["ton_gain_db"], 10)
+        nachher = messung.loudnorm_messen(video, -14, -1.5)
+        self.assertAlmostEqual(nachher["input_i"], -14, delta=1.0)
+        self.assertLessEqual(nachher["input_tp"], -1.0)
+        self.assertEqual(pakete(video), bild)                                 # Videostrom per copy unverändert
+        self.assertEqual([p.name for p in self.tmp.iterdir()], ["leise.mp4"])   # keine Reste
+
+    def test_ohne_ton_unveraendert(self):
+        video = self.video("stumm.mp4", ton=False)
+        inhalt = video.read_bytes()
+        r = entwurf.normalisiere_ton(video, self.konfig)
+        self.assertFalse(r["normiert"])
+        self.assertTrue(r["ton_hinweis"])
+        self.assertEqual(video.read_bytes(), inhalt)

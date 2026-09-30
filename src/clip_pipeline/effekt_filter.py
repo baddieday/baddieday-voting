@@ -45,7 +45,9 @@ EINZUG, DRIFT = 0.18, 0.06
 # hält, solange gekippt ist (nachgerechnet für 16:9 und 4:3: keine schwarzen Ecken)
 TILT = 0.07
 # Spielbild-Katalog (bildfilter): Stärke 1 ->
-STROBE_HELLE, STROBE_HZ = 0.35, 7.5  # Helligkeit, Blinken je Sekunde (bei 30 fps: 2 Bilder an, 2 aus)
+# Helligkeit, Blinken je Sekunde: 2,5 Hz (bei 30 fps 6 Bilder an, 6 aus). Sicherheitsregel, kein Geschmack (Cutter-
+# Maßstab R4, Annahme A2): höchstens 3 Blitze je Sekunde (WCAG 2.3.1, TikTok-Warnung) – vorher 7,5 Hz
+STROBE_HELLE, STROBE_HZ = 0.35, 2.5
 KONTRAST, FARBPOP = 0.6, 1.2         # eq contrast bzw. saturation: 1 + Wert·(1−u)²
 BLUR_SIGMA = (14, 6)                 # gblur erst stark, dann schwach (je Hälfte), bei 1080 Breite
 PIXEL = 24                           # Kantenlänge der Pixel-Blöcke bei 1080 Breite

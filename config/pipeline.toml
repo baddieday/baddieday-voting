@@ -149,6 +149,16 @@ gut_ab = 60                # KI-Note ab hier zählt als 👍 im Regie-Lernen, da
 schwelle = 50              # darunter sortiert der Lern-Bot den Entwurf still aus und baut neu (0 = aus)
 prompt = "templates/kritik-prompt.txt"
 
+[regie.ton]
+# Ton-Hygiene im Renderer (30.09., Cutter-Maßstab R1/R3): jedes fertige Video wird in zwei Pässen (loudnorm) auf
+# diese Lautheit und diesen True Peak angeglichen – Entwurf, Upload-Fassung und Final (entwurf.normalisiere_ton)
+lufs = -14.0
+true_peak = -1.5
+# Musik-Kanten in Sekunden: einblenden nur gegen Knacken; ausblenden im Short kurz (Loop-Ende), im Zusammenschnitt weich
+musik_ein_s = 0.03
+musik_aus_s_short = 0.25
+musik_aus_s_zs = 2.0
+
 [regie.effekte]
 # Regisseur 2.0/2.1: Der Regisseur schreibt einen Effekt-Plan in die Schnittliste (src/clip_pipeline/effekte.py), der
 # Renderer setzt ihn nur um. Im Spielbild: Übergänge (gemischt ohne Wiederholung), Zoom, Zeitlupe/Zeitraffer, Farblook
