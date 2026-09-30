@@ -521,6 +521,9 @@ def speichere_messung(con: sqlite3.Connection, post_id: int, werte: dict, quelle
     # Neue Publikumsdaten sind der Auslöser, nicht ein weiterer Bewertungs-Klick.
     # Der Lerner benutzt SAVEPOINTs und funktioniert auch in der Bot-Transaktion.
     autonom.aktualisieren(con, konfig)
+    from . import massstab
+
+    massstab.nachziehen(con, konfig, "Publikum")   # Cutter-Maßstab: das Publikum ist Lehrer 1 (fängt selbst ab)
     return int(cursor.lastrowid)
 
 

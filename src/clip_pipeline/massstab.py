@@ -420,6 +420,26 @@ def faktoren(con: sqlite3.Connection) -> dict[str, float]:
     return werte
 
 
+def ki_gewicht(con: sqlite3.Connection) -> float:
+    """κ = 0,5·a_KI der neuesten Version (Spec §4): so stark zählt die KI-Note in N = (1 − κ)·M_f + κ·K. Ohne Version
+    zählt der KI-Cutter voll (a_KI = 1, κ = 0,5) – wie vor dem Maßstab, als score = (Regeln + KI)/2 war."""
+    z = _neueste(con)
+    a_ki = 1.0 if z is None or z["ki_lehrer"] is None else float(z["ki_lehrer"])
+    return 0.5 * max(0.0, min(1.0, a_ki))
+
+
+def nachziehen(con: sqlite3.Connection, konfig: Konfig | None, anlass: str = "") -> int | None:
+    """aktualisiere mit Netz (Spec §5.3 „Aufrufstellen“): nach einer Kritik, neuen Publikums-Scores oder deinem 👍/👎.
+    Ein Fehler hier kostet nichts – er landet nur im Log. Rückgabe: Version oder None."""
+    try:
+        version, ergebnis = aktualisiere(con, konfig)
+    except Exception:  # noqa: BLE001 – Lernen ist Zugabe, nie der Grund für einen verlorenen Schritt
+        log.exception("Cutter-Maßstab nachziehen (%s)", anlass or "?")
+        return None
+    log.info("Cutter-Maßstab v%s (%s) nach %s", version, ergebnis.get("grund"), anlass or "?")
+    return version
+
+
 # --- Anzeige ----------------------------------------------------------------------------------------------------
 
 def _de(x: float, stellen: int = 2) -> str:
