@@ -1,10 +1,8 @@
 """Highlight-Video alle 2 Wochen (`pipeline highlight --id ID --tage 14`).
 
-Auswahl: freigegebene Clips des Zeitraums, die noch in keinem Highlight waren, sortiert nach
-Ranglisten-Wert (Elo) und Punkten; das Beste kommt zum Schluss.
-Schnitt: alle Clips auf ein Format (1920×1080, feste Bildrate), weiche Übergänge (xfade/acrossfade).
-Musik: nur Titel mit Lizenzvermerk (<titel>.lizenz.txt daneben). Sie wird automatisch leiser, wenn im
-Spiel etwas los ist ("Ducking" mit sidechaincompress).
+Neue Ausgaben laufen über den gemeinsamen Regisseur und seine autonome Parameterwahl.
+Der n8n-Vertrag und bereits erzeugte Dateien bleiben erhalten. Die früheren Auswahl-/Filter-Helfer
+bleiben für vorhandene Aufrufer verfügbar; sie werden für neue Highlights nicht mehr verwendet.
 """
 
 from __future__ import annotations
@@ -15,9 +13,9 @@ import zlib
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import db, elo, merkmale
+from . import db, elo
 from .konfig import Konfig
-from .medien import MedienFehler, fuehre_aus, probe, vorschau
+from .medien import probe, vorschau
 from .verarbeitung import SessionFehler, pruefe_id
 from .zeit import iso, jetzt
 
@@ -143,65 +141,62 @@ def _mmss(sekunden: float) -> str:
 
 
 def erstelle(con: sqlite3.Connection, konfig: Konfig, hid: str, tage: int) -> dict:
+    """n8n-Vertrag, gemeinsamer autonomer Regisseur. Bestehende Exporte bleiben erhalten."""
+    from . import entwurf, regie, regie_lernen, stimmung
+
     pruefe_id(hid)
     if tage < 1:
         raise SessionFehler("--tage muss mindestens 1 sein")
     ordner = konfig.ordner("highlights")
     video, info_datei = ordner / f"{hid}.mp4", ordner / f"{hid}.json"
     if video.is_file() and info_datei.is_file():  # idempotent
+        # Bestehende Dateien nie überschreiben; unzulässige alte Längen brauchen eine neue ID.
+        regie.pruefe_dauer("zusammenschnitt", probe(video).dauer_s)
         return {**json.loads(info_datei.read_text(encoding="utf-8")), "uebersprungen": True}
     konfig.pruefe_speicher()
-
-    clips = auswahl(con, konfig, tage)
+    # Ein Urteil ist keine Eintrittskarte mehr. Bewusst verworfene Clips bleiben ausgeschlossen.
+    clips = con.execute("SELECT id,match_id FROM clips WHERE status != 'verworfen' AND clip_pfad IS NOT NULL "
+                        "AND start_utc >= ?", (iso(jetzt()-timedelta(days=tage)),)).fetchall()
     if not clips:
-        return {"id": hid, "clips": 0, "dauer": "00:00", "hinweis": f"keine freigegebenen Clips der letzten {tage} Tage"}
-    dateien = [konfig.absolut(c["clip_pfad"]) for c in clips]
-    fehlend = [str(d) for d in dateien if not d.is_file()]
-    if fehlend:
-        raise MedienFehler(f"Clip-Dateien fehlen: {fehlend[:3]}")
-    infos = [probe(d) for d in dateien]
-    musik = musik_waehlen(konfig, hid)
-    # Mikro/Chat nur bei Lachen, Jubel oder Gags (merkmale.stimmen_fuer_clip) – sonst nur Spur 0 (Spielton)
-    spuren = [len(i.tonspuren) if merkmale.stimmen_fuer_clip(con, c["id"]) else min(len(i.tonspuren), 1)
-              for i, c in zip(infos, clips)]
-    graph, gesamt = filtergraph([(i.dauer_s, s) for i, s in zip(infos, spuren)], musik=musik is not None, konfig=konfig)
-
-    befehl = ["ffmpeg", "-hide_banner", "-nostdin", "-y"]
-    for d in dateien:
-        befehl += ["-i", str(d)]
-    if musik:
-        befehl += ["-stream_loop", "-1", "-i", str(musik[0])]  # Musik bei Bedarf wiederholen
+        return {"id": hid, "clips": 0, "dauer": "00:00", "hinweis": f"keine Clips der letzten {tage} Tage"}
+    name = f"highlight-{hid}"
+    zeile = con.execute("SELECT * FROM entwuerfe WHERE name=?", (name,)).fetchone()
+    if zeile is None:
+        stimmung.analysiere(con, konfig, nur_clips=[c["id"] for c in clips], claude=False, whisper=False)
+        parameter, ziel = regie_lernen.aktuelle(con, konfig, "zusammenschnitt")
+        e = regie.erstelle(con, konfig, "zusammenschnitt", name=name, parameter=parameter, ziel=ziel,
+                           nur_matches={c["match_id"] for c in clips})
+        zeile = con.execute("SELECT * FROM entwuerfe WHERE id=?", (e["entwurf"],)).fetchone()
+    liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
+    regie.pruefe_dauer("zusammenschnitt", liste["dauer_s"])
     ordner.mkdir(parents=True, exist_ok=True)
     tmp = ordner / f"{hid}.tmp.mp4"
-    befehl += [
-        "-filter_complex", graph, "-map", "[vout]", "-map", "[aout]", "-t", f"{gesamt:.3f}",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(tmp),
-    ]
-    fuehre_aus(befehl, f"Highlight {hid}")
+    # Derselbe Renderer und dieselben harten Grenzen wie bei jedem vollständigen Entwurf.
+    entwurf.rendere(liste, tmp, konfig, vollstaendig=True, volle_aufloesung=True, crf=20,
+                    max_bytes=2_000_000_000, kbit_max=12000)
     tmp.replace(video)
-    # Das volle Video ist für Telegram zu groß (> 50 MB) -> kleine Vorschau zum Freigeben im Bot
     vorschau_datei = ordner / f"{hid}.vorschau.mp4"
     vorschau(video, vorschau_datei, max_bytes=int(float(konfig.wert("vorschau.max_mb", 48)) * 1_000_000),
              kurze_seite=int(konfig.wert("vorschau.kurze_seite", 720)))
 
-    ergebnis = {
-        "id": hid, "clips": len(clips), "dauer": _mmss(gesamt), "datei": konfig.relativ(video),
-        "musik": musik[0].name if musik else None, "lizenz": musik[1] if musik else None,
-        "clip_ids": [c["id"] for c in clips],
-    }
-    if not musik:
-        ergebnis["hinweis"] = "ohne Musik – keine Titel mit .lizenz.txt in musik/"
+    clip_ids = list(dict.fromkeys(s["clip_id"] for s in liste["segmente"] if s.get("clip_id") is not None))
+    m = liste.get("musik")
+    ergebnis = {"id": hid, "entwurf": zeile["id"], "clips": len(clip_ids), "dauer": _mmss(liste["dauer_s"]),
+                "datei": konfig.relativ(video), "musik": m["titel"] if m else None,
+                "lizenz": m["quelle"] if m else None, "clip_ids": clip_ids,
+                "hinweis": f"Publikumslernen: im Lern-Bot /link {zeile['id']} <Video-URL> schicken."}
     with db.transaktion(con):
-        for c in clips:
-            con.execute("UPDATE clips SET highlight_id = ?, geaendert = ? WHERE id = ?", (hid, iso(jetzt()), c["id"]))
-            db.status_wechsel(con, c["id"], ("veroeffentlicht",), "im_highlight")
+        for cid in clip_ids:
+            con.execute("UPDATE clips SET highlight_id = ?, geaendert = ? WHERE id = ?", (hid, iso(jetzt()), cid))
+            db.status_wechsel(con, cid, ("veroeffentlicht",), "im_highlight")
+        con.execute("UPDATE entwuerfe SET datei=?,status='gerendert' WHERE id=? AND status='neu'",
+                    (str(vorschau_datei), zeile["id"]))
         con.execute(
-            """INSERT OR IGNORE INTO highlights (name, datei, vorschau, clips, dauer, musik, erstellt)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (hid, konfig.relativ(video), konfig.relativ(vorschau_datei), len(clips), ergebnis["dauer"],
-             ergebnis["musik"], iso(jetzt())),
+            """INSERT OR IGNORE INTO highlights (name, datei, vorschau, clips, dauer, musik, erstellt, entwurf_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (hid, konfig.relativ(video), konfig.relativ(vorschau_datei), len(clip_ids), ergebnis["dauer"],
+             ergebnis["musik"], iso(jetzt()), zeile["id"]),
         )
-        db.protokoll(con, "highlight", f"{hid}: {len(clips)} Clips, {ergebnis['dauer']}")
+        db.protokoll(con, "highlight", f"{hid}: {len(clip_ids)} Clips, {ergebnis['dauer']}, Entwurf {zeile['id']}")
     info_datei.write_text(json.dumps(ergebnis, ensure_ascii=False, indent=2), encoding="utf-8")
     return ergebnis

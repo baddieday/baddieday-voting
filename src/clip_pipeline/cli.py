@@ -511,7 +511,7 @@ def _cmd_bewerte(args, konfig, con) -> int:
 
 
 def _cmd_lernstand(args, konfig, con) -> int:
-    from . import regie_lernen
+    from . import autonom, regie_lernen
 
     print(regie_lernen.lernstand_text(con, konfig), file=sys.stderr)
     # Zusatz wie HILFE_ZUSATZ: der Regie-Lernstand bleibt unverändert, die Trefferquote der Erwartung (Spec §10.5)
@@ -519,7 +519,7 @@ def _cmd_lernstand(args, konfig, con) -> int:
     if zusatz := erwartung.trefferquote_text(con, konfig):
         print(zusatz, file=sys.stderr)
     parameter, ziel = regie_lernen.aktuelle(con, konfig, "short")
-    _json({"parameter": parameter, "musik_ziele": ziel,  # Schnitt-Werte je Format (27.09.)
+    _json({"autonom": autonom.ueberblick(con), "parameter": parameter, "musik_ziele": ziel,
            "parameter_zusammenschnitt": regie_lernen.aktuelle(con, konfig, "zusammenschnitt")[0]})
     return 0
 
@@ -541,9 +541,15 @@ def _cmd_publikum(args, konfig, con) -> int:
     JSON: {"bewertet", "ohne_messung", "noch_zu_jung", "fehler", "posts": [{"id", "score"}], "meldung": bool}.
     Exit: 0 ok (auch: nichts fällig) · 1 mindestens ein Post nicht bewertbar (steht mit #Nummer im Log; die anderen
     sind trotzdem bewertet, die JSON-Zeile kommt trotzdem) · 2 Konfig ([publikum]-Schlüssel fehlt)."""
-    from . import lernbot_publikum, publikum  # erst hier: die anderen Befehle brauchen die Lernschleife nicht
+    from . import autonom, lernbot_publikum, publikum, publikum_adapter
 
     zeit = jetzt()
+    if args.aktion == "importieren":
+        antwort = json.loads(Path(args.datei).read_text(encoding="utf-8"))
+        mid = publikum_adapter.importiere(con, konfig, args.post, antwort, zeit=zeit)
+        _json({"messung": mid, "autonom": autonom.ueberblick(con)})
+        return 0
+    api = publikum_adapter.abrufen(con, konfig, zeit=zeit)
     try:
         ergebnis = publikum.bewerte_alle(con, konfig, zeit)
     # KonfigFehler: ein [publikum]-Schlüssel fehlt ganz (auch in pipeline.toml). Ein Tippfehler in lokal.toml
@@ -566,8 +572,10 @@ def _cmd_publikum(args, konfig, con) -> int:
             log.info("Gewichte Version %s (%s)", version, gelernt.grund)
         except (ValueError, KeyError, TypeError) as fehler:
             log.warning("Lernen nach dem Bewerten fehlgeschlagen (%s: %s)", type(fehler).__name__, fehler)
+    ergebnis["api"] = api
+    ergebnis["autonom"] = autonom.aktualisieren(con, konfig)
     _json(ergebnis)
-    return 1 if ergebnis["fehler"] else 0
+    return 1 if ergebnis["fehler"] or api["fehler"] else 0
 
 
 def baue_parser() -> argparse.ArgumentParser:
@@ -766,6 +774,9 @@ def baue_parser() -> argparse.ArgumentParser:
     publikum_befehle = s.add_subparsers(dest="aktion", required=True)
     publikum_befehle.add_parser("bewerten", help="Publikums-Scores aller fälligen Posts setzen (einmal je Post, "
                                                  "weckt nie) – bei neuen Scores eine Meldung im Lern-Bot")
+    importer = publikum_befehle.add_parser("importieren", help="Plattform-JSON importieren und automatisch lernen")
+    importer.add_argument("--post", type=int, required=True)
+    importer.add_argument("--datei", required=True)
     s.set_defaults(fn=_cmd_publikum, sperren=False)  # reine DB-Arbeit: keine Pipeline-Sperre, nicht in WECKEN
     return p
 

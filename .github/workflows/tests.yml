@@ -1,0 +1,43 @@
+name: Tests
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Medienwerkzeuge
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Abhängigkeiten
+        run: python -m pip install -e .
+      - name: Bestehende Regressionen einschließlich echter Renderläufe
+        env:
+          TEST_SHARD: ${{ matrix.shard }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import sys
+          import unittest
+          # Jedes Modul genau einmal; drei parallele Läufe verkürzen die vielen
+          # bestehenden FFmpeg-Prüfungen, ohne Tests auszulassen.
+          modules = sorted('tests.' + p.stem for p in pathlib.Path('tests').glob('test*.py'))
+          selected = modules[int(os.environ['TEST_SHARD'])::3]
+          print('Testmodule:', ', '.join(selected), flush=True)
+          suite = unittest.defaultTestLoader.loadTestsFromNames(selected)
+          result = unittest.TextTestRunner(verbosity=1).run(suite)
+          sys.exit(not result.wasSuccessful())
+          PY

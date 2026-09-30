@@ -90,7 +90,9 @@ class Short(MitSpeicher):
     def test_hochformat_mit_endcard(self):
         clip = testvideo(self.tmp / "clip.mp4", dauer=6, tonspuren=2)
         ziel = self.tmp / "short.mp4"
-        groesse = shorts.rendere(clip, ziel, self.konfig)
+        with self.assertRaisesRegex(medien.MedienFehler, "/entwurf short"):
+            shorts.rendere(clip, ziel, self.konfig)
+        groesse = shorts.rendere(clip, ziel, self.konfig, vollstaendig=False)
         info = medien.probe(ziel)
         self.assertEqual((info.breite, info.hoehe, len(info.tonspuren)), (1080, 1920, 1))
         self.assertAlmostEqual(info.dauer_s, 6 + 2.5 - 0.5, delta=0.2)
@@ -99,9 +101,9 @@ class Short(MitSpeicher):
     def test_mit_cam_braucht_koordinaten(self):
         clip = testvideo(self.tmp / "clip.mp4", dauer=2, tonspuren=0)
         with self.assertRaises(medien.MedienFehler):
-            shorts.rendere(clip, self.tmp / "s.mp4", self.konfig, layout="mit-cam")
+            shorts.rendere(clip, self.tmp / "s.mp4", self.konfig, layout="mit-cam", vollstaendig=False)
         self.konfig.daten["shorts"]["cam"] = {"x": 0, "y": 0, "b": 200, "h": 150}
-        shorts.rendere(clip, self.tmp / "s.mp4", self.konfig, layout="mit-cam")
+        shorts.rendere(clip, self.tmp / "s.mp4", self.konfig, layout="mit-cam", vollstaendig=False)
         self.assertEqual(medien.probe(self.tmp / "s.mp4").hoehe, 1920)
 
 

@@ -53,13 +53,24 @@ def _grenze(wert: float, unten: float, oben: float) -> float:
     return round(max(unten, min(oben, wert)), 3)
 
 
-def bewertungen(con: sqlite3.Connection) -> list[sqlite3.Row]:
-    return con.execute(
-        """SELECT b.*, e.schnittliste, e.track_id, e.format, t.bpm AS track_bpm, t.energie AS track_energie
-             FROM entwurf_bewertungen b JOIN entwuerfe e ON e.id = b.entwurf_id
-             LEFT JOIN tracks t ON t.id = e.track_id
-            ORDER BY b.erstellt, b.entwurf_id"""
-    ).fetchall()
+def bewertungen(con: sqlite3.Connection, *, mit_ki: bool = True) -> list[sqlite3.Row]:
+    """Deine Bewertungen (quelle "du") und – mit_ki – die Urteile des KI-Cutters (kritik.py, quelle "ki", 30.09.):
+    Sie wirken mit denselben Regeln wie deine Knöpfe, so lernt der Regisseur auch ohne dein 👍/👎. Ein Entwurf, den
+    du selbst bewertet hast, zählt nur mit deinem Urteil (du hast Vorrang)."""
+    felder = """e.schnittliste, e.track_id, e.format, t.bpm AS track_bpm, t.energie AS track_energie"""
+    sql = f"""SELECT b.entwurf_id AS entwurf_id, b.daumen AS daumen, b.gruende AS gruende, b.erstellt AS erstellt,
+                     b.geaendert AS geaendert, 'du' AS quelle, {felder}
+                FROM entwurf_bewertungen b JOIN entwuerfe e ON e.id = b.entwurf_id
+                LEFT JOIN tracks t ON t.id = e.track_id"""
+    if mit_ki:
+        sql += f"""
+              UNION ALL
+              SELECT k.entwurf_id, k.daumen, k.gruende, k.erstellt, k.erstellt, 'ki', {felder}
+                FROM kritiken k JOIN entwuerfe e ON e.id = k.entwurf_id
+                LEFT JOIN tracks t ON t.id = e.track_id
+               WHERE k.daumen IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM entwurf_bewertungen b WHERE b.entwurf_id = k.entwurf_id)"""
+    return con.execute(sql + " ORDER BY erstellt, entwurf_id").fetchall()
 
 
 def _liste(zeile: sqlite3.Row) -> dict:
@@ -134,7 +145,17 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None) ->
     Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzte vorher auch die Shorts. Was du inhaltlich magst
     (Momente, Stimmungen, Musik), gilt für beide. fmt None: alle Bewertungen wie bisher."""
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
-    return _falte(bewertungen(con), konfig, energien, fmt)
+    p, ziel = _falte(bewertungen(con), konfig, energien, fmt)
+    if fmt is not None:
+        from . import autonom, stile
+
+        # Schnittstil (30.09.) zuerst: relativ auf das Gelernte; das Publikumsmodell darf danach nachsteuern
+        p = stile.anwenden(con, konfig, fmt, p)
+        p, ziel = autonom.plan_parameter(con, konfig, fmt, p, ziel)
+        grenzen = format_regeln(konfig, fmt)[0]
+        if "ziel_dauer_s" in p:
+            p["ziel_dauer_s"] = ziel_dauer(grenzen, 1.0, ziel_s=p["ziel_dauer_s"])
+    return p, ziel
 
 
 def _falte(zeilen: list, konfig: Konfig, energien: list[float], fmt: str | None) -> tuple[dict, dict]:
@@ -266,9 +287,10 @@ def wirkung(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> dict | None:
     gefühlt ins Leere“): Parameter mit und ohne diese Bewertung, als kurze Sätze. None ohne Bewertungen.
     Beispiel: {"entwurf": 41, "format": "short", "aenderungen": ["Ziel-Dauer 81% → 90%", "6 Momente kommen öfter"]}."""
     zeilen = bewertungen(con)
-    if not zeilen:
+    deine = [z for z in zeilen if z["quelle"] == "du"]   # KI-Urteile (30.09.) sind nie „deine letzte Bewertung“
+    if not deine:
         return None
-    letzte = max(zeilen, key=lambda z: (z["geaendert"] or z["erstellt"] or "", z["entwurf_id"]))
+    letzte = max(deine, key=lambda z: (z["geaendert"] or z["erstellt"] or "", z["entwurf_id"]))
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
     ohne = [z for z in zeilen if z["entwurf_id"] != letzte["entwurf_id"]]
     vorher, _ = _falte(ohne, konfig, energien, fmt)
@@ -277,14 +299,14 @@ def wirkung(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> dict | None:
             "aenderungen": _unterschiede(vorher, nachher)}
 
 
-def dauer_zeile(zeilen: list, dauer_faktor: float, fmt: dict) -> str:
+def dauer_zeile(zeilen: list, dauer_faktor: float, fmt: dict, *, ziel_s: float | None = None) -> str:
     """Auswertung deiner Längen-Stimmen für Shorts (28.09.): wie oft „zu kurz“/„zu lang“, wie oft beides zugleich
     (hebt sich auf) und welche Ziel-Dauer daraus folgt."""
     gruende_je = [set(json.loads(z["gruende"] or "[]")) for z in zeilen if z["format"] == "short"]
     kurz = sum(1 for g in gruende_je if "kurz" in g and "lang" not in g)
     lang = sum(1 for g in gruende_je if "lang" in g and "kurz" not in g)
     beide = sum(1 for g in gruende_je if "kurz" in g and "lang" in g)
-    jetzt = ziel_dauer(fmt, dauer_faktor)
+    jetzt = ziel_dauer(fmt, dauer_faktor, ziel_s=ziel_s)
     text = (f"Short-Länge: {len(gruende_je)} Short-Bewertungen, {kurz}× „⏱️ zu kurz“, {lang}× „⏳ zu lang“"
             + (f", {beide}× beides (hebt sich auf)" if beide else "")
             + f" → Ziel {jetzt:.0f} s (Start {fmt['ziel_s']:.0f} s, erlaubt {fmt['min_s']:.0f}–{fmt['max_s']:.0f} s)")
@@ -298,10 +320,15 @@ def dauer_zeile(zeilen: list, dauer_faktor: float, fmt: dict) -> str:
 def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     p, ziel = aktuelle(con, konfig, "short")
     start, start_ziel, hinweise = vorgaben(konfig)
-    zeilen = bewertungen(con)
+    zeilen = bewertungen(con, mit_ki=False)
     daumen = sum(1 for z in zeilen if z["daumen"] > 0)
-    teile = [f"🧠 Regie – {len(zeilen)} Bewertungen ({daumen} 👍 / {len(zeilen) - daumen} 👎)",
+    ki = [z for z in bewertungen(con) if z["quelle"] == "ki"]
+    teile = [f"🧠 Regie – {len(zeilen)} Bewertungen von dir ({daumen} 👍 / {len(zeilen) - daumen} 👎) · "
+             f"{len(ki)} vom KI-Cutter ({sum(1 for z in ki if z['daumen'] > 0)} 👍)",
              "Schnitt-Werte lernen je Format (unten: Short); Momente, Stimmung und Musik gelten für beide"]
+    from . import stile
+
+    teile.append(stile.stil_zeile(con))
     for name in ("puffer_vor_s", "puffer_nach_s", "seg_min_faktor", "beats_pro_schnitt", "dauer_faktor", "uebergang_faktor"):
         s0, jetzt_ = start[name], p[name]
         herkunft = "" if s0 == PARAMETER[name] else ", deine Vorgabe"
@@ -332,12 +359,14 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     teile.append(f"Zusammenschnitt ({n_zs} Bewertungen): dauer_faktor {zs['dauer_faktor']}, "
                  f"seg_min_faktor {zs['seg_min_faktor']}, puffer_vor_s {zs['puffer_vor_s']}, "
                  f"uebergang_faktor {zs['uebergang_faktor']}")
-    teile.append(dauer_zeile(zeilen, p["dauer_faktor"], format_regeln(konfig, "short")[0]))
-    for fmt_name, df in (("short", p["dauer_faktor"]), ("zusammenschnitt", zs["dauer_faktor"])):
+    teile.append(dauer_zeile(zeilen, p["dauer_faktor"], format_regeln(konfig, "short")[0],
+                            ziel_s=p.get("ziel_dauer_s")))
+    for fmt_name, parameter in (("short", p), ("zusammenschnitt", zs)):
         fmt, fmt_hinweise = format_regeln(konfig, fmt_name)
         standard = fmt == format_regeln(None, fmt_name)[0]
         min_m, max_m = momente_grenzen(fmt)
-        teile.append(f"{fmt_name}: {fmt['min_s']:.0f}–{fmt['max_s']:.0f} s, Ziel jetzt {ziel_dauer(fmt, df):.0f} s"
+        dauer = ziel_dauer(fmt, parameter["dauer_faktor"], ziel_s=parameter.get("ziel_dauer_s"))
+        teile.append(f"{fmt_name}: {fmt['min_s']:.0f}–{fmt['max_s']:.0f} s, Ziel jetzt {dauer:.0f} s"
                      + (f", {min_m}–{max_m} Momente" if max_m < 10 ** 6 else "")
                      + f", Segment bis {fmt['seg_max_s']:.0f} s, Serie bis {fmt['serie_max_s']:.0f} s"
                      + ("" if standard else " (deine Vorgabe [regie.formate])"))

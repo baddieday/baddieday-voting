@@ -236,6 +236,13 @@ class EndeZuEndePublikum(MitSpeicher):
                                                                      "erlaubt": ERLAUBT})
         self.lern_context = SimpleNamespace(bot_data=self.lern_app.bot_data, application=self.lern_app, args=[])
 
+    def tearDown(self):
+        # Windows erlaubt Temp-Cleanup erst nach dem Schließen aller DB-Verbindungen.
+        for name in ("clip_bot_con", "lern_bot_con"):
+            if hasattr(self, name):
+                getattr(self, name).close()
+        super().tearDown()
+
     def clip_bot_klick(self, daten: str) -> tuple[list, list]:
         """Knopf im Clip-Bot (bot.app.bei_klick): (Antworten am Knopf, neue Nachrichtentexte)."""
         antworten, texte = [], []
@@ -436,6 +443,8 @@ class EndeZuEndePublikum(MitSpeicher):
         code, ergebnis, zeilen = self.pipeline_publikum_bewerten()
         self.assertEqual(code, 0)
         self.assertEqual(len(zeilen), 1, zeilen)  # stdout: genau eine JSON-Zeile (Logs gehen nach stderr)
+        self.assertEqual(ergebnis.pop("api")["fehler"], 0)
+        self.assertGreater(ergebnis.pop("autonom")["version"], 0)
         self.assertEqual(ergebnis, {"bewertet": 2, "ohne_messung": 0, "noch_zu_jung": 0, "fehler": 0,
                                     "posts": [{"id": clip_post, "score": 0.0}, {"id": entwurf_post, "score": 0.0}],
                                     "meldung": True})
@@ -470,6 +479,8 @@ class EndeZuEndePublikum(MitSpeicher):
         self.uhr = NOCHMAL
         code, ergebnis, _ = self.pipeline_publikum_bewerten()
         self.assertEqual(code, 0)
+        self.assertEqual(ergebnis.pop("api")["fehler"], 0)
+        self.assertFalse(ergebnis.pop("autonom")["geaendert"])
         self.assertEqual(ergebnis, {"bewertet": 0, "ohne_messung": 0, "noch_zu_jung": 0, "fehler": 0, "posts": [],
                                     "meldung": False})
         self.assertEqual([self.post(clip_post), self.post(entwurf_post)], vorher)
@@ -485,8 +496,8 @@ class EndeZuEndePublikum(MitSpeicher):
         self.assertEqual(antwort.splitlines(), [
             "📊 Publikum · 2 Posts, 2 mit Score (neueste zuerst)",
             f"#{entwurf_post} TikTok · Entwurf {ENTWURF} · 8 Tage · 👁 2{t}000 ❤️ 100 ⏱ 15,5 s 🏁 35 % (Tag 7) · "
-            "Score 0 (Basis zu klein)",
-            f"#{clip_post} TikTok · Clip 1 · 8 Tage · 👁 5{t}000 ❤️ 300 ⏱ 11 s 🏁 40 % (Tag 7) · Score 0 (Basis zu klein)",
+            "Publikumsscore 0 · Vertrauen 86 %",
+            f"#{clip_post} TikTok · Clip 1 · 8 Tage · 👁 5{t}000 ❤️ 300 ⏱ 11 s 🏁 40 % (Tag 7) · Publikumsscore 0 · Vertrauen 89 %",
             "🤖 Claude diese Woche: 2 Aufrufe",
         ])
 

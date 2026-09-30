@@ -1,8 +1,8 @@
-"""Lern-Bot: vom bewerteten Entwurf zum Post – Upload-Paket, Häkchen, /link (Spec §10.4).
+"""Lern-Bot: vom Entwurf zum Post – Upload-Paket, Häkchen, /link.
 
 So läuft es für dich:
-  1. Nach 👍 und „✅ fertig“ steht unter einem Short-Entwurf „📦 Upload-Paket“ (`pk:<eid>:`).
-  2. Der Bot rendert die Upload-Fassung (1080×1920, entwurf.upload_fassung – auf dem Mini, unter der
+  1. Unter jedem Entwurf steht direkt „📦 Upload-Paket“ (`pk:<eid>:`); Bewerten ist optional.
+  2. Der Bot rendert die Upload-Fassung (volle Auflösung, entwurf.upload_fassung – auf dem Mini, unter der
      Pipeline-Sperre, nie auf pve-big) und schickt sie als Datei (Telegram komprimiert Dateien nicht neu),
      dazu die Caption zum Kopieren (caption.entwurf_caption, mit Musik-Quellenangabe) und eine Checkliste mit
      einem Häkchen je Plattform aus [publikum].plattformen (`pt:<eid>:t` für TikTok, `pt:<eid>:y` für YouTube).
@@ -12,8 +12,8 @@ So läuft es für dich:
      per /link; ein zweiter /link ersetzt einen falschen).
 
 Regeln (Annahmen A5, A26, A27 – docs/ENTSCHEIDUNGEN.md, „Annahmen im Sprint Lernschleife“):
-  - Nur 👍-Entwürfe im Format "short" bekommen Paket, Häkchen und Post („kein Short ohne deine Freigabe“; ein
-    Zusammenschnitt 16:9 liefert kein Publikumssignal, Spec §9.1). Andere → kurzer Hinweis, kein Post.
+  - Shorts und Zusammenschnitte bekommen Paket, Häkchen und Post, unabhängig von manuellen Bewertungen.
+    Das Paket veröffentlicht selbst nichts; die Entscheidung für den tatsächlichen Upload bleibt bei dir.
   - Die Checkliste nennt nur die Post-Plattformen ([publikum].plattformen); clip-battle.de bekommt für Entwürfe
     keinen Punkt (Florian 25.09., Rückfrage R5 in docs/ENTSCHEIDUNGEN.md: keine clip-battle.de-Checkliste).
   - Der Stand je Plattform liegt in `posts` (veroeffentlichungen bleibt Clip-Sache), nachgesehen mit
@@ -34,7 +34,7 @@ einmal gleichzeitig (bot_data["paket_arbeitet"]). Nie ins Log: Datei-URLs von Te
 
 Zeit: `jetzt` ist auf Modulebene importiert – Tests ersetzen `lernbot_paket.jetzt` (mock.patch.object).
 
-Fehler: Was fachlich nicht geht (kein 👍, kein Short, fremder Link …), beantworten die Funktionen mit einem Satz
+Fehler: Was fachlich nicht geht (unbekannter Entwurf, fremder Link …), beantworten die Funktionen mit einem Satz
 für dich statt mit einer Ausnahme. Technische Fehler (Schnittliste fehlt, ffmpeg scheitert, Sperre belegt) fangen
 die Telegram-Handler ab: du bekommst einen kurzen Satz, die Details stehen im Log.
 """
@@ -66,7 +66,7 @@ KLICK_MUSTER = r"^(pk|pt):"
 # ohne clip-battle.de ("c"). Abgeleitet statt abgeschrieben: {"y": "youtube", "t": "tiktok"}.
 PLATTFORM_KUERZEL = {k: p for k, p in aktionen.PLATTFORM_KUERZEL.items() if p in publikum.PLATTFORMEN}
 KUERZEL_VON = {p: k for k, p in PLATTFORM_KUERZEL.items()}  # die Gegenrichtung: "tiktok" → "t"
-NUR_FORMAT = "short"  # Paket, Häkchen und Post nur für Shorts (Annahme A26)
+UPLOAD_FORMATE = ("short", "zusammenschnitt")
 
 # /link <nr> <url>: die Nummer des Entwurfs, wahlweise mit „e“ davor (Annahme A3). Nur Ziffern 0–9 – \d ließe auch
 # andere Schriften zu („٤١“).
@@ -83,11 +83,8 @@ def _name(plattform: str) -> str:
 
 
 def knoepfe_nach_fertig(eid: int, bewertung: sqlite3.Row | None, fmt: str) -> Knoepfe | None:
-    """Knöpfe unter einem fertig bewerteten Entwurf: bei 👍 auf einen Short „📦 Upload-Paket“, sonst keine (None).
-
-    Beispiel: knoepfe_nach_fertig(41, {"daumen": 1, …}, "short") == [[("📦 Upload-Paket", "pk:41:")]];
-    knoepfe_nach_fertig(42, {"daumen": 1, …}, "zusammenschnitt") is None."""
-    if fmt != NUR_FORMAT or bewertung is None or int(bewertung["daumen"]) <= 0:
+    """Paket direkt anbieten; der historische Parameter bewertung bleibt für bestehende Aufrufer."""
+    if fmt not in UPLOAD_FORMATE:
         return None
     return [[("📦 Upload-Paket", f"pk:{eid}:")]]
 
@@ -115,20 +112,14 @@ def lies_link_argumente(args: list[str]) -> tuple[int, str]:
 
 def paket_erlaubt(con: sqlite3.Connection, entwurf_id: int) -> str | None:
     """Die fachliche Prüfung für Paket, Häkchen und /link: None = erlaubt, sonst der Grund als Satz für dich.
-    Regeln: Entwurf existiert („Entwurf #41 gibt es nicht“) · Format short („Upload-Paket gibt es nur für
-    Shorts“) · mit 👍 bewertet („Entwurf #41 ist nicht mit 👍 bewertet“)."""
+    Regeln: Entwurf existiert und ist ein unterstütztes Videoformat. Keine Pflichtbewertung."""
     zeile = con.execute("SELECT format FROM entwuerfe WHERE id = ?", (entwurf_id,)).fetchone()
     # Regel 1: den Entwurf gibt es (Tippfehler bei /link)
     if zeile is None:
         return f"Entwurf #{entwurf_id} gibt es nicht."
-    # Regel 2: nur Shorts – ein Zusammenschnitt (16:9) liefert kein Publikumssignal (Annahme A26)
-    if zeile["format"] != NUR_FORMAT:
-        return (f"Upload-Paket gibt es nur für Shorts (Entwurf #{entwurf_id} ist ein "
+    if zeile["format"] not in UPLOAD_FORMATE:
+        return (f"Upload-Paket gibt es für Shorts und Zusammenschnitte (Entwurf #{entwurf_id} ist ein "
                 f"{lernbot.FORMAT_NAMEN.get(zeile['format'], zeile['format'])}).")
-    # Regel 3: nur mit 👍 – kein Short geht ohne deine Freigabe raus (Annahme A5)
-    bewertung = con.execute("SELECT daumen FROM entwurf_bewertungen WHERE entwurf_id = ?", (entwurf_id,)).fetchone()
-    if bewertung is None or int(bewertung["daumen"]) <= 0:
-        return f"Entwurf #{entwurf_id} ist nicht mit 👍 bewertet."
     return None
 
 
@@ -195,15 +186,15 @@ def link_speichern(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, url
     plattform = aktionen.plattform_aus_url(url)
     # Regel 1: nur https-Links bekannter Plattformen (dieselbe Erkennung wie im Clip-Bot)
     if plattform is None:
-        return "Unbekannter Link – erwartet https://… von TikTok oder YouTube.", None
+        return "Unbekannter Link – erwartet https://… von TikTok, YouTube oder Instagram.", None
     # Regel 2: clip-battle.de ist keine Post-Plattform – dort wird eingereicht, nicht geschaut
     if plattform not in publikum.PLATTFORMEN:
         return (f"{_name(plattform)}-Links legen für Entwürfe keinen Post an (Einreichen gibt es nur im Clip-Bot). "
-                "Für die Zahlen brauche ich den TikTok-Link."), None
+                "Für die Zahlen brauche ich den Link des veröffentlichten Videos."), None
     # Regel 3: nur Plattformen, auf denen die Lernschleife Zahlen sammelt (Annahme A9)
     if plattform not in publikum.post_plattformen(konfig):
         return f"{_name(plattform)} wird in der Lernschleife nicht verfolgt ([publikum].plattformen) – kein Post.", None
-    # Regel 4: 👍-Short (paket_erlaubt)
+    # Regel 4: bekannter Entwurf, keine Pflichtbewertung
     if grund := paket_erlaubt(con, entwurf_id):
         return grund, None
     daten = publikum.entwurf_post_daten(con, konfig, entwurf_id)

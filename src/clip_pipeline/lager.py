@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 from . import big, db
+from .bestand import VIDEO_ENDUNGEN
 from .konfig import Konfig, KonfigFehler, SpeicherOffline
 from .material import BLOCK, sha256
 from .sperre import sperre
@@ -387,7 +388,7 @@ def _ins_lager(con: sqlite3.Connection, o: Offen, lager: Path) -> str:
                     break
                 if sha := _gleicher_inhalt(o.pfad, ziel, erwartet):  # schon einmal abgelegt, nur unbestätigt
                     _bestaetige(con, o.relativ, erwartet, sha, ziel.relative_to(lager).as_posix(), o.gesehen)
-                    return art
+                    return "bestaetigt"
         # abgeleitete Ordner (sessions/, highlights/ …): neue Fassung ersetzt die alte (per Zwischendatei)
     sha = kopiere_geprueft(o.pfad, ziel, erwartet)
     _bestaetige(con, o.relativ, erwartet, sha, ziel.relative_to(lager).as_posix(), o.gesehen)
@@ -423,6 +424,26 @@ def _melde(con: sqlite3.Connection, konfig: Konfig, e: dict, abbruch_melden: boo
     db.meldung(con, f"lager:{_heute(konfig)}", text)
 
 
+def _melde_uebertragungsende(con: sqlite3.Connection, lauf: int, e: dict, verwechslung: bool) -> None:
+    """Ein Abschluss je angefangenem Lauf, auch nach Teilfehler oder Abbruch; keine rohen Fehlertexte im Chat."""
+    status = "abgebrochen" if e.get("abbruch") else "mit Fehlern beendet" if e["fehler"] else "abgeschlossen"
+    symbol = "✅" if e["ok"] else "⚠️"
+    teile = [f"{symbol} Übertragung Puffer → Lager {status}.",
+             f"Neu erfolgreich übertragene Videos: {e['videos_uebertragen']}."]
+    if e["videos_bestaetigt"]:
+        teile.append(f"Bereits im Lager vorhandene Videos: {e['videos_bestaetigt']} (nur bestätigt).")
+    if e["versioniert"]:
+        teile.append(f"{e['versioniert']} Rohdatei(en) als zusätzliche Fassung gesichert – nichts überschrieben. "
+                     "Nichts verloren – beide Fassungen liegen im Lager.")
+    if e["fehler"]:
+        teile.append(f"{e['fehler']} Datei(en) konnten nicht übertragen werden.")
+    if not e["ok"]:
+        teile.append("Nichts verloren – im Puffer bleibt alles liegen. "
+                     + ("Puffer-/Lager-Zuordnung und .clip-puffer/.clip-lager prüfen; " if verwechslung else "")
+                     + "Details: pipeline lager status")
+    db.meldung(con, f"uebertragung:lager:{lauf}:ende", "\n".join(teile))
+
+
 def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -> dict:
     """Täglicher Abgleich (Timer 10:00): DB sichern, Offenes sammeln, nur dann pve-big wecken, jede Datei
     kopieren und zurücklesen. Fehler je Datei werden gezählt, der Rest läuft weiter; ist das Lager selbst weg
@@ -443,8 +464,9 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
                     "nachtruhe": ruhe, "dateien": [o.relativ for o in offen[:50]]}
         lauf = con.execute("INSERT INTO lager_laeufe (art, start) VALUES ('abgleich', ?)", (iso(jetzt()),)).lastrowid
         e: dict = {"offen": 0, "offen_gb": 0.0, "kopiert": 0, "bestaetigt": 0, "versioniert": 0, "fehler": 0,
+                   "videos_uebertragen": 0, "videos_bestaetigt": 0,
                    "lager_gebraucht": False, "fehler_liste": [], "versioniert_liste": []}
-        abbruch_melden = verwechslung = False
+        abbruch_melden = verwechslung = gestartet = False
         try:
             konfig.pruefe_getrennt(mit_lager=False)  # Puffer-Seite sofort; das Lager erst nach dem Wecken
             e["sicherung"] = sichere_datenbank(con, konfig)
@@ -461,6 +483,10 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
                 return e
             log.info("Lager-Abgleich: %d Datei(en), %.2f GB%s", e["offen"], e["offen_gb"],
                      " (Nachtruhe, pve-big läuft schon)" if ruhe else "")
+            db.meldung(con, f"uebertragung:lager:{lauf}:start",
+                       f"🗄️ Übertragung Puffer → Lager gestartet.\n"
+                       f"{e['offen']} Dateien werden geprüft und bei Bedarf übertragen.")
+            gestartet = True
             with _wach(konfig, "lager", f"Lager-Abgleich ({e['offen']} Dateien)", wecken=not ruhe):
                 e["lager_gebraucht"] = True
                 konfig.pruefe_lager(float(konfig.wert("lager.warten_s", 240)))
@@ -483,6 +509,8 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
                         e["fehler_liste"].append(f"{o.relativ}: {str(f)[:150]}")
                         continue
                     e[art] += 1
+                    if Path(o.relativ).suffix.lower() in VIDEO_ENDUNGEN:
+                        e["videos_bestaetigt" if art == "bestaetigt" else "videos_uebertragen"] += 1
                     if art == "versioniert":
                         log.warning("%s: im Lager liegt eine andere Fassung – daneben abgelegt", o.relativ)
                         e["versioniert_liste"].append(o.relativ)
@@ -504,7 +532,10 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
             e["versioniert_liste"] = e["versioniert_liste"][:LISTE_MAX]
             con.execute("UPDATE lager_laeufe SET ende = ?, ergebnis = ? WHERE id = ?",
                         (iso(jetzt()), json.dumps(e, ensure_ascii=False), lauf))
-            _melde(con, konfig, e, abbruch_melden, verwechslung)
+            if gestartet:
+                _melde_uebertragungsende(con, lauf, e, verwechslung)
+            else:  # z. B. vertauschte Marken: wichtige Warnung schon vor einem Übertragungsstart erhalten
+                _melde(con, konfig, e, abbruch_melden, verwechslung)
             log.info("Lager-Abgleich: %d kopiert, %d bestätigt, %d versioniert, %d Fehler",
                      e["kopiert"], e["bestaetigt"], e["versioniert"], e["fehler"])
     return e

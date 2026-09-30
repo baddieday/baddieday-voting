@@ -632,3 +632,23 @@ Stand beim Vertrag (25.09.). Die Bauer-Annahmen und die Befunde des Panels komme
 - **Stimmen (26.09.):** Bewertung mit allen Stimmen; im Upload Mikro/Chat (ab Spur 1) nur bei Lachen, Jubel,
   lauten Mikro-Spitzen oder Stimmung „lustig“. Annahme: ohne Mic-Analyse (nichts bekannt) → nur Spielton;
   schon gerenderte Shorts (`short_pfad`) werden nicht neu gerendert.
+
+### Autonomes Publikumslernen (29.09.2026)
+
+- Neue Bewertungen sind optional; Upload, nächste Planung und Lernen benötigen keinen Daumen.
+- Publikum trainiert einen getrennten, versionierten Regie-Champion. Historische Bewertungen bleiben als
+  schrumpfender Prior erhalten. Ganze Videogruppen werden zeitlich getrennt geprüft; mehrere Messungen sind
+  keine zusätzlichen Videos. Cold-Start-Exploration liefert auch vor dem ersten Champion neue Varianten.
+- Short 30–75 s (Startziel mindestens 45 s), Zusammenschnitt 75–120 s gelten in Planung und vollständigem Render.
+- Plattformzugänge müssen autorisiert sein. TikTok/YouTube werden abgeholt, Instagram wird importiert;
+  fehlende API-Metriken bleiben unbekannt. Details und Grenzen: `AUTONOMES_LERNEN.md`.
+
+### Telegram bei Übertragungen (30.09.2026)
+
+- Gaming-PC → Puffer und Puffer → Lager melden Start und Abschluss im bestehenden Clip-Bot, je tatsächlichem
+  Übertragungslauf. Leere Timerläufe, Probeläufe und in der Nachtruhe aufgeschobene Abgleiche bleiben still.
+- Gezählt werden neu erfolgreich kopierte Videos (`.mp4`, `.mkv`, `.mov`), keine Replays/Bilder oder bereits
+  vorhandenen Dateien. Teilfehler und Abbrüche nennen die erfolgreiche Teilmenge.
+- Der PC schreibt dauerhafte Laufberichte ohne Zugangsdaten. Bei unerreichbarem Puffer werden sie lokal behalten
+  und bei der nächsten aktiven erreichbaren Übertragung nachgereicht. Der Clip-Bot liest nur den lokalen Puffer;
+  die Meldungen wecken keinen Host. Nachts kommen sie sofort, aber ohne Benachrichtigungston.

@@ -178,11 +178,19 @@ class UploadFassungPruefungen(MitUpload):
             entwurf.upload_fassung(self.con, self.konfig, self.eid)
         self.assertIn("Musik fehlt", str(fehler.exception))
 
-    def test_zusammenschnitt_nur_fuer_shorts(self):
+    def test_zusammenschnitt_als_upload_erlaubt(self):
+        # Beide Formate können veröffentlicht werden; ein alter zu kurzer Zusammenschnitt wird abgefangen.
         self.con.execute("UPDATE entwuerfe SET format = 'zusammenschnitt' WHERE id = ?", (self.eid,))
+        liste = self.liste(self.eid)
+        liste["format"] = "zusammenschnitt"
+        Path(self.zeile(self.eid)["schnittliste"]).write_text(json.dumps(liste), encoding="utf-8")
         with self.assertRaises(MedienFehler) as fehler:
             entwurf.upload_fassung(self.con, self.konfig, self.eid)
-        self.assertIn("nur für Shorts", str(fehler.exception))
+        self.assertIn("75–120", str(fehler.exception))
+        liste["dauer_s"] = 90.0
+        Path(self.zeile(self.eid)["schnittliste"]).write_text(json.dumps(liste), encoding="utf-8")
+        with mock.patch.object(entwurf, "rendere", side_effect=lambda liste, ziel, k, **kw: _falsches_ergebnis(ziel, 90)):
+            self.assertEqual(entwurf.upload_fassung(self.con, self.konfig, self.eid)["dauer_s"], 90)
 
     def test_ohne_getrennten_betrieb_konfigfehler(self):
         self.konfig.daten["lager"]["wurzel"] = ""
@@ -266,7 +274,8 @@ class UploadFassungVaApi(MitUpload):
             Path(befehl[-1]).write_bytes(b"x" * 1000)  # die .tmp-Ausgabe, klein genug
             return ""
 
-        with mock.patch.object(entwurf, "fuehre_aus", side_effect=lauf):
+        with mock.patch.object(entwurf, "fuehre_aus", side_effect=lauf), \
+                mock.patch.object(entwurf, "_pruefe_renderdauer", return_value=self.liste(eid)["dauer_s"]):
             r = entwurf.upload_fassung(self.con, self.konfig, eid)
         vaapi, cpu = befehle
         self.assertIn("-b:v", vaapi)                                   # VA-API kennt kein crf: Rate als -b:v
@@ -309,6 +318,7 @@ class UploadFassungRate(MitUpload):
             return ""
 
         with mock.patch.object(entwurf, "filtergraph", side_effect=graph_45_s), \
+                mock.patch.object(entwurf, "_pruefe_renderdauer", return_value=45.0), \
                 mock.patch.object(entwurf, "fuehre_aus", side_effect=lauf):
             entwurf.upload_fassung(self.con, self.konfig, eid)
         (befehl,) = befehle
@@ -340,6 +350,7 @@ class UploadFassungMitEffekten(MitUpload):
             return ""
 
         with mock.patch.object(entwurf, "fuehre_aus", side_effect=lauf), \
+                mock.patch.object(entwurf, "_pruefe_renderdauer", return_value=liste["dauer_s"]), \
                 mock.patch.object(sfx, "datei", side_effect=lambda _k, name: Path("/sfx") / f"{name}.wav"), \
                 mock.patch.object(entwurf.shorts, "schrift", return_value=SCHRIFT):
             r = entwurf.upload_fassung(self.con, self.konfig, eid)

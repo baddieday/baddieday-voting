@@ -143,7 +143,10 @@ class Abgleich(MitAbgleich):
         lauf = self.con.execute("SELECT * FROM lager_laeufe").fetchone()
         self.assertEqual(lauf["art"], "abgleich")
         self.assertTrue(json.loads(lauf["ergebnis"])["ok"] and lauf["ende"])
-        self.assertEqual(self.meldungen(), [])
+        self.assertEqual([m["schluessel"] for m in self.meldungen()],
+                         [f"uebertragung:lager:{lauf['id']}:start", f"uebertragung:lager:{lauf['id']}:ende"])
+        self.assertEqual(e["videos_uebertragen"], 1)
+        self.assertIn("Neu erfolgreich übertragene Videos: 1", self.meldungen()[-1]["text"])
         # Rohdaten im Puffer unverändert (nur gelesen)
         self.assertEqual((self.puffer / "eingang/nvidia/a.mp4").read_bytes(), dateien["eingang/nvidia/a.mp4"])
 
@@ -244,8 +247,10 @@ class Abgleich(MitAbgleich):
         self.assertEqual((self.lager / f"replays/r~{mtime_r}-2.replay").read_bytes(), b"ABC")
         self.assertEqual(self.zeile("eingang/nvidia/a.mp4")["lager_relativ"], f"eingang/nvidia/a~{mtime}.mp4")
         self.assertEqual((self.lager / "sessions/s/analyse.json").read_bytes(), b'{"neu": 1}')
-        [(schluessel, text)] = self.meldungen()
-        self.assertEqual(schluessel, f"lager:{self.heute()}")
+        self.assertEqual(len(self.meldungen()), 2)
+        schluessel, text = self.meldungen()[-1]
+        self.assertTrue(schluessel.endswith(":ende"))
+        self.assertEqual(e["videos_uebertragen"], 1)
         self.assertIn("nichts überschrieben", text)
         self.assertIn("Nichts verloren – beide Fassungen liegen im Lager", text)
         # Bestätigung verloren (ältere DB-Sicherung eingespielt, Absturz zwischen replace und Eintrag): der nächste
@@ -256,7 +261,8 @@ class Abgleich(MitAbgleich):
             code, e = self.lauf("lager", "abgleich")
         self.assertEqual(code, 0, e)
         self.assertEqual(self.geweckt, ["lager", "lager"])  # wirklich geweckt, nicht nur die Sicherung offen
-        self.assertEqual((e["versioniert"], e["kopiert"], e["fehler"]), (2, 1, 0))  # kopiert: nur die DB-Sicherung
+        self.assertEqual((e["versioniert"], e["bestaetigt"], e["kopiert"], e["fehler"]), (0, 2, 1, 0))
+        self.assertEqual((e["videos_uebertragen"], e["videos_bestaetigt"]), (0, 1))
         self.assertEqual([c.args[0].name for c in kopie.call_args_list], [f"pipeline-{self.heute()}.db"])
         self.assertEqual(self.lager_inhalt(), set(vorher))
         for rel, mtime_ns in vorher.items():  # Rohdaten im Lager nicht angefasst
@@ -285,13 +291,14 @@ class Abgleich(MitAbgleich):
         self.assertIsNone(self.zeile("eingang/a.mp4"))
         self.assertFalse((self.lager / "eingang" / "a.mp4").exists())
         self.assertFalse(list(self.lager.rglob("*.teil")))
-        [(_, text)] = self.meldungen()
+        self.assertEqual(len(self.meldungen()), 2)
+        _, text = self.meldungen()[-1]
         self.assertIn("Nichts verloren", text)
         # beim nächsten Abgleich klappt es (Datei ist fertig)
         code, e = self.lauf("lager", "abgleich")
         self.assertEqual((code, e["kopiert"]), (0, 2))
         self.assertEqual((self.lager / "eingang" / "a.mp4").read_bytes(), b"a" * 5000 + b"mehr")
-        self.assertEqual(len(self.meldungen()), 1)  # höchstens eine Meldung am Tag
+        self.assertEqual(len(self.meldungen()), 4)  # jeder tatsächliche Lauf hat Start und Abschluss
 
     def test_pruefsummenfehler(self):
         self.datei(self.puffer, "replays/r.replay", b"replay")
@@ -322,6 +329,9 @@ class Abgleich(MitAbgleich):
         with mock.patch.object(lager, "kopiere_geprueft", side_effect=kopie):
             code, e = self.lauf("lager", "abgleich")
         self.assertEqual((code, e["fehler"], e["kopiert"]), (1, 1, 2))
+        self.assertEqual(e["videos_uebertragen"], 1)
+        self.assertIn("mit Fehlern beendet", self.meldungen()[-1]["text"])
+        self.assertIn("Neu erfolgreich übertragene Videos: 1", self.meldungen()[-1]["text"])
         self.assertTrue((self.lager / "eingang/b.mp4").is_file())
 
     def test_eio_bricht_die_schleife_ab(self):
@@ -332,7 +342,9 @@ class Abgleich(MitAbgleich):
         self.assertEqual(code, 3, e)
         self.assertIn("E/A-Fehler", e["abbruch"])
         self.assertEqual(kopie.call_count, 1)
-        self.assertEqual(len(self.meldungen()), 1)
+        self.assertEqual(len(self.meldungen()), 2)
+        self.assertIn("abgebrochen", self.meldungen()[-1]["text"])
+        self.assertIn("Neu erfolgreich übertragene Videos: 0", self.meldungen()[-1]["text"])
 
     def test_lager_markierung_verschwindet_unterwegs(self):
         for rel in ("eingang/a.mp4", "eingang/b.mp4"):
@@ -369,6 +381,56 @@ class Abgleich(MitAbgleich):
         self.assertEqual(self.geweckt, [])
         self.assertFalse((self.puffer / "sicherung").exists())
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM lager_laeufe").fetchone()[0], 0)
+        self.assertEqual(self.meldungen(), [])
+
+    def test_uebertragung_zaehlt_nur_neue_videos_und_meldet_jeden_lauf(self):
+        for rel in ("eingang/a.mp4", "eingang/b.MKV", "eingang/c.mov", "eingang/d.mp4",
+                    "replays/r.replay", "sessions/s/analyse.json"):
+            self.datei(self.puffer, rel, b"neu")
+        self.datei(self.lager, "eingang/c.mov", b"alt")  # neue versionierte Kopie zählt
+        self.datei(self.lager, "eingang/d.mp4", b"neu")  # identische alte Kopie zählt nicht
+        original = big.wach_halten
+
+        @contextlib.contextmanager
+        def mit_start(*args, **kwargs):
+            self.assertEqual([m["schluessel"].rsplit(":", 1)[1] for m in self.meldungen()], ["start"])
+            with original(*args, **kwargs):
+                yield
+
+        with mock.patch.object(big, "wach_halten", mit_start):
+            e = lager.abgleich(self.con, self.konfig)
+        self.assertEqual((e["videos_uebertragen"], e["videos_bestaetigt"], e["versioniert"]), (3, 1, 1))
+        self.assertEqual(len(self.meldungen()), 2)
+        self.assertIn("Neu erfolgreich übertragene Videos: 3", self.meldungen()[-1]["text"])
+        # Wiederholung ohne neue Arbeit meldet nichts; ein weiterer echter Lauf am selben Tag meldet wieder.
+        lager.abgleich(self.con, self.konfig)
+        self.assertEqual(len(self.meldungen()), 2)
+        self.datei(self.puffer, "eingang/e.mp4", b"neu")
+        e = lager.abgleich(self.con, self.konfig)
+        self.assertEqual(e["videos_uebertragen"], 1)
+        keys = [m["schluessel"] for m in self.meldungen()]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual([k.rsplit(":", 1)[1] for k in keys], ["start", "ende", "start", "ende"])
+
+    def test_unterbrechung_meldet_bestaetigte_teilzahl_ohne_fehlerdetails(self):
+        for rel in ("eingang/a.mp4", "eingang/b.mp4"):
+            self.datei(self.puffer, rel, b"video")
+        original = lager.kopiere_geprueft
+
+        def kopie(quelle, ziel, erwartet=None):
+            if quelle.name == "b.mp4":
+                raise KeyboardInterrupt("TOKEN_DARF_NICHT_IN_TELEGRAM")
+            return original(quelle, ziel, erwartet)
+
+        with mock.patch.object(lager, "kopiere_geprueft", side_effect=kopie), self.assertRaises(KeyboardInterrupt):
+            lager.abgleich(self.con, self.konfig)
+        meldungen = self.meldungen()
+        self.assertEqual(len(meldungen), 2)
+        self.assertIn("abgebrochen", meldungen[-1]["text"])
+        self.assertIn("Neu erfolgreich übertragene Videos: 1", meldungen[-1]["text"])
+        self.assertNotIn("TOKEN_DARF_NICHT_IN_TELEGRAM", meldungen[-1]["text"])
+        self.assertIsNotNone(self.zeile("eingang/a.mp4"))
+        self.assertIsNone(self.zeile("eingang/b.mp4"))
 
 
 class Verwechslung(MitAbgleich):
@@ -387,8 +449,9 @@ class Verwechslung(MitAbgleich):
         self.assertEqual(self.lager_inhalt() - {".clip-lager", ".clip-puffer"}, set())
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM lager").fetchone()[0], 0)
         self.assertEqual(self.geweckt, geweckt)
-        [(_, text)] = self.meldungen()
-        self.assertIn("nichts kopiert", text)
+        self.assertEqual(len(self.meldungen()), 2 if geweckt else 1)
+        _, text = self.meldungen()[-1]
+        self.assertIn("Neu erfolgreich übertragene Videos: 0" if geweckt else "nichts kopiert", text)
         self.assertIn("Nichts verloren", text)
 
     def test_gleiches_dateisystem(self):
@@ -424,7 +487,8 @@ class OfflineUndSperre(MitAbgleich):
         lauf = json.loads(self.con.execute("SELECT ergebnis FROM lager_laeufe").fetchone()[0])
         self.assertFalse(lauf["ok"])
         self.assertIn("SpeicherOffline", lauf["abbruch"])
-        self.assertEqual(self.meldungen(), [])  # vorübergehend: meldet erst die Morgenprüfung
+        self.assertEqual(len(self.meldungen()), 2)  # nach Start auch bei vorübergehendem Ausfall ehrlicher Abschluss
+        self.assertIn("abgebrochen", self.meldungen()[-1]["text"])
 
     def test_wecken_verboten_exit_3_ohne_wol(self):
         # das echte wach_halten: pve-big schläft, ohne MAC darf er nicht geweckt werden

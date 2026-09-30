@@ -561,7 +561,8 @@ anderen Fehler ab.
   (z. B. „Puffer 61 GB frei · Lager: 1840 GB frei, letzter Abgleich 10:07 ok · 0 offen“). Der Platz im Lager ist
   der beim letzten Abgleich gemessene – `/status` weckt pve-big dafür nie; ist er nicht von heute, steht „(Stand …)“
   dabei.
-- **Meldungen** kommen höchstens einmal am Tag je Thema, montags ein Lebenszeichen – Stille heißt: alles gut.
+- **Zustandswarnungen** kommen höchstens einmal am Tag je Thema, montags ein Lebenszeichen. Übertragungen
+  melden zusätzlich Start und Abschluss wie unten beschrieben.
 - **Exit-Codes** von `pipeline lager …`: 0 ok (auch: in der Nachtruhe übersprungen) · 1 einzelne Dateien
   fehlgeschlagen (beim nächsten Abgleich wieder) · 2 Aufruf oder Konfiguration (z. B. Puffer und Lager verwechselbar
   – dann wurde **nichts** kopiert – oder eine ungültige Nachtruhe) · 3 Lager offline bzw. pve-big nicht wach
@@ -575,6 +576,26 @@ anderen Fehler ab.
   50 GB (`lager_alarm_frei_gb`) – höchstens einmal am Tag, mit dem Tag der Messung. Nächster Schritt dann: Platz auf
   pve-big schaffen oder die Platte erweitern. Noch keine Messung (z. B. kurz nach R6): keine Meldung. Läuft das Lager
   doch voll, bricht der Abgleich ab, und alles bleibt im Puffer, bis wieder Platz ist.
+
+## Telegram bei Übertragungen
+
+Für **Gaming-PC → Puffer** und **Puffer → Lager** meldet der Clip-Bot den Start eines tatsächlichen
+Übertragungslaufs und anschließend den Abschluss mit der Zahl neu erfolgreich übertragener Videos.
+Replays und Bilder zählen nicht als Videos; bereits vorhandene Dateien werden nicht erneut mitgezählt.
+Bei Fehlern oder Abbruch nennt die Abschlussmeldung die erfolgreiche Teilmenge. Leere Timerläufe, Probeläufe
+und wegen Nachtruhe aufgeschobene Abgleiche erzeugen keine Start-/Endmeldungen.
+
+Zum Aktivieren den Pipeline-Code im CT und `windows/Uebertragung.ps1` im von der Windows-Aufgabe verwendeten
+Checkout aktualisieren und den vorhandenen `clip-bot` neu starten. Die vorhandene Bot-Konfiguration genügt;
+keine weiteren Tokens, Dienste oder n8n-Änderungen sind nötig. Der Bot prüft seine Outbox standardmäßig alle
+30 Sekunden. In der Telegram-Ruhezeit kommen diese Laufmeldungen ohne Benachrichtigungston.
+
+Der PC speichert Start und Ende in `sitzungen/uebertragung/<Lauf-ID>.json` auf dem Puffer; auch kurze Läufe
+verlieren dadurch keine Startmeldung. Ist der Puffer unerreichbar, bleiben Berichte zunächst lokal unter
+`%LOCALAPPDATA%\ClipPipeline\uebertragung` und werden bei der nächsten aktiven, erreichbaren Übertragung
+nachgereicht. Erfolgreich übermittelte Endstände bleiben lokal unter `gemeldet` erhalten. Wiederholtes Einlesen
+legt keine doppelten Outbox-Einträge an; ein Telegram-Versandfehler wird beim nächsten Bot-Durchlauf erneut versucht.
+Das Lesen der PC-Berichte ist auf den getrennten Pufferbetrieb beschränkt und greift nie auf das schlafende Lager zu.
 
 ## Dateien
 

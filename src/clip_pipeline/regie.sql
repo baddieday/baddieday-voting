@@ -103,3 +103,17 @@ CREATE TABLE IF NOT EXISTS einstellungen (
     wert       TEXT NOT NULL,               -- JSON
     geaendert  TEXT NOT NULL
 );
+
+-- Cutter-Kritik (Regisseur 3.0, 30.09.): der Bot benotet jeden Entwurf selbst – Handwerksregeln aus der Schnittliste
+-- plus (optional) Claude als Senior-Cutter auf einem Kontaktbogen. Grundlage für Stilwahl, Selbst-Aussortieren und
+-- automatische Gründe im Regie-Lernen; ersetzt dein 👍/👎 nicht, braucht es aber nicht.
+CREATE TABLE IF NOT EXISTS kritiken (
+    entwurf_id  INTEGER PRIMARY KEY REFERENCES entwuerfe (id),
+    score       REAL NOT NULL,              -- 0..100 (Regeln und KI gemittelt, ohne KI nur Regeln)
+    regel_score REAL NOT NULL,
+    ki_score    REAL,                       -- NULL = keine KI-Kritik (aus, Tageslimit, Fehler)
+    daumen      INTEGER,                    -- aus dem KI-Urteil: +1 ab [regie.kritik].gut_ab, sonst −1; NULL ohne KI
+    gruende     TEXT NOT NULL DEFAULT '[]', -- JSON: Schlüssel aus regie_lernen.GRUENDE (vom KI-Cutter)
+    details     TEXT NOT NULL,              -- JSON: Regel-Teile, Stärken, Schwächen, Hinweis
+    erstellt    TEXT NOT NULL
+);

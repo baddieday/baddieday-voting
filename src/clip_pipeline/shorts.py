@@ -125,7 +125,7 @@ def ziel_fuer(konfig: Konfig, clip) -> Path:
 
 
 def rendere(clip: Path, ziel: Path, konfig: Konfig, *, layout: str | None = None, max_bytes: int = 49_000_000,
-            stimmen: bool = True) -> int:
+            stimmen: bool = True, vollstaendig: bool = True) -> int:
     """Rendert den Short und bleibt unter max_bytes (Telegram-Grenze für Bots). Gibt die Größe zurück.
     stimmen: siehe filtergraph (Aufrufer: merkmale.stimmen_fuer_clip)."""
     info = probe(clip)
@@ -134,6 +134,14 @@ def rendere(clip: Path, ziel: Path, konfig: Konfig, *, layout: str | None = None
         dauer=info.dauer_s, fps=fps, tonspuren=len(info.tonspuren),
         layout=layout or str(konfig.wert("shorts.layout", "unschaerfe")), konfig=konfig, stimmen=stimmen,
     )
+    from .entwurf import _pruefe_formatdauer, _pruefe_renderdauer
+
+    plan = {"format": "short", "dauer_s": gesamt, "fps": fps}
+    if vollstaendig:
+        try:
+            _pruefe_formatdauer(plan)
+        except MedienFehler as exc:
+            raise MedienFehler(f"{exc}. Mehrere Momente mit /entwurf short zusammenstellen.") from exc
     ton = ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"] if info.tonspuren else ["-an"]
     # Obergrenze der Bitrate so, dass die Datei sicher unter max_bytes bleibt
     budget_kbit = int(max_bytes * 8 * 0.9 / gesamt / 1000) - (192 if info.tonspuren else 0)
@@ -151,6 +159,7 @@ def rendere(clip: Path, ziel: Path, konfig: Konfig, *, layout: str | None = None
         fuehre_aus(befehl, f"Short {ziel.name}")
         groesse = tmp.stat().st_size
         if groesse <= max_bytes:
+            _pruefe_renderdauer(plan, tmp, vollstaendig=vollstaendig)
             tmp.replace(ziel)
             return groesse
         maxrate = int(maxrate * 0.75)

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cutter-Kritik eines Entwurfs (kritik.py)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["score", "staerken", "schwaechen", "gruende"],
+  "properties": {
+    "score": {"type": "integer", "minimum": 0, "maximum": 100},
+    "staerken": {"type": "array", "maxItems": 4, "items": {"type": "string", "maxLength": 140}},
+    "schwaechen": {"type": "array", "maxItems": 4, "items": {"type": "string", "maxLength": 140}},
+    "gruende": {"type": "array", "maxItems": 4, "uniqueItems": true,
+                "items": {"enum": ["hektisch", "lang", "kurz", "langweilig", "effekte_viel", "action", "abgeschnitten", "musik"]}}
+  }
+}

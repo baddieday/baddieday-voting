@@ -279,18 +279,28 @@ def status(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None
     return stand
 
 
-def _abgleich_hat_gemeldet(con: sqlite3.Connection, stand: dict, tag: date) -> bool:
-    """Hat sich der Abgleich heute schon selbst gemeldet (lager:<Datum>), meldet das Thema lager nicht dasselbe noch
-    einmal. Eine fehlgeschlagene Puffer-Prüfung ist nur dann „dasselbe“, wenn der letzte Abgleich an genau ihr
-    abgebrochen ist – sonst (z. B. Meldung nur wegen Rohdaten-Konflikten, danach Puffer nicht eingehängt) käme die
+def _abgleich_hat_gemeldet(con: sqlite3.Connection, konfig: Konfig, stand: dict, tag: date) -> bool:
+    """Hat sich der letzte Abgleich heute schon selbst gemeldet, meldet das Thema lager nicht dasselbe noch
+    einmal. Alte Tagesmeldungen bleiben gültig. Eine fehlgeschlagene Puffer-Prüfung ist nur dann „dasselbe“, wenn
+    der letzte Abgleich an genau ihr abgebrochen ist – sonst (z. B. Meldung nur wegen Rohdaten-Konflikten, danach
+    Puffer nicht eingehängt) käme die
     Warnung erst mit dem nächsten Abgleich, fast einen Tag später."""
-    if not con.execute("SELECT 1 FROM meldungen WHERE schluessel = ?", (f"lager:{tag.isoformat()}",)).fetchone():
-        return False
     lager_stand = stand.get("lager") or {}
+    lauf = lager_stand.get("letzter_lauf") or {}
+    gemeldet = con.execute("SELECT 1 FROM meldungen WHERE schluessel = ?",
+                           (f"lager:{tag.isoformat()}",)).fetchone()
+    if not gemeldet and lauf.get("ende") and _datum(konfig, aus_iso(lauf["ende"])) == tag:
+        zeile = con.execute("SELECT id FROM lager_laeufe WHERE art = 'abgleich' AND start = ? AND ende = ? "
+                            "ORDER BY id DESC LIMIT 1", (lauf["start"], lauf["ende"])).fetchone()
+        if zeile:
+            gemeldet = con.execute("SELECT 1 FROM meldungen WHERE schluessel = ?",
+                                   (f"uebertragung:lager:{zeile['id']}:ende",)).fetchone()
+    if not gemeldet:
+        return False
     pruefung = lager_stand.get("pruefung")
     if pruefung == "ok":  # Befund zum Abgleich selbst (Datei-Fehler, Abbruch): hat er schon gemeldet
         return True
-    return pruefung is not None and (lager_stand.get("letzter_lauf") or {}).get("abbruch") == pruefung
+    return pruefung is not None and lauf.get("abbruch") == pruefung
 
 
 def melde(con: sqlite3.Connection, konfig: Konfig, stand: dict, zeit: datetime | None = None) -> list[str]:
@@ -299,7 +309,7 @@ def melde(con: sqlite3.Connection, konfig: Konfig, stand: dict, zeit: datetime |
     tag = _datum(konfig, zeit or jetzt())
     neu = []
     for thema, text in stand["befunde"].items():
-        if thema == "lager" and _abgleich_hat_gemeldet(con, stand, tag):
+        if thema == "lager" and _abgleich_hat_gemeldet(con, konfig, stand, tag):
             continue
         schluessel = f"puffer:{thema}:{tag.isoformat()}"
         if db.meldung(con, schluessel, text):

@@ -53,7 +53,7 @@ class Regisseur(MitRegieMaterial):
         e = self.compose("zusammenschnitt")
         liste = lies(e)
         self.assertEqual(regie.pruefe_liste(liste), [])
-        self.assertTrue(180 <= liste["dauer_s"] <= 300, liste["dauer_s"])
+        self.assertTrue(75 <= liste["dauer_s"] <= 120, liste["dauer_s"])
         self.assertEqual(liste["aufloesung"], [1920, 1080])
         self.assertEqual(liste["musik"]["track_id"], spannend["id"])
         self.auf_beats(liste, spannend)
@@ -124,7 +124,9 @@ class ActionAmEnde(MitRegieMaterial):
 
     def test_jubel_kurz_vor_dateiende_bricht_compose_nicht(self):
         # Instant-Replays enden direkt nach der Action: Jubel bei 9,6 s von 10 s
-        self.momente_anlegen([("lustig", 0, [], "m1"), ("spannend", 1, [9.8], "m2"), ("chill", 0, [], "m3")])
+        self.momente_anlegen([("lustig", 0, [], "m1"), ("spannend", 1, [9.8], "m2"),
+                              ("chill", 0, [], "m3"), ("chill", 0, [], "m4"), ("chill", 0, [], "m5"),
+                              ("chill", 0, [], "m6")])
         self.con.execute("UPDATE momente SET merkmale = json_set(merkmale, '$.jubel_laut_s', json('[9.6]')) "
                          "WHERE schluessel = 'datei:1'")
         liste = lies(regie.erstelle(self.con, self.konfig, "short"))
@@ -361,7 +363,7 @@ class Auswahl(unittest.TestCase):
         lang = [self.k(f"l{i}", 20.0 - i, match=f"c{i}", kern=(2.0, 16.0)) for i in range(8)]
         gewaehlt, ziel, _ = regie.waehle(lang, fmt, {**p, "dauer_faktor": regie.dauer_grenzen(fmt)[0]})
         self.assertEqual((ziel, len(gewaehlt)), (30.0, 4))                             # 3 reichten für 30 s – mind. 4
-        self.assertEqual(regie.dauer_grenzen(regie.FORMATE["zusammenschnitt"]), (0.6, 1.0))  # Zusammenschnitt wie bisher
+        self.assertEqual(regie.dauer_grenzen(regie.FORMATE["zusammenschnitt"]), (0.75, 1.2))
 
 
 class FormatRegeln(unittest.TestCase):
