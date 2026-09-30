@@ -205,6 +205,7 @@ class Kandidat:
     max_gruppe: int = 0            # größte Kill-Serie (wie Bot und Elo zählen) – Kill-Titel
     victory: bool = False          # Victory Royale – Titel VICTORY ROYALE
     gesperrt: bool = False         # Cooldown: in einem der letzten cooldown_entwuerfe Entwürfe – nur Reserve
+    start_utc: str | None = None   # Beginn des Moments (momente.start_utc) – Reihenfolge „chronologisch“
 
     def __post_init__(self) -> None:
         if not self.teile:  # alte Momente: genau ein Teil = Kern (wie bisher)
@@ -461,8 +462,21 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
         ergebnis.append(Kandidat(z["schluessel"], datei, dauer, z["stimmung"], intensitaet,
                                  round(punkte - abzug, 2), z["clip_id"], z["match_id"], kern, muss, grund, mk,
                                  abzug, gezeigt, teile, teile_muss, serie, max_gruppe=gruppe, victory=bool(victory),
-                                 gesperrt=gesperrt))
+                                 gesperrt=gesperrt, start_utc=z["start_utc"]))
     return ergebnis, bericht
+
+
+def _quellmasse(dateien: set[str]) -> list[tuple[int, int]]:
+    """(Breite, Höhe) je Quelldatei – für den wirksamen Rahmen-Zoom; nicht lesbare Dateien fehlen (der Renderer
+    rechnet ohnehin noch einmal nach)."""
+    masse = []
+    for datei in sorted(dateien):
+        try:
+            info = entwurf.probe(Path(datei))
+        except (entwurf.MedienFehler, OSError):
+            continue
+        masse.append((info.breite, info.hoehe))
+    return masse
 
 
 def plan_laenge(k: Kandidat, fmt: dict, seg_min: float) -> float:
@@ -550,7 +564,21 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandid
 
 # --- 2. Spannungsbogen -----------------------------------------------------------------
 
-def bogen(gewaehlt: list[Kandidat], fmt_name: str, *, hook_staerkster: bool = False) -> list[Kandidat]:
+def bogen(gewaehlt: list[Kandidat], fmt_name: str, *, hook_staerkster: bool = False,
+          reihenfolge: str = "bogen") -> list[Kandidat]:
+    """Reihenfolge der Momente. reihenfolge (Schnittstil, stile.py): "bogen" = Hook, Steigerung, Höhepunkt am Ende;
+    "steigend" = vom schwächsten zum stärksten; "chronologisch" = wie gespielt (Match, dann Zeit im Moment), der
+    stärkste Moment wandert ans Ende (Höhepunkt, aus ihm kommt auch der Hook vorn)."""
+    if reihenfolge in ("steigend", "chronologisch") and len(gewaehlt) > 1:
+        staerkster = max(gewaehlt, key=lambda k: (k.intensitaet, k.schluessel))
+        rest = [k for k in gewaehlt if k is not staerkster]
+        if reihenfolge == "steigend":
+            rest.sort(key=lambda k: (k.intensitaet, k.schluessel))
+        else:  # wie gespielt: echte Uhrzeit des Moments (momente.start_utc), sonst Match und Zeit im Moment
+            rest.sort(key=lambda k: (k.start_utc or "", k.match_id or "", k.kern[0], k.schluessel))
+        # hook_staerkster (Stil, Experiment oder Publikum) wirkt auch hier – sonst lernte das Publikums-Modell aus einem
+        # Wert, den das Video nicht zeigt: Cold Open, der Höhepunkt kommt zuerst, der Rest in der Reihenfolge des Stils
+        return [staerkster, *rest] if hook_staerkster else [*rest, staerkster]
     if len(gewaehlt) <= 2:
         return sorted(gewaehlt, key=lambda k: k.intensitaet, reverse=hook_staerkster)
     nach_staerke = sorted(gewaehlt, key=lambda k: (-k.intensitaet, k.schluessel))
@@ -850,7 +878,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         hinweise.append(f"{len(zu_lang)} Serie(n) zu lang für Short (> {fmt['serie_max_s']:.0f} s am Stück)")
     # Nachlegen nimmt aus demselben Vorrat wie die Auswahl: ohne die Momente im Cooldown, außer der reichte nicht
     vorrat, _ = frei_von_cooldown(alle, fmt, p)
-    reihe = bogen(gewaehlt, fmt_name, hook_staerkster=bool(p.get("hook_staerkster", False)))
+    reihe = bogen(gewaehlt, fmt_name, hook_staerkster=bool(p.get("hook_staerkster", False)),
+                  reihenfolge=str(p.get("reihenfolge", "bogen")))
 
     # Vorherrschende Stimmung (nach Länge gewichtet) bestimmt die Musik
     anteile: dict[str, float] = {}
@@ -903,7 +932,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                     rest = frische
                 naechster_ = max(rest, key=lambda k: (k.punkte, k.schluessel))
                 neue_reihe = bogen([*gewaehlt, naechster_], fmt_name,
-                                   hook_staerkster=bool(p.get("hook_staerkster", False)))
+                                   hook_staerkster=bool(p.get("hook_staerkster", False)),
+                                   reihenfolge=str(p.get("reihenfolge", "bogen")))
                 neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
                 if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
                     passt_nicht.append(naechster_)
@@ -959,6 +989,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         fx_plan = effekte.plane(segmente, reihe, p, konfig, fmt_name, fps, beats, stimmung=haupt)
     else:
         fx_plan = {"an": False}
+    # 30.09.: Rahmen-Zoom nur so weit, dass der Kill-Titel über der Bedienzone lesbar bleibt (4:3 ist höher als
+    # 16:9). Gespeichert wird der WIRKSAME Wert – Kritik, Bot-Anzeige und Publikums-Modell sehen, was im Video ist.
+    if fmt_name == "short" and float(p.get("rahmen_zoom", 1.0) or 1.0) > 1.0:
+        p["rahmen_zoom"] = entwurf.rahmen_grenze({"format": "short", "parameter": p}, int(fmt["b"]), int(fmt["h"]),
+                                                 _quellmasse({s["datei"] for s in segmente}))
 
     if name is None:
         name = basis = f"{fmt_name}-{jetzt():%Y%m%d-%H%M%S}"
