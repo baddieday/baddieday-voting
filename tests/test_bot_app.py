@@ -33,8 +33,43 @@ class BotApp(MitSpeicher):
     def test_aufbau(self):
         app = bot_app.baue_app(self.konfig, "123456:TEST", 42)
         befehle = {c for h in app.handlers[0] for c in getattr(h, "commands", ())}
-        self.assertTrue({"battle", "rangliste", "gewichte", "offen", "status"} <= befehle)
+        self.assertTrue({"battle", "rangliste", "gewichte", "offen", "status", "auto", "clip", "einstellungen"} <= befehle)
+        # ⚙️ im Clip-Bot (30.09.): der erste Klick-Handler, der „s:m“ nimmt, ist der der Einstellungen
+        from telegram.ext import CallbackQueryHandler
+
+        from clip_pipeline import lernbot_einstellungen
+
+        klick = next(h for h in app.handlers[0] if isinstance(h, CallbackQueryHandler)
+                     and (h.pattern is None or h.pattern.match("s:m")))
+        self.assertIs(klick.callback, lernbot_einstellungen.bei_klick)
         app.bot_data["con"].close()
+
+    def test_zusammenfassung_je_match_einmal_und_ohne_ton(self):
+        # Auto-Freigabe (30.09.): erst wenn render das Match abgeschlossen hat, genau einmal, ohne Ton
+        self.konfig.daten["auto_freigabe"]["modus"] = "an"
+        cid = self.clip_anlegen(status="freigegeben")
+        self.con.execute("UPDATE clips SET freigabe_quelle = 'auto', auto_art = 'sofort', auto_vorschlag = 'freigegeben',"
+                         " auto_grund = 'Regel: 3er-Serie' WHERE id = ?", (cid,))
+        self.clip_anlegen(status="gesendet")
+        nachrichten = []
+
+        async def send_message(chat, text, **kwargs):
+            nachrichten.append((text, kwargs))
+
+        fake = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                               bot=SimpleNamespace(send_message=send_message))
+        anzahl = "SELECT COUNT(*) FROM meldungen WHERE schluessel = 'auto:m1'"
+        asyncio.run(bot_app.automat_lauf(fake))
+        self.assertEqual(self.con.execute(anzahl).fetchone()[0], 0)       # render läuft noch (Match nicht fertig)
+        self.con.execute("UPDATE matches SET status = 'verarbeitet' WHERE id = 'm1'")
+        asyncio.run(bot_app.automat_lauf(fake))
+        asyncio.run(bot_app.automat_lauf(fake))
+        self.assertEqual(self.con.execute(anzahl).fetchone()[0], 1)
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(fake)), 1)
+        text, optionen = nachrichten[0]
+        self.assertIn(f"✅ 1 selbst freigegeben: #{cid} Regel 3er-Serie", text)
+        self.assertIn("🙋 1 bei dir", text)
+        self.assertTrue(optionen["disable_notification"])
 
     def test_outbox_sendet_vorbewertete_clips(self):
         cid = self.clip_anlegen(status="vorbewertet", file_id=None)

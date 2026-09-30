@@ -211,7 +211,9 @@ def _round_robin(gut: list[dict], schlecht: list[dict], maximal: int):
 
 def sammle_paare(con: sqlite3.Connection, *, zonen_name: str, wechsel_stunde: int, max_pro_abend: int) -> tuple[list[Paar], int, int]:
     """Gibt (Paare, Anzahl entschiedener Clips, Anzahl entschiedener Battles) zurück – erst alle Battles, dann die
-    Freigaben. Alle Paare tragen hier Gewicht 1,0; das Freigabe-Gewicht setzt berechne aus der Konfig."""
+    Freigaben. Alle Paare tragen hier Gewicht 1,0; das Freigabe-Gewicht setzt berechne aus der Konfig.
+    Freigaben zählen nur, wenn DU entschieden hast (freigabe_quelle nicht 'auto', Auto-Freigabe 30.09.) – sonst
+    lernte die Vorbewertung aus Entscheidungen, die sie selbst getroffen hat (Zirkelschluss)."""
     paare: list[Paar] = []
     battles = con.execute(
         """SELECT b.ergebnis, a.merkmale AS ma, c.merkmale AS mb
@@ -225,7 +227,7 @@ def sammle_paare(con: sqlite3.Connection, *, zonen_name: str, wechsel_stunde: in
     platzhalter = ", ".join("?" for _ in BEWERTET)
     entschieden = con.execute(
         f"""SELECT id, status, start_utc, merkmale FROM clips
-             WHERE status IN ({platzhalter}, 'verworfen') ORDER BY id""",
+             WHERE status IN ({platzhalter}, 'verworfen') AND freigabe_quelle IS NOT 'auto' ORDER BY id""",
         BEWERTET,
     ).fetchall()
     abende: dict[str, dict[str, list]] = {}

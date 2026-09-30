@@ -56,6 +56,22 @@ KATALOG: tuple[Einstellung, ...] = (
                 50.0, "Entwürfe mit schlechterer Cutter-Note sortiert der Bot selbst aus und baut neu."),
     Einstellung("musik.genres_bevorzugt", "🎵 Musik", ((HARTE_GENRES, "Techno/Rock bevorzugt"), ([], "alle Genres gleich")),
                 [], "Techno, Hardcore und Rock bekommen bei der Musikwahl Vorrang."),
+    # Auto-Freigabe im Clip-Bot (30.09.) – am Ende, damit sich die Nummern schon offener Menüs (s:o:<i>) nicht
+    # verschieben. Die Typen müssen zu config/pipeline.toml passen (ziel_quote float, frist_h int), sonst lehnt
+    # _erlaubt einen Wert aus der Datei ab.
+    Einstellung("auto_freigabe.modus", "🤖 Auto-Freigabe",
+                (("an", "an"), ("probe", "👀 nur anzeigen"), ("aus", "aus")),
+                "an", "Klare Clips entscheidet der Clip-Bot selbst (🤖, ohne Ton, umdrehbar). „Nur anzeigen“ zeigt, "
+                "was er täte."),
+    Einstellung("auto_freigabe.ziel_quote", "🎯 Auto-Genauigkeit",
+                ((0.95, "vorsichtig"), (0.9, "normal"), (0.85, "mutig")),
+                0.9, "So oft muss die Erwartung bei deinen Urteilen gestimmt haben, bevor der Bot selbst entscheidet."),
+    Einstellung("auto_freigabe.verwerfen", "🗑️ Auto-Aussortieren",
+                ((True, "an (weich, nie Triple+/Victory)"), (False, "aus")),
+                True, "Aussortierte bleiben Material für Shorts und Highlight – nur dein 🗑️ schließt aus."),
+    Einstellung("auto_freigabe.frist_h", "⏰ Frist",
+                ((12, "12 h"), (24, "24 h"), (48, "48 h"), (0, "nie")),
+                24, "Danach entscheidet der Clip-Bot offene Clips selbst."),
 )
 NACH_SCHLUESSEL = {e.schluessel: e for e in KATALOG}
 
