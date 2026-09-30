@@ -302,6 +302,24 @@ def _cmd_sicherung(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_kalibrieren(args, konfig, con) -> int:
+    """Kalibrier-Bericht für ein echtes Match (B5, erste Stufe): Kills mit Waffen-Nummer, Merkmale, Stimmung,
+    Transkript, drei Standbilder je Clip nach sessions/<ID>/kalibrierung/. Weckt nie (nur Puffer)."""
+    from . import kalibrierung
+
+    try:
+        e = kalibrierung.bericht(con, konfig, args.session, bilder=not args.ohne_bilder, whisper=not args.ohne_whisper)
+    except kalibrierung.KalibrierFehler as fehler:
+        _json({"fehler": str(fehler)})
+        return 2
+    for c in e["clips"]:
+        log.info("%s", kalibrierung.clip_text(c).replace("\n", " · "))
+    _json({"session": e["session"], "clips": len(e["clips"]), "bilder": sum(len(c["bilder"]) for c in e["clips"]),
+           "waffen_unbekannt": e["waffen_unbekannt"], "hinweise": e["hinweise"],
+           "datei": f"{e['ordner']}/bericht.json"})
+    return 0
+
+
 def _cmd_puffer(args, konfig, con) -> int:
     """Morgenprüfung (E19): pruefen legt Meldungen an (je Thema und Tag eine), status zeigt nur. Weckt nie.
     Exit: 0 ok · 1 ein Thema ließ sich nicht prüfen · 2 kein getrennter Betrieb."""
@@ -628,6 +646,13 @@ def baue_parser() -> argparse.ArgumentParser:
                    help="von eingang/ nur Dateien der letzten N Tage (Standard: [puffer].rohdaten_tage = 14)")
     a.add_argument("--probelauf", action="store_true", help="nur zählen (weckt nicht, kopiert nichts)")
     s.set_defaults(fn=_cmd_lager, sperren=False)  # eigene Lager-Sperre statt der Pipeline-Sperre
+
+    s = unter.add_parser("kalibrieren", help="ein echtes Match zum Nachprüfen: Kills mit Waffen-Nummer, Merkmale, "
+                                               "Stimmung, Transkript, 3 Standbilder je Clip (B5; weckt nie)")
+    s.add_argument("--session", required=True, help="Match-ID, z. B. 2026-09-28_21-42-22")
+    s.add_argument("--ohne-bilder", action="store_true")
+    s.add_argument("--ohne-whisper", action="store_true")
+    s.set_defaults(fn=_cmd_kalibrieren, sperren=True)  # Whisper ist rechenintensiv: Pipeline-Sperre, nicht in WECKEN
 
     s = unter.add_parser("sicherung", help="Datenbank sichern (sqlite3-Backup nach <speicher>/sicherung/, Rotation "
                                             "[lager].sicherungen_behalten) – auch ohne getrennten Betrieb (B1)")

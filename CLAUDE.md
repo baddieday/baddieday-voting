@@ -248,3 +248,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Techno/Rock bevorzugt. Die Clip-Auswahl wird je Entwurf neu aufgelöst, zieht zuerst die Stimmung der Clips dieser
   Matches nach und steht als Hinweis vorn im Entwurf. Telegram statt Webseite: kein neuer Dienst, kein offener Port,
   schon auf Florian beschränkt (Prinzip 7). Weitere Werte kommen einfach als Zeile in den Katalog.
+- 2026-09-30 (Queue-Punkt B5, erste Stufe): **Kalibrieren an einem echten Match** – `pipeline kalibrieren --session ID`
+  und `/kalibrieren [ID]` im Lern-Bot (ohne ID: neuestes Match mit Clips). Zieht fehlende Stimmung nach (Whisper, ohne
+  Claude), schreibt je Clip Kills mit Waffen-Nummer und Kategorie, Merkmale, Stimmung mit Sicherheit, Transkript-Anfang
+  und 3 Standbilder nach `sessions/<ID>/kalibrierung/` (bericht.json); der Bot schickt je Clip ein Album und am Ende
+  die Waffen-Nummern, die in `[merkmale.waffen]` fehlen. Pipeline-Sperre, weckt nie, löscht nichts. Bestätigen/Korrigieren
+  per Knopf und Waffen direkt in lokal.toml schreiben sind die nächste Stufe.
