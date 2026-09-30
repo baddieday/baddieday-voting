@@ -521,6 +521,9 @@ def speichere_messung(con: sqlite3.Connection, post_id: int, werte: dict, quelle
     # Neue Publikumsdaten sind der Auslöser, nicht ein weiterer Bewertungs-Klick.
     # Der Lerner benutzt SAVEPOINTs und funktioniert auch in der Bot-Transaktion.
     autonom.aktualisieren(con, konfig)
+    # Cutter-Maßstab NICHT hier: speichere_messung läuft im Lern-Bot synchron in der Event-Loop und in einer
+    # Transaktion – das volle Nachlernen hielte den Bot Sekunden an (Review 30.09.). Das Publikum als Lehrer 1
+    # zieht der tägliche Lauf `pipeline publikum bewerten` nach (cli._cmd_publikum → massstab.nachziehen).
     return int(cursor.lastrowid)
 
 

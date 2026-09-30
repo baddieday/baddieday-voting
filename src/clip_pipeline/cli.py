@@ -320,6 +320,64 @@ def _cmd_kalibrieren(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_kritik(args, konfig, con) -> int:
+    """Cutter-Maßstab: einen Entwurf (neu) benoten – Messung am Video, Teilnoten, Tore, KI-Cutter (Tageslimit),
+    Note mit den aktuellen Faktoren. --neu misst auch dann neu, wenn messung.json schon passt. Weckt nie."""
+    from . import kritik
+
+    try:
+        e = kritik.bewerte(con, konfig, args.id, neu_messen=args.neu)
+    except (ValueError, OSError) as fehler:
+        _json({"fehler": str(fehler)})
+        return 1
+    log.info("%s", kritik.kritik_zeile(con, args.id))
+    _json({"entwurf": args.id, "score": e["score"], "regel_score": e["regel_score"], "ki_score": e["ki_score"],
+           "mess_version": e["mess_version"], "tor": e["tor"], "gemessen": e["gemessen"],
+           "verluste": [v[0] for v in e["verluste"]]})
+    return 0
+
+
+def _cmd_massstab(args, konfig, con) -> int:
+    """Cutter-Maßstab: Faktoren nachlernen und zeigen. --nachmessen misst alte Entwürfe, deren Video im Puffer liegt
+    (nur lesen, ohne neuen KI-Aufruf – vorhandene KI-Urteile bleiben und bilden sofort Paare), neueste zuerst,
+    höchstens --max; danach einmal lernen und die Abnahme (Spec §4) ausgeben. Weckt nie, löscht nichts."""
+    from . import kritik, massstab
+
+    ergebnis: dict = {}
+    if args.nachmessen:
+        gemessen, fehler, uebrig = 0, 0, 0
+        zeilen = con.execute("""SELECT e.id, e.datei FROM entwuerfe e LEFT JOIN kritiken k ON k.entwurf_id = e.id
+                                 WHERE e.datei IS NOT NULL AND COALESCE(k.mess_version, 0) < 1
+                                 ORDER BY e.id DESC""").fetchall()
+        for z in zeilen:
+            if not Path(z["datei"]).is_file():
+                continue
+            if args.max is not None and gemessen + fehler >= args.max:
+                uebrig += 1
+                continue
+            try:
+                e = kritik.bewerte(con, konfig, int(z["id"]), ki=False, lernen=False)
+                gemessen += 1
+                log.info("Entwurf #%s: %s (Messung v%s)", z["id"], e["regel_score"], e["mess_version"])
+            except Exception as ausnahme:  # noqa: BLE001 – ein kaputter alter Entwurf hält die anderen nicht auf
+                fehler += 1
+                log.warning("Entwurf #%s nicht messbar: %s", z["id"], ausnahme)
+        ergebnis.update(gemessen=gemessen, fehler=fehler, uebrig=uebrig, abnahme=kritik.abnahme(con))
+        a = ergebnis["abnahme"]
+        log.info("Abnahme: %s gemessen · σ %s · Spannweite der Stile %s · %s", a["n"], a["sigma"], a["spannweite"],
+                 " · ".join(f"{s} {m}" for s, m in sorted(a["stile"].items(), key=lambda x: -x[1])))
+        if a["trennt_nicht"]:
+            log.info("Trennt nicht (σ < 0,1): %s", ", ".join(a["trennt_nicht"]))
+    version, stand = massstab.aktualisiere(con, konfig)
+    if args.zeigen or not args.nachmessen:
+        for zeile in massstab.lernstand_zeilen(con, konfig):
+            print(zeile, file=sys.stderr)
+    ergebnis.update(version=version, aktiv=bool(stand["aktiv"]), grund=stand["grund"],
+                    datenbasis=stand["datenbasis"], faktoren=stand["faktoren"])
+    _json(ergebnis)
+    return 0
+
+
 def _cmd_puffer(args, konfig, con) -> int:
     """Morgenprüfung (E19): pruefen legt Meldungen an (je Thema und Tag eine), status zeigt nur. Weckt nie.
     Exit: 0 ok · 1 ein Thema ließ sich nicht prüfen · 2 kein getrennter Betrieb."""
@@ -505,6 +563,9 @@ def _cmd_bewerte(args, konfig, con) -> int:
     for grund in args.grund:
         if grund not in json.loads(b["gruende"]):
             b = regie_lernen.bewerte(con, args.entwurf, grund=grund)
+    from . import massstab
+
+    massstab.nachziehen(con, konfig, "👍/👎")         # Cutter-Maßstab: dein Urteil ist ein Lehrer
     print(regie_lernen.lernstand_text(con, konfig), file=sys.stderr)
     _json({"entwurf": args.entwurf, "daumen": b["daumen"], "gruende": json.loads(b["gruende"])})
     return 0
@@ -589,6 +650,9 @@ def _cmd_publikum(args, konfig, con) -> int:
             log.warning("Lernen nach dem Bewerten fehlgeschlagen (%s: %s)", type(fehler).__name__, fehler)
     ergebnis["api"] = api
     ergebnis["autonom"] = autonom.aktualisieren(con, konfig)
+    from . import massstab
+
+    massstab.nachziehen(con, konfig, "Publikum")   # Cutter-Maßstab: nur ins Log, die JSON-Zeile bleibt, wie sie ist
     _json(ergebnis)
     return 1 if ergebnis["fehler"] or api["fehler"] else 0
 
@@ -676,6 +740,19 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--ohne-bilder", action="store_true")
     s.add_argument("--ohne-whisper", action="store_true")
     s.set_defaults(fn=_cmd_kalibrieren, sperren=True)  # Whisper ist rechenintensiv: Pipeline-Sperre, nicht in WECKEN
+
+    s = unter.add_parser("kritik", help="Cutter-Maßstab: einen Entwurf am fertigen Video benoten (Messung, Tore, "
+                                          "KI-Cutter; weckt nie)")
+    s.add_argument("--id", type=int, required=True, help="Entwurf-Nummer")
+    s.add_argument("--neu", action="store_true", help="neu messen, auch wenn messung.json schon passt")
+    s.set_defaults(fn=_cmd_kritik, sperren=True)  # ffmpeg-Messung ist rechenintensiv: Pipeline-Sperre
+
+    s = unter.add_parser("massstab", help="Cutter-Maßstab: gelernte Gewichte nachziehen und zeigen; --nachmessen "
+                                            "misst alte Entwürfe im Puffer (ohne KI, weckt nie)")
+    s.add_argument("--nachmessen", action="store_true", help="alte Entwürfe ohne Messung am Video messen")
+    s.add_argument("--max", type=int, help="mit --nachmessen: höchstens so viele (neueste zuerst)")
+    s.add_argument("--zeigen", action="store_true", help="Lernstand des Maßstabs nach stderr")
+    s.set_defaults(fn=_cmd_massstab, sperren=True)
 
     s = unter.add_parser("sicherung", help="Datenbank sichern (sqlite3-Backup nach <speicher>/sicherung/, Rotation "
                                             "[lager].sicherungen_behalten) – auch ohne getrennten Betrieb (B1)")

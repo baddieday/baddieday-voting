@@ -26,6 +26,8 @@ RATE = 48000
 AUSBLENDEN_S = 0.03  # am Ende jeder WAV: kein Knacken, wenn der Klang in die Stille springt
 SFX_PEGEL = 0.8  # Standard für [regie.effekte].sfx_pegel
 ORDNER = "/var/lib/clip-pipeline/sfx"
+# Limiter am Ende jeder Mischung mit Musik oder Klängen (abmischung): Spitzen ≤ 0,95, ohne Anheben, ohne Vorlauf
+LIMITER = "alimiter=limit=0.95:level=0:latency=1"
 
 # Frequenzverlauf per Phase: Ton, der von f0+df auf f0 fällt -> Phase f0*t + (df/k)*(1-exp(-k*t)) Schwingungen
 _BASS = "(40*t+(80/18)*(1-exp(-18*t)))"  # 120 -> 40 Hz
@@ -179,11 +181,12 @@ def mischung(ereignisse, erster_eingang: int, sfx_pegel: float = SFX_PEGEL) -> t
 def abmischung(ton: list[str], mit_sfx: bool) -> str:
     """Letzte Zeile der Tonkette -> [aout]. ton = ["[spiel]", "[leiser]"] (mit Musik) bzw. [a] (ohne).
 
-    Ohne Klänge zeichengleich mit heute. Mit Klängen: amix duration=first (der Spielton bestimmt die Länge),
-    Limiter mit level=0 (sonst hebt er wieder auf 0 dBFS an) und latency=1 (gleicht seine 5 ms Vorlauf aus)."""
+    Mit Klängen: amix duration=first (der Spielton bestimmt die Länge). Der Limiter ist überall derselbe (LIMITER):
+    level=0 (sonst hebt er wieder auf 0 dBFS an) und latency=1 (gleicht seine 5 ms Vorlauf aus) – seit 30.09.
+    (Cutter-Maßstab R2) auch im Zweig „Musik ohne Klänge“, wo der Standard level=1 den Mix automatisch anhob.
+    Ohne Musik und ohne Klänge: kein Limiter, wie bisher."""
     if not mit_sfx:
         if len(ton) == 1:
             return f"{ton[0]}apad[aout]"
-        return f"{''.join(ton)}amix=inputs={len(ton)}:normalize=0,alimiter=limit=0.95,apad[aout]"
-    return (f"{''.join(ton)}[sfx]amix=inputs={len(ton) + 1}:normalize=0:duration=first,"
-            "alimiter=limit=0.95:level=0:latency=1,apad[aout]")
+        return f"{''.join(ton)}amix=inputs={len(ton)}:normalize=0,{LIMITER},apad[aout]"
+    return f"{''.join(ton)}[sfx]amix=inputs={len(ton) + 1}:normalize=0:duration=first,{LIMITER},apad[aout]"

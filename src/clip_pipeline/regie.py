@@ -763,7 +763,8 @@ def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN, max_raffer: int = M
     Teile eines Moments (Jump-Cut) direkt hintereinander, aus derselben Datei, vorwärts, mit hartem Schnitt.
     version 4 (Effekte): Ereignisse im Quellfenster ihres Segments mit ihren Pflichtfeldern, höchstens
     MAX_EREIGNISSE; Tempo-Fenster (lupe) im Segment, Länge mit Zuschlag, Zeitlupe ≤ LUPE_MAX_S bzw. Zeitraffer
-    ≤ RAFFER_MAX_S, höchstens max_lupen Zeitlupen und max_raffer Zeitraffer; Hook nur vorn (Stufe 4)."""
+    ≤ RAFFER_MAX_S, höchstens max_lupen Zeitlupen und max_raffer Zeitraffer; Hook nur vorn (Stufe 4); höchstens
+    effekte.BLITZE_MAX Blitze (flash, strobe, negativ) in jeder Sekunde (Blitz-Sicherheit, 30.09.)."""
     fehler = schema.pruefe(liste, schema.lade("regie"))
     if fehler:
         return fehler
@@ -819,6 +820,10 @@ def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN, max_raffer: int = M
         fehler.append(f"{lupen} Zeitlupen – höchstens {max_lupen}")
     if raffer > max_raffer:
         fehler.append(f"{raffer} Zeitraffer – höchstens {max_raffer}")
+    # Blitz-Sicherheit (R4): höchstens effekte.BLITZE_MAX Blitze in jeder Sekunde (Strobe anteilig)
+    anzahl, ab = effekte.blitze(effekte.zeitleiste(liste))
+    if anzahl > effekte.BLITZE_MAX + 1e-6:
+        fehler.append(f"{anzahl:g} Blitze in 1 s ab {ab:.2f} s – höchstens {effekte.BLITZE_MAX}")
     for n, s in hooks:
         if n != 0 or len(hooks) > 1:
             fehler.append(f"Segment {s['nr']}: Hook nur als erstes Segment und höchstens einer")
