@@ -117,3 +117,25 @@ CREATE TABLE IF NOT EXISTS kritiken (
     details     TEXT NOT NULL,              -- JSON: Regel-Teile, Stärken, Schwächen, Hinweis
     erstellt    TEXT NOT NULL
 );
+
+-- Cutter-Maßstab 1.0 (30.09., kriterien.py/massstab.py): gelernte Faktoren f_k je Kriterium, eine Zeile je Version.
+-- Neue Version nur, wenn sich input_hash (Paare + Einstellungen) ändert. Gelernt wird nur aus Lehrern, die die Note
+-- nicht kennen (KI-Cutter blind, Publikum, dein 👍/👎) – nie aus kritiken.score/regel_score (Zirkelschluss).
+CREATE TABLE IF NOT EXISTS massstab (
+    version             INTEGER PRIMARY KEY,
+    erstellt            TEXT NOT NULL,
+    input_hash          TEXT NOT NULL UNIQUE,
+    faktoren            TEXT NOT NULL,      -- JSON {k: f_k} wirksam (nach Vertrauen/Schranke)
+    gelernt             TEXT NOT NULL,      -- JSON {k: f_k} roh
+    start               TEXT NOT NULL,      -- JSON {format: {k: w0}}
+    paare               TEXT NOT NULL,      -- JSON {"ki": n, "du": n, "publikum": n}
+    datenbasis          INTEGER NOT NULL,   -- Entwürfe in mindestens einem Paar
+    vertrauen           REAL NOT NULL,
+    publikum_anteil     REAL NOT NULL,      -- π = n_pub / (n_pub + publikum_halb)
+    ki_lehrer           REAL,               -- a_KI: so stark zählt der KI-Cutter als Lehrer
+    ki_treffer_publikum REAL,               -- q_KI: Anteil Publikumspaare, die der KI-Cutter richtig sortiert
+    quote_holdout       REAL,
+    quote_holdout_start REAL,
+    aktiv               INTEGER NOT NULL,
+    grund               TEXT NOT NULL
+);

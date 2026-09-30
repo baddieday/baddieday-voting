@@ -109,6 +109,12 @@ EINSTIEG_STILE = (("einzug",), ("einzug", "flash"), ("blur",), ("einzug", "rgb")
 VERGROESSERND = {"zoom"}              # Übergänge, die das GANZE Bild vergrößern (xfade zoomin) – Short: Texte enden davor
 # Zoom-Budget: wer gewinnt bei zu engem Abstand (Tod-Punch zählt wie ein Finisher)
 RANG_FINISHER, RANG_MEME, RANG_PUNCH, RANG_AKZENT = 3, 2, 1, 0
+# Blitz-Sicherheit (Cutter-Maßstab R4, 30.09., Pflicht statt Geschmack): Hell-Dunkel-Effekte beginnen mindestens
+# BLITZ_ABSTAND_S auseinander (plane), regie.pruefe_liste zählt nach – höchstens BLITZE_MAX Blitze in jeder Sekunde
+# (WCAG 2.3.1; TikTok warnt bei mehr). Strobe zählt anteilig mit effekt_filter.STROBE_HZ.
+BLITZ = ("flash", "strobe", "negativ")
+BLITZ_ABSTAND_S = 0.4
+BLITZE_MAX = 3
 
 _GEMEINSAM = {"mini_faktor": 0.5, "titel_ab_kette": 2}
 # Stärken 0..1 je Stimmung (0 = aus). uebergaenge: Pool (Art, Dauer s) für die Übergänge IN Momente dieser Stimmung –
@@ -777,7 +783,9 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
     if beats:
         belegt = [z.t for z in plan if z.art in ZOOM or z.art in BILD or z.art == "rgb"]
         plan += _akzente(beats, segmente, prof, stark, belegt, fenster, abstand, Stilfolge(BEAT_STILE, "beat" + seed))
-    _speichern([z for z in plan if z.staerke > 0], segmente)
+    # 12. Blitz-Sicherheit: flash, strobe, negativ mindestens BLITZ_ABSTAND_S auseinander
+    plan = _blitz_abstand([z for z in plan if z.staerke > 0])
+    _speichern(plan, segmente)
 
     look, look_staerke = prof[stimmung]["look"]
     look_staerke = staerke(look_staerke, p, stimmung, "look", schwelle)
@@ -899,6 +907,37 @@ def _akzente(beats: list[float], segmente: list[dict], prof: dict, stark, belegt
                 ergebnis.append(_Plan(art, i, b, w, dauer=DAUER[art], rang=RANG_AKZENT))
         bisect.insort(belegt, b)
     return ergebnis
+
+
+def _blitz_abstand(plan: list[_Plan]) -> list[_Plan]:
+    """Von Blitzen (BLITZ), die näher als BLITZ_ABSTAND_S beieinander beginnen, bleibt der stärkere (bei Gleichstand
+    der frühere); alles andere bleibt unverändert. Mit Strobe-Dauer 0,4 s ergibt das höchstens 3 Blitze je Sekunde."""
+    behalten: list[_Plan] = []
+    for z in sorted((z for z in plan if z.art in BLITZ), key=lambda z: (-z.staerke, z.t, z.i)):
+        if all(abs(z.t - b.t) >= BLITZ_ABSTAND_S - 1e-9 for b in behalten):
+            behalten.append(z)
+    bleibt = {id(z) for z in behalten}
+    return [z for z in plan if z.art not in BLITZ or id(z) in bleibt]
+
+
+def blitze(ereignisse: list[Ereignis], strobe_hz: float | None = None) -> tuple[float, float]:
+    """(höchste Zahl Blitze in einem 1-s-Fenster, Beginn dieses Fensters) – für regie.pruefe_liste und die Messung.
+    flash und negativ zählen je 1, strobe anteilig: strobe_hz (effekt_filter.STROBE_HZ) je Sekunde seiner Dauer im
+    Fenster (0,4 s bei 2,5 Hz = 1). Die Fenster beginnen an jedem Blitz. Beispiel: flash bei 1,0/1,4/1,8 → (3, 1.0)."""
+    if strobe_hz is None:
+        from .effekt_filter import STROBE_HZ as strobe_hz
+    b = [e for e in ereignisse if e.art in BLITZ]
+    bestes = (0.0, 0.0)
+    for start in sorted({e.t for e in b}):
+        ende, n = start + 1.0, 0.0
+        for e in b:
+            if e.art == "strobe":
+                n += max(0.0, min(e.t + e.dauer, ende) - max(e.t, start)) * strobe_hz
+            elif start - 1e-9 <= e.t < ende - 1e-9:
+                n += 1
+        if n > bestes[0] + 1e-9:
+            bestes = (round(n, 3), start)
+    return bestes
 
 
 def _speichern(ereignisse: list[_Plan], segmente: list[dict]) -> None:

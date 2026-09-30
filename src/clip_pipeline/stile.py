@@ -14,8 +14,9 @@ ist, bleibt wirksam. „rahmen_zoom“ vergrößert im Short das Spielbild (Mitt
 im Rand darüber/darunter). Wirksam wird er nur so weit, dass der Kill-Titel über der Bedienzone lesbar bleibt
 (entwurf.rahmen_grenze: 16:9 bis ×1,28, 4:3 gar nicht) – gespeichert wird der wirksame Wert.
 
-Welcher Stil kommt, entscheidet der Bot selbst: Thompson-Sampling über die Cutter-Scores (kritik.py) der bisherigen
-Entwürfe je Stil – ohne dein 👍/👎. Ein Stil mit guten Noten kommt öfter, jeder bekommt weiter Chancen, und nie
+Welcher Stil kommt, entscheidet der Bot selbst: Thompson-Sampling über die Cutter-Noten (kritik.py, seit dem
+Cutter-Maßstab 1.0 nur gemessene, mit den aktuell gelernten Gewichten neu gerechnet) der bisherigen Entwürfe je
+Stil – ohne dein 👍/👎. Ein Stil mit guten Noten kommt öfter, jeder bekommt weiter Chancen, und nie
 dreimal derselbe hintereinander. In ⚙️ Einstellungen lässt sich ein Stil fest wählen ([regie].stil).
 """
 
@@ -50,15 +51,35 @@ def _stil_von(parameter_json: str | None) -> str | None:
         return None
 
 
-def statistik(con: sqlite3.Connection, fmt: str) -> dict[str, dict]:
-    """Je Stil: Anzahl Urteile, Summe der Scores (0..1) – aus kritiken (dem Cutter-Kritiker), nicht aus 👍/👎."""
+def statistik(con: sqlite3.Connection, fmt: str, konfig: Konfig | None = None) -> dict[str, dict]:
+    """Je Stil: Anzahl Urteile, Summe der Noten (0..1) – aus kritiken (dem Cutter-Maßstab), nicht aus 👍/👎.
+    Cutter-Maßstab 1.0 (Spec §5.5): nur gemessene Kritiken (mess_version ≥ 1) – die alten Regel-Noten (79–85)
+    verwässerten sonst jeden Unterschied. Die Note wird aus den Teilnoten mit den AKTUELLEN Faktoren neu gerechnet
+    (kriterien.note), die KI-Note fließt mit κ ein. Ein veröffentlichter Entwurf zählt zusätzlich doppelt mit dem
+    Publikums-Score (y + 1)/2. Ein Stil ohne solche Zeilen startet mit Beta(1, 1)."""
+    from . import kritik, massstab   # spät: massstab → regie_lernen → stile
+
     werte: dict[str, dict] = {s: {"n": 0, "summe": 0.0} for s in STILE}
-    for z in con.execute("""SELECT e.parameter, k.score FROM kritiken k JOIN entwuerfe e ON e.id = k.entwurf_id
-                             WHERE e.format = ?""", (fmt,)):
+    faktoren, kappa = massstab.faktoren(con), massstab.ki_gewicht(con)
+    start = massstab.start_gewichte(konfig)
+    zeilen = con.execute("""SELECT e.id, e.parameter, k.teile, k.tore, k.ki_score FROM kritiken k
+                              JOIN entwuerfe e ON e.id = k.entwurf_id
+                             WHERE e.format = ? AND k.mess_version >= 1""", (fmt,)).fetchall()
+    publikum = massstab._publikum(con, {int(z["id"]): None for z in zeilen})
+    for z in zeilen:
         stil = _stil_von(z["parameter"])
-        if stil in werte:
-            werte[stil]["n"] += 1
-            werte[stil]["summe"] += max(0.0, min(1.0, float(z["score"]) / 100))
+        if stil not in werte:
+            continue
+        try:
+            teile, tore = json.loads(z["teile"] or "{}"), json.loads(z["tore"] or "null")
+        except ValueError:
+            continue
+        _, note = kritik.note_jetzt(teile, tore, fmt, z["ki_score"], faktoren=faktoren, kappa=kappa, start=start)
+        werte[stil]["n"] += 1
+        werte[stil]["summe"] += max(0.0, min(1.0, note / 100))
+        if (p := publikum.get(int(z["id"]))) is not None:
+            werte[stil]["n"] += 2
+            werte[stil]["summe"] += 2 * max(0.0, min(1.0, (p["y"] + 1) / 2))
     return werte
 
 
@@ -75,7 +96,7 @@ def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> str:
         return fest
     n = con.execute("SELECT COUNT(*) FROM entwuerfe WHERE format = ?", (fmt,)).fetchone()[0]
     zufall = random.Random(f"{fmt}:{n}")
-    werte = statistik(con, fmt)
+    werte = statistik(con, fmt, konfig)
     # Beta(1 + Summe der Scores, 1 + Summe der Fehlpunkte): gute Noten ziehen, wenig Erfahrung streut stark
     zuege = sorted(((zufall.betavariate(1 + w["summe"], 1 + w["n"] - w["summe"]), stil) for stil, w in werte.items()),
                    reverse=True)
@@ -105,9 +126,9 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict
     return p
 
 
-def stil_zeile(con: sqlite3.Connection, fmt: str = "short") -> str:
+def stil_zeile(con: sqlite3.Connection, fmt: str = "short", konfig: Konfig | None = None) -> str:
     """Für /lernstand: „Schnittstile (Cutter-Score im Schnitt): ⚡ Montage 71 (5×) · …“."""
-    werte = statistik(con, fmt)
+    werte = statistik(con, fmt, konfig)
     teile = [f"{STILE[s]['titel']} {100 * w['summe'] / w['n']:.0f} ({w['n']}×)" if w["n"] else f"{STILE[s]['titel']} –"
              for s, w in sorted(werte.items(), key=lambda x: -(x[1]["summe"] / x[1]["n"] if x[1]["n"] else -1))]
     return "Schnittstile (Cutter-Score im Schnitt, lernt selbst): " + " · ".join(teile)

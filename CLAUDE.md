@@ -278,3 +278,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - `clips.freigabe_quelle` (du/auto) + `vorgelegt`/`auto_*`; automatische Entscheidungen zählen nie beim Lernen, in der
     Erwartung oder im Tor. `/auto`, `/clip <nr>`, ⚙️ auch im Clip-Bot (Modus an/👀 probe/aus, Genauigkeit,
     Aussortieren, Frist). n8n-Vertrag unverändert. Annahmen A1–A9: `docs/ENTSCHEIDUNGEN.md`, „Auto-Freigabe“.
+- 2026-09-30 (Cutter-Maßstab 1.0, Florian: „mach die Schnittregeln professionell“):
+  - Benotet wird das **fertige Video** (ein ffmpeg-Messlauf, Bordmittel): 14 Kriterien mit stetigen Kurven, 6 K.O.-Tore
+    (Schwarz, Standbild, > 3 Blitze/s, Ton, Länge, doppelter Moment) deckeln auf 40 und sortieren aus.
+  - Der Renderer garantiert die Hygiene: −14 LUFS / −1,5 dBTP, einheitlicher Limiter, kurze Musik-Kanten, Strobe ≤ 2,5 Hz.
+  - Gewichte lernt `massstab.py` selbst (Faktoren 0,5–2) – nur von Lehrern, die die Note nicht kennen: KI-Cutter blind
+    (20 Bilder + Wellenform), Publikum, dein 👍/👎. Schwelle = Q20 der eigenen Noten (40–50), ab 20 gemessenen Entwürfen.
+  - `pipeline kritik --id N`, `pipeline massstab --nachmessen`; Doku `docs/REGIE.md` „Cutter-Maßstab“, Annahmen
+    `docs/ENTSCHEIDUNGEN.md`.

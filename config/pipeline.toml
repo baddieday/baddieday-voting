@@ -149,6 +149,16 @@ gut_ab = 60                # KI-Note ab hier zählt als 👍 im Regie-Lernen, da
 schwelle = 50              # darunter sortiert der Lern-Bot den Entwurf still aus und baut neu (0 = aus)
 prompt = "templates/kritik-prompt.txt"
 
+[regie.ton]
+# Ton-Hygiene im Renderer (30.09., Cutter-Maßstab R1/R3): jedes fertige Video wird in zwei Pässen (loudnorm) auf
+# diese Lautheit und diesen True Peak angeglichen – Entwurf, Upload-Fassung und Final (entwurf.normalisiere_ton)
+lufs = -14.0
+true_peak = -1.5
+# Musik-Kanten in Sekunden: einblenden nur gegen Knacken; ausblenden im Short kurz (Loop-Ende), im Zusammenschnitt weich
+musik_ein_s = 0.03
+musik_aus_s_short = 0.25
+musik_aus_s_zs = 2.0
+
 [regie.effekte]
 # Regisseur 2.0/2.1: Der Regisseur schreibt einen Effekt-Plan in die Schnittliste (src/clip_pipeline/effekte.py), der
 # Renderer setzt ihn nur um. Im Spielbild: Übergänge (gemischt ohne Wiederholung), Zoom, Zeitlupe/Zeitraffer, Farblook
@@ -173,6 +183,60 @@ sfx_ordner = "/var/lib/clip-pipeline/sfx"
 sfx_pegel = 0.8
 # Kill-Titel in der Schrift aus [shorts].schriften (DejaVu Sans Bold): Breite eines Zeichens / Schriftgröße
 titel_zeichenbreite = 0.75
+
+[regie.massstab]
+# Cutter-Maßstab 1.0 (30.09., kriterien.py/massstab.py): 14 Kriterien am fertigen Video, ihre Gewichte lernt der Bot
+# paarweise aus Lehrern, die die Note nicht kennen (KI-Cutter blind, Publikum, dein 👍/👎). Faktor f je Kriterium.
+plattformen = ["tiktok", "youtube"]   # Safe-Zonen für die Lesbarkeit (mit "instagram" strenger)
+mindestens = 15            # ab so vielen Entwürfen in Paaren lernt er, darunter f = 1
+voll_vertrauen = 60        # Vertrauen = n / voll_vertrauen (höchstens 1)
+faktor_min = 0.5
+faktor_max = 2.0
+beta = 8                   # Steilheit P(a ≻ b) = σ(β·Δ)
+l2 = 4                     # Zug zurück zum Handwerks-Start
+schritte = 400
+lernrate = 0.05
+ki_abstand = 10            # KI-Paar erst ab so viel Noten-Unterschied
+ki_fenster_tage = 14
+ki_budget = 40             # mehr KI-Paare verdünnen ihr Gewicht (min(1, budget/n))
+publikum_abstand = 0.2
+publikum_fenster_tage = 30
+publikum_halb = 8          # ab so vielen Publikums-Videos führt das Publikum zur Hälfte
+schwelle_quantil = 0.2
+schwelle_min = 40
+schwelle_ab_n = 20
+
+[regie.massstab.start.short]
+# Startgewichte in Prozent (Spec §2.1), Summe 100 – werden auf 1 normiert
+hook = 20
+leerlauf = 11
+reiztakt = 6
+tempokurve = 5
+cut_on_action = 3
+beat_sync = 5
+payoff = 9
+bogen = 3
+ende = 5
+tonmix = 13
+spielbild = 6
+bild_technik = 5
+lesbarkeit = 2
+effektdosis = 7
+
+[regie.massstab.start.zusammenschnitt]
+hook = 8
+leerlauf = 11
+reiztakt = 6
+tempokurve = 7
+cut_on_action = 4
+beat_sync = 7
+payoff = 11
+bogen = 9
+ende = 5
+tonmix = 15
+bild_technik = 8
+lesbarkeit = 2
+effektdosis = 7
 
 [sitzungen]
 # "Session vorbei"-Dateien des Gaming-PCs (windows/Uebertragung.ps1, SessionVorbeiMinuten)

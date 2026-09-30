@@ -672,3 +672,28 @@ Florian: „nicht jeden Clip per Hand separat freigeben“. Code: `src/clip_pipe
 - Beim Bau dazu: Die Frist trägt ihre Richtung in `auto_vorschlag` ein, wenn beim Senden keiner stand – so zeigt die
   Bildunterschrift nach deinem Tipp „von dir bestätigt“ bzw. „(Automatik korrigiert)“. „Letzte 7 Tage“ in `/auto`
   zählen nach `clips.erstellt` (es gibt keinen Sende-Zeitstempel außer `vorgelegt`, und der wandert mit /offen).
+
+### Cutter-Maßstab 1.0, Stufe 1 (30.09.2026) – Annahmen bis Florian widerspricht
+
+| Nr. | Annahme |
+|---|---|
+| A1 | −14 LUFS / −1,5 dBTP für alle Plattformen (YouTube als Sekundärquelle, TikTok/Instagram undokumentiert) |
+| A2 | Strobe höchstens 2,5 Hz ist eine Sicherheitsregel (WCAG 2.3.1, TikTok-Warnung) und wird nicht gelernt |
+| A3 | Safe-Zone standardmäßig TikTok + YouTube (`[regie.massstab].plattformen`) |
+| A4 | Beat-Toleranz 45 ms |
+| A5 | Aussortier-Schwelle = Q20 der eigenen Noten, begrenzt auf 40–50; vor 20 gemessenen Entwürfen je Format nur Tore |
+| A6 | Alle Kurvenwerte und Startgewichte ohne Quelle sind Erfahrungswerte |
+| A7 | `payoff` gegen `hook_staerkster`: das Lernen entscheidet, Stufe 2 löst es über den Hook-Teaser |
+| A8 | β = 8, λ = 4, Mindestzahl 15 sind Startwerte ohne Messung |
+
+Beim Zusammenführen (Anbindung) zusätzlich angenommen:
+- Ein verletztes Tor deckelt auch die Gesamtnote N (mit KI-Anteil) auf 40, nicht nur M_f.
+- `[regie.kritik].schwelle = 0` schaltet das Aussortieren durch den Cutter ganz ab, Tore inklusive (wie bisher
+  „0 = aus“). Grund: G6(b) „doppelt“ schlägt auf synthetischem Testmaterial an; ob es auf echten Matches zu streng
+  ist, zeigt erst `pipeline massstab --nachmessen`.
+- `pipeline massstab --nachmessen` fragt den KI-Cutter nicht neu; ein vorhandenes KI-Urteil (samt `ki_version`,
+  bei alten Urteilen NULL) und sein Zeitstempel bleiben, damit es nicht erneut ins Tageslimit zählt.
+- `kritik.regeln()` liefert als Wrapper die Plan-Teilnoten des Maßstabs (Schlüssel `hook`, `payoff` …) statt der
+  alten Teile `einstieg`, `action` …; der alte Regeltest ist darauf umgestellt.
+- `normiert` (aus dem Sidecar) steht in `kritiken.details`; nur solche Entwürfe zählen für die Schwelle.
+- Dein ✅ nach 👍/👎 zieht den Maßstab im Hintergrund nach (eigene Datenbank-Verbindung, blockiert den Bot nicht).

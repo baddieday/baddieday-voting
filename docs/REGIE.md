@@ -353,7 +353,8 @@ nötig sind sie nicht.
   - Der **KI-Cutter** (`claude -p`, nur Leserecht, Schema `kritik`, höchstens `ki_pro_tag` am Tag) liest einen
     Kontaktbogen mit 8 Standbildern und `plan.json`. Er liefert Note, Stärken, Schwächen und Gründe aus derselben
     Liste wie deine Knöpfe.
-  - Die Note ist das Mittel aus beidem.
+  - Die Note ist das Mittel aus beidem. **Abgelöst** durch den Cutter-Maßstab 1.0 (nächster Abschnitt): Messung am
+    fertigen Video, 20 Bilder + Wellenform für den KI-Cutter, gelernte Gewichte.
 - **Selbst lernen:**
   1. Welcher Stil kommt, wählt ein Thompson-Sampling über die Noten je Stil. Gute Stile kommen öfter, jeder
      bekommt weiter Chancen, und nie kommt derselbe dreimal hintereinander.
@@ -365,6 +366,43 @@ nötig sind sie nicht.
 - Sichtbar: unter jedem Entwurf „🎬 Stil … · Spielbild ×z“ und „🧐 Cutter-Score …“. `/lernstand` zeigt die Noten je
   Stil und wie viele Urteile vom KI-Cutter kamen.
 - Das **Publikum** (`autonom.py`) bleibt das Hauptsignal, sobald veröffentlichte Videos Zahlen haben.
+
+## Cutter-Maßstab 1.0 – Profi-Kritik am fertigen Video (30.09.)
+
+Florian: „mach die Schnittregeln professionell“. Die Handwerksregeln von Regisseur 3.0 lasen nur den Plan und
+landeten für jeden Stil bei 79–85 Punkten. Jetzt wird das **fertige Video** gemessen und wie bei einer Abnahme durch
+einen Senior-Editor benotet (`messung.py` → `kriterien.py` → `kritik.py`, lernend in `massstab.py`).
+
+- **Messung** (ein ffmpeg-Durchlauf, nur Bordmittel, Wächter über `medien.fuehre_aus`): Lautheit M/S alle 0,1 s,
+  I/LRA/True Peak (`ebur128`), Stille, Szenenwechsel (`scdet`), Schwarz, Helligkeit/Sättigung im Vollbild, Bewegung
+  (YDIF) und Standbild im Spielbild-Band, 8×8-Hash 2×/s. Mit Musik zusätzlich die Stems des Renderers (Vordergrund,
+  Musik nach dem Ducking). Ablage: `kritik-<id>/messung.json` (+ `stems.mka`); das Sidecar `<entwurf>.render.json`
+  liefert Band, Spielbild-Anteile und ob der Ton angeglichen ist. Von Hand: `pipeline kritik --id N [--neu]`.
+- **14 Kriterien** mit stetigen Kurven (Startgewichte Short in %): Hook 20 · Leerlauf 11 · Reiztakt 6 · Tempokurve 5 ·
+  Schnitt in Bewegung 3 · Beat-Sync 5 · Payoff 9 · Spannungsbogen 3 · Ende/Loop 5 · Tonmix 13 · Spielbild 6 ·
+  Bildtechnik 5 · Lesbarkeit 2 · Effektdosis 7 (Zusammenschnitt: `[regie.massstab.start.zusammenschnitt]`).
+  Was nicht messbar ist, fehlt (wird renormiert, zählt nicht als 0).
+- **6 K.O.-Tore** (werden nie gelernt, deckeln die Note auf 40, der Bot sortiert den Entwurf aus): Schwarzbild,
+  Standbild ≥ 1 s, mehr als 3 Blitze je Sekunde, Ton (True Peak > −0,5 dBTP oder ±2 LU neben −14 LUFS), Ton ≠ Bild
+  oder Dauer außerhalb des Formats, doppelter Moment.
+- **Renderer garantiert die Hygiene:** Lautheit −14 LUFS / −1,5 dBTP in zwei Pässen, einheitlicher Limiter,
+  Musik-Kanten 0,03 s ein / 0,25 s aus (Short), Strobe höchstens 2,5 Hz und ≥ 0,4 s zwischen Blitzen.
+- **Fehlerverhalten:** fehlt ein Filter, fällt sein Zweig weg; scheitert die Messung, rechnen die Kriterien mit
+  Plan-Näherung und die Tore stehen auf „unbekannt“ (kein Deckel). Ein Entwurf geht deswegen nie verloren.
+- **Note:** M_f = Σ w0·f·t / Σ w0·f; N = (1 − κ)·M_f + κ·KI-Note (κ = 0,5·a_KI). `score` = N, `regel_score` = M_f.
+  Unter jedem Entwurf: „🧐 Cutter 64/100 · schwächstes: Leerlauf 0,42 (0:21–0:26 ohne Aktion) · …“.
+- **Selbst aussortieren:** Tor verletzt → weg. Note unter `kritik.schwelle` (Q20 der letzten 40 gemessenen Noten
+  des Formats, begrenzt auf 40–`[regie.kritik].schwelle`) → weg, aber erst ab 20 gemessenen Entwürfen je Format.
+- **Lernweg (in 5 Zeilen):**
+  1. Gelernt werden nur Faktoren f ∈ [0,5; 2] je Kriterium (paarweise, linear, gedeckelt, λ zieht zum Handwerk).
+  2. Lehrer kennen die Note nicht: der KI-Cutter (blind – Kontaktbogen mit 20 Bildern, Wellenform, Plan ohne
+     `auf_beat`), das Publikum (führt ab 8 Videos zur Hälfte) und dein 👍/👎. Nie `score`/`regel_score`.
+  3. KI-Paare dürfen Tonmix und Beat-Sync nicht verschieben (die KI hört nichts); trifft sie das Publikum nicht,
+     zählt sie nichts mehr.
+  4. Aktiv ab 15 Entwürfen in Paaren, Vertrauen bis 60, Holdout-Schranke „nie schlechter als das Handwerk“.
+  5. Schnellstart: `pipeline massstab --nachmessen [--max N]` misst alte Entwürfe im Puffer (ohne KI) und gibt die
+     Abnahme aus (je Stil M_f, σ, Spannweite; Ziel ≥ 15 Punkte Spannweite, σ ≥ 8). `pipeline massstab --zeigen`
+     und `/lernstand` zeigen „📐 Cutter-Maßstab …“.
 
 ## pve-big schaltet sich selbst ab (clip-leerlauf)
 `deploy/big/clip-leerlauf` läuft auf pve-big jede Minute und fährt ihn nach 20 min ohne echten Zugriff auf den

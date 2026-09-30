@@ -509,6 +509,22 @@ class Impacts(unittest.TestCase):
         chill = {effekte.finisher_stil(effekte.PROFIL["chill"], k) for k in range(20)}
         self.assertFalse([s for s in chill if {"flash", "shake", "negativ", "strobe", "tilt"} & set(s)], chill)
 
+    def test_blitz_sicherheit(self):
+        # 30.09. (R4): zwölf 0,8-s-Segmente mit Einstieg, Finisher und Tod – ohne die Regel 4 Blitze in einer Sekunde
+        segs = [seg(n + 1, f"m{n}", 1.0, 1.8, round(0.8 * n, 3)) for n in range(12)]
+        reihe = [moment(f"m{n}", {"kill_sekunden": [1.2], "tod_sekunde": 1.5}) for n in range(12)]
+        liste = plane(segs, reihe, beats=[round(0.25 * i, 3) for i in range(1, 40)])   # plane() prüft pruefe_liste
+        blitz = sorted(e.t for e in effekte.zeitleiste(liste) if e.art in effekte.BLITZ)
+        self.assertGreater(len(blitz), 5)                                                # Blitze bleiben, nur seltener
+        self.assertGreaterEqual(min(b - a for a, b in zip(blitz, blitz[1:])), effekte.BLITZ_ABSTAND_S - 1e-3)
+        self.assertLessEqual(effekte.blitze(effekte.zeitleiste(liste))[0], effekte.BLITZE_MAX)
+        # Fehlerfall: vier Blitze in einer Sekunde meldet der Prüfer
+        from tests.effekt_hilfen import mini_liste
+        dicht = mini_liste([("/x/a.mp4", 1.0, 5.0, ("schnitt", 0.0))],     # drei Blitze sind noch erlaubt
+                           ereignisse=[(1, "flash", t, {"dauer_s": 0.12}) for t in (1.0, 1.25, 1.5)])
+        dicht["segmente"][0]["effekte"].append({"art": "flash", "t_s": 2.75, "staerke": 1.0, "dauer_s": 0.12})
+        self.assertIn("4 Blitze in 1 s ab 1.00 s", " ".join(regie.pruefe_liste(dicht)))
+
     def test_tod_wackelt_und_blitzt(self):
         liste = ein_moment({"kill_sekunden": [], "tod_sekunde": 10.0}, stimmung="frustriert")
         beim_tod = [e for _, e in ereignisse(liste) if e["t_s"] == 10.0]
