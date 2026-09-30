@@ -18,7 +18,8 @@ from clip_pipeline.medien import MedienFehler
 from tests.hilfen import HAT_FFMPEG
 
 RATE = sfx.RATE
-HEUTE_MIT_MUSIK = "[spiel][leiser]amix=inputs=2:normalize=0,alimiter=limit=0.95,apad[aout]"
+# Seit 30.09. (R2) derselbe Limiter wie mit Klängen: level=0 hebt nicht mehr automatisch an
+HEUTE_MIT_MUSIK = "[spiel][leiser]amix=inputs=2:normalize=0,alimiter=limit=0.95:level=0:latency=1,apad[aout]"
 
 
 def ereignis(t: float, klang: str, staerke: float = 1.0) -> dict:

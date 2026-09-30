@@ -39,6 +39,11 @@ def extrahiere(snapshot: dict) -> dict[str, float]:
     for k, skala in STEUERUNG.items():
         if (v := zahl(p.get(k))) is not None:
             x[k] = max(0., min(1., v/skala))
+    # Schnittstil und Bildgröße (30.09., stile.py): das Publikum soll mitlernen, welcher Stil ankommt
+    if isinstance(p.get("stil"), str):
+        x["stil:" + p["stil"]] = 1.
+    if (z := zahl(p.get("rahmen_zoom"))) is not None:
+        x["rahmen_zoom"] = max(0., min(1., (z-1.)/.3))
     seg = liste.get("segmente") or []
     if seg:
         laengen = [float(s["zeit_ende"])-float(s["zeit_start"]) for s in seg

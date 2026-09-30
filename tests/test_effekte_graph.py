@@ -54,9 +54,9 @@ HEUTE_SHORT = ";".join([
     "[vtext]null[vout]",
     "[ax2]asplit=2[spiel][schluessel]",
     "[3:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.35,atrim=0:12.000,"
-    "afade=t=in:d=0.5,afade=t=out:st=10.000:d=2[mus]",
+    "afade=t=in:d=0.03,afade=t=out:st=11.750:d=0.25[mus]",   # Musik-Kanten aus [regie.ton] (30.09., R3)
     "[mus][schluessel]sidechaincompress=threshold=0.05:ratio=6:attack=20:release=400[leiser]",
-    "[spiel][leiser]amix=inputs=2:normalize=0,alimiter=limit=0.95,apad[aout]",
+    "[spiel][leiser]amix=inputs=2:normalize=0,alimiter=limit=0.95:level=0:latency=1,apad[aout]",   # R2
 ])
 HEUTE_16_9 = ";".join([
     "[0:v]fps=30,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
@@ -135,6 +135,12 @@ class AusIstHeute(unittest.TestCase):
                     g, _ = entwurf.filtergraph(liste, spuren, b=b, h=h, musik_eingang=3 if musik else None,
                                                schrift=schrift if fmt == "short" else None)
                     self.assertEqual(g, heute)
+        # Stems (R5): nur zwei Abzweige mehr – Vordergrund vor dem Ducking, Musik danach
+        liste = heute_liste("short", True)
+        g, _ = entwurf.filtergraph(liste, [2, 1, 0], b=720, h=1280, musik_eingang=3, schrift=schrift, stems=True)
+        erwartet = (HEUTE_SHORT.replace("asplit=2[spiel][schluessel]", "asplit=3[spiel][schluessel][stv]")
+                    .replace("release=400[leiser]", "release=400[leiser0];[leiser0]asplit=2[leiser][stm]"))
+        self.assertEqual(g, erwartet)
 
     def test_an_false_wie_ohne_plan(self):
         # Derselbe Plan, aber ausgeschaltet: kein einziger Effekt-Filter, gleich wie version 3 ohne Plan
@@ -484,7 +490,7 @@ class Katalog2(unittest.TestCase):
         self.assertEqual(reihenfolge, sorted(reihenfolge))
         self.assertIn("negate=enable='between(t,1,1.1)'", spiel)
         self.assertIn("gblur=sigma=9:enable='between(t,1.5,1.58)'", spiel)            # erste 40 % stark
-        self.assertIn("lt(mod((t-2)*7.5,1),0.5)", spiel)                                # Strobe 7,5 Hz
+        self.assertIn("lt(mod((t-2)*2.5,1),0.5)", spiel)                                # Strobe 2,5 Hz (R4)
         self.assertIn("saturation='1+between(t,3,3.45)*1.2*pow(1-(t-3)/0.45,2)'", spiel)
         self.assertIn("contrast='1+between(t,3,3.35)*0.6*pow(1-(t-3)/0.35,2)'", spiel)
         for f in ("negate", "gblur", "pixelize", "vignette", "hue="):                     # nie auf dem Hintergrund
