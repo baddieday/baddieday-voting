@@ -52,6 +52,7 @@ MAX_GRAPH = 4_000_000
 # im Zusammenschnitt weich
 TON_STANDARD = {"lufs": -14.0, "true_peak": -1.5, "musik_ein_s": 0.03, "musik_aus_s_short": 0.25,
                 "musik_aus_s_zs": 2.0}
+AAC_RESERVE_DB = 1.0  # Abstand des loudnorm-Ziels zu [regie.ton] true_peak (normalisiere_ton)
 
 
 @functools.lru_cache(maxsize=1)
@@ -356,7 +357,8 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
     stems_tmp = stems.with_name(stems.stem + ".tmp" + stems.suffix) if mit_stems else None
     if stems_tmp is not None:  # zweiter Ausgang: Stems für die Messung, gleich lang wie das Video
         stems_tmp.parent.mkdir(parents=True, exist_ok=True)
-        befehl += ["-map", "[stv]", "-map", "[stm]", "-ac", "1", "-c:a", "flac", "-t", f"{gesamt:.3f}", str(stems_tmp)]
+        befehl += ["-map", "[stv]", "-map", "[stm]", "-ac", "1", "-c:a", "flac", "-sample_fmt", "s16",
+                   "-t", f"{gesamt:.3f}", str(stems_tmp)]   # 16 Bit reichen für die Lautheit (halb so groß)
     try:
         fuehre_aus(befehl, f"Entwurf {liste['name']}")
     except MedienFehler:
@@ -449,7 +451,10 @@ def normalisiere_ton(datei: Path, konfig: Konfig) -> dict:
     "ton_hinweis": str | None}. Kein Tonstrom, stille Spur (I = −inf) oder ein Fehler: datei bleibt unverändert,
     normiert False, der Grund in ton_hinweis. Wirft nicht."""
     t = ton_einstellungen(konfig)
-    ziel_i, ziel_tp = t["lufs"], t["true_peak"]
+    # AAC hebt den True Peak beim Neukodieren um bis zu ~1,4 dB (gemessen 30.09.) -> loudnorm zielt AAC_RESERVE_DB
+    # tiefer, sonst landet das fertige Video über der Grenze von Tor G4 (−0,5 dBTP) und wird vom eigenen Renderer
+    # aussortiert; [regie.ton] true_peak bleibt die Zahl, die im fertigen Video gelten soll
+    ziel_i, ziel_tp = t["lufs"], t["true_peak"] - AAC_RESERVE_DB
     ergebnis = {"normiert": False, "ton_gain_db": None, "loudnorm_modus": None, "ton_hinweis": None}
     werte = messung.loudnorm_messen(datei, ziel_i, ziel_tp)
     if werte is None:

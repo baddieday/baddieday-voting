@@ -327,7 +327,8 @@ def _beats(liste: dict, dauer: float) -> list[float]:
     if not roh:
         return []
     start = float(musik.get("start_s") or 0.0)
-    return [round(float(b) - start, 3) for b in roh if 0.0 <= float(b) - start <= dauer + 1e-6]
+    # bis 0,5 s über das Ende hinaus: ein Beat knapp NACH dem Ende zählt für „Ende auf dem Takt“ (Review 30.09.)
+    return [round(float(b) - start, 3) for b in roh if 0.0 <= float(b) - start <= dauer + 0.5]
 
 
 def ereignisse(liste: dict, m) -> Ereignisse:

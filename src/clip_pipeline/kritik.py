@@ -321,7 +321,9 @@ def bewerte(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, *, neu_mes
 
     alt = con.execute("SELECT * FROM kritiken WHERE entwurf_id = ?", (entwurf_id,)).fetchone()
     alt_details = json.loads(alt["details"] or "{}") if alt is not None else {}
-    urteil, hinweis = ki_urteil(con, konfig, liste, video, ordner) if ki else (None, None)
+    # Blinder Lehrer (Spec §5.1 Regel 1): eigener Ordner NUR mit Kontaktbogen, Wellenform und plan.json – in
+    # kritik-<id>/ liegen messung.json und stems.mka, die claude -p mit Leserecht sonst lesen könnte (Review 30.09.)
+    urteil, hinweis = ki_urteil(con, konfig, liste, video, ordner / "ki") if ki else (None, None)
     erstellt = iso(jetzt())
     if urteil is not None:
         k_score = float(urteil["score"])

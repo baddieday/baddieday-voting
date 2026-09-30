@@ -378,6 +378,9 @@ def aktualisiere(con: sqlite3.Connection, konfig: Konfig | None) -> tuple[int, d
     h = _hash(paare_, meta)
     alt = con.execute("SELECT * FROM massstab WHERE input_hash = ?", (h,)).fetchone()
     if alt is not None:
+        # Eingaben wie bei einer älteren Version (input_hash UNIQUE): diese gilt wieder – als neueste markieren,
+        # sonst läsen faktoren()/ki_gewicht() weiter eine spätere, nicht mehr passende Version (Review 30.09.)
+        con.execute("UPDATE massstab SET erstellt = ? WHERE version = ?", (iso(jetzt()), alt["version"]))
         return int(alt["version"]), _als_dict(alt)
     ergebnis = _lerne(paare_, meta)
     version = con.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM massstab").fetchone()[0]
@@ -406,7 +409,7 @@ def _speichere(con: sqlite3.Connection, version: int, h: str, ergebnis: dict) ->
 
 def _neueste(con: sqlite3.Connection) -> sqlite3.Row | None:
     try:
-        return con.execute("SELECT * FROM massstab ORDER BY version DESC LIMIT 1").fetchone()
+        return con.execute("SELECT * FROM massstab ORDER BY erstellt DESC, version DESC LIMIT 1").fetchone()
     except sqlite3.OperationalError:     # alte Datenbank ohne Tabelle
         return None
 

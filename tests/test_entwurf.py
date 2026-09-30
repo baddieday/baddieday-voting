@@ -281,11 +281,13 @@ class NormalisiereTon(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def video(self, name: str, ton: bool) -> Path:
+    def video(self, name: str, ton: bool, quelle: str = "") -> Path:
         ziel = self.tmp / name
         befehl = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
                   "testsrc=size=320x240:rate=30:duration=4"]
-        if ton:  # Sinus, rund −30 LUFS
+        if quelle:  # eigene Tonquelle (lavfi)
+            befehl += ["-f", "lavfi", "-i", quelle, "-af", "aformat=channel_layouts=stereo", "-c:a", "aac"]
+        elif ton:  # Sinus, rund −30 LUFS
             befehl += ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=4", "-af",
                        "volume=-11dB,aformat=channel_layouts=stereo", "-c:a", "aac"]
         subprocess.run([*befehl, "-c:v", "libx264", "-preset", "ultrafast", "-t", "4", str(ziel)], check=True)
@@ -304,6 +306,14 @@ class NormalisiereTon(unittest.TestCase):
         self.assertLessEqual(nachher["input_tp"], -1.0)
         self.assertEqual(pakete(video), bild)                                 # Videostrom per copy unverändert
         self.assertEqual([p.name for p in self.tmp.iterdir()], ["leise.mp4"])   # keine Reste
+
+    def test_spitzen_bleiben_unter_true_peak_nach_aac(self):
+        # Kick mit Spitzen fast bei 0 dBFS: ohne AAC-Reserve lag der True Peak nach dem Neukodieren über −1,5 dBTP
+        video = self.video("kick.mp4", ton=True, quelle="aevalsrc=0.9*sin(2*PI*80*t)*exp(-12*mod(t\\,0.5))"
+                                                        "+0.08*(random(0)-0.5):s=48000:d=4")
+        r = entwurf.normalisiere_ton(video, self.konfig)
+        self.assertTrue(r["normiert"], r)
+        self.assertLessEqual(messung.loudnorm_messen(video, -14, -1.5)["input_tp"], -1.5)
 
     def test_ohne_ton_unveraendert(self):
         video = self.video("stumm.mp4", ton=False)

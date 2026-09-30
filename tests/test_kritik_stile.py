@@ -142,6 +142,7 @@ class Kritik(MitSpeicher):
         self.assertTrue((ordner / "kontaktbogen.jpg").is_file())
         self.assertTrue((ordner / "wellenform.png").is_file())
         self.assertNotIn("auf_beat", (ordner / "plan.json").read_text(encoding="utf-8"))
+        self.assertEqual(sorted(p.name for p in ordner.iterdir()), ["kontaktbogen.jpg", "plan.json", "wellenform.png"])
         self.assertEqual((e["ki_score"], e["gruende"]), (80.0, ["hektisch"]))
         self.assertEqual(e["score"], round((e["regel_score"] + 80) / 2, 1))          # κ = 0,5 ohne Maßstab-Version
         z = self.con.execute("SELECT ki_version FROM kritiken WHERE entwurf_id = ?", (eid,)).fetchone()

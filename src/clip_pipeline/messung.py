@@ -17,7 +17,6 @@ in einem eigenen Temp-Ordner und sind danach wieder weg; bleiben soll nur, was d
 from __future__ import annotations
 
 import dataclasses
-import functools
 import json
 import logging
 import math
@@ -77,9 +76,12 @@ class Messung:
 
 # --- ffmpeg -------------------------------------------------------------------------------------------
 
-@functools.lru_cache(maxsize=1)
 def filter_vorhanden() -> frozenset[str]:
-    """Namen aller Filter dieses ffmpeg (`ffmpeg -hide_banner -filters`); leer, wenn ffmpeg fehlt oder scheitert."""
+    """Namen aller Filter dieses ffmpeg (`ffmpeg -hide_banner -filters`); leer, wenn ffmpeg fehlt oder scheitert.
+    Nur ein Erfolg wird gemerkt – ein einmaliger Fehlschlag (Timeout, Last) schaltet die Messung sonst bis zum
+    Neustart des Lern-Bots ab (Review 30.09.)."""
+    if _FILTER:
+        return _FILTER[0]
     try:
         text = fuehre_aus(["ffmpeg", "-hide_banner", "-filters"], "ffmpeg-Filter", timeout=60)
     except MedienFehler as exc:
@@ -91,7 +93,12 @@ def filter_vorhanden() -> frozenset[str]:
         # Zeilen wie „ .S. blackdetect       V->V       Detect video …“ – Flags aus T, S, C und Punkten
         if len(teile) >= 3 and re.fullmatch(r"[TSC.]{2,3}", teile[0]) and "->" in teile[2]:
             namen.add(teile[1])
+    if namen:
+        _FILTER.append(frozenset(namen))
     return frozenset(namen)
+
+
+_FILTER: list[frozenset[str]] = []   # Merker für filter_vorhanden (nur Erfolge)
 
 
 def _crop(band: tuple[int, int] | None) -> str:
