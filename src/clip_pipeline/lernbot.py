@@ -214,7 +214,7 @@ def stand_satz(con: sqlite3.Connection) -> str:
             f"{e['n'] or 0} Entwürfe. {daumen['n'] or 0} freiwillige Bewertungen als Start- und Zusatzwissen.")
     # B5: Transparenz, was der Auto-Filter schon allein entschieden hat (0, solange [lernbot].auto_schwelle aus ist)
     if auto := con.execute("SELECT COUNT(*) FROM entwuerfe WHERE auto_verworfen IS NOT NULL").fetchone()[0]:
-        text += f" {auto} automatisch aussortiert (niedrige Erwartung)."
+        text += f" {auto} automatisch aussortiert (Cutter-Note oder Erwartung zu niedrig)."
     return text
 
 
@@ -521,7 +521,7 @@ async def neuer_entwurf(app, fmt: str) -> int | None:
             aussortiert.append(eid)
         if aussortiert:
             wort = "Entwurf" if len(aussortiert) == 1 else "Entwürfe"
-            await app.bot.send_message(chat, f"🤖 {len(aussortiert)} {wort} selbst aussortiert (Cutter-Note oder "
+            await app.bot.send_message(chat, f"🤖 {len(aussortiert)} {wort} automatisch aussortiert (Cutter-Note oder "
                                              "Erwartung zu niedrig)")
         t = time.monotonic()
         await sende_entwuerfe(app)
