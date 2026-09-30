@@ -49,13 +49,14 @@ ZAEHLER = ("geprueft", "neu_geschnitten", "nur_merkmale", "schon_erledigt", "ohn
            "ohne_aufnahme", "passt_nicht", "fehler", "gekappt_60s")
 
 # Spalten ausdrücklich benannt: momente und clips haben gleichnamige Spalten (id, start_utc, merkmale …)
-AUSWAHL = """
+# Von dir verworfene fallen weg, automatisch aussortierte werden weiter nachgeschnitten (30.09., hart_verworfen_sql)
+AUSWAHL = f"""
     SELECT m.id AS moment_id, m.schluessel, m.datei, m.start_s, m.ende_s, m.start_utc AS m_start_utc,
            m.merkmale AS m_merkmale,
            c.id AS clip_id, c.match_id, c.kills, c.status, c.start_utc AS c_start_utc, c.ende_utc AS c_ende_utc,
            c.quelle_pfad, c.quelle_start_s, c.quelle_ende_s
       FROM momente m JOIN clips c ON c.id = m.clip_id
-     WHERE m.schluessel LIKE 'clip:%' AND c.kills >= 2 AND c.status != 'verworfen' AND c.start_utc >= ?
+     WHERE m.schluessel LIKE 'clip:%' AND c.kills >= 2 AND NOT {db.hart_verworfen_sql('c.')} AND c.start_utc >= ?
      ORDER BY c.start_utc, c.id"""
 
 

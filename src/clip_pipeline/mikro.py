@@ -157,8 +157,8 @@ def clips_nachziehen(con: sqlite3.Connection, konfig: Konfig, *, session: str | 
 
     mit_whisper = whisper_da()
     kandidaten = con.execute(
-        """SELECT c.id, m.merkmale FROM clips c LEFT JOIN momente m ON m.clip_id = c.id
-            WHERE c.mic_stand IS NULL AND c.status != 'verworfen' AND c.clip_pfad IS NOT NULL
+        f"""SELECT c.id, m.merkmale FROM clips c LEFT JOIN momente m ON m.clip_id = c.id
+            WHERE c.mic_stand IS NULL AND NOT {db.hart_verworfen_sql("c.")} AND c.clip_pfad IS NOT NULL
             ORDER BY CASE WHEN c.match_id = ? THEN 0 ELSE 1 END, c.punkte DESC, c.id""", (session,)).fetchall()
     ids = [int(z["id"]) for z in kandidaten
            if _braucht_messung(_lies(z["merkmale"]) if z["merkmale"] is not None else None, mit_whisper)]
