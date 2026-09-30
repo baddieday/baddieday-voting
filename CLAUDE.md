@@ -263,3 +263,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - **Aus den Noten lernt er selbst:** Stil-Wahl per Thompson-Sampling; die Gründe des KI-Cutters speisen das
     Regie-Lernen, wobei deine Bewertung vorgeht; Entwürfe unter der Mindest-Note (50) sortiert er selbst aus.
   - Abschaltbar und einstellbar in ⚙️. Das Publikum bleibt das Hauptsignal. Doku: `docs/REGIE.md`, „Regisseur 3.0“.
+- 2026-09-30 (Florian: „warum nicht, ich dachte du hast alles schon vorbereitet“): **TikTok verbinden per `/tiktok`**
+  im Lern-Bot bzw. `pipeline publikum anmelden [--code …]` – die Spec (§7.2) sah das vor, gebaut war nur das Erneuern
+  vorhandener Tokens. `.env` braucht nur Client Key und Secret; Tokens nur in `publikum-oauth.json` (0600), nie im
+  Chat oder Log; Rücksprung `https://clip-battle.de/tiktok/callback` (Seite muss nicht existieren, `[tiktok].redirect_uri`).
