@@ -225,6 +225,45 @@ def importiere(con, konfig, post_id: int, antwort: dict, *, zeit: datetime | Non
                                      roh=json.dumps(werte, ensure_ascii=False, allow_nan=False))
 
 
+def _tiktok_zuordnen(con, konfig, token: str, posts: list, zeit: datetime) -> dict[int, str]:
+    """TikTok-Posts ohne Video-Nummer (kein Link oder Kurzlink vm.tiktok.com) selbst zuordnen (30.09., Spec §7.2):
+    eigene Videoliste über /v2/video/list/ (Scope video.list), je Post das Video, das höchstens
+    [publikum].zuordnung_stunden (72) vor dem Häkchen/Link bis 30 min danach erstellt wurde und dessen Länge auf
+    ±2 s passt – das zeitlich nächste. Ein Video gehört nie zu zwei Posts. Trägt video_id (und url, falls leer) nach.
+    Rückgabe: {post_id: video_id}."""
+    fenster = timedelta(hours=float(konfig.wert("publikum.zuordnung_stunden", 72)))
+    frueheste = min(aus_iso(p["gepostet_utc"]) for p in posts) - fenster
+    videos, cursor = [], None
+    for _ in range(int(konfig.wert("publikum.zuordnung_seiten", 10))):  # je 20 Videos, neueste zuerst
+        antwort = _json("https://open.tiktokapis.com/v2/video/list/?" + urlencode(
+            {"fields": "id,create_time,duration,share_url"}), token,
+            daten={"max_count": 20, **({"cursor": cursor} if cursor else {})})
+        daten = antwort.get("data") or {}
+        seite = daten.get("videos") or []
+        videos += seite
+        cursor = daten.get("cursor")
+        if not daten.get("has_more") or not seite or not cursor or \
+                min(float(v.get("create_time") or 0) for v in seite) < frueheste.timestamp():
+            break
+    vergeben = {z[0] for z in con.execute("SELECT video_id FROM posts WHERE plattform = 'tiktok' AND video_id IS NOT NULL")}
+    zugeordnet: dict[int, str] = {}
+    for post in sorted(posts, key=lambda z: z["gepostet_utc"]):
+        gepostet = aus_iso(post["gepostet_utc"]).timestamp()
+        passend = [v for v in videos if str(v.get("id") or "") and str(v["id"]) not in vergeben
+                   and gepostet - fenster.total_seconds() <= float(v.get("create_time") or 0) <= gepostet + 1800
+                   and abs(float(v.get("duration") or 0) - float(post["dauer_s"])) <= 2.0]
+        if not passend:
+            continue
+        video = min(passend, key=lambda v: abs(gepostet - float(v["create_time"])))
+        vid = str(video["id"])
+        con.execute("UPDATE posts SET video_id = ?, url = COALESCE(url, ?) WHERE id = ? AND video_id IS NULL",
+                    (vid, video.get("share_url"), post["id"]))
+        vergeben.add(vid)
+        zugeordnet[int(post["id"])] = vid
+        log.info("Publikum: Post #%s ist TikTok-Video %s (per Zeit und Länge zugeordnet)", post["id"], vid)
+    return zugeordnet
+
+
 def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
     """Timer-Einstieg: vorhandene Posts automatisch aktualisieren, ohne Bewertung.
 
@@ -232,7 +271,7 @@ def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
     pro Lauf einmal erneuert. Ein defekter Zugang stoppt nicht andere Plattformen.
     """
     zeit = zeit or jetzt()
-    ergebnis = dict(gespeichert=0, unveraendert=0, ohne_zugang=0, ohne_id=0, fehler=0)
+    ergebnis = dict(gespeichert=0, unveraendert=0, ohne_zugang=0, ohne_id=0, zugeordnet=0, fehler=0)
     if not konfig.wert("publikum.api_abruf", True):
         ergebnis["deaktiviert"] = True
         return ergebnis
@@ -246,9 +285,22 @@ def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
                                     p.gepostet_utc DESC,p.id DESC LIMIT ?""",
                         (seit, vor, int(konfig.wert("publikum.api_max_posts", 100)))).fetchall()
     tokens = {}
+    zugeordnet: dict[int, str] = {}
+    ohne = [p for p in posts if p["plattform"] == "tiktok" and not p["video_id"]]
+    if ohne:  # Kurzlink oder gar kein Link: selbst zuordnen, statt dich nach Links zu fragen
+        try:
+            tokens["tiktok"] = None
+            tokens["tiktok"] = _token("tiktok", konfig, zeit)
+            if tokens["tiktok"]:
+                zugeordnet = _tiktok_zuordnen(con, konfig, tokens["tiktok"], ohne, zeit)
+                ergebnis["zugeordnet"] = len(zugeordnet)
+        except (AdapterFehler, ValueError, TypeError, KeyError, OSError) as exc:
+            log.warning("Publikum-API tiktok, Zuordnung: %s", type(exc).__name__)
+            ergebnis["fehler"] += 1
     for post in posts:
         plattform = post["plattform"]
-        if not post["video_id"]:
+        video_id = post["video_id"] or zugeordnet.get(int(post["id"]))
+        if not video_id:
             ergebnis["ohne_id"] += 1
             continue
         if plattform not in ("tiktok", "youtube"):
@@ -267,13 +319,13 @@ def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
             if plattform == "tiktok":
                 felder = "id,create_time,duration,view_count,like_count,comment_count,share_count"
                 antwort = _json("https://open.tiktokapis.com/v2/video/query/?" + urlencode({"fields": felder}),
-                                 token, daten={"filters": {"video_ids": [post["video_id"]]}})
+                                 token, daten={"filters": {"video_ids": [video_id]}})
                 videos = (antwort.get("data") or {}).get("videos") or []
-                if len(videos) != 1 or str(videos[0].get("id")) != post["video_id"]:
+                if len(videos) != 1 or str(videos[0].get("id")) != video_id:
                     raise AdapterFehler("TikTok-Video nicht im autorisierten Account gefunden")
             else:
                 query = {"ids": "channel==MINE", "startDate": aus_iso(post["gepostet_utc"]).date().isoformat(),
-                         "endDate": zeit.date().isoformat(), "filters": f"video=={post['video_id']}",
+                         "endDate": zeit.date().isoformat(), "filters": f"video=={video_id}",
                          "metrics": "views,likes,comments,shares,averageViewDuration,averageViewPercentage,subscribersGained"}
                 antwort = _json("https://youtubeanalytics.googleapis.com/v2/reports?" + urlencode(query), token)
             nummer = importiere(con, konfig, post["id"], antwort, zeit=zeit)

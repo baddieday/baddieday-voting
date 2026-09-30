@@ -126,6 +126,9 @@ zählt das nicht; `decide` und Stimmung zählen noch nicht mit, Annahme A18).
 4. Fertig: Die Tokens liegen nur in `publikum-oauth.json` neben der DB (0600), der Timer `clip-publikum` holt die
    Zahlen täglich und erneuert den Zugang selbst. Ohne Bot: `pipeline publikum anmelden` bzw. `… --code '<adresse>'`.
 Im Sandbox-Modus kann TikTok Zahlen zurückhalten – dann bleibt der Screenshot-Weg.
+Posts ohne Video-Nummer (kein Link, oder Kurzlink `vm.tiktok.com/…` aus der App) ordnet der Abruf selbst zu: eigene
+Videoliste, das Video mit passender Länge (±2 s), erstellt bis 72 h vor dem Häkchen/Link, das zeitlich nächste
+(`[publikum].zuordnung_stunden`). In der JSON-Zeile steht dann `"zugeordnet": n`; `/link` ist nur noch für Ausnahmen.
 
 ### 6. Meldungen und Ruhezeit
 Nach dem täglichen Lauf (10:00) kommt höchstens **eine** Meldung am Tag, nur wenn es neue Scores gibt:
