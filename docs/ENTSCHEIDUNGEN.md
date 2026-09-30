@@ -652,3 +652,23 @@ Stand beim Vertrag (25.09.). Die Bauer-Annahmen und die Befunde des Panels komme
 - Der PC schreibt dauerhafte Laufberichte ohne Zugangsdaten. Bei unerreichbarem Puffer werden sie lokal behalten
   und bei der nächsten aktiven erreichbaren Übertragung nachgereicht. Der Clip-Bot liest nur den lokalen Puffer;
   die Meldungen wecken keinen Host. Nachts kommen sie sofort, aber ohne Benachrichtigungston.
+
+### Auto-Freigabe im Clip-Bot (30.09.2026)
+
+Florian: „nicht jeden Clip per Hand separat freigeben“. Code: `src/clip_pipeline/auto_freigabe.py`, `[auto_freigabe]`.
+
+- **A1:** Standard `modus = "an"` – Florian will es so; weich, umkehrbar, mit Tor und Stichprobe; die DB sichert das Update.
+- **A2:** Aussortieren durch den Bot ist immer weich. Nur dein 🗑️ schließt aus Regie, Highlight und Mikro aus
+  (`db.hart_verworfen_sql`).
+- **A3:** Entschieden wird beim ersten Senden mit den vorhandenen Merkmalen; die Mic-Analyse wird nicht abgewartet.
+- **A4:** Auto-Clips werden trotzdem einzeln (ohne Ton) gesendet – für `tg_file_id` (Battles), die Vergleichsbasis der
+  Erwartung und den Rückweg direkt am Clip.
+- **A5:** Stichprobe deterministisch über `clip_id % stichprobe_jede` (auch für Regel-Fälle), nie ganz aus (mindestens 2).
+- **A6:** Korrekturen zählen im Tor als Fehltreffer, Bestätigungen („👍 Stimmt“ auf Sofort-Clips) nicht (wohl beim
+  Lernen), Schweigen zählt nie.
+- **A7:** `freigabe_quelle` NULL gilt als du; keine Rückfüllung. `/paket` auf einen Auto-Clip lässt `auto` stehen.
+- **A8:** ⚙️ ist eine gemeinsame Liste für beide Bots; der Clip-Bot hängt `lernbot_einstellungen.registriere` ein.
+- **A9:** Kein Tageslimit für Fragen an dich – die Frist macht jede Antwort freiwillig. Später ggf. ein KATALOG-Eintrag.
+- Beim Bau dazu: Die Frist trägt ihre Richtung in `auto_vorschlag` ein, wenn beim Senden keiner stand – so zeigt die
+  Bildunterschrift nach deinem Tipp „von dir bestätigt“ bzw. „(Automatik korrigiert)“. „Letzte 7 Tage“ in `/auto`
+  zählen nach `clips.erstellt` (es gibt keinen Sende-Zeitstempel außer `vorgelegt`, und der wandert mit /offen).

@@ -127,9 +127,10 @@ def _nachgeschnittene(con: sqlite3.Connection) -> dict[str, sqlite3.Row]:
 def momente_aus_clips(con: sqlite3.Connection, konfig: Konfig) -> list[Moment]:
     ergebnis, cache = [], {}
     nachgeschnitten = _nachgeschnittene(con)
-    # Beste zuerst (freigegebene, dann nach Punkten) – verworfene braucht der Regisseur nie
+    # Beste zuerst (freigegebene, dann nach Punkten) – von dir verworfene braucht der Regisseur nie, automatisch
+    # aussortierte bleiben Material (30.09.)
     for c in con.execute(
-        """SELECT * FROM clips WHERE clip_pfad IS NOT NULL AND status != 'verworfen'
+        f"""SELECT * FROM clips WHERE clip_pfad IS NOT NULL AND NOT {db.hart_verworfen_sql()}
             ORDER BY CASE WHEN status IN ('freigegeben', 'veroeffentlicht', 'im_highlight') THEN 0 ELSE 1 END,
                      punkte DESC, id""").fetchall():
         schluessel = f"clip:{c['id']}"

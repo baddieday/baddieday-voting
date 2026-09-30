@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS battles (
     entschieden     TEXT
 );
 
--- Upload-Nachverfolgung: Jeder freigegebene Clip muss auf alle Pflicht-Plattformen
+-- Upload-Nachverfolgung (nur noch Ausnahme über /paket und /link, Entscheidung 26.09.): Häkchen je Plattform
 CREATE TABLE IF NOT EXISTS veroeffentlichungen (
     clip_id   INTEGER NOT NULL REFERENCES clips (id),
     plattform TEXT    NOT NULL,        -- youtube | tiktok | clipbattle

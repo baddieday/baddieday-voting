@@ -18,7 +18,8 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
 
-from .. import caption, db, erwartung, highlight, lernen, merkmale, publikum, shorts, uebertragung
+from .. import (auto_freigabe, caption, db, einstellungen, erwartung, highlight, lernbot_einstellungen, lernen,
+               merkmale, publikum, shorts, uebertragung)
 from ..konfig import Konfig, SpeicherOffline
 from ..medien import MedienFehler
 from ..zeit import aus_iso, iso, jetzt
@@ -37,12 +38,23 @@ def _daten(context: ContextTypes.DEFAULT_TYPE):
     return context.bot_data["con"], context.bot_data["konfig"], context.bot_data["erlaubt"]
 
 
-def _clip_text(con, konfig: Konfig, clip_id: int) -> str:
+def _clip_text(con, konfig: Konfig, clip_id: int, vorschlag: auto_freigabe.Vorschlag | None = None) -> str:
     """Bildunterschrift eines Clips. Die Erwartung wird hier nur GELESEN (/offen, nach einem Klick) – festgeschrieben
-    wird sie einmal beim ersten Senden (sende_outbox, Spec §10.5)."""
-    clip = db.clip(con, clip_id)
+    wird sie einmal beim ersten Senden (sende_outbox, Spec §10.5).
+
+    vorschlag: beim ersten Senden die Entscheidung der Auto-Freigabe, BEVOR sie in der Datenbank steht – so zeigt die
+    Bildunterschrift die 🤖-Zeile (sofort) bzw. 🎲/👀 schon. Die Zusatzzeile (⏰/🎲/👀) liest die ⚙️-Werte mit."""
+    clip = dict(db.clip(con, clip_id))
+    if vorschlag is not None:
+        clip.update(auto_art=vorschlag.art, auto_vorschlag=vorschlag.ziel, auto_grund=vorschlag.grund,
+                    **({"status": vorschlag.ziel, "freigabe_quelle": "auto"} if vorschlag.art == "sofort" else {}))
+    try:
+        zeile = auto_freigabe.hinweis_zeile(clip, einstellungen.anwenden(con, konfig))
+    except Exception:  # eine Zusatzzeile darf keine Bildunterschrift verhindern
+        log.exception("Hinweis der Auto-Freigabe für Clip #%s nicht gebaut", clip_id)
+        zeile = None
     return texte.clip_text(clip, db.match(con, clip["match_id"]), konfig.wert("zeit.zeitzone", "Europe/Berlin"),
-                           erwartung=erwartung.gespeichert(con, "clip", clip_id))
+                           erwartung=erwartung.gespeichert(con, "clip", clip_id), auto_zeile=zeile)
 
 
 def _erwartung_festschreiben(con, konfig: Konfig, clip_id: int) -> None:
@@ -83,13 +95,45 @@ async def sende_meldungen(app: Application) -> int:
     gesendet = 0
     for m in aktionen.faellige_meldungen(con, konfig):
         optionen = {"disable_notification": aktionen.ruhezeit(konfig)} if m["schluessel"].startswith("uebertragung:") else {}
+        if m["schluessel"].startswith(AUTO_MELDUNGEN):  # Zusammenfassungen der Auto-Freigabe immer ohne Ton
+            optionen = {"disable_notification": True}
         await app.bot.send_message(chat, m["text"], **optionen)
         con.execute("UPDATE meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
         gesendet += 1
     return gesendet
 
 
+# Meldungen der Auto-Freigabe (Zusammenfassung je Match, Frist) – kommen immer ohne Ton
+AUTO_MELDUNGEN = ("auto:", "frist:")
+
+
+def _auto_stand(con, k: Konfig) -> dict | None:
+    """Aktive Stufen der Auto-Freigabe, einmal je Runde; None = Modus aus oder Fehler (dann alles normal)."""
+    try:
+        if auto_freigabe.werte(k)["modus"] == "aus":
+            return None
+        return auto_freigabe.stufe(con, k)
+    except Exception:
+        log.exception("Auto-Freigabe: Stufen nicht berechnet – diese Runde geht alles zu dir")
+        return None
+
+
+def _vorschlag(con, k: Konfig, clip, stand: dict | None) -> auto_freigabe.Vorschlag | None:
+    """Vorschlag der Auto-Freigabe für einen Clip. Im Zweifel fragt der Bot: jeder Fehler → None (normaler Weg)."""
+    if stand is None:
+        return None
+    try:
+        return auto_freigabe.vorschlag(con, k, clip, erwartung.gespeichert(con, "clip", clip["id"]), stand)
+    except Exception:
+        log.exception("Auto-Freigabe für Clip #%s fehlgeschlagen – er geht normal zu dir", clip["id"])
+        return None
+
+
 async def sende_outbox(app: Application) -> int:
+    """Neue Clips (vorbewertet) und Highlight-Videos verschicken. Auto-Freigabe (30.09.): Nach dem Festschreiben der
+    Erwartung entscheidet auto_freigabe.vorschlag; ein Sofort-Clip kommt trotzdem, aber ohne Ton, mit 🤖-Zeile und
+    Knöpfen zum Umdrehen. ⚙️-Werte (einstellungen.anwenden) gelten ab der nächsten Runde; für Speicher und Pfade
+    bleibt die geladene Konfig."""
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     zeilen = aktionen.outbox(con)
     highlights = aktionen.highlight_outbox(con)
@@ -102,19 +146,31 @@ async def sende_outbox(app: Application) -> int:
         return 0
     gesendet = 0
     leise = aktionen.ruhezeit(konfig)  # nachts kommen Clips weiter sofort, aber ohne Ton (gilt auch ohne [lager])
+    k = einstellungen.anwenden(con, konfig) if zeilen else konfig  # nur zum Lesen von [auto_freigabe]
+    stand = _auto_stand(con, k) if zeilen else None
     for z in zeilen:
         pfad = konfig.absolut(z["vorschau_pfad"]) if z["vorschau_pfad"] else None
         if pfad is None or not pfad.is_file():
             log.warning("Vorschau für Clip #%s fehlt: %s", z["id"], pfad)
             continue
         _erwartung_festschreiben(con, konfig, z["id"])  # vor send_video: die Bildunterschrift zeigt sie schon
+        vorschlag = _vorschlag(con, k, z, stand)
+        try:
+            text = _clip_text(con, konfig, z["id"], vorschlag)
+        except Exception:  # im Zweifel fragt der Bot: ohne Automatik weiter
+            log.exception("Bildunterschrift mit Auto-Freigabe für Clip #%s fehlgeschlagen", z["id"])
+            vorschlag = None
+            text = _clip_text(con, konfig, z["id"])
+        sofort = vorschlag is not None and vorschlag.art == "sofort"
+        knoepfe = aktionen.knoepfe_auto(z["id"], vorschlag.ziel) if sofort else aktionen.knoepfe_neu(z["id"])
         with pfad.open("rb") as datei:
             nachricht = await app.bot.send_video(
-                chat_id=chat, video=datei, caption=_clip_text(con, konfig, z["id"]), parse_mode=ParseMode.HTML,
-                reply_markup=_markup(aktionen.knoepfe_neu(z["id"])), supports_streaming=True,
-                disable_notification=leise, read_timeout=300, write_timeout=300, connect_timeout=30,
+                chat_id=chat, video=datei, caption=text, parse_mode=ParseMode.HTML,
+                reply_markup=_markup(knoepfe), supports_streaming=True,
+                disable_notification=leise or sofort, read_timeout=300, write_timeout=300, connect_timeout=30,
             )
-        aktionen.als_gesendet(con, z["id"], nachricht.message_id, nachricht.video.file_id if nachricht.video else None)
+        aktionen.als_gesendet(con, z["id"], nachricht.message_id, nachricht.video.file_id if nachricht.video else None,
+                              vorschlag)
         gesendet += 1
     for h in highlights:
         pfad = konfig.absolut(h["vorschau"]) if h["vorschau"] else None
@@ -130,6 +186,30 @@ async def sende_outbox(app: Application) -> int:
         aktionen.highlight_gesendet(con, h["id"], nachricht.message_id)
         gesendet += 1
     return gesendet
+
+
+async def automat_lauf(app: Application) -> int:
+    """Auto-Freigabe außerhalb des Sendens (braucht keinen Speicher): Frist für offene Clips – die alte Nachricht
+    bekommt die 🤖-Zeile und Knöpfe zum Umdrehen, dazu eine stille Meldung „⏰ … selbst entschieden“ – und die
+    Zusammenfassung je fertigem Match (Meldung auto:<match>, einmal). Rückgabe: Anzahl Frist-Entscheidungen."""
+    con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
+    k = einstellungen.anwenden(con, konfig)
+    w = auto_freigabe.werte(k)
+    if w["modus"] == "aus":
+        return 0
+    ergebnis = auto_freigabe.frist(con, k)
+    for e in ergebnis:
+        if not e["tg_nachricht_id"]:
+            continue
+        with contextlib.suppress(BadRequest):  # Nachricht weg oder zu alt: die Entscheidung gilt trotzdem
+            await app.bot.edit_message_caption(
+                chat_id=chat, message_id=e["tg_nachricht_id"], caption=_clip_text(con, konfig, e["id"]),
+                parse_mode=ParseMode.HTML, reply_markup=_markup(aktionen.knoepfe_auto(e["id"], e["status"])))
+    if ergebnis:
+        db.meldung(con, f"frist:{iso(jetzt())}", auto_freigabe.frist_text(ergebnis, w["frist_h"]))
+    for match_id in auto_freigabe.faellige_zusammenfassungen(con):
+        db.meldung(con, f"auto:{match_id}", auto_freigabe.zusammenfassung_text(con, match_id, k))
+    return len(ergebnis)
 
 
 async def erinnere(app: Application) -> bool:
@@ -152,7 +232,7 @@ async def erinnere(app: Application) -> bool:
 async def _outbox_schleife(app: Application) -> None:
     intervall = float(app.bot_data["konfig"].wert("telegram.outbox_intervall_s", 30))
     while True:
-        for aufgabe in (sende_meldungen, sende_outbox, erinnere):
+        for aufgabe in (sende_meldungen, sende_outbox, automat_lauf, erinnere):
             try:
                 await aufgabe(app)
             except Exception:  # der Bot soll wegen eines Versandfehlers nicht sterben
@@ -187,7 +267,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         speicher = "offline (großer Host schläft?)"
     letzte = con.execute("SELECT id, status FROM matches ORDER BY start_utc DESC LIMIT 1").fetchone()
     text = texte.status_text(db.anzahl_je_status(con), speicher, f"{letzte['id']} ({letzte['status']})" if letzte else None,
-                             lager=_lager_zeile(con, konfig))
+                             lager=_lager_zeile(con, konfig), auto=db.anzahl_auto(con))
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
@@ -214,11 +294,51 @@ async def cmd_offen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for z in zeilen:
         if not z["tg_file_id"]:
             continue
+        # Wer nachsieht, bekommt mehr Zeit: die Frist der Auto-Freigabe beginnt neu
+        con.execute("UPDATE clips SET vorgelegt = ? WHERE id = ?", (iso(jetzt()), z["id"]))
         nachricht = await context.bot.send_video(
             chat_id=chat, video=z["tg_file_id"], caption=_clip_text(con, konfig, z["id"]),
             parse_mode=ParseMode.HTML, reply_markup=_markup(aktionen.knoepfe_neu(z["id"])),
         )
         con.execute("UPDATE clips SET tg_nachricht_id = ? WHERE id = ?", (nachricht.message_id, z["id"]))
+
+
+def _knoepfe_fuer(clip) -> aktionen.Knoepfe | None:
+    """Passende Knöpfe für einen Clip: offen ✅/🗑️, automatisch entschieden 👍/umdrehen, von dir entschieden ↩️."""
+    if clip["status"] in ("vorbewertet", "gesendet"):
+        return aktionen.knoepfe_neu(clip["id"])
+    if clip["status"] in ("freigegeben", "verworfen"):
+        if clip["freigabe_quelle"] == "auto":
+            return aktionen.knoepfe_auto(clip["id"], clip["status"])
+        return aktionen.knoepfe_entschieden(clip["id"], clip["status"])
+    return None
+
+
+async def cmd_clip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/clip <nr>: einen Clip per tg_file_id erneut schicken, mit den passenden Knöpfen – so lässt sich auch ein Clip
+    umdrehen, dessen Nachricht weit oben steht."""
+    con, konfig, chat = _daten(context)
+    if not context.args or not context.args[0].isdigit():
+        await update.effective_message.reply_text("Aufruf: /clip <Clip-Nummer>")
+        return
+    clip = db.clip(con, int(context.args[0]))
+    if clip is None or not clip["tg_file_id"]:
+        await update.effective_message.reply_text(
+            f"Clip #{context.args[0]} gibt es nicht oder er wurde noch nicht gesendet.")
+        return
+    nachricht = await context.bot.send_video(
+        chat_id=chat, video=clip["tg_file_id"], caption=_clip_text(con, konfig, clip["id"]),
+        parse_mode=ParseMode.HTML, reply_markup=_markup(_knoepfe_fuer(clip)), disable_notification=True,
+    )
+    con.execute("UPDATE clips SET tg_nachricht_id = ? WHERE id = ?", (nachricht.message_id, clip["id"]))
+
+
+async def cmd_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/auto: Stand der Auto-Freigabe (Modus, Stufen, letzte 7 Tage, Korrekturen) mit Knopf ⚙️ Einstellungen."""
+    con, konfig, _ = _daten(context)
+    u = auto_freigabe.ueberblick(con, einstellungen.anwenden(con, konfig))
+    await update.effective_message.reply_text(texte.auto_text(u), parse_mode=ParseMode.HTML,
+                                              reply_markup=_markup([[("⚙️ Einstellungen", "s:m")]]))
 
 
 async def sende_battle(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -434,9 +554,12 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int) -> Application:
     for name, funktion in (
         ("start", cmd_hilfe), ("hilfe", cmd_hilfe), ("help", cmd_hilfe), ("status", cmd_status),
         ("offen", cmd_offen), ("battle", cmd_battle), ("rangliste", cmd_rangliste), ("gewichte", cmd_gewichte),
-        ("paket", cmd_paket), ("uploads", cmd_uploads), ("link", cmd_link),
+        ("paket", cmd_paket), ("uploads", cmd_uploads), ("link", cmd_link), ("auto", cmd_auto), ("clip", cmd_clip),
     ):
         app.add_handler(CommandHandler(name, funktion, filters=nur_ich))
+    # ⚙️ auch im Clip-Bot (gemeinsame Liste mit dem Lern-Bot) – VOR bei_klick, sonst fängt der musterlose Handler
+    # die s:-Knöpfe ab
+    lernbot_einstellungen.registriere(app, nur_ich)
     app.add_handler(CallbackQueryHandler(bei_klick))
     app.add_error_handler(bei_fehler)
     return app

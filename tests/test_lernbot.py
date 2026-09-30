@@ -225,7 +225,7 @@ class LernBot(MitRegieMaterial):
         self.assertIsNone(zeilen[1]["auto_verworfen"])      # letzter Versuch: kommt trotzdem durch
         self.assertEqual(eid, zeilen[1]["id"])
         self.assertEqual(len(self.bot.videos), 1)           # nur der zweite wurde geschickt
-        self.assertTrue(any("automatisch aussortiert" in t for _, t in self.bot.texte))
+        self.assertTrue(any("selbst aussortiert" in t for _, t in self.bot.texte))  # Text seit Regisseur 3.0
 
     def test_ohne_auto_schwelle_wie_bisher(self):
         self.momente_anlegen(MOMENTE[:8])

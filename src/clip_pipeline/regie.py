@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import effekte, entwurf, lernen, material, schema
-from .db import BEWERTET
+from .db import BEWERTET, hart_verworfen
 from .konfig import Konfig
 from .merkmale import fuer_moment, stimmen_gebraucht
 from .musik import ZIEL
@@ -415,14 +415,15 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     bericht = {"ohne_datei": 0, "ersetzt": 0, "gesperrt": 0}
     zeilen = con.execute(
         """SELECT m.*, c.status AS clip_status, c.elo AS elo, c.merkmale AS clip_merkmale,
-                  c.max_gruppe AS max_gruppe, c.victory_royale AS victory_royale, c.clip_pfad AS clip_pfad
+                  c.max_gruppe AS max_gruppe, c.victory_royale AS victory_royale, c.clip_pfad AS clip_pfad,
+                  c.freigabe_quelle AS clip_quelle
              FROM momente m LEFT JOIN clips c ON c.id = m.clip_id
             ORDER BY m.id"""
     ).fetchall()
     ergebnis = []
     for z in zeilen:
-        if z["clip_status"] == "verworfen":
-            continue
+        if hart_verworfen(z["clip_status"], z["clip_quelle"]):
+            continue  # nur dein 🗑️ schließt aus – automatisch aussortierte bleiben Material (30.09.)
         if nur_matches is not None and z["match_id"] not in nur_matches:
             continue  # Spielabend: fremde Matches zählen auch in der Bilanz nicht mit
         mk = json.loads(z["merkmale"])
@@ -446,7 +447,9 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
         # Die eine Formel (Leitplanke 3); auf 2 Stellen wie bisher – Bogen und Schnittliste zeigen diese Zahl
         intensitaet = round(roh_score(fuer_moment(clip_mk, mk, kill_tabelle), gewichte), 2)
         punkte = intensitaet + float(p["stimmung_bonus"].get(z["stimmung"], 0.0))
-        if z["clip_status"] in BEWERTET:  # freigegeben, veröffentlicht, im Highlight: von dir für gut befunden
+        # freigegeben, veröffentlicht, im Highlight: von dir für gut befunden. Eine Auto-Freigabe folgt aus genau
+        # diesem Score – mit Bonus zählte er doppelt (30.09.)
+        if z["clip_status"] in BEWERTET and z["clip_quelle"] != "auto":
             punkte += historisch
         if z["elo"] is not None:
             punkte += historisch * (float(z["elo"]) - 1500.0) / 100.0
