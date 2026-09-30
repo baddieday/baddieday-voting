@@ -50,7 +50,16 @@ class MitAuto(MitErwartung):
 class Frist(MitAuto):
     """T1: offene Clips entscheidet der Bot nach frist_h selbst."""
 
+    def test_altbestand_vollautonom_sofort(self):
+        offen = self.clip("gesendet", 3.0)                                  # vor dem Update gesendet, nie beantwortet
+        self.p(offen, 0.7)
+        ergebnis = auto_freigabe.frist(self.con, self.konfig, zeit=UHR)
+        self.assertIn({"id": offen, "status": "freigegeben"}, [{"id": e["id"], "status": e["status"]} for e in ergebnis])
+        self.assertTrue(self.spalten(offen, "auto_grund")[0].startswith("vollautonom"))
+        self.assertIn("offener Clip selbst entschieden", auto_freigabe.frist_text(ergebnis, 24))   # ohne „nach 24 h“
+
     def test_frist_entscheidet_nach_p_und_laesst_sich_abschalten(self):
+        self.konfig.daten["auto_freigabe"]["vollautonom"] = False          # klassischer Weg: erst nach der Frist
         alt = iso(UHR - timedelta(hours=25))
         gut, schlecht, frisch = self.clip("gesendet", 3.0), self.clip("gesendet", 1.0), self.clip("gesendet", 1.0)
         self.con.execute("UPDATE clips SET vorgelegt = ? WHERE id IN (?, ?)", (alt, gut, schlecht))
@@ -221,6 +230,7 @@ class SofortImClipBot(MitAuto):
         return [(b.text, b.callback_data) for reihe in kwargs["reply_markup"].inline_keyboard for b in reihe]
 
     def test_sofort_stichprobe_regel_und_aus(self):
+        self.konfig.daten["auto_freigabe"]["stichprobe_jede"] = 5          # Stichproben nur noch auf Wunsch
         sofort, triple = self.neu(0.9), self.neu(0.01, max_gruppe=3)
         self.clip("gesendet", 1.0)                                         # Platzhalter: nächster Clip ist #20
         stich = self.neu(0.9)
@@ -243,6 +253,25 @@ class SofortImClipBot(MitAuto):
         self.assertEqual(asyncio.run(bot_app.sende_outbox(self.fake)), 1)
         self.assertEqual(self.spalten(normal, "status", "freigabe_quelle", "auto_art"), ("gesendet", None, None))
         self.assertNotIn("🤖", self.gesendet[-1]["caption"])
+
+    def test_vollautonom_ohne_urteile_von_dir(self):
+        # Florian 30.09.: „muss es Referenzen geben, wenn ich sage, es soll autonom passieren?“ – nein
+        self.con.execute("DELETE FROM erwartungen WHERE ziel_id < 17")      # nur Testdaten: kein Tor, keine Urteile
+        self.con.execute("UPDATE clips SET status = 'gesendet' WHERE id < 17")
+        gut, schwach, ohne = self.neu(0.7), self.neu(0.2), self.clip_anlegen(status="vorbewertet", max_gruppe=2,
+                                                                                 file_id=None)
+        self.con.execute("UPDATE clips SET vorschau_pfad = 'sessions/m1/vorschau/v.mp4' WHERE id = ?", (ohne,))
+        self.assertEqual(asyncio.run(bot_app.sende_outbox(self.fake)), 3)
+        self.assertEqual(self.spalten(gut, "status", "freigabe_quelle"), ("freigegeben", "auto"))
+        self.assertEqual(self.spalten(schwach, "status", "freigabe_quelle"), ("verworfen", "auto"))   # weich
+        self.assertEqual(self.spalten(ohne, "status", "auto_grund"), ("freigegeben", "ohne Erwartung, 2er-Serie"))
+        self.assertTrue(all(g["disable_notification"] for g in self.gesendet))                       # nichts piept
+        self.assertEqual(self.knoepfe(self.gesendet[1]), [("✅ Doch freigeben", f"f:{schwach}"),
+                                                          ("🚫 Ganz raus", f"v:{schwach}")])
+        self.konfig.daten["auto_freigabe"]["vollautonom"] = False             # alter Weg: Unsichere kommen zu dir
+        frage = self.neu(0.7)
+        asyncio.run(bot_app.sende_outbox(self.fake))
+        self.assertEqual(self.spalten(frage, "status", "freigabe_quelle"), ("gesendet", None))
 
     def test_fehler_in_der_automatik_schickt_den_clip_normal(self):
         cid = self.neu(0.9)

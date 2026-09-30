@@ -467,6 +467,7 @@ leise_bis = "08:00"
 # Der Clip-Bot entscheidet selbst (30.09., Florian: „nicht jeden Clip per Hand separat freigeben“,
 # src/clip_pipeline/auto_freigabe.py). Werte aus ⚙️ im Bot gehen vor. Automatische Entscheidungen zählen nie beim Lernen.
 modus = "an"            # an · probe (nur anzeigen, nichts entscheiden) · aus (alles wie früher, auch keine Frist)
+vollautonom = true      # jeden Clip sofort selbst entscheiden – ohne Referenz-Urteile von dir (Florian 30.09.)
 ziel_quote = 0.9        # so oft muss die Erwartung im Band gestimmt haben (float, sonst lehnt ⚙️ ab)
 verwerfen = true        # automatisch aussortieren – immer weich (bleibt Material), nie bei Triple+/Victory
 frist_h = 24            # danach entscheidet der Bot offene Clips selbst; 0 = nie (int)
@@ -475,7 +476,7 @@ stufen_frei = [0.95, 0.9, 0.85, 0.8]   # mögliche Freigabe-Schwellen der Erwart
 stufen_weg = [0.05, 0.1, 0.15]         # mögliche Aussortier-Schwellen
 fenster = 30            # letzte n Urteile von dir je Band
 mindest_n = 15          # darunter zählt eine Stufe nicht
-stichprobe_jede = 5     # jeder n-te Sofort-Vorschlag kommt trotzdem zu dir (unter 2 gilt 2 – nie ganz aus)
+stichprobe_jede = 0     # 0 = keine Stichproben; ab 2 kommt jeder n-te Sofort-Vorschlag trotzdem zu dir
 frist_je_lauf = 20      # höchstens so viele Frist-Entscheidungen je Outbox-Runde (30 s)
 
 [aufraeumen]

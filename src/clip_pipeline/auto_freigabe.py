@@ -1,11 +1,17 @@
 """Auto-Freigabe im Clip-Bot (30.09., Florian: „nicht jeden Clip per Hand separat freigeben“).
 
-Drei Wege, auf denen ein Clip entschieden wird:
+Vollautonom (Florian 30.09.: „muss es Referenzen geben, wenn ich sage, es soll autonom passieren?“): Standard ist
+`vollautonom = true` – JEDER Clip wird beim ersten Senden sofort entschieden, ohne Referenz-Urteile von dir, ohne
+Stichproben (stichprobe_jede = 0), ohne Warten. Deine Tipps bleiben freiwillig und zählen dann beim Lernen.
+
+Wege, auf denen ein Clip entschieden wird:
   A. Sofort beim ersten Senden (bot/app.sende_outbox → vorschlag): Regel aus Replay-Fakten (Serie ≥ regel_gruppe
-     oder Victory Royale → frei) oder die festgeschriebene Erwartung p gegen das Tor (stufe). Der Clip wird trotzdem
-     gesendet – ohne Ton, mit 🤖-Zeile und Knöpfen zum Umdrehen.
-  B. Zu dir: alle übrigen, dazu jede stichprobe_jede-te Sofort-Entscheidung (🎲) und im Modus „probe“ alles (👀).
-  C. Frist: Liegt ein Clip frist_h Stunden offen, entscheidet der Bot selbst (frist).
+     oder Victory Royale → frei), die festgeschriebene Erwartung p gegen das Tor (stufe) und – vollautonom – sonst
+     p ≥ 0,5 → frei, darunter weich aussortiert (ohne p: Serie ≥ 2 → frei). Der Clip wird trotzdem gesendet – ohne
+     Ton, mit 🤖-Zeile und Knöpfen zum Umdrehen.
+  B. Zu dir: nur mit vollautonom = false (die Fälle ohne Regel/Tor), mit stichprobe_jede ≥ 2 jede n-te
+     Sofort-Entscheidung (🎲) und im Modus „probe“ alles (👀).
+  C. Frist: Liegt ein Clip frist_h Stunden offen (Altbestand, Fehlerfall), entscheidet der Bot selbst (frist).
 
 Das Tor wächst mit gemessener Genauigkeit: Eine Stufe (z. B. „ab 85 %“) gilt erst, wenn deine letzten `fenster`
 Urteile mit p in diesem Band oft genug (ziel_quote) gestimmt haben. Gezählt wird nur, was DU entschieden hast –
@@ -31,7 +37,7 @@ log = logging.getLogger("clip-bot")
 
 STANDARD = {"modus": "an", "ziel_quote": 0.9, "verwerfen": True, "frist_h": 24, "regel_gruppe": 3,
             "stufen_frei": [0.95, 0.9, 0.85, 0.8], "stufen_weg": [0.05, 0.1, 0.15], "fenster": 30, "mindest_n": 15,
-            "stichprobe_jede": 5, "frist_je_lauf": 20}
+            "stichprobe_jede": 0, "frist_je_lauf": 20, "vollautonom": True}
 MODI = ("an", "probe", "aus")
 TRIPLE = 3              # ab Triple (oder Victory) wird nie aussortiert – egal, was regel_gruppe sagt
 FRIST_SCHWELLE = 0.5    # nach der Frist: p ab hier frei, darunter weich aussortiert (wie erwartung.SCHWELLE)
@@ -61,8 +67,10 @@ def werte(konfig: Konfig) -> dict:
         "stufen_weg": sorted(float(s) for s in w["stufen_weg"]),                    # streng → locker
         "fenster": max(1, int(w["fenster"])),
         "mindest_n": max(1, int(w["mindest_n"])),
-        "stichprobe_jede": max(2, int(w["stichprobe_jede"])),  # nie ganz aus, sonst friert das Tor ein
+        # 0/1 = keine Stichproben (vollautonom, Standard); ab 2 jede n-te Sofort-Entscheidung zu dir
+        "stichprobe_jede": max(0, int(w["stichprobe_jede"])),
         "frist_je_lauf": max(1, int(w["frist_je_lauf"])),
+        "vollautonom": bool(w["vollautonom"]),
     }
 
 
@@ -162,11 +170,20 @@ def vorschlag(con: sqlite3.Connection, konfig: Konfig, clip, p: float | None, st
         s = stand["weg_bis"]
         ziel = "verworfen"
         grund = f"Erwartung {_prozent(p)} ≤ Stufe {_prozent(s)}" + _band_text(stand["zeilen"]["weg"], s)
+    elif w["vollautonom"]:  # ohne Referenz-Urteile: die beste eigene Schätzung entscheidet sofort
+        if p is not None:
+            ziel = "freigegeben" if p >= FRIST_SCHWELLE else "verworfen"
+            grund = f"Erwartung {_prozent(p)}"
+        else:
+            ziel = "freigegeben" if gruppe >= 2 else "verworfen"
+            grund = "ohne Erwartung, " + (f"{gruppe}er-Serie" if gruppe >= 2 else "Einzelkill")
+        if ziel == "verworfen" and (not w["verwerfen"] or _schutz(clip)):
+            return None
     else:
         return None
     if w["modus"] == "probe":
         art = "probe"
-    elif int(clip["id"]) % w["stichprobe_jede"] == 0:
+    elif w["stichprobe_jede"] >= 2 and int(clip["id"]) % w["stichprobe_jede"] == 0:
         art = "stichprobe"
     else:
         art = "sofort"
@@ -202,25 +219,28 @@ def frist(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None)
     Erst Altbestand: gesendet ohne vorgelegt bekommt vorgelegt = jetzt (idempotent; entschieden wird er also erst
     frist_h später). Dann je fälligem Clip: Triple+/Victory → frei; sonst p (festgeschrieben) ≥ 0,5 → frei, sonst
     weich aussortiert; ohne p: Serie ≥ 2 → frei, sonst aussortiert. Aussortieren nur, wenn verwerfen an ist – sonst
-    bleibt der Clip offen. Nur im Modus „an“ und bei frist_h > 0.
+    bleibt der Clip offen. Nur im Modus „an“ und bei frist_h > 0. Vollautonom: Clips ohne auto_art (Altbestand,
+    Fehlerfall) sind sofort fällig – nur Stichproben (🎲) warten die Frist ab.
     Rückgabe: [{"id", "status", "tg_nachricht_id", "grund"}] der entschiedenen Clips (für die Nachrichten)."""
     w = werte(konfig)
     if w["modus"] != "an":
         return []
     zeit = zeit or jetzt()
     con.execute("UPDATE clips SET vorgelegt = ? WHERE status = 'gesendet' AND vorgelegt IS NULL", (iso(zeit),))
-    if w["frist_h"] <= 0:
+    if w["frist_h"] <= 0 and not w["vollautonom"]:
         return []
-    grenze = iso(zeit - timedelta(hours=w["frist_h"]))
+    grenze = iso(zeit - timedelta(hours=w["frist_h"])) if w["frist_h"] > 0 else ""   # "" = Frist nie
     faellig = con.execute(
-        "SELECT * FROM clips WHERE status = 'gesendet' AND vorgelegt IS NOT NULL AND vorgelegt <= ?"
-        " ORDER BY vorgelegt, id", (grenze,)).fetchall()
+        "SELECT * FROM clips WHERE status = 'gesendet' AND vorgelegt IS NOT NULL"
+        " AND (vorgelegt <= ? OR (? AND auto_art IS NULL)) ORDER BY vorgelegt, id",
+        (grenze, int(w["vollautonom"]))).fetchall()
     ergebnis = []
     for c in faellig:
         if len(ergebnis) >= w["frist_je_lauf"]:
             break
         p = erwartung.gespeichert(con, "clip", int(c["id"]))
-        kopf = f"Frist {w['frist_h']} h ohne Antwort"
+        sofort = w["vollautonom"] and _feld(c, "auto_art") is None and (c["vorgelegt"] or "") > grenze
+        kopf = "vollautonom" if sofort else f"Frist {w['frist_h']} h ohne Antwort"
         if _schutz(c):
             ziel, grund = "freigegeben", f"{kopf} · " + ("Victory Royale" if c["victory_royale"] else
                                                          f"{c['max_gruppe']}er-Serie")
@@ -257,7 +277,8 @@ def frist_text(ergebnis: list[dict], stunden: int) -> str:
     weg = [e["id"] for e in ergebnis if e["status"] == "verworfen"]
     teile = ([f"✅ {_nummern(frei)}"] if frei else []) + ([f"🗑️ {_nummern(weg)} (bleibt nutzbar)"] if weg else [])
     n = len(ergebnis)
-    return (f"⏰ {n} offene{'r' if n == 1 else ''} Clip{'' if n == 1 else 's'} nach {stunden} h selbst entschieden: "
+    wann = "" if all(e["grund"].startswith("vollautonom") for e in ergebnis) else f" nach {stunden} h"
+    return (f"⏰ {n} offene{'r' if n == 1 else ''} Clip{'' if n == 1 else 's'}{wann} selbst entschieden: "
             + " · ".join(teile) + ". Umdrehen am Clip oder /clip <nr>.")
 
 

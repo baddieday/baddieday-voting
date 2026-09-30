@@ -268,9 +268,12 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   vorhandener Tokens. `.env` braucht nur Client Key und Secret; Tokens nur in `publikum-oauth.json` (0600), nie im
   Chat oder Log; Rücksprung `https://clip-battle.de/tiktok/callback` (Seite muss nicht existieren, `[tiktok].redirect_uri`).
 - 2026-09-30 (Florian: „nicht jeden Clip per Hand separat freigeben“): **Der Clip-Bot entscheidet selbst.**
-  - Sofort beim Senden: Regel (Serie ≥ 3 oder Victory → frei) oder die Erwartung gegen ein gemessenes Tor (Stufe erst
-    aktiv, wenn deine letzten Urteile in dem Band zu 90 % stimmten). Auto-Clips kommen ohne Ton mit 🤖-Zeile und
-    „👍 Stimmt / Doch …“; jeder 5. als 🎲 Stichprobe zu dir. Unsichere kommen wie bisher – nach 24 h entscheidet die Frist.
+  - **Vollautonom** (Florian: „muss es Referenzen geben, wenn ich sage, es soll autonom passieren?“ – nein): JEDER Clip
+    wird beim Senden sofort entschieden – Regel (Serie ≥ 3 oder Victory → frei), ein gemessenes Tor, sonst die eigene
+    Erwartung (≥ 50 % frei, darunter weich aussortiert; ohne Erwartung: Serie ≥ 2 frei). Keine Referenz-Urteile, keine
+    Stichproben (`stichprobe_jede = 0`), keine Wartezeit; offene Altfälle entscheidet er gleich mit. Alles ohne Ton mit
+    🤖-Zeile, pro Match eine stille Zusammenfassung; umdrehen am Clip freiwillig („🚫 Ganz raus“ = dein Verwerfen).
+    `vollautonom = false` stellt den vorsichtigen Weg (Unsichere zu dir, 24-h-Frist) wieder her.
   - Aussortieren ist immer weich (bleibt Material für Regie, Highlight, Mikro); nur dein 🗑️ schließt aus. Nichts gelöscht.
   - `clips.freigabe_quelle` (du/auto) + `vorgelegt`/`auto_*`; automatische Entscheidungen zählen nie beim Lernen, in der
     Erwartung oder im Tor. `/auto`, `/clip <nr>`, ⚙️ auch im Clip-Bot (Modus an/👀 probe/aus, Genauigkeit,

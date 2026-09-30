@@ -46,7 +46,7 @@ class BotApp(MitSpeicher):
 
     def test_zusammenfassung_je_match_einmal_und_ohne_ton(self):
         # Auto-Freigabe (30.09.): erst wenn render das Match abgeschlossen hat, genau einmal, ohne Ton
-        self.konfig.daten["auto_freigabe"]["modus"] = "an"
+        self.konfig.daten["auto_freigabe"].update(modus="an", vollautonom=False)   # mit einem Clip „bei dir“
         cid = self.clip_anlegen(status="freigegeben")
         self.con.execute("UPDATE clips SET freigabe_quelle = 'auto', auto_art = 'sofort', auto_vorschlag = 'freigegeben',"
                          " auto_grund = 'Regel: 3er-Serie' WHERE id = ?", (cid,))

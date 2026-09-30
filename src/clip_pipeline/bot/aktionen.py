@@ -60,7 +60,8 @@ def knoepfe_auto(clip_id: int, status: str) -> Knoepfe:
     Callbacks (f:/v:), „👍 Stimmt“ ist f:/v: mit dem Status, den der Clip schon hat (entscheide)."""
     if status == "freigegeben":
         return [[("👍 Stimmt", f"f:{clip_id}"), ("🗑️ Doch aussortieren", f"v:{clip_id}")]]
-    return [[("👍 Stimmt", f"v:{clip_id}"), ("✅ Doch freigeben", f"f:{clip_id}")]]
+    # Weich aussortiert bleibt Material; v: macht daraus DEIN Verwerfen – dann ist der Clip ganz raus (Review 30.09.)
+    return [[("✅ Doch freigeben", f"f:{clip_id}"), ("🚫 Ganz raus", f"v:{clip_id}")]]
 
 
 def knoepfe_battle(battle_id: int) -> Knoepfe:
