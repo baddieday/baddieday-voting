@@ -544,6 +544,21 @@ def _cmd_publikum(args, konfig, con) -> int:
     from . import autonom, lernbot_publikum, publikum, publikum_adapter
 
     zeit = jetzt()
+    if args.aktion == "anmelden":  # 30.09.: TikTok-Konto verbinden – Tokens nur in die private Token-Datei
+        from . import tiktok_anmeldung
+
+        try:
+            if not args.code:
+                url = tiktok_anmeldung.anmelde_url(konfig)
+                log.info("Öffnen, zustimmen, dann: pipeline publikum anmelden --code '<Adresse aus der Adresszeile>'")
+                _json({"url": url, "redirect_uri": tiktok_anmeldung.redirect_uri(konfig)})
+                return 0
+            _json({"verbunden": True, **tiktok_anmeldung.tausche(konfig, args.code, zeit)})
+            return 0
+        except tiktok_anmeldung.AnmeldeFehler as e:
+            log.error("%s", e)
+            _json({"verbunden": False, "fehler": str(e)})
+            return 1
     if args.aktion == "importieren":
         antwort = json.loads(Path(args.datei).read_text(encoding="utf-8"))
         mid = publikum_adapter.importiere(con, konfig, args.post, antwort, zeit=zeit)
@@ -774,6 +789,9 @@ def baue_parser() -> argparse.ArgumentParser:
     publikum_befehle = s.add_subparsers(dest="aktion", required=True)
     publikum_befehle.add_parser("bewerten", help="Publikums-Scores aller fälligen Posts setzen (einmal je Post, "
                                                  "weckt nie) – bei neuen Scores eine Meldung im Lern-Bot")
+    anmelden = publikum_befehle.add_parser("anmelden", help="TikTok verbinden: ohne --code die Anmelde-Adresse, mit "
+                                                            "--code die Adresse nach dem Zustimmen (oder den Code)")
+    anmelden.add_argument("--code", default="")
     importer = publikum_befehle.add_parser("importieren", help="Plattform-JSON importieren und automatisch lernen")
     importer.add_argument("--post", type=int, required=True)
     importer.add_argument("--datei", required=True)
