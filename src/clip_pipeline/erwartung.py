@@ -156,12 +156,15 @@ def moment_score(con: sqlite3.Connection, konfig: Konfig, art: str, ziel_id: int
 # --- Urteile, Vergleichsbasis, Modell ---------------------------------------------------------------------------
 
 def _urteile(con: sqlite3.Connection, art: str) -> list[tuple[int, int]]:
-    """(ziel_id, 1 = positiv / 0 = negativ) aller geurteilten Objekte einer Art, nach id (deterministisch)."""
+    """(ziel_id, 1 = positiv / 0 = negativ) aller geurteilten Objekte einer Art, nach id (deterministisch).
+    Clips nur mit DEINEM Urteil: automatische Entscheidungen (freigabe_quelle 'auto', 30.09.) zählen weder im Modell
+    noch in der Trefferquote – die Automatik benutzt die Erwartung, sie darf sie nicht füttern."""
     if art == "clip":
         positiv = ", ".join("?" for _ in db.BEWERTET)
         zeilen = con.execute(
             f"""SELECT id, CASE WHEN status = 'verworfen' THEN 0 ELSE 1 END AS gut FROM clips
-                WHERE status = 'verworfen' OR status IN ({positiv}) ORDER BY id""", db.BEWERTET).fetchall()
+                WHERE (status = 'verworfen' OR status IN ({positiv})) AND freigabe_quelle IS NOT 'auto'
+                ORDER BY id""", db.BEWERTET).fetchall()
     else:
         zeilen = con.execute(
             "SELECT entwurf_id AS id, CASE WHEN daumen > 0 THEN 1 ELSE 0 END AS gut FROM entwurf_bewertungen"

@@ -73,9 +73,27 @@ class Einstellungen(MitRegieMaterial):
                                                      "'lernbot.quelle'").fetchone()[0]), "match:m2")
         text, _, _ = klick("s:r:0")
         self.assertIn("🎯 Clips: alle Clips", text)
-        for falsch in ("s:w:9:0", "s:x:../etc", "s:w:0:7", "x:1"):
+        for falsch in ("s:w:99:0", "s:x:../etc", "s:w:0:7", "x:1"):         # 99: jenseits des Katalogs
             with self.assertRaises(ValueError):
                 klick(falsch)
+
+
+    def test_auto_freigabe_im_katalog(self):
+        # 30.09.: die vier Werte der Auto-Freigabe – die Datei-Werte (pipeline.toml) passen zum Typ der Optionen,
+        # sonst würde ⚙️ sie als „unbekannt“ ablehnen; ein Bot-Wert kommt in auto_freigabe.werte an
+        from clip_pipeline import auto_freigabe, konfig as konfig_modul
+
+        datei = konfig_modul.lade()
+        for schluessel in ("auto_freigabe.modus", "auto_freigabe.ziel_quote", "auto_freigabe.verwerfen",
+                           "auto_freigabe.frist_h"):
+            self.assertTrue(einstellungen._erlaubt(einstellungen.NACH_SCHLUESSEL[schluessel], datei.wert(schluessel)),
+                            schluessel)
+        einstellungen.setze(self.con, "auto_freigabe.frist_h", 48)
+        einstellungen.setze(self.con, "auto_freigabe.modus", "probe")
+        w = auto_freigabe.werte(einstellungen.anwenden(self.con, self.konfig))
+        self.assertEqual((w["frist_h"], w["modus"]), (48, "probe"))
+        with self.assertRaises(ValueError):
+            einstellungen.setze(self.con, "auto_freigabe.frist_h", 24.0)                  # float statt int
 
 
 if __name__ == "__main__":

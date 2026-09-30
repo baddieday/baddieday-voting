@@ -154,8 +154,9 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, hid: str, tage: int) -> di
         regie.pruefe_dauer("zusammenschnitt", probe(video).dauer_s)
         return {**json.loads(info_datei.read_text(encoding="utf-8")), "uebersprungen": True}
     konfig.pruefe_speicher()
-    # Ein Urteil ist keine Eintrittskarte mehr. Bewusst verworfene Clips bleiben ausgeschlossen.
-    clips = con.execute("SELECT id,match_id FROM clips WHERE status != 'verworfen' AND clip_pfad IS NOT NULL "
+    # Ein Urteil ist keine Eintrittskarte mehr. Bewusst (von dir) verworfene Clips bleiben ausgeschlossen, automatisch
+    # aussortierte bleiben drin (30.09., db.hart_verworfen_sql).
+    clips = con.execute(f"SELECT id,match_id FROM clips WHERE NOT {db.hart_verworfen_sql()} AND clip_pfad IS NOT NULL "
                         "AND start_utc >= ?", (iso(jetzt()-timedelta(days=tage)),)).fetchall()
     if not clips:
         return {"id": hid, "clips": 0, "dauer": "00:00", "hinweis": f"keine Clips der letzten {tage} Tage"}

@@ -55,6 +55,15 @@ def knoepfe_entschieden(clip_id: int, status: str = "verworfen") -> Knoepfe:
     return [[("↩️ Rückgängig", f"u:{clip_id}")]]
 
 
+def knoepfe_auto(clip_id: int, status: str) -> Knoepfe:
+    """Knöpfe an einem automatisch entschiedenen Clip (30.09.): bestätigen oder umdrehen – nur vorhandene
+    Callbacks (f:/v:), „👍 Stimmt“ ist f:/v: mit dem Status, den der Clip schon hat (entscheide)."""
+    if status == "freigegeben":
+        return [[("👍 Stimmt", f"f:{clip_id}"), ("🗑️ Doch aussortieren", f"v:{clip_id}")]]
+    # Weich aussortiert bleibt Material; v: macht daraus DEIN Verwerfen – dann ist der Clip ganz raus (Review 30.09.)
+    return [[("✅ Doch freigeben", f"f:{clip_id}"), ("🚫 Ganz raus", f"v:{clip_id}")]]
+
+
 def knoepfe_battle(battle_id: int) -> Knoepfe:
     return [[("⬅️ A", f"b:{battle_id}:a"), ("🤷 Egal", f"b:{battle_id}:s"), ("B ➡️", f"b:{battle_id}:b")]]
 
@@ -65,18 +74,32 @@ KNOEPFE_NAECHSTES = [[("⚔️ Nächstes Battle", "n:0")]]
 # --- Freigabe -------------------------------------------------------------------
 
 def entscheide(con: sqlite3.Connection, clip_id: int, nach: str) -> Antwort:
-    """Freigeben oder Verwerfen. Ein Doppelklick ändert nichts ein zweites Mal."""
+    """Freigeben oder Verwerfen. Ein Doppelklick ändert nichts ein zweites Mal.
+
+    Auto-Freigabe (30.09.): Eine Korrektur (anderer Status als die Automatik) läuft normal und zählt als dein Urteil.
+    „👍 Stimmt“ (derselbe Status auf einem automatisch entschiedenen Clip) macht die Entscheidung zu deiner:
+    freigabe_quelle 'auto' → 'du' – zählt fürs Lernen, fürs Tor aber nicht (auto_freigabe.band)."""
     erlaubt = tuple(s for s in ("vorbewertet", "gesendet", "freigegeben", "verworfen") if s != nach)
     if db.status_wechsel(con, clip_id, erlaubt, nach):
         return Antwort("✅ Freigegeben" if nach == "freigegeben" else "🗑️ Verworfen", nach, knoepfe_entschieden(clip_id, nach))
     zeile = db.clip(con, clip_id)
     if zeile is None:
         return Antwort("Clip nicht gefunden")
+    if zeile["status"] == nach and zeile["freigabe_quelle"] == "auto":
+        with db.transaktion(con):
+            geaendert = con.execute(
+                "UPDATE clips SET freigabe_quelle = 'du', geaendert = ? WHERE id = ? AND freigabe_quelle = 'auto'",
+                (iso(jetzt()), clip_id)).rowcount
+            if geaendert:
+                db.protokoll(con, "status", f"{nach} bestätigt (war auto)", clip_id=clip_id)
+        return Antwort("👍 Bestätigt", nach, knoepfe_entschieden(clip_id, nach))
     return Antwort(f"Status ist schon „{zeile['status']}“", zeile["status"], None)
 
 
 def rueckgaengig(con: sqlite3.Connection, clip_id: int) -> Antwort:
+    """Zurück auf „gesendet“ (Quelle wieder offen); die Frist beginnt neu (vorgelegt = jetzt)."""
     if db.status_wechsel(con, clip_id, ("freigegeben", "verworfen"), "gesendet"):
+        con.execute("UPDATE clips SET vorgelegt = ? WHERE id = ?", (iso(jetzt()), clip_id))
         return Antwort("↩️ Zurückgeholt", "gesendet", knoepfe_neu(clip_id))
     zeile = db.clip(con, clip_id)
     return Antwort("Geht nicht mehr" if zeile else "Clip nicht gefunden", zeile["status"] if zeile else None, None)
@@ -135,13 +158,24 @@ def knoepfe_highlight_freigegeben(highlight_id: int) -> Knoepfe:
     return [[("✅ Hochgeladen", f"hu:{highlight_id}")]]
 
 
-def als_gesendet(con: sqlite3.Connection, clip_id: int, nachricht_id: int, file_id: str | None) -> None:
+def als_gesendet(con: sqlite3.Connection, clip_id: int, nachricht_id: int, file_id: str | None,
+                 vorschlag=None) -> None:
+    """Nach dem Senden: Nachricht und file_id merken, vorgelegt = jetzt (Beginn der Frist). vorschlag
+    (auto_freigabe.Vorschlag oder None): Art, Ziel und Grund werden festgehalten; bei art „sofort“ entscheidet die
+    Automatik gleich (vorbewertet → Ziel, Quelle 'auto'), sonst geht der Clip wie immer auf „gesendet“."""
+    zeit = iso(jetzt())
     with db.transaktion(con):
         con.execute(
-            "UPDATE clips SET tg_nachricht_id = ?, tg_file_id = COALESCE(?, tg_file_id), geaendert = ? WHERE id = ?",
-            (nachricht_id, file_id, iso(jetzt()), clip_id),
+            """UPDATE clips SET tg_nachricht_id = ?, tg_file_id = COALESCE(?, tg_file_id), geaendert = ?, vorgelegt = ?,
+                                auto_vorschlag = ?, auto_art = ?, auto_grund = ?
+                WHERE id = ?""",
+            (nachricht_id, file_id, zeit, zeit, vorschlag.ziel if vorschlag else None,
+             vorschlag.art if vorschlag else None, vorschlag.grund if vorschlag else None, clip_id),
         )
-        db.status_wechsel(con, clip_id, ("vorbewertet",), "gesendet")
+        if vorschlag is not None and vorschlag.art == "sofort":
+            db.status_wechsel(con, clip_id, ("vorbewertet",), vorschlag.ziel, quelle="auto", grund=vorschlag.grund)
+        else:
+            db.status_wechsel(con, clip_id, ("vorbewertet",), "gesendet")
 
 
 # --- Battles --------------------------------------------------------------------

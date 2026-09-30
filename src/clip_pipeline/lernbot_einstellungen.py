@@ -27,7 +27,7 @@ HERKUNFT = {"bot": "📱", "datei": "🗂", "standard": ""}
 
 def menue_text(con: sqlite3.Connection, konfig: Konfig, meldung: str | None = None) -> str:
     teile = [f"✓ {meldung}" if meldung else None,
-             "⚙️ Einstellungen – gelten ab dem nächsten Entwurf.",
+             "⚙️ Einstellungen – gelten sofort (Clip-Bot) bzw. ab dem nächsten Entwurf.",
              "📱 = hier im Bot gesetzt · 🗂 = aus der Konfigdatei · ohne Zeichen = Standard"]
     for e, wert, herkunft in einstellungen.aktuell(con, konfig):
         teile.append(f"{e.titel}: {einstellungen.anzeige(e, wert, con, konfig)} {HERKUNFT[herkunft]}".rstrip())
@@ -125,7 +125,8 @@ async def bei_klick(update, context) -> None:
 
 
 def registriere(app, nur_ich) -> None:
-    """Hängt /einstellungen und die s:-Knöpfe in die Lern-Bot-App (aufgerufen von lernbot.baue_app)."""
+    """Hängt /einstellungen und die s:-Knöpfe in die App (Lern-Bot und Clip-Bot; aufgerufen von lernbot.baue_app und
+    bot.app.baue_app – dort VOR dem musterlosen Klick-Handler)."""
     from telegram.ext import CallbackQueryHandler, CommandHandler
 
     app.add_handler(CommandHandler("einstellungen", cmd_einstellungen, filters=nur_ich))

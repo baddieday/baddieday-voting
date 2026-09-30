@@ -49,6 +49,13 @@ MIGRATIONEN += [("publikum_messungen", name, typ) for name, typ in (
     ("impressions", "INTEGER"), ("retention_prozent", "REAL"), ("follows", "INTEGER"),
     ("profilaufrufe", "INTEGER"), ("rewatches", "INTEGER"), ("skip_prozent", "REAL"), ("metriken", "TEXT"))]
 
+# Auto-Freigabe im Clip-Bot (30.09., Florian: „nicht jeden Clip per Hand separat freigeben“): wer entschieden hat
+# ('du' · 'auto' · NULL = offen oder Altbestand, zählt als du), seit wann der Clip offen liegt (Grundlage der Frist),
+# was die Automatik beim Senden vorschlug, auf welchem Weg und warum. Eigene Spalten statt neuem Status – die
+# CHECK-Liste von clips.status ließe sich nur mit Tabellen-Umbau ändern (wie bei highlights.hochgeladen).
+MIGRATIONEN += [("clips", "freigabe_quelle", "TEXT"), ("clips", "vorgelegt", "TEXT"), ("clips", "auto_vorschlag", "TEXT"),
+                ("clips", "auto_art", "TEXT"), ("clips", "auto_grund", "TEXT")]
+
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)
     if str(pfad) != ":memory:":
@@ -117,21 +124,32 @@ def lern_meldung(con: sqlite3.Connection, schluessel: str, text: str) -> bool:
     return cursor.rowcount == 1
 
 
-def status_wechsel(con: sqlite3.Connection, clip_id: int, von: tuple[str, ...], nach: str) -> bool:
-    """Ändert den Status nur, wenn der alte Status passt. True = geändert."""
+def status_wechsel(con: sqlite3.Connection, clip_id: int, von: tuple[str, ...], nach: str, *,
+                   quelle: str = "du", grund: str | None = None) -> bool:
+    """Ändert den Status nur, wenn der alte Status passt. True = geändert.
+
+    quelle: wer entscheidet ("du" oder "auto", Auto-Freigabe 30.09.). Bei freigegeben/verworfen wird sie in
+    clips.freigabe_quelle gemerkt, bei gesendet/vorbewertet (wieder offen) geleert, sonst (veröffentlicht, im
+    Highlight) bleibt sie. Bei "auto" steht der grund mit im Protokoll: „gesendet -> freigegeben (auto: …)“."""
     if nach not in CLIP_STATUS:
         raise ValueError(f"Unbekannter Status {nach!r}")
+    if quelle not in ("du", "auto"):
+        raise ValueError(f"Unbekannte Quelle {quelle!r}")
     zeit = iso(jetzt())
     platzhalter = ", ".join("?" for _ in von)
     cursor = con.execute(
         f"""UPDATE clips
                SET status = ?, geaendert = ?,
-                   entschieden = CASE WHEN ? IN ('freigegeben', 'verworfen') THEN ? ELSE entschieden END
+                   entschieden = CASE WHEN ? IN ('freigegeben', 'verworfen') THEN ? ELSE entschieden END,
+                   freigabe_quelle = CASE WHEN ? IN ('freigegeben', 'verworfen') THEN ?
+                                          WHEN ? IN ('gesendet', 'vorbewertet') THEN NULL
+                                          ELSE freigabe_quelle END
              WHERE id = ? AND status IN ({platzhalter})""",
-        (nach, zeit, nach, zeit, clip_id, *von),
+        (nach, zeit, nach, zeit, nach, quelle, nach, clip_id, *von),
     )
     if cursor.rowcount == 1:
-        protokoll(con, "status", f"{'/'.join(von)} -> {nach}", clip_id=clip_id)
+        zusatz = f" (auto: {grund})" if quelle == "auto" else ""
+        protokoll(con, "status", f"{'/'.join(von)} -> {nach}{zusatz}", clip_id=clip_id)
         return True
     return False
 
@@ -148,16 +166,36 @@ def merkmale(zeile: sqlite3.Row) -> dict[str, float]:
     return {k: float(v) for k, v in json.loads(zeile["merkmale"]).items()}
 
 
+def hart_verworfen_sql(alias: str = "") -> str:
+    """SQL-Bedingung „von dir verworfen“ (Auto-Freigabe 30.09.): Nur dein 🗑️ schließt einen Clip aus Regie, Highlight,
+    Stimmung und Mikro aus – was die Automatik aussortiert, bleibt Material (weich). NULL zählt als du (sichere Seite).
+    alias: Tabellen-Kürzel mit Punkt, z. B. "c." → „(c.status = 'verworfen' AND c.freigabe_quelle IS NOT 'auto')“."""
+    return f"({alias}status = 'verworfen' AND {alias}freigabe_quelle IS NOT 'auto')"
+
+
+def hart_verworfen(status: str | None, quelle: str | None) -> bool:
+    """Python-Gegenstück zu hart_verworfen_sql (für Zeilen, die schon gelesen sind, z. B. im Regisseur)."""
+    return status == "verworfen" and quelle != "auto"
+
+
+def anzahl_auto(con: sqlite3.Connection) -> dict[str, int]:
+    """Automatisch entschiedene Clips für /status: {"frei": n, "weg": m}."""
+    zeile = con.execute(
+        """SELECT COALESCE(SUM(status = 'freigegeben'), 0) AS frei, COALESCE(SUM(status = 'verworfen'), 0) AS weg
+             FROM clips WHERE freigabe_quelle = 'auto'""").fetchone()
+    return {"frei": int(zeile["frei"]), "weg": int(zeile["weg"])}
+
+
 def ohne_mic_analyse(con: sqlite3.Connection) -> int:
-    """Wie viele Clips haben noch keine vollständige Mic-Analyse? (mic_stand leer, Status nicht verworfen)
+    """Wie viele Clips haben noch keine vollständige Mic-Analyse? (mic_stand leer, nicht von dir verworfen)
 
     Die eine Zählung für „offen“ in `pipeline stimmung --clips` (mikro.clips_nachziehen) und „ohne Mic-Analyse“ in
-    /gewichte (lernen.berechne) – so zeigen beide immer dieselbe Zahl. Verworfene zählen nicht: Die misst niemand
-    mehr nach. Fehler: sqlite3-Fehler gehen an den Aufrufer.
+    /gewichte (lernen.berechne) – so zeigen beide immer dieselbe Zahl. Von dir Verworfene zählen nicht: Die misst
+    niemand mehr nach (automatisch aussortierte schon, hart_verworfen_sql). Fehler: sqlite3-Fehler gehen an den Aufrufer.
     Beispiel: 3 Clips ohne mic_stand, davon 1 verworfen → 2.
     """
     return int(con.execute(
-        "SELECT COUNT(*) FROM clips WHERE mic_stand IS NULL AND status <> 'verworfen'").fetchone()[0])
+        f"SELECT COUNT(*) FROM clips WHERE mic_stand IS NULL AND NOT {hart_verworfen_sql()}").fetchone()[0])
 
 
 def anzahl_je_status(con: sqlite3.Connection) -> dict[str, int]:

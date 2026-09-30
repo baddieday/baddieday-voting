@@ -35,6 +35,8 @@ class MitSpeicher(unittest.TestCase):
         self.konfig.daten.setdefault("regie", {}).setdefault("kritik", {}).update(ki=False, schwelle=0.0)
         # Schnittstil (30.09.): fest „klassik“ (= der bisherige Aufbau), damit alte Tests nicht von der Stilwahl abhängen
         self.konfig.daten["regie"]["stil"] = "klassik"
+        # Auto-Freigabe im Clip-Bot (30.09.): aus, damit alte Tests unverändert bleiben – neue Tests schalten sie an
+        self.konfig.daten.setdefault("auto_freigabe", {})["modus"] = "aus"
         for name in ("eingang", "replays", "sessions", "highlights", "musik", "archiv", "papierkorb"):
             self.konfig.ordner(name).mkdir(parents=True, exist_ok=True)
         (self.konfig.wurzel / ".clip-speicher").touch()
