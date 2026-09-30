@@ -31,6 +31,10 @@ class MitSpeicher(unittest.TestCase):
         # Tests sollen nicht vom Datum abhängen: Sprint-Frist aus, Zustand von pve-big im Testordner
         self.konfig.daten.setdefault("big", {}).update(frist="", zustand_ordner=str(self.tmp / "zustand"), host="",
                                                        ssh_ziel="")
+        # Cutter-Kritik (30.09.): nie ein echtes claude aus Tests, und alte Tests nicht durch die Mindest-Note aussortieren
+        self.konfig.daten.setdefault("regie", {}).setdefault("kritik", {}).update(ki=False, schwelle=0.0)
+        # Schnittstil (30.09.): fest „klassik“ (= der bisherige Aufbau), damit alte Tests nicht von der Stilwahl abhängen
+        self.konfig.daten["regie"]["stil"] = "klassik"
         for name in ("eingang", "replays", "sessions", "highlights", "musik", "archiv", "papierkorb"):
             self.konfig.ordner(name).mkdir(parents=True, exist_ok=True)
         (self.konfig.wurzel / ".clip-speicher").touch()

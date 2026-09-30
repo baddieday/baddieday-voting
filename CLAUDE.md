@@ -254,3 +254,12 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   und 3 Standbilder nach `sessions/<ID>/kalibrierung/` (bericht.json); der Bot schickt je Clip ein Album und am Ende
   die Waffen-Nummern, die in `[merkmale.waffen]` fehlen. Pipeline-Sperre, weckt nie, löscht nichts. Bestätigen/Korrigieren
   per Knopf und Waffen direkt in lokal.toml schreiben sind die nächste Stufe.
+- 2026-09-30 (Regisseur 3.0, Florian: „immer die selbe Grütze“, „er muss das selbst erkennen und lernen“, „ich möchte
+  keine 100 oder 1000 Videos bewerten“): **Der Bot benotet sich selbst.**
+  - **Schnittstile** im Short (Montage, Story, Steigerung, Kino, Klassik) als relative Stellschrauben, mit
+    größerem Spielbild (`rahmen_zoom` bis 1,6; vorher ein schmaler Streifen).
+  - **Cutter-Kritik** je Entwurf: Handwerksregeln, dazu Claude als Senior-Cutter auf einem Kontaktbogen (nur
+    Leserecht, Schema `kritik`, höchstens 20 am Tag).
+  - **Aus den Noten lernt er selbst:** Stil-Wahl per Thompson-Sampling; die Gründe des KI-Cutters speisen das
+    Regie-Lernen, wobei deine Bewertung vorgeht; Entwürfe unter der Mindest-Note (50) sortiert er selbst aus.
+  - Abschaltbar und einstellbar in ⚙️. Das Publikum bleibt das Hauptsignal. Doku: `docs/REGIE.md`, „Regisseur 3.0“.

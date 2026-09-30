@@ -53,13 +53,24 @@ def _grenze(wert: float, unten: float, oben: float) -> float:
     return round(max(unten, min(oben, wert)), 3)
 
 
-def bewertungen(con: sqlite3.Connection) -> list[sqlite3.Row]:
-    return con.execute(
-        """SELECT b.*, e.schnittliste, e.track_id, e.format, t.bpm AS track_bpm, t.energie AS track_energie
-             FROM entwurf_bewertungen b JOIN entwuerfe e ON e.id = b.entwurf_id
-             LEFT JOIN tracks t ON t.id = e.track_id
-            ORDER BY b.erstellt, b.entwurf_id"""
-    ).fetchall()
+def bewertungen(con: sqlite3.Connection, *, mit_ki: bool = True) -> list[sqlite3.Row]:
+    """Deine Bewertungen (quelle "du") und – mit_ki – die Urteile des KI-Cutters (kritik.py, quelle "ki", 30.09.):
+    Sie wirken mit denselben Regeln wie deine Knöpfe, so lernt der Regisseur auch ohne dein 👍/👎. Ein Entwurf, den
+    du selbst bewertet hast, zählt nur mit deinem Urteil (du hast Vorrang)."""
+    felder = """e.schnittliste, e.track_id, e.format, t.bpm AS track_bpm, t.energie AS track_energie"""
+    sql = f"""SELECT b.entwurf_id AS entwurf_id, b.daumen AS daumen, b.gruende AS gruende, b.erstellt AS erstellt,
+                     b.geaendert AS geaendert, 'du' AS quelle, {felder}
+                FROM entwurf_bewertungen b JOIN entwuerfe e ON e.id = b.entwurf_id
+                LEFT JOIN tracks t ON t.id = e.track_id"""
+    if mit_ki:
+        sql += f"""
+              UNION ALL
+              SELECT k.entwurf_id, k.daumen, k.gruende, k.erstellt, k.erstellt, 'ki', {felder}
+                FROM kritiken k JOIN entwuerfe e ON e.id = k.entwurf_id
+                LEFT JOIN tracks t ON t.id = e.track_id
+               WHERE k.daumen IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM entwurf_bewertungen b WHERE b.entwurf_id = k.entwurf_id)"""
+    return con.execute(sql + " ORDER BY erstellt, entwurf_id").fetchall()
 
 
 def _liste(zeile: sqlite3.Row) -> dict:
@@ -136,8 +147,10 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None) ->
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
     p, ziel = _falte(bewertungen(con), konfig, energien, fmt)
     if fmt is not None:
-        from . import autonom
+        from . import autonom, stile
 
+        # Schnittstil (30.09.) zuerst: relativ auf das Gelernte; das Publikumsmodell darf danach nachsteuern
+        p = stile.anwenden(con, konfig, fmt, p)
         p, ziel = autonom.plan_parameter(con, konfig, fmt, p, ziel)
         grenzen = format_regeln(konfig, fmt)[0]
         if "ziel_dauer_s" in p:
@@ -306,10 +319,15 @@ def dauer_zeile(zeilen: list, dauer_faktor: float, fmt: dict, *, ziel_s: float |
 def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     p, ziel = aktuelle(con, konfig, "short")
     start, start_ziel, hinweise = vorgaben(konfig)
-    zeilen = bewertungen(con)
+    zeilen = bewertungen(con, mit_ki=False)
     daumen = sum(1 for z in zeilen if z["daumen"] > 0)
-    teile = [f"🧠 Regie – {len(zeilen)} Bewertungen ({daumen} 👍 / {len(zeilen) - daumen} 👎)",
+    ki = [z for z in bewertungen(con) if z["quelle"] == "ki"]
+    teile = [f"🧠 Regie – {len(zeilen)} Bewertungen von dir ({daumen} 👍 / {len(zeilen) - daumen} 👎) · "
+             f"{len(ki)} vom KI-Cutter ({sum(1 for z in ki if z['daumen'] > 0)} 👍)",
              "Schnitt-Werte lernen je Format (unten: Short); Momente, Stimmung und Musik gelten für beide"]
+    from . import stile
+
+    teile.append(stile.stil_zeile(con))
     for name in ("puffer_vor_s", "puffer_nach_s", "seg_min_faktor", "beats_pro_schnitt", "dauer_faktor", "uebergang_faktor"):
         s0, jetzt_ = start[name], p[name]
         herkunft = "" if s0 == PARAMETER[name] else ", deine Vorgabe"

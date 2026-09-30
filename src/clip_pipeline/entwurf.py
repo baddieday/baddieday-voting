@@ -89,8 +89,22 @@ def _gerade(x: float) -> int:
     return int(round(x / 2) * 2)
 
 
+RAHMEN_MAX = 1.6   # Short: Spielbild höchstens 1,6-fach (Mitte), sonst fehlt zu viel vom Rand (HUD, Gegner seitlich)
+
+
+def rahmen_zoom(liste: dict) -> float:
+    """Schnittstil (stile.py, 30.09.): Short-Spielbild vergrößert und mittig zugeschnitten – statt eines schmalen
+    Streifens (16:9 in 9:16 = ein Drittel der Höhe). 1,0 = wie bisher; nur Short."""
+    if liste.get("format") != "short":
+        return 1.0
+    try:
+        return max(1.0, min(RAHMEN_MAX, float((liste.get("parameter") or {}).get("rahmen_zoom", 1.0))))
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", look: str = "", tempo: str = "",
-          flash: str = "") -> str:
+          flash: str = "", rahmen: float = 1.0) -> str:
     """fps zuerst: Alle weiteren Filter sehen nur noch die Bilder, die ins Ergebnis kommen (60 fps -> halb so viele).
     tempo (effekt_filter.tempo_video) noch davor: Zeitlupe/Zeitraffer dehnen die Quelle, fps macht daraus die
     Bilder des Videos (eine 60-fps-Aufnahme bleibt bei Faktor 0,5 im 30-fps-Short flüssig).
@@ -98,8 +112,10 @@ def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", lo
     Hintergrund, 16:9: vor dem Rand), der Hintergrund zoomt also nie mit.
     look (nur Short): Farblook auf Spielbild und kleinem Hintergrund, bevor beide zusammengesetzt werden.
     flash (effekt_filter.bildfilter): der Effekt-Katalog (Blitz, Strobe, Farb-Pop, Negativ, Blur …) nur auf dem
-    Spielbild, nach dem Zoom, vor dem Look."""
+    Spielbild, nach dem Zoom, vor dem Look.
+    rahmen (rahmen_zoom, nur Short): Spielbild rahmen-fach breiter skalieren und auf b zuschneiden (Mitte)."""
     z = f",{zoom}" if zoom else ""
+    groesse = f"scale={_gerade(b * rahmen)}:-2,crop={b}:ih" if hochformat and rahmen > 1.0 else f"scale={b}:-2"
     fl = f",{flash}" if flash else ""
     lk = f",{look}" if look else ""
     kopf = f"[{i}:v]{tempo + ',' if tempo else ''}fps={fps}"
@@ -109,7 +125,7 @@ def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", lo
         return (f"{kopf},split=2[hg{i}][vg{i}];"
                 f"[hg{i}]scale={b4}:{h4}:force_original_aspect_ratio=increase,crop={b4}:{h4},boxblur=5:2{lk},"
                 f"scale={b}:{h},eq=brightness=-0.08[hgb{i}];"
-                f"[vg{i}]scale={b}:-2{z}{fl}{lk}[vgs{i}];[hgb{i}][vgs{i}]overlay=(W-w)/2:(H-h)/2,"
+                f"[vg{i}]{groesse}{z}{fl}{lk}[vgs{i}];[hgb{i}][vgs{i}]overlay=(W-w)/2:(H-h)/2,"
                 f"format=yuv420p,setsar=1,settb=AVTB[v{i}]")
     return (f"{kopf},scale={b}:{h}:force_original_aspect_ratio=decrease{z}{fl},pad={b}:{h}:(ow-iw)/2:(oh-ih)/2,"
             f"format=yuv420p,setsar=1,settb=AVTB[v{i}]")
@@ -148,6 +164,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
     zooms = effekt_filter.zooms_je_segment(liste, ereignisse, griffe)
     bild = effekt_filter.je_segment(liste, ereignisse, griffe, effekte.BILD)   # Katalog nur aufs Spielbild
     look = effekt_filter.look_der_liste(liste) if hoch else ""  # 16:9: einmal global (effekt_filter.global_kette)
+    rahmen = rahmen_zoom(liste)
     teile, laengen = [], []
     for i, (s, (vorne, hinten)) in enumerate(zip(segmente, griffe)):
         laenge = (s["zeit_ende"] - s["zeit_start"]) + vorne + hinten
@@ -159,7 +176,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
             eingang = s["quelle_start_s"] - vorne
             tempo_v, tempo_a = effekt_filter.tempo_video(fenster, eingang), effekt_filter.tempo_ton(i, s, eingang)
         teile.append(_bild(i, b, h, fps, hoch, effekt_filter.zoom(i, zooms[i]) if i in zooms else "", look, tempo_v,
-                           effekt_filter.bildfilter(bild[i], b) if i in bild else ""))
+                           effekt_filter.bildfilter(bild[i], b) if i in bild else "", rahmen))
         teile.append(_ton(i, spuren[i], laenge, bool(s.get("stimmen", True)), tempo_a))
     # Verketten: offset_i = bisherige Länge − Übergangsdauer (siehe Herleitung in docs/ENTSCHEIDUNGEN.md E8)
     v, a, gesamt = "[v0]", "[a0]", laengen[0]
@@ -251,7 +268,7 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
         info = probe(datei)
         spuren.append(len(info.tonspuren))
         if info.breite and info.hoehe:  # Short: Texte über/unter dem höchsten Spielbild (4:3-Aufnahme ist höher)
-            spiel_h = max(spiel_h, effekt_filter.spiel_hoehe(b, info.breite, info.hoehe))
+            spiel_h = max(spiel_h, effekt_filter.spiel_hoehe(_gerade(b * rahmen_zoom(liste)), info.breite, info.hoehe))
         start = s["quelle_start_s"] - vorne
         dauer = (s["quelle_ende_s"] - s["quelle_start_s"]) + vorne + hinten
         # Überhang: xfade braucht Bilder bis GANZ ans Ende des Übergangs, sonst bricht die Ausgabe still ab.

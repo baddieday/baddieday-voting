@@ -52,6 +52,8 @@ class Kalibrierung(MitSpeicher):
 
     def test_bot_schickt_album_je_clip(self):
         try:
+            import telegram  # noqa: F401  (lernbot_kalibrierung importiert es erst beim Senden)
+
             from clip_pipeline import lernbot_kalibrierung
         except ImportError:
             self.skipTest("python-telegram-bot fehlt")

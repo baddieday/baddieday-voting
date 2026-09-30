@@ -550,7 +550,17 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandid
 
 # --- 2. Spannungsbogen -----------------------------------------------------------------
 
-def bogen(gewaehlt: list[Kandidat], fmt_name: str, *, hook_staerkster: bool = False) -> list[Kandidat]:
+def bogen(gewaehlt: list[Kandidat], fmt_name: str, *, hook_staerkster: bool = False,
+          reihenfolge: str = "bogen") -> list[Kandidat]:
+    """Reihenfolge der Momente. reihenfolge (Schnittstil, stile.py): "bogen" = Hook, Steigerung, Höhepunkt am Ende;
+    "steigend" = vom schwächsten zum stärksten; "chronologisch" = wie gespielt (Match, dann Zeit im Moment), der
+    stärkste Moment wandert ans Ende (Höhepunkt, aus ihm kommt auch der Hook vorn)."""
+    if reihenfolge == "steigend":
+        return sorted(gewaehlt, key=lambda k: (k.intensitaet, k.schluessel))
+    if reihenfolge == "chronologisch" and len(gewaehlt) > 1:
+        staerkster = max(gewaehlt, key=lambda k: (k.intensitaet, k.schluessel))
+        rest = sorted((k for k in gewaehlt if k is not staerkster), key=lambda k: (k.match_id or "", k.kern[0], k.schluessel))
+        return [*rest, staerkster]
     if len(gewaehlt) <= 2:
         return sorted(gewaehlt, key=lambda k: k.intensitaet, reverse=hook_staerkster)
     nach_staerke = sorted(gewaehlt, key=lambda k: (-k.intensitaet, k.schluessel))
@@ -850,7 +860,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         hinweise.append(f"{len(zu_lang)} Serie(n) zu lang für Short (> {fmt['serie_max_s']:.0f} s am Stück)")
     # Nachlegen nimmt aus demselben Vorrat wie die Auswahl: ohne die Momente im Cooldown, außer der reichte nicht
     vorrat, _ = frei_von_cooldown(alle, fmt, p)
-    reihe = bogen(gewaehlt, fmt_name, hook_staerkster=bool(p.get("hook_staerkster", False)))
+    reihe = bogen(gewaehlt, fmt_name, hook_staerkster=bool(p.get("hook_staerkster", False)),
+                  reihenfolge=str(p.get("reihenfolge", "bogen")))
 
     # Vorherrschende Stimmung (nach Länge gewichtet) bestimmt die Musik
     anteile: dict[str, float] = {}
@@ -903,7 +914,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                     rest = frische
                 naechster_ = max(rest, key=lambda k: (k.punkte, k.schluessel))
                 neue_reihe = bogen([*gewaehlt, naechster_], fmt_name,
-                                   hook_staerkster=bool(p.get("hook_staerkster", False)))
+                                   hook_staerkster=bool(p.get("hook_staerkster", False)),
+                                   reihenfolge=str(p.get("reihenfolge", "bogen")))
                 neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
                 if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
                     passt_nicht.append(naechster_)

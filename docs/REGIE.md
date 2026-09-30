@@ -335,6 +335,35 @@ Der Filtergraph ist ein einziges Argument auf der Befehlszeile (Linux: höchsten
 darum schon beim Planen und bricht über 64 KB ab (`Schnittliste zu groß`); 40 Segmente mit 400 Ereignissen
 ergeben rund 57 KB.
 
+## Regisseur 3.0 – Schnittstile und Selbstkritik (30.09.)
+
+Florian: „immer die selbe Grütze … er muss das selbst erkennen und lernen“, „ich möchte keine 100 oder 1000 Videos
+bewerten“. Der Bot benotet deshalb jeden Entwurf **selbst** und lernt daraus. Deine 👍/👎 wirken weiter und gehen vor,
+nötig sind sie nicht.
+
+- **Schnittstile** (`stile.py`, nur Short): ⚡ Montage, 📖 Story, 📈 Steigerung, 🎬 Kino und 🎞️ Klassik (wie bisher).
+  Ein Stil legt Reihenfolge, Hook und Spielbild-Größe fest. Tempo, Effekt-Dichte und Musikpegel ändert er
+  **relativ**; das Gelernte bleibt also wirksam. `rahmen_zoom` 1,0–1,6 vergrößert das Spielbild im Short. Die
+  Bildmitte bleibt, die Ränder fallen weg, und die Texte bleiben im unscharfen Rand.
+- **Cutter-Kritik** (`kritik.py`, Tabelle `kritiken`): Jeder Entwurf bekommt eine Note von 0 bis 100.
+  - **Handwerksregeln** laufen immer und kosten nichts. Sie prüfen Einstieg, Leerlauf, Rhythmus, Finale,
+    Bildfläche, Effekt-Dichte und Länge.
+  - Der **KI-Cutter** (`claude -p`, nur Leserecht, Schema `kritik`, höchstens `ki_pro_tag` am Tag) liest einen
+    Kontaktbogen mit 8 Standbildern und `plan.json`. Er liefert Note, Stärken, Schwächen und Gründe aus derselben
+    Liste wie deine Knöpfe.
+  - Die Note ist das Mittel aus beidem.
+- **Selbst lernen:**
+  1. Welcher Stil kommt, wählt ein Thompson-Sampling über die Noten je Stil. Gute Stile kommen öfter, jeder
+     bekommt weiter Chancen, und nie kommt derselbe dreimal hintereinander.
+  2. Die Gründe des KI-Cutters wirken im Regie-Lernen wie deine Knöpfe (`regie_lernen.bewertungen`, Quelle
+     `ki`). Ab `gut_ab` gilt ein Entwurf als 👍.
+  3. Entwürfe unter `schwelle` siehst du gar nicht. Der Bot baut dann neu, höchstens `auto_versuche_max`-mal.
+- **Einstellbar** in ⚙️: 🎬 Schnittstil (auto oder fest), 🧐 KI-Cutter an/aus und 🧐 Mindest-Note. In der Datei
+  unter `[regie].stil` und `[regie.kritik]`.
+- Sichtbar: unter jedem Entwurf „🎬 Stil … · Spielbild ×z“ und „🧐 Cutter-Score …“. `/lernstand` zeigt die Noten je
+  Stil und wie viele Urteile vom KI-Cutter kamen.
+- Das **Publikum** (`autonom.py`) bleibt das Hauptsignal, sobald veröffentlichte Videos Zahlen haben.
+
 ## pve-big schaltet sich selbst ab (clip-leerlauf)
 `deploy/big/clip-leerlauf` läuft auf pve-big jede Minute und fährt ihn nach 20 min ohne echten Zugriff auf den
 Clips-Ordner herunter (Details im Kopf des Skripts). Er setzt jede Minute den Zeitstempel der leeren Datei
