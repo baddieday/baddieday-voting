@@ -43,7 +43,7 @@ def extrahiere(snapshot: dict) -> dict[str, float]:
     if isinstance(p.get("stil"), str):
         x["stil:" + p["stil"]] = 1.
     if (z := zahl(p.get("rahmen_zoom"))) is not None:
-        x["rahmen_zoom"] = max(0., min(1., (z-1.)/.6))
+        x["rahmen_zoom"] = max(0., min(1., (z-1.)/.3))
     seg = liste.get("segmente") or []
     if seg:
         laengen = [float(s["zeit_ende"])-float(s["zeit_start"]) for s in seg

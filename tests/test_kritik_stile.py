@@ -5,10 +5,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from clip_pipeline import entwurf, kritik, regie, regie_lernen, stile
+from clip_pipeline import effekt_filter, entwurf, kritik, regie, regie_lernen, stile
 from clip_pipeline.claude_aufruf import ClaudeAntwort
 from clip_pipeline.zeit import iso, jetzt
 from tests.hilfen import HAT_FFMPEG, MitSpeicher, testvideo
+from tests.regie_hilfen import MOMENTE, MitRegieMaterial
 
 
 def liste(kill_s=(3.0,), rahmen=1.0, dauer=40.0):
@@ -34,7 +35,7 @@ class Stile(MitSpeicher):
     def test_fester_stil_wirkt_relativ(self):
         self.konfig.daten["regie"]["stil"] = "kino"
         p = stile.anwenden(self.con, self.konfig, "short", {**regie.PARAMETER, "seg_min_faktor": 1.1})
-        self.assertEqual((p["stil"], p["rahmen_zoom"], p["reihenfolge"]), ("kino", 1.6, "bogen"))
+        self.assertEqual((p["stil"], p["rahmen_zoom"], p["reihenfolge"]), ("kino", 1.3, "bogen"))
         self.assertEqual(p["seg_min_faktor"], 1.32)                   # 1,1 gelernt × 1,2 Kino – Gelerntes bleibt
         self.assertIs(stile.anwenden(self.con, self.konfig, "zusammenschnitt", {"x": 1})["x"], 1)  # nur Short
 
@@ -57,6 +58,11 @@ class Stile(MitSpeicher):
         ks = [k("a", 5, "m2", 1), k("b", 1, "m1", 9), k("c", 9, "m1", 2), k("d", 3, "m1", 5)]
         self.assertEqual([x.schluessel for x in regie.bogen(ks, "short", reihenfolge="steigend")], ["b", "d", "a", "c"])
         self.assertEqual([x.schluessel for x in regie.bogen(ks, "short", reihenfolge="chronologisch")], ["d", "b", "a", "c"])
+        # Hook (Stil, Experiment, Publikum) wirkt in jeder Reihenfolge: Höhepunkt zuerst (Review 30.09.)
+        self.assertEqual([x.schluessel for x in regie.bogen(ks, "short", reihenfolge="steigend", hook_staerkster=True)],
+                         ["c", "b", "d", "a"])
+        ks[0].start_utc, ks[1].start_utc, ks[3].start_utc = "2026-09-29T20:00:00Z", "2026-09-29T21:00:00Z", "2026-09-29T22:00:00Z"
+        self.assertEqual([x.schluessel for x in regie.bogen(ks, "short", reihenfolge="chronologisch")], ["a", "b", "d", "c"])
 
 
 class Kritik(MitSpeicher):
@@ -98,6 +104,7 @@ class Kritik(MitSpeicher):
         p, _ = regie_lernen.aktuelle(self.con, self.konfig)          # ohne Format: kein Stil, nur das Gelernte
         self.assertEqual(p["seg_min_faktor"], 1.15)                    # „zu hektisch“ vom KI-Cutter wirkt
         self.assertIn("🧐 Cutter-Score", kritik.kritik_zeile(self.con, eid))
+        self.assertIsNone(regie_lernen.wirkung(self.con, self.konfig, "short"))   # „🧠 Aus #n“ nur aus deinen Bewertungen
 
     def test_ohne_ki_nur_regeln(self):
         eid = self.anlegen()
@@ -131,6 +138,28 @@ class Rahmen(unittest.TestCase):
         self.assertEqual(entwurf.rahmen_zoom({"format": "zusammenschnitt", "parameter": {"rahmen_zoom": 1.4}}), 1.0)
         self.assertIn("scale=1044:-2,crop=720:ih", entwurf._bild(0, 720, 1280, 30, True, rahmen=1.45))
         self.assertIn("[vg0]scale=720:-2[vgs0]", entwurf._bild(0, 720, 1280, 30, True))   # 1,0: wie bisher
+
+    def test_zoom_nur_so_weit_wie_der_titel_lesbar_bleibt(self):
+        kino = {"format": "short", "parameter": {"rahmen_zoom": 1.3}}
+        z = entwurf.rahmen_grenze(kino, 720, 1280, [(1920, 1080)])
+        self.assertEqual(z, 1.28)                                                            # 16:9: knapp unter Kino
+        spiel_h = effekt_filter.spiel_hoehe(entwurf._gerade(720 * z), 1920, 1080)
+        titel = effekt_filter.lage(720, 1280, True, 11, 0.6, spiel_h)["titel"][1]
+        self.assertGreaterEqual(titel, effekt_filter.TITEL_LESBAR * 1280)                   # Kill-Titel bleibt lesbar
+        self.assertEqual(entwurf.rahmen_grenze(kino, 720, 1280, [(1920, 1080), (1440, 1080)]), 1.0)   # 4:3: kein Zoom
+        self.assertEqual(entwurf.rahmen_grenze(kino, 1080, 1920, [(1920, 1080)]), 1.28)     # Upload-Fassung wie Entwurf
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class PlanerSpeichertWirksamenZoom(MitRegieMaterial):
+    def test_kino_short(self):
+        self.momente_anlegen(MOMENTE)
+        self.musik_anlegen(150, "episch")
+        self.konfig.daten["regie"]["stil"] = "kino"
+        p, ziel = regie_lernen.aktuelle(self.con, self.konfig, "short")
+        e = regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel)
+        gespeichert = json.loads(self.con.execute("SELECT parameter FROM entwuerfe WHERE id = ?", (e["entwurf"],)).fetchone()[0])
+        self.assertEqual((gespeichert["stil"], gespeichert["rahmen_zoom"]), ("kino", 1.28))   # Testmaterial 640×360
 
 
 if __name__ == "__main__":

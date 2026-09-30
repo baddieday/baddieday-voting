@@ -343,8 +343,10 @@ nötig sind sie nicht.
 
 - **Schnittstile** (`stile.py`, nur Short): ⚡ Montage, 📖 Story, 📈 Steigerung, 🎬 Kino und 🎞️ Klassik (wie bisher).
   Ein Stil legt Reihenfolge, Hook und Spielbild-Größe fest. Tempo, Effekt-Dichte und Musikpegel ändert er
-  **relativ**; das Gelernte bleibt also wirksam. `rahmen_zoom` 1,0–1,6 vergrößert das Spielbild im Short. Die
-  Bildmitte bleibt, die Ränder fallen weg, und die Texte bleiben im unscharfen Rand.
+  **relativ**; das Gelernte bleibt also wirksam. `rahmen_zoom` (Klassik 1,0 bis Kino 1,3) vergrößert das Spielbild
+  im Short. Die Bildmitte bleibt, die Ränder fallen weg, und die Texte bleiben im unscharfen Rand. Wirksam wird der
+  Zoom nur so weit, dass der Kill-Titel über der Bedienzone von TikTok/Shorts noch lesbar ist (mindestens 3 % der
+  Bildhöhe): bei 16:9 bis ×1,28, bei 4:3 gar nicht. Gespeichert wird der wirksame Wert.
 - **Cutter-Kritik** (`kritik.py`, Tabelle `kritiken`): Jeder Entwurf bekommt eine Note von 0 bis 100.
   - **Handwerksregeln** laufen immer und kosten nichts. Sie prüfen Einstieg, Leerlauf, Rhythmus, Finale,
     Bildfläche, Effekt-Dichte und Länge.

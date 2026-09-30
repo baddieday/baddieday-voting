@@ -11,7 +11,8 @@ gleicher Spannungsbogen, gleiches Tempo. Ein Stil ist ein Schnitt-Konzept, wie e
 
 Stile verändern die gelernten Werte RELATIV (z. B. Segmentlänge ×0,75) – was aus Bewertungen und Publikum gelernt
 ist, bleibt wirksam. „rahmen_zoom“ vergrößert im Short das Spielbild (Mitte, die Ränder fallen weg; die Texte bleiben
-im Rand darüber/darunter).
+im Rand darüber/darunter). Wirksam wird er nur so weit, dass der Kill-Titel über der Bedienzone lesbar bleibt
+(entwurf.rahmen_grenze: 16:9 bis ×1,28, 4:3 gar nicht) – gespeichert wird der wirksame Wert.
 
 Welcher Stil kommt, entscheidet der Bot selbst: Thompson-Sampling über die Cutter-Scores (kritik.py) der bisherigen
 Entwürfe je Stil – ohne dein 👍/👎. Ein Stil mit guten Noten kommt öfter, jeder bekommt weiter Chancen, und nie
@@ -27,13 +28,13 @@ import sqlite3
 from .konfig import Konfig
 
 STILE: dict[str, dict] = {
-    "montage": {"titel": "⚡ Montage", "rahmen_zoom": 1.45, "reihenfolge": "bogen", "hook_staerkster": True,
+    "montage": {"titel": "⚡ Montage", "rahmen_zoom": 1.22, "reihenfolge": "bogen", "hook_staerkster": True,
                 "faktoren": {"seg_min_faktor": 0.75, "effekt_hektik": 1.2, "musik_pegel": 1.3}, "beats": 1},
-    "story": {"titel": "📖 Story", "rahmen_zoom": 1.25, "reihenfolge": "chronologisch", "hook_staerkster": False,
+    "story": {"titel": "📖 Story", "rahmen_zoom": 1.1, "reihenfolge": "chronologisch", "hook_staerkster": False,
               "faktoren": {"seg_min_faktor": 1.4, "effekt_hektik": 0.7, "musik_pegel": 0.6}, "beats": 2},
-    "steigerung": {"titel": "📈 Steigerung", "rahmen_zoom": 1.3, "reihenfolge": "steigend", "hook_staerkster": False,
+    "steigerung": {"titel": "📈 Steigerung", "rahmen_zoom": 1.15, "reihenfolge": "steigend", "hook_staerkster": False,
                    "faktoren": {"seg_min_faktor": 0.9}, "beats": None},
-    "kino": {"titel": "🎬 Kino", "rahmen_zoom": 1.6, "reihenfolge": "bogen", "hook_staerkster": True,
+    "kino": {"titel": "🎬 Kino", "rahmen_zoom": 1.3, "reihenfolge": "bogen", "hook_staerkster": True,
              "faktoren": {"seg_min_faktor": 1.2, "effekt_hektik": 0.85, "musik_pegel": 0.8}, "beats": None},
     "klassik": {"titel": "🎞️ Klassik", "rahmen_zoom": 1.0, "reihenfolge": "bogen", "hook_staerkster": None,
                 "faktoren": {}, "beats": None},

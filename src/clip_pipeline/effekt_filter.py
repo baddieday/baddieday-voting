@@ -75,6 +75,7 @@ TITEL_GROESSE, TITEL_BREITE = 0.10, 0.76   # höchstens 0,10·b; Breite ≤ 0,76
 ZAEHLER_GROESSE = 0.04                    # × h
 GLEITEN = 0.015                           # × h: so weit gleitet ein Text von außen herein
 TEXT_MIN = 0.015                          # × h: kleiner wird kein Text – dann fällt er weg (kein Platz)
+TITEL_LESBAR = 0.03                       # × h: so groß muss der Kill-Titel bleiben – deckelt den Rahmen-Zoom (30.09.)
 # 16:9: Titel mitten in der Blende
 TITEL_16_9_GROESSE, TITEL_16_9_BREITE = 0.14, 0.80
 
@@ -355,6 +356,13 @@ def spielbild(b: int, h: int, hoehe: int | None = None) -> tuple[int, int]:
     hoehe = min(h, hoehe or spiel_hoehe(b, 16, 9))
     oben = ((h - hoehe) // 2) & ~1
     return oben, oben + hoehe
+
+
+def spiel_hoehe_max(h: int) -> int:
+    """Short: höchstes Spielbild (Mitte), unter dem bis zur Bedienzone (SICHER_UNTEN) noch ein Kill-Titel der Größe
+    TITEL_LESBAR · h passt – dieselbe Rechnung wie lage(), rückwärts. Bei 1280 Höhe: 522 px (16:9 bis ×1,29)."""
+    frei = TITEL_LESBAR * h * 2 * (TINTE * POP_SPITZE / 2 + RAND) / 0.8
+    return int(2 * (SICHER_UNTEN * h - frei) - h) - 4   # −4: Rundung von oben/unten auf gerade Zeilen
 
 
 def _halbe_hoehe(groesse: float) -> float:

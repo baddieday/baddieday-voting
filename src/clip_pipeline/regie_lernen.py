@@ -287,9 +287,10 @@ def wirkung(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> dict | None:
     gefühlt ins Leere“): Parameter mit und ohne diese Bewertung, als kurze Sätze. None ohne Bewertungen.
     Beispiel: {"entwurf": 41, "format": "short", "aenderungen": ["Ziel-Dauer 81% → 90%", "6 Momente kommen öfter"]}."""
     zeilen = bewertungen(con)
-    if not zeilen:
+    deine = [z for z in zeilen if z["quelle"] == "du"]   # KI-Urteile (30.09.) sind nie „deine letzte Bewertung“
+    if not deine:
         return None
-    letzte = max(zeilen, key=lambda z: (z["geaendert"] or z["erstellt"] or "", z["entwurf_id"]))
+    letzte = max(deine, key=lambda z: (z["geaendert"] or z["erstellt"] or "", z["entwurf_id"]))
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
     ohne = [z for z in zeilen if z["entwurf_id"] != letzte["entwurf_id"]]
     vorher, _ = _falte(ohne, konfig, energien, fmt)

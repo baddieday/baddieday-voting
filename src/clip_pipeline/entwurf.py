@@ -89,7 +89,7 @@ def _gerade(x: float) -> int:
     return int(round(x / 2) * 2)
 
 
-RAHMEN_MAX = 1.6   # Short: Spielbild höchstens 1,6-fach (Mitte), sonst fehlt zu viel vom Rand (HUD, Gegner seitlich)
+RAHMEN_MAX = 1.6   # Short: Obergrenze der Angabe; wirksam begrenzt rahmen_grenze (lesbarer Titel über der Bedienzone)
 
 
 def rahmen_zoom(liste: dict) -> float:
@@ -101,6 +101,20 @@ def rahmen_zoom(liste: dict) -> float:
         return max(1.0, min(RAHMEN_MAX, float((liste.get("parameter") or {}).get("rahmen_zoom", 1.0))))
     except (TypeError, ValueError):
         return 1.0
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def rahmen_grenze(liste: dict, b: int, h: int, quellen: list[tuple[int, int]]) -> float:
+    """Wirksamer Rahmen-Zoom (30.09.): so groß wie der Stil will, aber nur so weit, dass unter dem Spielbild der
+    höchsten Quelle (4:3 ist höher als 16:9) ein lesbarer Kill-Titel über der Bedienzone Platz hat
+    (effekt_filter.spiel_hoehe_max). 16:9 bei 720×1280: höchstens ×1,28; 4:3: ×1,0. quellen: (Breite, Höhe) je Datei."""
+    z = rahmen_zoom(liste)
+    quellen = [(qb, qh) for qb, qh in quellen if qb and qh]
+    if z <= 1.0 or not quellen:
+        return z
+    hoch = max(qh / qb for qb, qh in quellen)
+    return max(1.0, min(z, math.floor(100 * effekt_filter.spiel_hoehe_max(h) / (b * hoch)) / 100))
 
 
 def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", look: str = "", tempo: str = "",
@@ -151,11 +165,11 @@ def _ton(i: int, spuren: int, dauer: float, stimmen: bool = True, tempo: str = "
 def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang: int | None,
                 schrift: Path | None, sfx_pegel: float = sfx.SFX_PEGEL,
                 zeichenbreite: float = effekte.STANDARD["titel_zeichenbreite"],
-                spiel_h: int | None = None) -> tuple[str, float]:
+                spiel_h: int | None = None, rahmen: float | None = None) -> tuple[str, float]:
     """(Graph, Länge). Eingänge: 0 … n−1 die Segmente, dann die Musik (musik_eingang), dann die Klänge des Plans in
     der Reihenfolge von sfx.mischung. schrift: für clip-battle.de und die Kill-Titel (ohne: keine Texte).
     spiel_h: Höhe des höchsten Spielbilds im Short (effekt_filter.spiel_hoehe) – die Texte bleiben darüber und
-    darunter; ohne Angabe 16:9."""
+    darunter; ohne Angabe 16:9. rahmen: wirksamer Rahmen-Zoom (rahmen_grenze); ohne Angabe aus der Liste."""
     segmente = liste["segmente"]
     fps = int(liste["fps"])
     hoch = liste["format"] == "short"
@@ -164,7 +178,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
     zooms = effekt_filter.zooms_je_segment(liste, ereignisse, griffe)
     bild = effekt_filter.je_segment(liste, ereignisse, griffe, effekte.BILD)   # Katalog nur aufs Spielbild
     look = effekt_filter.look_der_liste(liste) if hoch else ""  # 16:9: einmal global (effekt_filter.global_kette)
-    rahmen = rahmen_zoom(liste)
+    rahmen = rahmen_zoom(liste) if rahmen is None else rahmen
     teile, laengen = [], []
     for i, (s, (vorne, hinten)) in enumerate(zip(segmente, griffe)):
         laenge = (s["zeit_ende"] - s["zeit_start"]) + vorne + hinten
@@ -260,21 +274,23 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
         b, h = _gerade(b * faktor), _gerade(h * faktor)
     griffe = _griffe(segmente, int(liste["fps"]))
     befehl = ["ffmpeg", "-hide_banner", "-nostdin", "-y"]
-    spuren, spiel_h = [], 0
+    spuren, quellen = [], []
     for s, (vorne, hinten) in zip(segmente, griffe):
         datei = Path(s["datei"])
         if not datei.is_file():
             raise MedienFehler(f"Moment-Datei fehlt: {datei}")
         info = probe(datei)
         spuren.append(len(info.tonspuren))
-        if info.breite and info.hoehe:  # Short: Texte über/unter dem höchsten Spielbild (4:3-Aufnahme ist höher)
-            spiel_h = max(spiel_h, effekt_filter.spiel_hoehe(_gerade(b * rahmen_zoom(liste)), info.breite, info.hoehe))
+        quellen.append((info.breite, info.hoehe))
         start = s["quelle_start_s"] - vorne
         dauer = (s["quelle_ende_s"] - s["quelle_start_s"]) + vorne + hinten
         # Überhang: xfade braucht Bilder bis GANZ ans Ende des Übergangs, sonst bricht die Ausgabe still ab.
         # Überzählige Bilder verwirft xfade; der Ton wird im Graphen exakt auf die Länge geschnitten.
         ueberhang = max(0.0, min(UEBERHANG_S, info.dauer_s - (start + dauer)))
         befehl += ["-ss", f"{max(0.0, start):.3f}", "-t", f"{dauer + ueberhang:.3f}", "-i", str(datei)]
+    # Short: Texte über/unter dem höchsten Spielbild (4:3-Aufnahme ist höher); Zoom nur so weit, dass Titel lesbar bleiben
+    rahmen = rahmen_grenze(liste, b, h, quellen)
+    spiel_h = max((effekt_filter.spiel_hoehe(_gerade(b * rahmen), qb, qh) for qb, qh in quellen if qb and qh), default=0)
     musik_eingang = None
     if m := liste.get("musik"):
         datei = musik.ordner(konfig) / m["datei"]
@@ -288,7 +304,7 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
     befehl += sfx.eingaenge(konfig, klaenge)
     graph, gesamt = filtergraph(liste, spuren, b=b, h=h, musik_eingang=musik_eingang, schrift=_schrift(liste, konfig),
                                 sfx_pegel=sfx.pegel(konfig), zeichenbreite=_zeichenbreite(konfig),
-                                spiel_h=spiel_h or None)
+                                spiel_h=spiel_h or None, rahmen=rahmen)
     if len(graph.encode()) >= MAX_GRAPH:
         raise MedienFehler(f"Entwurf {liste['name']}: Filtergraph {len(graph.encode()) // 1000} KB – höchstens "
                            f"{MAX_GRAPH // 1000} KB")

@@ -257,7 +257,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - 2026-09-30 (Regisseur 3.0, Florian: „immer die selbe Grütze“, „er muss das selbst erkennen und lernen“, „ich möchte
   keine 100 oder 1000 Videos bewerten“): **Der Bot benotet sich selbst.**
   - **Schnittstile** im Short (Montage, Story, Steigerung, Kino, Klassik) als relative Stellschrauben, mit
-    größerem Spielbild (`rahmen_zoom` bis 1,6; vorher ein schmaler Streifen).
+    größerem Spielbild (`rahmen_zoom` bis ×1,3, begrenzt so, dass der Kill-Titel über der Bedienzone lesbar bleibt).
   - **Cutter-Kritik** je Entwurf: Handwerksregeln, dazu Claude als Senior-Cutter auf einem Kontaktbogen (nur
     Leserecht, Schema `kritik`, höchstens 20 am Tag).
   - **Aus den Noten lernt er selbst:** Stil-Wahl per Thompson-Sampling; die Gründe des KI-Cutters speisen das

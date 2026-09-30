@@ -72,7 +72,7 @@ def regeln(liste: dict, format_regeln: tuple[float, float] | None = None) -> dic
     teile["finale"] = 1.0 if bogen and bogen[-1] >= max(bogen) - 1e-6 else 0.5
     # Bildfläche: im Short ist ein größeres Spielbild lesbarer (1,0 = schmaler Streifen)
     zoom = float((liste.get("parameter") or {}).get("rahmen_zoom", 1.0) or 1.0)
-    teile["bild"] = 1.0 if liste.get("format") != "short" else round(min(1.0, 0.4 + (zoom - 1.0) / 0.45 * 0.6), 3)
+    teile["bild"] = 1.0 if liste.get("format") != "short" else round(min(1.0, 0.4 + (zoom - 1.0) / 0.25 * 0.6), 3)
     # Effekt-Dichte je 10 s: kaum etwas wirkt leer, ein Gewitter wirkt billig
     ereignisse = sum(len(s.get("effekte") or []) for s in segmente) + sum(1 for s in segmente if s.get("lupe"))
     dichte = ereignisse / dauer * 10
