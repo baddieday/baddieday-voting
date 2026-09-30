@@ -115,6 +115,18 @@ Messung. „Score kommt beim nächsten Lauf“ heißt: alles da, der Timer war n
 die Screenshot-Auswertungen seit Montag 00:00, bei denen claude wirklich lief (fand der Dienst claude gar nicht,
 zählt das nicht; `decide` und Stimmung zählen noch nicht mit, Annahme A18).
 
+### 5a. TikTok verbinden (Zahlen automatisch, 30.09.)
+1. Im TikTok-Entwicklerportal eine App anlegen: Plattform Web, Produkte **Login Kit** und **Display API**, Scopes
+   `user.info.basic` und `video.list`, Redirect-URI `https://clip-battle.de/tiktok/callback` (Domain vorher über
+   „Verify URL properties“ per DNS-TXT bestätigen), Sandbox mit deinem Konto als Target User.
+2. Client Key und Client Secret in `/opt/clip-pipeline/.env` eintragen (`TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`),
+   Lern-Bot neu starten. Nie in den Chat schreiben.
+3. Im Lern-Bot `/tiktok` → Adresse öffnen, zustimmen → die Adresse, auf der der Browser landet (die Seite darf leer
+   sein), mit `/tiktok <adresse>` zurückschicken. Der Code gilt nur wenige Minuten.
+4. Fertig: Die Tokens liegen nur in `publikum-oauth.json` neben der DB (0600), der Timer `clip-publikum` holt die
+   Zahlen täglich und erneuert den Zugang selbst. Ohne Bot: `pipeline publikum anmelden` bzw. `… --code '<adresse>'`.
+Im Sandbox-Modus kann TikTok Zahlen zurückhalten – dann bleibt der Screenshot-Weg.
+
 ### 6. Meldungen und Ruhezeit
 Nach dem täglichen Lauf (10:00) kommt höchstens **eine** Meldung am Tag, nur wenn es neue Scores gibt:
 `📊 2 Posts bewertet: #17 +0,8 · #18 −0,3 – /publikum`. Solange der Score 0 wegen „Basis zu klein“ ist, erklärt

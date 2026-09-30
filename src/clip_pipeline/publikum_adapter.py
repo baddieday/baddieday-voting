@@ -75,9 +75,43 @@ def _json(url: str, token: str | None = None, *, daten=None, formular=False) -> 
     return wert
 
 
+ANMELDUNG = "anmeldung"   # Seed einer Anmeldung per /tiktok (tiktok_anmeldung) – geht vor dem Refresh-Token aus .env
+
+
+def cache_pfad(konfig) -> Path:
+    """Private Token-Datei neben der DB (Linux 0600, Git ignoriert sie)."""
+    return konfig.datenbank.parent / "publikum-oauth.json"
+
+
+def lies_cache(pfad: Path) -> dict:
+    if not pfad.is_file():
+        return {}
+    try:
+        return json.loads(pfad.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise AdapterFehler("TikTok-Token-Datei ist nicht lesbar") from None
+
+
+def schreibe_cache(pfad: Path, daten: dict) -> None:
+    """Atomar und privat (0600): erst Temp-Datei, fsync, dann ersetzen."""
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".publikum-oauth-", suffix=".tmp", dir=pfad.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(daten, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, pfad)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
 def _token(plattform: str, konfig, zeit: datetime) -> str | None:
     """Access-Token bzw. automatische Erneuerung; rotierte TikTok-Refresh-Tokens
     bleiben atomar in einer privaten Datei neben der DB (Linux 0600), nie im Repo.
+    TikTok: Eine Anmeldung per /tiktok (seed "anmeldung") reicht – dann braucht .env nur Key und Secret.
     """
     prefix = plattform.upper()
     direkt = os.environ.get(f"{prefix}_ACCESS_TOKEN", "").strip()
@@ -85,7 +119,11 @@ def _token(plattform: str, konfig, zeit: datetime) -> str | None:
     client_name = "CLIENT_KEY" if plattform == "tiktok" else "CLIENT_ID"
     client = os.environ.get(f"{prefix}_{client_name}", "").strip()
     secret = os.environ.get(f"{prefix}_CLIENT_SECRET", "").strip()
-    if not (refresh and client and secret):
+    pfad = cache_pfad(konfig)
+    cache = lies_cache(pfad) if plattform == "tiktok" and client and secret else {}
+    angemeldet = (cache.get("client_key") == client and cache.get("seed") == ANMELDUNG
+                  and bool(cache.get("refresh_token")))
+    if not ((refresh or angemeldet) and client and secret):
         return direkt or None
     # YouTube gibt beim Refresh keinen neuen Refresh-Token aus. Der langlebige
     # Token bleibt nur in .env; der kurzfristige Access-Token bleibt im Speicher.
@@ -95,14 +133,7 @@ def _token(plattform: str, konfig, zeit: datetime) -> str | None:
         if not antwort.get("access_token"):
             raise AdapterFehler("YouTube-Token konnte nicht erneuert werden")
         return str(antwort["access_token"])
-    cache_pfad = konfig.datenbank.parent / "publikum-oauth.json"
-    seed = hashlib.sha256(refresh.encode()).hexdigest()
-    cache = {}
-    if cache_pfad.is_file():
-        try:
-            cache = json.loads(cache_pfad.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            raise AdapterFehler("TikTok-Token-Datei ist nicht lesbar") from None
+    seed = ANMELDUNG if angemeldet else hashlib.sha256(refresh.encode()).hexdigest()
     # Andere App-Konfiguration darf keine alten Tokens verwenden.
     if cache.get("client_key") == client and cache.get("seed") == seed:
         refresh = cache.get("refresh_token") or refresh
@@ -112,21 +143,10 @@ def _token(plattform: str, konfig, zeit: datetime) -> str | None:
                      "client_key": client, "client_secret": secret, "refresh_token": refresh}, formular=True)
     if not antwort.get("access_token"):
         raise AdapterFehler("TikTok-Token konnte nicht erneuert werden")
-    neu = {"client_key": client, "seed": seed, "access_token": antwort["access_token"],
-           "refresh_token": antwort.get("refresh_token") or refresh,
-           "expires_at": zeit.timestamp() + float(antwort.get("expires_in", 0))}
-    cache_pfad.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".publikum-oauth-", suffix=".tmp", dir=cache_pfad.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(neu, stream)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, cache_pfad)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+    schreibe_cache(pfad, {**{k: v for k, v in cache.items() if k in ("open_id", "scope")},
+                          "client_key": client, "seed": seed, "access_token": antwort["access_token"],
+                          "refresh_token": antwort.get("refresh_token") or refresh,
+                          "expires_at": zeit.timestamp() + float(antwort.get("expires_in", 0))})
     return str(antwort["access_token"])
 
 
