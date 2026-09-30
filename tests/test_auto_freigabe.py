@@ -71,6 +71,30 @@ class Frist(MitAuto):
         self.assertEqual(auto_freigabe.frist(self.con, self.konfig, zeit=UHR), [])
         self.assertEqual(self.spalten(frisch, "status"), ("gesendet",))
 
+    @unittest.skipIf(bot_app is None, "python-telegram-bot fehlt")
+    def test_frist_meldet_auch_wenn_telegram_bremst(self):
+        # Altbestand-Welle: Flood-Limit beim Bearbeiten darf weder die ⏰-Meldung noch den Lauf kosten
+        from telegram.error import RetryAfter
+
+        alt = iso(UHR - timedelta(hours=25))
+        ids = [self.clip("gesendet", 3.0) for _ in range(3)]
+        for i, cid in enumerate(ids):
+            self.con.execute("UPDATE clips SET vorgelegt = ?, tg_nachricht_id = ? WHERE id = ?", (alt, 500 + i, cid))
+            self.p(cid, 0.7)
+        bearbeitet = []
+
+        async def edit_message_caption(**kwargs):
+            if bearbeitet:
+                raise RetryAfter(5)
+            bearbeitet.append(kwargs["message_id"])
+
+        fake = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                               bot=SimpleNamespace(edit_message_caption=edit_message_caption))
+        self.assertEqual(asyncio.run(bot_app.automat_lauf(fake)), 3)
+        self.assertEqual(bearbeitet, [500])
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM meldungen WHERE schluessel LIKE 'frist:%'")
+                         .fetchone()[0], 1)
+
 
 class KeinZirkelschluss(MitAuto):
     """T2: automatische Entscheidungen füttern weder Lernen noch Erwartung noch das Tor."""

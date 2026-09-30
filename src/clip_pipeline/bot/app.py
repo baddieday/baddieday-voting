@@ -15,7 +15,7 @@ from html import escape
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaVideo, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, Conflict
+from telegram.error import BadRequest, Conflict, RetryAfter, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
 
 from .. import (auto_freigabe, caption, db, einstellungen, erwartung, highlight, lernbot_einstellungen, lernen,
@@ -198,15 +198,21 @@ async def automat_lauf(app: Application) -> int:
     if w["modus"] == "aus":
         return 0
     ergebnis = auto_freigabe.frist(con, k)
+    if ergebnis:  # zuerst die Meldung: die Entscheidungen stehen schon fest, auch wenn Telegram gleich streikt
+        db.meldung(con, f"frist:{iso(jetzt())}", auto_freigabe.frist_text(ergebnis, w["frist_h"]))
     for e in ergebnis:
         if not e["tg_nachricht_id"]:
             continue
-        with contextlib.suppress(BadRequest):  # Nachricht weg oder zu alt: die Entscheidung gilt trotzdem
+        clip = db.clip(con, e["id"])  # aktueller Stand – Florian kann während der Schleife schon umgedreht haben
+        try:
             await app.bot.edit_message_caption(
                 chat_id=chat, message_id=e["tg_nachricht_id"], caption=_clip_text(con, konfig, e["id"]),
-                parse_mode=ParseMode.HTML, reply_markup=_markup(aktionen.knoepfe_auto(e["id"], e["status"])))
-    if ergebnis:
-        db.meldung(con, f"frist:{iso(jetzt())}", auto_freigabe.frist_text(ergebnis, w["frist_h"]))
+                parse_mode=ParseMode.HTML, reply_markup=_markup(_knoepfe_fuer(clip)))
+        except RetryAfter:  # Flood-Limit: die übrigen alten Nachrichten bleiben wie sie sind, die Entscheidung gilt
+            log.warning("Frist: Telegram bremst – die restlichen alten Nachrichten bleiben diesmal unbearbeitet")
+            break
+        except TelegramError as fehler:  # Nachricht weg, zu alt, Netz: die Entscheidung gilt trotzdem
+            log.warning("Frist: Nachricht zu Clip #%s nicht bearbeitet: %s", e["id"], fehler)
     for match_id in auto_freigabe.faellige_zusammenfassungen(con):
         db.meldung(con, f"auto:{match_id}", auto_freigabe.zusammenfassung_text(con, match_id, k))
     return len(ergebnis)
