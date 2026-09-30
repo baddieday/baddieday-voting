@@ -45,6 +45,7 @@ Veröffentlichte Videos und ihre Publikumszahlen verbessern die nächsten Entwü
 👍/👎 bleiben freiwilliges Zusatzfeedback; danach bei Bedarf Gründe antippen und ✅ fertig.
 /musik – Titel · /lernstand – autonomer Lernfortschritt · /stand – kurzer Stand
 ⚙️ /einstellungen – Clip-Auswahl (alle · neuester Spielabend · ein Match), Vorfilter, Effekte, Musik
+🧪 /kalibrieren – neuestes Match zum Nachprüfen: je Clip 3 Standbilder, Stimmung, Kills mit Waffen-Nummer
 Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 
 # Kurzbefehle (27.09.): Knöpfe im Chat wie beim Bewerten (Florian: „nicht die Tastatur ersetzen“). Callback k:0:<ziel>.
@@ -715,9 +716,9 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     # Lernschleife „Publikum“ (Spec §7.1, §10.4, §14 Stufe 1): Screenshots/Hand-Eingabe, Upload-Paket und /link,
     # /publikum – eigene Module, hier nur eingehängt. VOR dem allgemeinen Klick-Handler: der liest jeden Knopf als
     # Entwurfs-Knopf; die Module melden ihre Knöpfe (pl/pm, pk/pt) mit eigenem Muster an.
-    from . import lernbot_einstellungen, lernbot_paket, lernbot_publikum, lernbot_zahlen
+    from . import lernbot_einstellungen, lernbot_kalibrierung, lernbot_paket, lernbot_publikum, lernbot_zahlen
 
-    for modul in (lernbot_zahlen, lernbot_paket, lernbot_publikum, lernbot_einstellungen):
+    for modul in (lernbot_zahlen, lernbot_paket, lernbot_publikum, lernbot_einstellungen, lernbot_kalibrierung):
         modul.registriere(app, nur_ich)
     app.add_handler(CallbackQueryHandler(bei_klick))
     app.add_error_handler(bei_fehler)
