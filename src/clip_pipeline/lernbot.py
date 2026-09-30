@@ -26,7 +26,8 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from . import autonom, big, db, einstellungen, entwurf, erwartung, kritik, musik, regie, regie_lernen, stile, stimmung
+from . import (autonom, big, db, einstellungen, entwurf, erwartung, kriterien, kritik, massstab, musik, regie,
+               regie_lernen, stile, stimmung)
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import iso, jetzt, utc_zu_lokal
@@ -317,17 +318,38 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
         con.close()
 
 
+def massstab_nachziehen(konfig: Konfig) -> int | None:
+    """massstab.nachziehen mit eigener Verbindung (läuft in einem Thread, nicht im Event-Loop des Bots)."""
+    con = db.verbinde(konfig.datenbank)
+    try:
+        return massstab.nachziehen(con, konfig, "👍/👎")
+    finally:
+        con.close()
+
+
 def pruefe_auto_verwerfen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> str | None:
     """B5 ([lernbot].auto_schwelle, Florian: „nicht jeden Entwurf bewerten müssen, sagen will ich trotzdem, was
     hochgeladen wird“): None = normal senden, sonst der Grund, warum der Entwurf still aussortiert wird – kein
     Foto an dich, kein Eintrag in entwurf_bewertungen (sonst würde die Erwartung ihr eigenes Urteil bestätigen,
     statt an deinem gemessen zu werden). Sobald Publikumsevidenz vorhanden ist, entfällt dieser historische
     Vorfilter. Schwelle 0 (Standard) oder ohne Modell (zu wenige Urteile, [erwartung].mindest_urteile) lässt durch.
-    Beispiel: Schwelle 0,5, Erwartung 32 % → "Erwartung 32 % unter Schwelle 50 %"."""
-    note = con.execute("SELECT score FROM kritiken WHERE entwurf_id = ?", (entwurf_id,)).fetchone()
-    mindest = float(konfig.wert("regie.kritik.schwelle", 0.0))
-    if note is not None and mindest > 0 and note["score"] < mindest:  # 30.09.: der Bot erkennt schwache Schnitte selbst
-        return f"Cutter-Score {note['score']:.0f} unter {mindest:.0f}"
+    Beispiel: Schwelle 0,5, Erwartung 32 % → "Erwartung 32 % unter Schwelle 50 %".
+    Cutter-Maßstab 1.0 (30.09., Spec §4): zuerst die K.O.-Tore am Video („Tor: Blitze 7/s (Grenze 3)“), dann die
+    Note gegen kritik.schwelle – Q20 der eigenen Notenverteilung, begrenzt auf 40–50, erst ab 20 gemessenen
+    Entwürfen des Formats (vorher wirken nur die Tore)."""
+    note = con.execute("SELECT k.score, k.tore, e.format FROM kritiken k JOIN entwuerfe e ON e.id = k.entwurf_id "
+                       "WHERE k.entwurf_id = ?", (entwurf_id,)).fetchone()
+    # 30.09.: der Bot erkennt schwache Schnitte selbst ([regie.kritik].schwelle = 0 schaltet das ganz ab, Tore inklusive)
+    if note is not None and float(konfig.wert("regie.kritik.schwelle", 50) or 0) > 0:
+        try:
+            tor = kriterien.tor_verletzt(json.loads(note["tore"] or "null"))
+        except ValueError:
+            tor = None
+        if tor is not None:
+            return f"Tor: {tor['text']}"
+        mindest = kritik.schwelle(con, konfig, note["format"])
+        if mindest > 0 and note["score"] < mindest:
+            return f"Cutter-Score {note['score']:.0f} unter {mindest:.0f}"
     schwelle = float(konfig.wert("lernbot.auto_schwelle", 0.0))
     if schwelle <= 0 or autonom.ueberblick(con)["ausgewertet"] > 0:
         return None
@@ -671,6 +693,10 @@ async def bei_klick(update, context) -> None:
     # Wo ein Klick Zeit braucht – zum Nachmessen auf dem Mini: journalctl -u clip-lernbot | grep Knopf
     log.info("Knopf %s Entwurf #%s: Antwort %.2f s · Speichern %.2f s · Bildunterschrift %.2f s", aktion, eid,
              geantwortet - start, gespeichert - geantwortet, time.monotonic() - gespeichert)
+    if aktion not in ("d", "g") and not weiter:
+        # Cutter-Maßstab (30.09.): dein 👍/👎 ist ein Lehrer – nachlernen (eigene Verbindung, im Thread). Mit
+        # „weiter“ erledigt das die Kritik des nächsten Entwurfs, der schon mit dieser Bewertung gebaut wird.
+        await asyncio.to_thread(massstab_nachziehen, context.bot_data["konfig"])
 
 
 async def bei_fehler(update, context) -> None:

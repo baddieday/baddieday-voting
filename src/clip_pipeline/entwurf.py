@@ -11,9 +11,11 @@ Aufbau des FFmpeg-Filtergraphen:
   3. Effekte (Regisseur 2.0, nur mit liste["effekte"].an): Zoom je Segment nur auf dem Spielbild, Look (Short je
      Segment, 16:9 danach auf das ganze Bild), nach den Übergängen Blenden-Filter und Kill-Titel/Zähler
      (effekt_filter.py) – der Plan steht in der Schnittliste
-  4. Musik ab ihrem Versatz, geduckt unter dem Spielton (sidechaincompress), ein- und ausgeblendet; die Klänge des
-     Plans (sfx.py) kommen danach dazu
+  4. Musik ab ihrem Versatz, geduckt unter dem Spielton (sidechaincompress), ein- und ausgeblendet ([regie.ton]); die
+     Klänge des Plans (sfx.py) kommen danach dazu
   5. Short: Schriftzug "clip-battle.de"
+  6. Danach (30.09., Cutter-Maßstab): Lautheit angleichen (normalisiere_ton), Sidecar `<name>.render.json` und – nur
+     mit Musik, auf Wunsch – die Stems für die Messung (messung.py)
 Ohne Effekte (an = false oder version 3) ist der Graph zeichengleich mit dem von vorher.
 """
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import math
 import re
 import shutil
@@ -30,9 +33,11 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import effekt_filter, effekte, musik, sfx, shorts
+from . import effekt_filter, effekte, medien, messung, musik, sfx, shorts
 from .konfig import Konfig, KonfigFehler
 from .medien import MedienFehler, fuehre_aus, probe
+
+log = logging.getLogger(__name__)
 
 ENTWURF_KURZE_SEITE = 720
 UEBERHANG_S = 0.2
@@ -42,6 +47,12 @@ ENTWURF_KBIT = 4000
 # noch eine Notbremse gegen einen außer Kontrolle geratenen Plan.
 MAX_INLINE = 100_000
 MAX_GRAPH = 4_000_000
+# Ton-Hygiene (Cutter-Maßstab R1/R3, 30.09.), überschreibbar in [regie.ton]: Ziel-Lautheit und True Peak für alle
+# Plattformen (Annahme A1), Musik-Kanten – einblenden nur gegen Knacken, ausblenden im Short kurz (Loop-Ende),
+# im Zusammenschnitt weich
+TON_STANDARD = {"lufs": -14.0, "true_peak": -1.5, "musik_ein_s": 0.03, "musik_aus_s_short": 0.25,
+                "musik_aus_s_zs": 2.0}
+AAC_RESERVE_DB = 1.0  # Abstand des loudnorm-Ziels zu [regie.ton] true_peak (normalisiere_ton)
 
 
 @functools.lru_cache(maxsize=1)
@@ -99,8 +110,6 @@ def rahmen_zoom(liste: dict) -> float:
         return 1.0
     try:
         return max(1.0, min(RAHMEN_MAX, float((liste.get("parameter") or {}).get("rahmen_zoom", 1.0))))
-    except (TypeError, ValueError):
-        return 1.0
     except (TypeError, ValueError):
         return 1.0
 
@@ -165,11 +174,17 @@ def _ton(i: int, spuren: int, dauer: float, stimmen: bool = True, tempo: str = "
 def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang: int | None,
                 schrift: Path | None, sfx_pegel: float = sfx.SFX_PEGEL,
                 zeichenbreite: float = effekte.STANDARD["titel_zeichenbreite"],
-                spiel_h: int | None = None, rahmen: float | None = None) -> tuple[str, float]:
+                spiel_h: int | None = None, rahmen: float | None = None, ton: dict | None = None,
+                stems: bool = False) -> tuple[str, float]:
     """(Graph, Länge). Eingänge: 0 … n−1 die Segmente, dann die Musik (musik_eingang), dann die Klänge des Plans in
     der Reihenfolge von sfx.mischung. schrift: für clip-battle.de und die Kill-Titel (ohne: keine Texte).
     spiel_h: Höhe des höchsten Spielbilds im Short (effekt_filter.spiel_hoehe) – die Texte bleiben darüber und
-    darunter; ohne Angabe 16:9. rahmen: wirksamer Rahmen-Zoom (rahmen_grenze); ohne Angabe aus der Liste."""
+    darunter; ohne Angabe 16:9. rahmen: wirksamer Rahmen-Zoom (rahmen_grenze); ohne Angabe aus der Liste.
+    ton: Werte aus [regie.ton] (ton_einstellungen; ohne Angabe TON_STANDARD) – Musik-Kanten: einblenden
+    musik_ein_s, ausblenden musik_aus_s_short bzw. musik_aus_s_zs (Cutter-Maßstab R3).
+    stems (nur mit Musik, Cutter-Maßstab R5): zusätzlich die Ausgänge [stv] (Vordergrund = Spiel + Stimmen vor den
+    Klängen) und [stm] (Musik nach dem Ducking) für die Messung (messung.py). Ohne stems ist der Graph zeichengleich
+    mit dem ohne diesen Schalter."""
     segmente = liste["segmente"]
     fps = int(liste["fps"])
     hoch = liste["format"] == "short"
@@ -220,11 +235,17 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
         teile.append(sfx_teil)
     if musik_eingang is not None:
         m = liste["musik"]
+        t = {**TON_STANDARD, **(ton or {})}
+        ein = float(t["musik_ein_s"])
+        aus = float(t["musik_aus_s_short"] if hoch else t["musik_aus_s_zs"])
         teile += [
-            f"{a}asplit=2[spiel][schluessel]",
+            f"{a}asplit=3[spiel][schluessel][stv]" if stems else f"{a}asplit=2[spiel][schluessel]",
             f"[{musik_eingang}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"volume={m['pegel']},atrim=0:{gesamt:.3f},afade=t=in:d=0.5,afade=t=out:st={max(0.0, gesamt - 2):.3f}:d=2[mus]",
-            "[mus][schluessel]sidechaincompress=threshold=0.05:ratio=6:attack=20:release=400[leiser]",
+            f"volume={m['pegel']},atrim=0:{gesamt:.3f},afade=t=in:d={ein:g},"
+            f"afade=t=out:st={max(0.0, gesamt - aus):.3f}:d={aus:g}[mus]",
+            "[mus][schluessel]sidechaincompress=threshold=0.05:ratio=6:attack=20:release=400"
+            + ("[leiser0]" if stems else "[leiser]"),
+            *(["[leiser0]asplit=2[leiser][stm]"] if stems else []),
             sfx.abmischung(["[spiel]", "[leiser]"], bool(sfx_teil)),
         ]
     else:
@@ -247,7 +268,7 @@ def encoder(konfig: Konfig, final: bool) -> tuple[list[str], list[str], str]:
 
 def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max_bytes: int = 48_000_000,
             encoder_name: str | None = None, volle_aufloesung: bool = False, crf: int = 23,
-            kbit_max: int = ENTWURF_KBIT, vollstaendig: bool = True) -> dict:
+            kbit_max: int = ENTWURF_KBIT, vollstaendig: bool = True, stems: Path | None = None) -> dict:
     """Rendert eine Schnittliste nach `ziel` (erst `<name>.tmp.mp4`, dann umbenannt – nie eine halbe Datei).
     Rückgabe {"datei", "mb", "dauer_s", "encoder", "aufloesung"}, z. B. {…, "encoder": "libx264",
     "aufloesung": [720, 1280]}.
@@ -261,6 +282,11 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
     encoder_name="libx264": CPU erzwingen – so ruft sich der Rückfall selbst auf.
     vollstaendig=False: isolierte Effekt-/Segmentvorschau; alle vollständigen Videos prüfen die Formatgrenzen.
     final (NVENC, pve-big): crf, kbit_max und max_bytes wirken nicht, es gibt keine Größenprüfung.
+    stems (nur mit Musik, Cutter-Maßstab R5): zweiter Ausgang dorthin (z. B. kritik-<id>/stems.mka), zwei Mono-Spuren
+      FLAC – Vordergrund und Musik nach dem Ducking – für messung.messe; ohne Musik entsteht keine Datei.
+    Ton-Hygiene (R1): nach der Dauerprüfung und vor der Größenprüfung gleicht normalisiere_ton die Lautheit auf
+      [regie.ton] an (zwei Pässe loudnorm); scheitert das, bleibt der Ton wie gerendert.
+    Sidecar: neben ziel liegt danach `<name>.render.json` (Geometrie, Encoder, Ton – _sidecar) für die Messung.
 
     Fehler: MedienFehler, wenn eine Moment-Datei oder die Musik fehlt (vor ffmpeg) oder ffmpeg scheitert – VA-API
     fällt vorher einmal auf CPU zurück (mit denselben Werten). ZuGross(kbit) mit der benutzten Rate, wenn die Datei
@@ -302,9 +328,11 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
     ereignisse = effekte.zeitleiste(liste)
     klaenge, _ = sfx.mischung(ereignisse, len(segmente) + (musik_eingang is not None), sfx.pegel(konfig))
     befehl += sfx.eingaenge(konfig, klaenge)
+    mit_stems = stems is not None and musik_eingang is not None
     graph, gesamt = filtergraph(liste, spuren, b=b, h=h, musik_eingang=musik_eingang, schrift=_schrift(liste, konfig),
                                 sfx_pegel=sfx.pegel(konfig), zeichenbreite=_zeichenbreite(konfig),
-                                spiel_h=spiel_h or None, rahmen=rahmen)
+                                spiel_h=spiel_h or None, rahmen=rahmen, ton=ton_einstellungen(konfig),
+                                stems=mit_stems)
     if len(graph.encode()) >= MAX_GRAPH:
         raise MedienFehler(f"Entwurf {liste['name']}: Filtergraph {len(graph.encode()) // 1000} KB – höchstens "
                            f"{MAX_GRAPH // 1000} KB")
@@ -326,27 +354,148 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
     befehl += [*_graph_argumente(graph, graph_datei), "-map", "[vout]", "-map", "[aout]", "-t", f"{gesamt:.3f}",
                *video, *rate]
     befehl += ["-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(tmp)]
+    stems_tmp = stems.with_name(stems.stem + ".tmp" + stems.suffix) if mit_stems else None
+    if stems_tmp is not None:  # zweiter Ausgang: Stems für die Messung, gleich lang wie das Video
+        stems_tmp.parent.mkdir(parents=True, exist_ok=True)
+        befehl += ["-map", "[stv]", "-map", "[stm]", "-ac", "1", "-c:a", "flac", "-sample_fmt", "s16",
+                   "-t", f"{gesamt:.3f}", str(stems_tmp)]   # 16 Bit reichen für die Lautheit (halb so groß)
     try:
         fuehre_aus(befehl, f"Entwurf {liste['name']}")
     except MedienFehler:
+        if stems_tmp is not None:
+            stems_tmp.unlink(missing_ok=True)
         if name == "h264_vaapi" and encoder_name is None:  # VA-API streikt -> CPU
             return rendere(liste, ziel, konfig, final=final, max_bytes=max_bytes, encoder_name="libx264",
                            volle_aufloesung=volle_aufloesung, crf=crf, kbit_max=kbit_max,
-                           vollstaendig=vollstaendig)
+                           vollstaendig=vollstaendig, stems=stems)
         raise
     finally:
         graph_datei.unlink(missing_ok=True)
-    groesse = tmp.stat().st_size
     # ffmpeg kann trotz Exit 0 vorzeitig enden (z. B. xfade). Erst die tatsächlich vorhandenen Videobilder
     # prüfen; ein längerer Audiostream/Container darf einen abgebrochenen Film nicht verdecken.
-    wirklich = _pruefe_renderdauer(liste, tmp, vollstaendig=vollstaendig or final)
+    try:
+        wirklich = _pruefe_renderdauer(liste, tmp, vollstaendig=vollstaendig or final)
+    except MedienFehler:
+        if stems_tmp is not None:
+            stems_tmp.unlink(missing_ok=True)
+        raise
+    ton = normalisiere_ton(tmp, konfig)   # R1: Lautheit angleichen; scheitert es, bleibt der Ton wie gerendert
+    groesse = tmp.stat().st_size
     if not final and groesse > max_bytes:
         tmp.unlink(missing_ok=True)
+        if stems_tmp is not None:
+            stems_tmp.unlink(missing_ok=True)
         raise ZuGross(f"Entwurf {liste['name']} ist {groesse // 1_000_000} MB groß (Grenze {max_bytes // 1_000_000})",
                       kbit)
     tmp.replace(ziel)
+    if stems_tmp is not None and stems_tmp.is_file():
+        stems_tmp.replace(stems)
+    _sidecar(ziel, {**geometrie(liste, b, h, quellen, rahmen), "fps": int(liste["fps"]), "encoder": name, **ton,
+                    "stems": str(stems) if mit_stems else None})
     return {"datei": str(ziel), "mb": round(groesse / 1e6, 1), "dauer_s": round(wirklich, 3), "encoder": name,
             "aufloesung": [b, h]}
+
+
+def ton_einstellungen(konfig: Konfig) -> dict:
+    """[regie.ton] mit TON_STANDARD als Rückfall, alles als Zahl (ein falscher Wert gilt als Standard)."""
+    werte = {}
+    for k, standard in TON_STANDARD.items():
+        try:
+            werte[k] = float(konfig.wert(f"regie.ton.{k}", standard))
+        except (TypeError, ValueError):
+            werte[k] = standard
+    return werte
+
+
+def geometrie(liste: dict, b: int, h: int, quellen: list[tuple[int, int]], rahmen: float) -> dict:
+    """Wo das Spielbild im gerenderten Video liegt – dieselbe Rechnung wie _bild. quellen: (Breite, Höhe) je Segment
+    (0 = unbekannt, dann 16:9); rahmen: wirksamer Rahmen-Zoom (rahmen_grenze).
+    Rückgabe {"b", "h", "format", "band": [y0, y1], "spiel_anteile": [Spielbild-Höhe / h je Segment], "rahmen"}.
+    band: Short = effekt_filter.spielbild mit dem NIEDRIGSTEN Spielbild der Liste – so liegt ein Ausschnitt sicher im
+    Spielbild jedes Segments, Logo, Titel und unscharfer Rand fallen heraus. 16:9: volle Höhe, nur ein Rand oben/unten
+    (Quelle breiter als 16:9) wird abgezogen – 4:3 bekommt Ränder links/rechts, die Höhe bleibt voll.
+    Beispiel Short 720×1280, 16:9-Quellen, rahmen 1,0: band [436, 842], spiel_anteile je 0,3172."""
+    hoch = liste.get("format") == "short"
+    hoehen = []
+    for qb, qh in quellen:
+        qb, qh = (qb, qh) if qb and qh else (16, 9)
+        if hoch:
+            hoehen.append(min(h, effekt_filter.spiel_hoehe(_gerade(b * rahmen), qb, qh)))
+        else:  # scale=b:h:force_original_aspect_ratio=decrease, dann pad
+            hoehen.append(min(h, _gerade(qh * min(b / qb, h / qh))))
+    niedrigste = min(hoehen, default=effekt_filter.spiel_hoehe(b, 16, 9) if hoch else h)
+    if hoch:
+        y0, y1 = effekt_filter.spielbild(b, h, niedrigste)
+    else:
+        y0 = ((h - niedrigste) // 2) & ~1
+        y1 = y0 + niedrigste
+    return {"b": b, "h": h, "format": liste.get("format"), "band": [y0, y1],
+            "spiel_anteile": [round(x / h, 4) for x in hoehen], "rahmen": round(rahmen, 3)}
+
+
+def _sidecar(ziel: Path, daten: dict) -> None:
+    """`<name>.render.json` neben dem Video. Nur eine Hilfe für die Messung: ein Schreibfehler kostet das Video nicht."""
+    try:
+        ziel.with_suffix(".render.json").write_text(json.dumps(daten, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError as exc:
+        log.warning("Sidecar %s nicht geschrieben: %s", ziel.with_suffix(".render.json"), exc)
+
+
+def normalisiere_ton(datei: Path, konfig: Konfig) -> dict:
+    """Lautheit des fertigen Videos auf [regie.ton] lufs/true_peak (−14 LUFS / −1,5 dBTP), zwei Pässe (R1, 30.09.):
+    Pass 1 misst (messung.loudnorm_messen), Pass 2 gleicht linear an – das Bild wird nur kopiert (-c:v copy), der Ton
+    neu kodiert (AAC 160k, 48 kHz). LRA=20, damit loudnorm linear bleibt; fehlt die Reserve für den True Peak, fällt
+    er in den dynamischen Modus – das steht dann als loudnorm_modus im Sidecar, der Limiter bleibt die Sicherung.
+    Erst wenn die neue Datei so lang ist wie die alte (Bild ±0,05 s, Ton da), ersetzt sie datei.
+    Rückgabe {"normiert": bool, "ton_gain_db": float | None, "loudnorm_modus": "linear" | "dynamic" | None,
+    "ton_hinweis": str | None}. Kein Tonstrom, stille Spur (I = −inf) oder ein Fehler: datei bleibt unverändert,
+    normiert False, der Grund in ton_hinweis. Wirft nicht."""
+    t = ton_einstellungen(konfig)
+    # AAC hebt den True Peak beim Neukodieren um bis zu ~1,4 dB (gemessen 30.09.) -> loudnorm zielt AAC_RESERVE_DB
+    # tiefer, sonst landet das fertige Video über der Grenze von Tor G4 (−0,5 dBTP) und wird vom eigenen Renderer
+    # aussortiert; [regie.ton] true_peak bleibt die Zahl, die im fertigen Video gelten soll
+    ziel_i, ziel_tp = t["lufs"], t["true_peak"] - AAC_RESERVE_DB
+    ergebnis = {"normiert": False, "ton_gain_db": None, "loudnorm_modus": None, "ton_hinweis": None}
+    werte = messung.loudnorm_messen(datei, ziel_i, ziel_tp)
+    if werte is None:
+        ergebnis["ton_hinweis"] = "Lautheit nicht messbar (kein Tonstrom?)"
+        return ergebnis
+    gemessen = [werte.get(k) for k in ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")]
+    if not all(isinstance(x, float) and math.isfinite(x) for x in gemessen):
+        ergebnis["ton_hinweis"] = f"Ton still (I = {werte.get('input_i')}) – nicht angeglichen"
+        return ergebnis
+    i, tp, lra, schwelle, versatz = gemessen
+    neu = datei.with_name(datei.stem + ".ton" + datei.suffix)
+    try:
+        ton_alt, bild_alt = messung._stream_dauern(datei)
+        if bild_alt is None:
+            raise MedienFehler("Bildlänge nicht messbar")
+        # loudnorm gibt den Ton in 0,1-s-Blöcken aus (hinten bis zu 0,1 s mehr) -> auf die alte Länge schneiden
+        laenge = ton_alt if ton_alt is not None else bild_alt
+        af = (f"loudnorm=I={ziel_i}:TP={ziel_tp}:LRA={messung.LOUDNORM_LRA}:measured_I={i}:measured_TP={tp}:"
+              f"measured_LRA={lra}:measured_thresh={schwelle}:offset={versatz}:linear=true:print_format=json,"
+              f"aresample=48000,atrim=0:{laenge:.3f}")
+        befehl = ["ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-y", "-i", str(datei), "-map", "0:v", "-map",
+                  "0:a", "-c:v", "copy", "-af", af, "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(neu)]
+        # medien.fuehre_aus (nicht der Name hier im Modul): wer den Render-Aufruf in Tests ersetzt, trifft nur ihn
+        text = medien.fuehre_aus(befehl, f"Lautheit {datei.name}")
+        ton_neu, bild_neu = messung._stream_dauern(neu)
+        if bild_neu is None or ton_neu is None or abs(bild_neu - bild_alt) > 0.05 or abs(ton_neu - laenge) > 0.05:
+            raise MedienFehler(f"Länge nach dem Angleichen: Bild {bild_neu} s, Ton {ton_neu} s "
+                               f"(vorher {bild_alt} s / {ton_alt} s)")
+    except (MedienFehler, ValueError) as exc:
+        neu.unlink(missing_ok=True)
+        ergebnis["ton_hinweis"] = f"Lautheit nicht angeglichen: {exc}"[:300]
+        log.warning("%s: %s", datei.name, ergebnis["ton_hinweis"])
+        return ergebnis
+    zweiter = messung.loudnorm_json(text) or {}
+    neu.replace(datei)
+    if all(isinstance(zweiter.get(k), float) and math.isfinite(zweiter[k]) for k in ("output_i", "input_i")):
+        gain = zweiter["output_i"] - zweiter["input_i"]
+    else:
+        gain = ziel_i - i
+    return {"normiert": True, "ton_gain_db": round(gain, 2), "loudnorm_modus": zweiter.get("normalization_type"),
+            "ton_hinweis": None}
 
 
 def _pruefe_formatdauer(liste: dict, dauer_s: float | None = None) -> None:
@@ -396,7 +545,8 @@ def graph_fehler(liste: dict, konfig: Konfig) -> list[str]:
         schrift = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
     n = len(liste["segmente"])
     graph, _ = filtergraph(liste, [2] * n, b=b, h=h, musik_eingang=n if liste.get("musik") else None, schrift=schrift,
-                           sfx_pegel=sfx.pegel(konfig), zeichenbreite=_zeichenbreite(konfig))
+                           sfx_pegel=sfx.pegel(konfig), zeichenbreite=_zeichenbreite(konfig),
+                           ton=ton_einstellungen(konfig))
     groesse = len(graph.encode())
     if groesse >= MAX_GRAPH:
         return [f"Filtergraph {groesse // 1000} KB – höchstens {MAX_GRAPH // 1000} KB (zu viele Effekte)"]
@@ -423,7 +573,9 @@ def entwurf(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> dict:
         _pruefe_renderdauer(liste, Path(zeile["datei"]))
         return {"entwurf": entwurf_id, "datei": zeile["datei"], "uebersprungen": True}
     ziel = Path(zeile["schnittliste"]).with_suffix(".mp4")
-    ergebnis = rendere(liste, ziel, konfig, max_bytes=_max_bytes(konfig), vollstaendig=True)
+    # Stems (nur mit Musik) in den Ordner der Cutter-Kritik, wo die Messung sie sucht (kritik-<id>/, Spec §3.2)
+    stems = Path(zeile["schnittliste"]).parent / f"kritik-{entwurf_id}" / "stems.mka"
+    ergebnis = rendere(liste, ziel, konfig, max_bytes=_max_bytes(konfig), vollstaendig=True, stems=stems)
     con.execute("UPDATE entwuerfe SET datei = ?, status = CASE WHEN status = 'neu' THEN 'gerendert' ELSE status END "
                 "WHERE id = ?", (str(ziel), entwurf_id))
     return {"entwurf": entwurf_id, **ergebnis}

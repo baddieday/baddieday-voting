@@ -56,6 +56,13 @@ MIGRATIONEN += [("publikum_messungen", name, typ) for name, typ in (
 MIGRATIONEN += [("clips", "freigabe_quelle", "TEXT"), ("clips", "vorgelegt", "TEXT"), ("clips", "auto_vorschlag", "TEXT"),
                 ("clips", "auto_art", "TEXT"), ("clips", "auto_grund", "TEXT")]
 
+# Cutter-Maßstab 1.0 (30.09., Spec §3.4): Teilnoten, Plan-Näherung und Tore je Kritik (JSON), Version der Messung
+# (0 = nicht gemessen), des KI-Prompts (nur gleiche Versionen sind vergleichbar) und der Maßstab-Faktoren.
+MIGRATIONEN += [("kritiken", "teile", "TEXT"), ("kritiken", "plan_teile", "TEXT"), ("kritiken", "tore", "TEXT"),
+                ("kritiken", "mess_version", "INTEGER"), ("kritiken", "ki_version", "TEXT"),
+                ("kritiken", "massstab_version", "INTEGER")]
+
+
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)
     if str(pfad) != ":memory:":

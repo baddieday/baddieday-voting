@@ -24,12 +24,15 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import sqlite3
 
 from . import db, effekte
 from .konfig import Konfig
 from .musik import ZIEL
 from .regie import FORMATE, PARAMETER, dauer_grenzen, format_regeln, momente_grenzen, ziel_dauer
+
+log = logging.getLogger("pipeline")
 
 # Neue Gründe immer hinten anhängen: gespeicherte Bewertungen nennen die Schlüssel
 GRUENDE = {
@@ -328,7 +331,13 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
              "Schnitt-Werte lernen je Format (unten: Short); Momente, Stimmung und Musik gelten für beide"]
     from . import stile
 
-    teile.append(stile.stil_zeile(con))
+    teile.append(stile.stil_zeile(con, konfig=konfig))
+    try:  # Cutter-Maßstab 1.0 (Spec §5.5): was er an den Kriterien-Gewichten gelernt hat – nur Anzeige
+        from . import massstab
+
+        teile.extend(massstab.lernstand_zeilen(con, konfig))
+    except Exception:  # noqa: BLE001 – eine kaputte Anzeige kostet nie den Lernstand
+        log.exception("Cutter-Maßstab im Lernstand")
     for name in ("puffer_vor_s", "puffer_nach_s", "seg_min_faktor", "beats_pro_schnitt", "dauer_faktor", "uebergang_faktor"):
         s0, jetzt_ = start[name], p[name]
         herkunft = "" if s0 == PARAMETER[name] else ", deine Vorgabe"
