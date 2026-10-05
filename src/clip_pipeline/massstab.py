@@ -44,6 +44,7 @@ log = logging.getLogger("pipeline")
 
 VERSION = 1                 # steigt, wenn sich das Verfahren ändert (geht in den input_hash)
 QUELLEN = ("ki", "du", "publikum")
+DEIN_GEWICHT = 2.0   # ein Paar aus deinem 👍/👎 (05.10.: vorher 1,0 – „mein persönlicher Impact wird zu wenig gewertet“)
 RANG = ("publikum", "du", "ki")       # Holdout-Schranke: die ranghöchste Quelle mit genug Paaren
 HOLDOUT_MIN = 10            # so viele Paare braucht eine Quelle für die Holdout-Schranke
 DU_FENSTER_TAGE = 7
@@ -168,7 +169,7 @@ def _du_paare(con: sqlite3.Connection, entwuerfe: dict[int, dict]) -> list[MassP
         s = schlecht.get(fmt, [])
         for a, b in lernen._round_robin(g, s, len(g) * len(s)):
             if _tage(a["zeit"], b["zeit"]) <= DU_FENSTER_TAGE:
-                paare.append(_paar(a, b, "du", 1.0))
+                paare.append(_paar(a, b, "du", DEIN_GEWICHT))
             if len(paare) >= DU_MAX_PAARE:
                 return paare
     return paare

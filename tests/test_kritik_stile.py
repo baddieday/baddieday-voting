@@ -150,7 +150,7 @@ class Kritik(MitSpeicher):
         ki = [z for z in regie_lernen.bewertungen(self.con) if z["quelle"] == "ki"]
         self.assertEqual([(z["daumen"], json.loads(z["gruende"])) for z in ki], [(1, ["hektisch"])])
         p, _ = regie_lernen.aktuelle(self.con, self.konfig)          # ohne Format: kein Stil, nur das Gelernte
-        self.assertEqual(p["seg_min_faktor"], 1.15)                    # „zu hektisch“ vom KI-Cutter wirkt
+        self.assertEqual(p["seg_min_faktor"], 1.049)   # „zu hektisch“ vom KI-Cutter wirkt mit einem Drittel (05.10.)
         self.assertIn("🧐 Cutter", kritik.kritik_zeile(self.con, eid))
         self.assertIsNone(regie_lernen.wirkung(self.con, self.konfig, "short"))   # „🧠 Aus #n“ nur aus deinen Bewertungen
         # Nachmessen ohne KI behält das Urteil (kein neuer Claude-Aufruf)
@@ -250,6 +250,42 @@ class PlanerSpeichertWirksamenZoom(MitRegieMaterial):
         e = regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel)
         gespeichert = json.loads(self.con.execute("SELECT parameter FROM entwuerfe WHERE id = ?", (e["entwurf"],)).fetchone()[0])
         self.assertEqual((gespeichert["stil"], gespeichert["rahmen_zoom"]), ("kino", 1.28))   # Testmaterial 640×360
+
+
+class DeinEinfluss(MitSpeicher):
+    """05.10. (Florian: „mein persönlicher Impact wird zu wenig gewertet“): dein Wort gilt vor dem KI-Cutter."""
+
+    def entwurf(self, n: int) -> int:
+        ordner = self.tmp / "regie"
+        ordner.mkdir(exist_ok=True)
+        (ordner / f"e{n}.json").write_text(json.dumps({"format": "short", "segmente": []}), encoding="utf-8")
+        return self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, erstellt) "
+                                "VALUES (?, 'short', ?, '{}', ?)", (f"e{n}", str(ordner / f"e{n}.json"),
+                                                                   f"2026-10-05T10:0{n}:00Z")).lastrowid
+
+    def test_dein_kurz_schlaegt_drei_ki_lang(self):
+        du = self.entwurf(1)
+        self.con.execute("INSERT INTO entwurf_bewertungen (entwurf_id, daumen, gruende, erstellt, geaendert) "
+                         "VALUES (?, -1, '[\"kurz\"]', '2026-10-05T10:01:00Z', '2026-10-05T10:01:00Z')", (du,))
+        for n in (2, 3, 4):   # der KI-Cutter findet drei Entwürfe danach „zu lang“
+            self.con.execute("INSERT INTO kritiken (entwurf_id, score, regel_score, daumen, gruende, details, erstellt) "
+                             "VALUES (?, 40, 40, -1, '[\"lang\"]', '{}', ?)", (self.entwurf(n), f"2026-10-05T10:0{n}:00Z"))
+        p, _ = regie_lernen.aktuelle(self.con, self.konfig)
+        self.assertEqual(p["dauer_faktor"], round(1 / 0.9, 3))                    # nur dein „zu kurz“ wirkt
+        zeile = regie_lernen.einfluss_zeile(1, 3, 0.6)
+        self.assertIn("Regie 50 %", zeile)                                         # 1 : 3 × 0,34 ≈ halbe-halbe
+        self.assertIn("dein Geschmack 60 %", zeile)
+
+    def test_dein_geschmack_zaehlt_wie_bis_zu_12_videos(self):
+        from clip_pipeline import autonom
+
+        self.assertEqual(autonom.dein_gewicht(self.con), 2.0)                     # wenige Bewertungen: wie bisher
+        for n in range(130):
+            eid = self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, erstellt) "
+                                   "VALUES (?, 'short', 'x', '{}', 'x')", (f"g{n}",)).lastrowid
+            self.con.execute("INSERT INTO entwurf_bewertungen (entwurf_id, daumen, gruende, erstellt, geaendert) "
+                             "VALUES (?, 1, '[]', 'x', 'x')", (eid,))
+        self.assertEqual(autonom.dein_gewicht(self.con), 12.0)                    # 130 Daumen: wie 12 Videos
 
 
 if __name__ == "__main__":
