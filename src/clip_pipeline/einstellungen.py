@@ -72,6 +72,13 @@ KATALOG: tuple[Einstellung, ...] = (
     Einstellung("auto_freigabe.frist_h", "⏰ Frist",
                 ((12, "12 h"), (24, "24 h"), (48, "48 h"), (0, "nie")),
                 24, "Danach entscheidet der Clip-Bot offene Clips selbst."),
+    # 🔥 Viral (05.10.) – hinten angehängt (offene Menüs s:o:<i> behalten ihre Nummern)
+    Einstellung("viral.variante", "🔥 Viral-Mischung",
+                (("auto", "automatisch (lernt selbst)"), ("twist", "😅 Highlights + Twist"),
+                 ("highlight", "⚡ nur Highlights"), ("fail", "💀 Fail-Video")),
+                "auto", "Automatisch wählt der Bot die Mischung selbst nach Cutter-Noten und Publikum."),
+    Einstellung("viral.ki", "🔥 KI-Einschätzung", ((True, "an"), (False, "aus")),
+                True, "Claude schätzt je Moment viral/humor/spannung ein (zählt gegen dein Abo, höchstens 40 am Tag)."),
 )
 NACH_SCHLUESSEL = {e.schluessel: e for e in KATALOG}
 
@@ -157,7 +164,7 @@ def letzte_matches(con: sqlite3.Connection, konfig: Konfig, anzahl: int = 8) -> 
         """SELECT m.id, m.start_utc, m.kills, m.platzierung, m.victory_royale
              FROM matches m
             WHERE EXISTS (SELECT 1 FROM clips c WHERE c.match_id = m.id)
-               OR EXISTS (SELECT 1 FROM momente mo WHERE mo.match_id = m.id)
+               OR EXISTS (SELECT 1 FROM momente mo WHERE mo.match_id = m.id AND mo.schluessel NOT LIKE 'fail:%')
             ORDER BY m.start_utc DESC LIMIT ?""", (anzahl,)).fetchall()
 
 
@@ -189,7 +196,7 @@ def quell_matches(con: sqlite3.Connection, konfig: Konfig) -> tuple[set[str] | N
     alle = con.execute(
         """SELECT m.id, m.start_utc, m.kills, m.platzierung, m.victory_royale FROM matches m
             WHERE EXISTS (SELECT 1 FROM clips c WHERE c.match_id = m.id)
-               OR EXISTS (SELECT 1 FROM momente mo WHERE mo.match_id = m.id)
+               OR EXISTS (SELECT 1 FROM momente mo WHERE mo.match_id = m.id AND mo.schluessel NOT LIKE 'fail:%')
             ORDER BY m.start_utc DESC""").fetchall()
     if not alle:
         return None, "⚠️ Clip-Auswahl: keine Matches gefunden – alle Clips"

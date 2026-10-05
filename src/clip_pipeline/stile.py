@@ -64,7 +64,8 @@ def statistik(con: sqlite3.Connection, fmt: str, konfig: Konfig | None = None) -
     start = massstab.start_gewichte(konfig)
     zeilen = con.execute("""SELECT e.id, e.parameter, k.teile, k.tore, k.ki_score FROM kritiken k
                               JOIN entwuerfe e ON e.id = k.entwurf_id
-                             WHERE e.format = ? AND k.mess_version >= 1""", (fmt,)).fetchall()
+                             WHERE e.format = ? AND k.mess_version >= 1
+                               AND e.variante IS NULL""", (fmt,)).fetchall()   # 🔥 Viral lernt seine Variante selbst
     publikum = massstab._publikum(con, {int(z["id"]): None for z in zeilen})
     for z in zeilen:
         stil = _stil_von(z["parameter"])

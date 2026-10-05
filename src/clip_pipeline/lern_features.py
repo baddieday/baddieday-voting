@@ -91,6 +91,22 @@ def extrahiere(snapshot: dict) -> dict[str, float]:
             staerken = [v for v in staerken if v is not None]
             if staerken:
                 x["effekt_staerke"] = sum(staerken)/len(staerken)
+    # 🔥 Viral (05.10., viral.bilanz): Variante als Arm, Mischung (Anteil Fails/Humor), KI-Mittel und Werkzeuge – nur
+    # wenn vorhanden, alte Schnittlisten bekommen keine neuen Schlüssel. Die KI-Einschätzung ist hier Eingabe; Ziel
+    # bleibt das Publikum (kein Zirkelschluss).
+    if (v := liste.get("viral")) and isinstance(v, dict):
+        if isinstance(v.get("variante"), str):
+            x["variante:" + v["variante"]] = 1.
+        for name in ("fail_anteil", "humor_anteil", "ki_anteil"):
+            if (z := zahl(v.get(name))) is not None:
+                x["mix_" + name.removesuffix("_anteil")] = max(0., min(1., z))
+        for name in ("ki_viral", "ki_humor", "ki_spannung"):
+            if (z := zahl(v.get(name))) is not None:
+                x[name] = max(0., min(1., z/100))
+        for name, an in (v.get("werkzeuge") or {}).items():
+            x["werkzeug:" + str(name)] = float(bool(an))
+    if seg and any(s.get("standbild") for s in seg):
+        x["standbild"] = min(1., sum(1 for s in seg if s.get("standbild"))/max(1, len(seg)))
     if "overlay" in liste:
         x["overlay"] = float(bool(liste["overlay"]))
     if "effekte" in liste:

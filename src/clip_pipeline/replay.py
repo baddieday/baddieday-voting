@@ -38,6 +38,9 @@ class MeinEreignis:
     waffe: int | None = None        # GunType-ZAHL; bei kill die Waffe MEINES Umhauens, sonst die des Erledigens
     opfer_bot: bool | None = None   # war das Opfer ein Bot? (replay2json eliminiert_bot; null = unbekannt)
     verbleibend: int | None = None  # Spieler noch im Match nach diesem Ereignis (spieler_gesamt − finale Eliminierungen)
+    # Fail-Format (05.10.), additiv – nur bei tod/knock_erlitten gefüllt, None = unbekannt (altes JSON ohne Felder):
+    eliminator_bot: bool | None = None  # hat mich ein Bot erledigt/umgehauen? (replay2json eliminator_bot)
+    selbst: bool | None = None          # Selbst-Eliminierung (Sturm, Sturz, eigene Explosion; replay2json selbst)
 
     @property
     def aktion(self) -> datetime:
@@ -122,9 +125,9 @@ def _waffe(eintrag: dict) -> int | None:
     return int(wert) if isinstance(wert, (int, float)) and not isinstance(wert, bool) else None
 
 
-def _bot(eintrag: dict) -> bool | None:
-    """eliminiert_bot aus replay2json: True/False, null oder fehlend = unbekannt (None)."""
-    wert = eintrag.get("eliminiert_bot")
+def _bot(eintrag: dict, feld: str = "eliminiert_bot") -> bool | None:
+    """eliminiert_bot (bzw. feld) aus replay2json: True/False, null oder fehlend = unbekannt (None)."""
+    wert = eintrag.get(feld)
     return bool(wert) if wert is not None else None
 
 
@@ -171,15 +174,18 @@ def _meine_ereignisse(eliminierungen: list[dict], start: datetime, meine_ids: se
         taeter = str(e.get("eliminator") or "").upper()
         opfer = str(e.get("eliminiert") or "").upper()
         felder = {"waffe": _waffe(e), "opfer_bot": _bot(e), "verbleibend": verbleibend(int(e["t_ms"]))}
+        # Fail-Format (05.10.): wer MICH erwischt hat – Bot? selbst (Sturm/Sturz)? Fehlt im alten JSON → None
+        mir = {**felder, "eliminator_bot": _bot(e, "eliminator_bot"),
+               "selbst": bool(e["selbst"]) if e.get("selbst") is not None else None}
         if e.get("knock"):
             letzter_knock[opfer] = (zeitpunkt, taeter, felder["waffe"])
             if opfer in meine_ids:
-                ereignisse.append(MeinEreignis(zeitpunkt, "knock_erlitten", **felder))
+                ereignisse.append(MeinEreignis(zeitpunkt, "knock_erlitten", **mir))
             elif taeter in meine_ids:
                 ereignisse.append(MeinEreignis(zeitpunkt, "knock", **felder))
             continue
         if opfer in meine_ids:
-            ereignisse.append(MeinEreignis(zeitpunkt, "tod", **felder))
+            ereignisse.append(MeinEreignis(zeitpunkt, "tod", **mir))
             continue
         knock = letzter_knock.pop(opfer, None)
         if knock and (zeitpunkt - knock[0]).total_seconds() > KNOCK_GUELTIG_S:

@@ -49,10 +49,12 @@ def _kills(liste: dict) -> list[float]:
 
     zeiten = []
     segmente = [s for s in liste.get("segmente") or [] if s.get("rolle") != "hook"]
-    mit_anker = any(s.get("kill_s") for s in segmente)
+    mit_anker = any(s.get("kill_s") or s.get("tod_s") is not None for s in segmente)
     for s in segmente:
-        # Effekte aus (⚙️): kein kill_s – dann die Muss-Spanne (erste Aktion … letzter Kill) als Näherung
-        punkte = s.get("kill_s") or ([] if mit_anker else list(s.get("muss") or []))
+        # Effekte aus (⚙️): kein kill_s – dann die Muss-Spanne (erste Aktion … letzter Kill) als Näherung;
+        # Fail-Momente (05.10.): der sichtbare Tod (tod_s) zählt wie ein Kill
+        punkte = s.get("kill_s") or ([s["tod_s"]] if s.get("tod_s") is not None else []) \
+            or ([] if mit_anker else list(s.get("muss") or []))
         for k in punkte:
             if s["quelle_start_s"] - 1e-6 <= k <= s["quelle_ende_s"] + 1e-6:
                 zeiten.append(auf_zeitleiste(s, float(k)))
@@ -409,7 +411,8 @@ def schwelle(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> float:
     ab_n = int(konfig.wert("regie.massstab.schwelle_ab_n", 20))
     noten = []
     for z in con.execute("""SELECT k.score, k.details FROM kritiken k JOIN entwuerfe e ON e.id = k.entwurf_id
-                             WHERE e.format = ? AND k.mess_version >= 1 ORDER BY k.entwurf_id DESC""", (fmt,)):
+                             WHERE e.format = ? AND k.mess_version >= 1 AND e.variante IS NULL
+                             ORDER BY k.entwurf_id DESC""", (fmt,)):
         try:
             if json.loads(z["details"] or "{}").get("normiert"):
                 noten.append(float(z["score"]))

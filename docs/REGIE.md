@@ -404,6 +404,50 @@ einen Senior-Editor benotet (`messung.py` → `kriterien.py` → `kritik.py`, le
      Abnahme aus (je Stil M_f, σ, Spannweite; Ziel ≥ 15 Punkte Spannweite, σ ≥ 8). `pipeline massstab --zeigen`
      und `/lernstand` zeigen „📐 Cutter-Maßstab …“.
 
+## Fail-Format und 🔥 Viral-Video (05.10.)
+
+Florian: „Wie soll daraus ein Fail-Video werden? Es soll Viewer ziehen, nicht nur lustig sein“ – und dann: „Ich will
+nur den Button drücken … er soll das mit KI können und aus Daten lernen, nicht durch 100te Bewertungen … eher
+professioneller Schnitt mit einem Hauch Humor.“ Deshalb kein starres Fail-Regelwerk, sondern ein Knopf.
+
+- **Fail-Momente** (`fail.py`, Material): Je eigenem Tod im Replay entsteht ein Moment aus dem Rohvideo mit der besten
+  Abdeckung im Puffer, 12 s vor bis 3 s nach dem Tod (`[fail]`). Schlüssel `fail:<match>:<sekunde>`, Datei in
+  `sessions/<ID>/momente/`, Stimmung frustriert (lacht das Mikro, lustig). In den Merkmalen stehen nur Fakten:
+  `platz` (= verbleibend + 1), `kills_vorher_30s`, `killer_bot`, `selbst` (Sturm/Sturz), `knock_erlitten`,
+  `waffe_gegner`. Victory = kein Tod = kein Fail.
+  - Automatisch im Mic-Schritt nach render (clip-mikro); von Hand `pipeline fail --session ID` oder
+    `pipeline fail --nachziehen [--tage 14]`. Unter der Pipeline-Sperre; weckt nie, überschreibt und löscht nichts.
+    Whisper holt der Mic-Schritt nach (`[fail].mic_je_lauf`).
+  - **Fail-Score** = Startwert/Rückfall ohne KI (`[fail.gewichte]`): Fallhöhe (Platz ≤ 10, ≤ 3, Kills davor),
+    Erwartungsbruch (Bot, selbst), Reaktion (Mikro). Beispiel: Platz 2 nach Triple Kill = 8,5.
+- **KI-Einschätzung je Moment** (`viral.py`, Fails und Highlights): `claude -p` sieht 5 Standbilder um Tod bzw.
+  Finisher, die Fakten und den Transkript-Anfang. Es gibt viral, humor und spannung (0–100) zurück, dazu einen Titel
+  (≤ 30 Zeichen) und einen Grund. Schema `moment_viral`, nur Leserecht.
+  - Je Moment einmal (Tabelle `moment_einschaetzungen`), höchstens `[viral].ki_pro_tag` am Tag.
+  - Ohne KI gilt die Regel. Der Titel wird wie die Caption geprüft: keine Zahl, die nicht in den Fakten steht,
+    keine Emojis (DejaVu kann keine).
+- **🔥 Viral** (`/viral`, Knopf „🔥 Viral-Video“, `/entwurf twist|highlight|fail`): Der Bot wählt die Mischung selbst.
+  Varianten: 😅 *Twist* = überwiegend Highlights, dazu 1–2 Fails/Gags bei ~60 %, nie vorn, nie als Höhepunkt.
+  ⚡ *Highlights*. 💀 *Fail-Video* = 4–8 Fails, 30–60 s, steigend, der schlimmste zuletzt.
+  - Die Wahl trifft Thompson-Sampling über die Cutter-Noten (und das Publikum). Startwissen `[viral.prior]`: Twist
+    ist der Hauptweg. In ⚙️ fest wählbar.
+  - Auswahl und Reihenfolge = gelernte Punkte + KI-Bonus `ki_gewicht × (viral − 50)/10`.
+  - Der Bot baut bis zu `[viral].versuche_max` Fassungen. Der Cutter-Maßstab benotet jede, schwache sortiert der Bot
+    aus, gesendet wird nur die beste.
+  - Gerendert wird ein Viral-Video wie jeder Short (`entwuerfe.format = 'short'`, Spalte `variante`). Fail-Momente
+    kommen nur hierher; normale Shorts und Zusammenschnitte bleiben unverändert.
+- **Werkzeuge statt Pflicht** (`[viral.werkzeuge]`, je Entwurf mit Wahrscheinlichkeit):
+  - Hook-Teaser: 1–1,5 s aus dem Höhepunkt vorn (`rolle: hook`, Anker `kill_s` bzw. `tod_s`).
+  - Zeitlupe kurz vor dem Tod.
+  - Standbild am Tod (0,64 s, Ton stumm, Segmentfeld `standbild`). Der Maßstab zählt es nicht als Macke.
+  - Fail-Titel im Rand statt Kill-Titel.
+  - Welche Werkzeuge ankommen, lernt das Publikums-Modell.
+- **Lernen ohne Bewertungspflicht:** Variante, Mischung (`mix_fail`, `mix_humor`, `mix_ki`), KI-Mittel und Werkzeuge
+  sind Merkmale in `lern_features` (Publikum = Hauptsignal); die Note kommt vom Cutter-Maßstab. Die KI-Einschätzung
+  ist nur Eingabe, nie selbst Lernziel.
+- **Caption** des Fail-Videos (`templates/caption-fail.txt`): Fakten des schlimmsten Fails, „Was hättest du gemacht?“
+  und „Größter Fail der Woche – stimm ab auf clip-battle.de“.
+
 ## pve-big schaltet sich selbst ab (clip-leerlauf)
 `deploy/big/clip-leerlauf` läuft auf pve-big jede Minute und fährt ihn nach 20 min ohne echten Zugriff auf den
 Clips-Ordner herunter (Details im Kopf des Skripts). Er setzt jede Minute den Zeitstempel der leeren Datei
