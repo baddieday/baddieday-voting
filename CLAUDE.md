@@ -286,3 +286,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     (20 Bilder + Wellenform), Publikum, dein 👍/👎. Schwelle = Q20 der eigenen Noten (40–50), ab 20 gemessenen Entwürfen.
   - `pipeline kritik --id N`, `pipeline massstab --nachmessen`; Doku `docs/REGIE.md` „Cutter-Maßstab“, Annahmen
     `docs/ENTSCHEIDUNGEN.md`.
+- 2026-10-05 (Florian: „mein persönlicher Impact wird zu wenig gewertet – am Schluss soll er es aber selbstständig besser
+  machen als ich“): **Dein Geschmack ist der Start, das Publikum übernimmt mit Belegen.**
+  - Regie-Lernen: ein KI-Cutter-Urteil wirkt mit einem Drittel deines Schritts (`regie_lernen.KI_STAERKE` 0,34); deine
+    letzte ausdrückliche Ansage je Gegensatz („zu kurz“/„zu lang“, „zu viele Effekte“/„mehr Action“) überstimmt
+    widersprechende KI-Gründe, bis du sie selbst änderst.
+  - Publikums-Modell: deine Daumen zählen wie `autonom.dein_gewicht` Videos (je 10 Bewertungen eins, 2–12; vorher fest 2).
+  - Cutter-Maßstab: ein Paar aus deinem 👍/👎 zählt 2,0 (vorher 1,0). `/lernstand` zeigt „👤 Dein Einfluss“ in Prozent.

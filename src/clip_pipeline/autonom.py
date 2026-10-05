@@ -254,6 +254,15 @@ def _setze_x(x, k, wert, fmt):
     return x
 
 
+def dein_gewicht(con) -> float:
+    """Wie viele Publikums-Videos deine bisherigen Bewertungen im Publikums-Modell wert sind: je 10 eins, 2 bis 12."""
+    try:
+        n_du = con.execute("SELECT COUNT(*) FROM entwurf_bewertungen").fetchone()[0]
+    except Exception:  # noqa: BLE001 – alte Datenbank ohne Tabelle: wie bisher
+        n_du = 0
+    return max(2., min(12., n_du/10.))
+
+
 def plan_parameter(con, konfig, fmt, parameter, musik_ziele):
     """Historische Präferenzen sind ein schrumpfender Prior, Publikum plant autonom."""
     from .regie import PARAMETER, format_regeln
@@ -288,8 +297,10 @@ def plan_parameter(con, konfig, fmt, parameter, musik_ziele):
     n = len(beispiele)
     if not n:
         return p, musik
-    anteil = n/(n+2.)
-    # Auch 120 alte Daumen besitzen zusammen nur zwei Pseudo-Videos Gewicht.
+    # Dein Geschmack als Start (05.10., Florian: „mein persönlicher Impact wird zu wenig gewertet“): deine Daumen
+    # zählen wie dein_gewicht(con) Videos (je 10 Bewertungen eins, 2 bis 12) – vorher fest 2, d. h. 120 Daumen
+    # waren nach 8 Publikums-Videos nur noch 20 % wert. Das Publikum übernimmt, sobald es genug echte Zahlen gibt.
+    anteil = n/(n+dein_gewicht(con))
     for k in ("moment_bonus", "stimmung_bonus", "track_malus"):
         p[k] = {name: value*(1-anteil) for name, value in p.get(k, {}).items()}
     # Dieselben Daten wirken auch in der vorhandenen Musik-/Stimmungsauswahl.
