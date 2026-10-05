@@ -161,57 +161,89 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None) ->
     return p, ziel
 
 
+# Dein Einfluss (05.10., Florian: „mein persönlicher Impact wird zu wenig gewertet“): Ein Urteil des KI-Cutters wirkt
+# nur mit diesem Anteil eines Schritts von dir – sonst überstimmt er dich allein durch die Menge (bis 20 am Tag).
+KI_STAERKE = 0.34
+GEGENSTUECKE = {"lang": "kurz", "kurz": "lang", "effekte_viel": "action", "action": "effekte_viel"}
+
+
+def _quelle(zeile) -> str:
+    try:
+        return str(zeile["quelle"] or "du")
+    except (KeyError, IndexError):   # Zeilen ohne Spalte (alte Aufrufer, Tests): deine
+        return "du"
+
+
+def _deine_richtung(zeilen: list) -> set[str]:
+    """Deine letzte ausdrückliche Ansage je Gegensatzpaar („kurz“ oder „lang“, „effekte_viel“ oder „action“) – ein
+    KI-Grund, der ihr widerspricht, wirkt nicht (dein Wort gilt, bis du es selbst änderst)."""
+    richtung: dict[frozenset, str] = {}
+    for z in zeilen:  # zeilen sind nach Zeit sortiert – die letzte Ansage gewinnt
+        if _quelle(z) != "du":
+            continue
+        gruende = set(json.loads(z["gruende"] or "[]"))
+        for g, gegen in GEGENSTUECKE.items():
+            if g in gruende and gegen not in gruende:
+                richtung[frozenset((g, gegen))] = g
+    return set(richtung.values())
+
+
 def _falte(zeilen: list, konfig: Konfig, energien: list[float], fmt: str | None) -> tuple[dict, dict]:
     p, ziel, _ = vorgaben(konfig)
+    deine = _deine_richtung(zeilen)
     beats_vorgabe = int(p["beats_pro_schnitt"])
     # Längen-Stimmen wirken bis an die Grenzen des Formats (Short 30–75 s), nicht darüber hinaus (28.09.)
     dauer_unten, dauer_oben = dauer_grenzen(format_regeln(konfig, fmt)[0]) if fmt else VORGABE_GRENZEN["dauer_faktor"]
     mindestens = int(konfig.wert("regie.lernen_ab", 3))
     for n, b in enumerate(zeilen, 1):
         gruende = set(json.loads(b["gruende"] or "[]"))
+        w = 1.0
+        if _quelle(b) != "du":
+            w = KI_STAERKE
+            gruende = {g for g in gruende if GEGENSTUECKE.get(g) not in deine}
         liste = _liste(b)
         haupt = liste.get("stimmung")
         # je Moment: was du magst, kommt öfter; was dich langweilt, seltener
         schritt = -1.0 if "langweilig" in gruende else 0.5 if b["daumen"] > 0 else -0.5 if not gruende else 0.0
         for m in {s.get("moment") for s in liste.get("segmente", []) if isinstance(s, dict)} - {None}:
             if schritt:
-                p["moment_bonus"][m] = _grenze(p["moment_bonus"].get(m, 0.0) + schritt, -3.0, 3.0)
+                p["moment_bonus"][m] = _grenze(p["moment_bonus"].get(m, 0.0) + schritt * w, -3.0, 3.0)
         if fmt is not None and b["format"] != fmt:
             gruende = gruende & INHALT_GRUENDE  # Schnitt-Gründe des anderen Formats wirken hier nicht
         if "hektisch" in gruende:
-            p["seg_min_faktor"] = _grenze(p["seg_min_faktor"] * 1.15, 0.5, 2.0)
-            p["uebergang_faktor"] = _grenze(p["uebergang_faktor"] * 1.10, 0.5, 2.0)
-            p["effekt_hektik"] = _grenze(p["effekt_hektik"] * 0.9, *VORGABE_GRENZEN["effekt_hektik"])
+            p["seg_min_faktor"] = _grenze(p["seg_min_faktor"] * 1.15 ** w, 0.5, 2.0)
+            p["uebergang_faktor"] = _grenze(p["uebergang_faktor"] * 1.10 ** w, 0.5, 2.0)
+            p["effekt_hektik"] = _grenze(p["effekt_hektik"] * 0.9 ** w, *VORGABE_GRENZEN["effekt_hektik"])
         # Effekt-Stärke der Hauptstimmung: beide Gründe zugleich heben sich auf
         weniger, mehr = "effekte_viel" in gruende, "action" in gruende
         if haupt in ZIEL and weniger != mehr:
             alt = p["effekt_staerke"].get(haupt, 1.0)
             unten, oben = EFFEKT_STAERKE_GELERNT
             if alt > 0:  # eine Vorgabe 0 (diese Stimmung ohne Effekte) bleibt 0; eine unter 0,1 steigt nicht durch 🎆
-                p["effekt_staerke"][haupt] = _grenze(alt * (0.85 if weniger else 1.15), min(unten, alt), oben)
+                p["effekt_staerke"][haupt] = _grenze(alt * (0.85 if weniger else 1.15) ** w, min(unten, alt), oben)
         # „zu lang“ ×0,9 / „zu kurz“ ÷0,9 (27.09.: vorher gab es kein Gegenstück – der Faktor konnte nur fallen und
         # blieb für immer unten, auch eine Vorgabe in lokal.toml ist nur der Startwert); beide zugleich: nichts
         kuerzer, laenger = "lang" in gruende, "kurz" in gruende
         if kuerzer != laenger:
             # 28.09.: Grenzen aus dem Format (Short 0,667 … 1,667 = 30–75 s) statt fest 0,6 … 1,0 – vorher war bei
             # 45 s Schluss, und jedes weitere „zu kurz“ verpuffte ohne Wirkung
-            p["dauer_faktor"] = _grenze(p["dauer_faktor"] * (0.9 if kuerzer else 1 / 0.9), dauer_unten, dauer_oben)
+            p["dauer_faktor"] = _grenze(p["dauer_faktor"] * (0.9 if kuerzer else 1 / 0.9) ** w, dauer_unten, dauer_oben)
         if "abgeschnitten" in gruende:
-            p["puffer_vor_s"] = _grenze(p["puffer_vor_s"] + 0.5, 1.0, 6.0)
-            p["puffer_nach_s"] = _grenze(p["puffer_nach_s"] + 0.3, 0.5, 4.0)
+            p["puffer_vor_s"] = _grenze(p["puffer_vor_s"] + 0.5 * w, 1.0, 6.0)
+            p["puffer_nach_s"] = _grenze(p["puffer_nach_s"] + 0.3 * w, 0.5, 4.0)
         if "musik" in gruende and b["track_id"] is not None:
             schluessel = str(b["track_id"])
-            p["track_malus"][schluessel] = _grenze(p["track_malus"].get(schluessel, 0.0) + 1.0, 0.0, 5.0)
+            p["track_malus"][schluessel] = _grenze(p["track_malus"].get(schluessel, 0.0) + 1.0 * w, 0.0, 5.0)
         if haupt:
             bonus = p["stimmung_bonus"].get(haupt, 0.0)
             if "getroffen" in gruende:
-                bonus += 0.5
+                bonus += 0.5 * w
                 if b["track_bpm"] is not None and energien:
                     rang = sum(1 for e in energien if e < float(b["track_energie"] or 0)) / max(1, len(energien) - 1)
                     ziel[haupt]["energie"] = round(ziel[haupt]["energie"] + 0.2 * (rang - ziel[haupt]["energie"]), 3)
                     ziel[haupt]["bpm"] = round(ziel[haupt]["bpm"] + 0.2 * (float(b["track_bpm"]) - ziel[haupt]["bpm"]), 1)
             elif n >= mindestens:
-                bonus += 0.25 * int(b["daumen"])
+                bonus += 0.25 * int(b["daumen"]) * w
             p["stimmung_bonus"][haupt] = _grenze(bonus, -2.0, 2.0)
     gelernt = 4 if p["seg_min_faktor"] >= 1.7 else 2 if p["seg_min_faktor"] >= 1.3 else 1
     p["beats_pro_schnitt"] = max(gelernt, beats_vorgabe)  # deine Vorgabe ist die Untergrenze
@@ -320,6 +352,20 @@ def dauer_zeile(zeilen: list, dauer_faktor: float, fmt: dict, *, ziel_s: float |
     return text
 
 
+def einfluss_zeile(n_du: int, n_ki: int, historischer_anteil: float | None) -> str:
+    """„👤 Dein Einfluss: Regie 75 % (KI-Cutter 25 %) · Publikums-Modell: dein Geschmack 60 %, Publikum 40 %“ (05.10.).
+    historischer_anteil None = noch kein Publikums-Modell (dann zählt dort nur dein Geschmack)."""
+    gesamt = n_du + KI_STAERKE * n_ki
+    du = 100.0 * n_du / gesamt if gesamt else 100.0
+    teile = [f"👤 Dein Einfluss: Regie {du:.0f} % (KI-Cutter {100 - du:.0f} %, deine Ansagen zu Länge/Effekten gelten vor)"]
+    if historischer_anteil is None:
+        teile.append("Publikums-Modell: noch keine Zahlen – dein Geschmack gilt")
+    else:
+        h = max(0.0, min(1.0, float(historischer_anteil)))
+        teile.append(f"Publikums-Modell: dein Geschmack {100 * h:.0f} %, Publikum {100 * (1 - h):.0f} %")
+    return " · ".join(teile)
+
+
 def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     p, ziel = aktuelle(con, konfig, "short")
     start, start_ziel, hinweise = vorgaben(konfig)
@@ -328,7 +374,8 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     ki = [z for z in bewertungen(con) if z["quelle"] == "ki"]
     teile = [f"🧠 Regie – {len(zeilen)} Bewertungen von dir ({daumen} 👍 / {len(zeilen) - daumen} 👎) · "
              f"{len(ki)} vom KI-Cutter ({sum(1 for z in ki if z['daumen'] > 0)} 👍)",
-             "Schnitt-Werte lernen je Format (unten: Short); Momente, Stimmung und Musik gelten für beide"]
+             "Schnitt-Werte lernen je Format (unten: Short); Momente, Stimmung und Musik gelten für beide",
+             einfluss_zeile(len(zeilen), len(ki), (p.get("autonom") or {}).get("historischer_anteil"))]
     from . import stile
 
     teile.append(stile.stil_zeile(con, konfig=konfig))
