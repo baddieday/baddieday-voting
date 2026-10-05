@@ -139,3 +139,16 @@ CREATE TABLE IF NOT EXISTS massstab (
     aktiv               INTEGER NOT NULL,
     grund               TEXT NOT NULL
 );
+
+-- KI-Einschätzung je Moment (🔥 Viral, 05.10., viral.py): claude -p sieht Kontaktbogen, Fakten und Transkript-Anfang.
+-- Je Moment einmal; Eingabe für Auswahl, Reihenfolge und Publikums-Lernen – nie selbst Lernziel (kein Zirkelschluss).
+CREATE TABLE IF NOT EXISTS moment_einschaetzungen (
+    schluessel TEXT PRIMARY KEY,            -- momente.schluessel (clip:42, fail:<match>:<sekunde>, datei:…)
+    viral      INTEGER NOT NULL,            -- 0..100
+    humor      INTEGER NOT NULL,            -- 0..100
+    spannung   INTEGER NOT NULL,            -- 0..100
+    titel      TEXT,                        -- geprüft (viral.pruefe_titel): nur Zahlen aus den Fakten, ≤ 30 Zeichen
+    grund      TEXT,
+    version    TEXT NOT NULL,               -- sha256(Prompt + Schema)[:12]
+    erstellt   TEXT NOT NULL
+);

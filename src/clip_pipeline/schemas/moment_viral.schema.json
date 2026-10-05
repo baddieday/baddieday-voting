@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KI-Einschätzung je Moment (viral.py): wie viral, wie lustig, wie spannend – Eingabe, nie Lernziel",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["momente"],
+  "properties": {
+    "momente": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "viral", "humor", "spannung"],
+        "properties": {
+          "id": {"type": "string", "maxLength": 8},
+          "viral": {"type": "integer", "minimum": 0, "maximum": 100},
+          "humor": {"type": "integer", "minimum": 0, "maximum": 100},
+          "spannung": {"type": "integer", "minimum": 0, "maximum": 100},
+          "titel": {"type": ["string", "null"], "maxLength": 40},
+          "grund": {"type": ["string", "null"], "maxLength": 200}
+        }
+      }
+    }
+  }
+}

@@ -33,6 +33,8 @@ class MitSpeicher(unittest.TestCase):
                                                        ssh_ziel="")
         # Cutter-Kritik (30.09.): nie ein echtes claude aus Tests, und alte Tests nicht durch die Mindest-Note aussortieren
         self.konfig.daten.setdefault("regie", {}).setdefault("kritik", {}).update(ki=False, schwelle=0.0)
+        # 🔥 Viral (05.10.): auch die KI-Einschätzung je Moment nie mit echtem claude
+        self.konfig.daten.setdefault("viral", {})["ki"] = False
         # Schnittstil (30.09.): fest „klassik“ (= der bisherige Aufbau), damit alte Tests nicht von der Stilwahl abhängen
         self.konfig.daten["regie"]["stil"] = "klassik"
         # Auto-Freigabe im Clip-Bot (30.09.): aus, damit alte Tests unverändert bleiben – neue Tests schalten sie an

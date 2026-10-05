@@ -1,7 +1,8 @@
 """Kommandozeile `pipeline ...` – Vertrag mit n8n (siehe CLAUDE.md, "Schnittstelle zu n8n"):
 
   prepare|analyze|decide|render --session ID     highlight --id ID --tage 14
-  (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe])
+  (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe],
+   fail --session ID | --nachziehen [--tage 14])
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -400,7 +401,13 @@ def _cmd_puffer(args, konfig, con) -> int:
 def _cmd_stimmung(args, konfig, con) -> int:
     if args.clips:  # Mic-Schritt (Spec §8.2): nur Clips, ohne Claude; ohne getrennten Betrieb lehnt main vorab ab
         session = verarbeitung.pruefe_id(args.session) if args.session else None
-        _json(mikro.clips_nachziehen(con, konfig, session=session, maximal=args.max))
+        ergebnis = mikro.clips_nachziehen(con, konfig, session=session, maximal=args.max)
+        # Fail-Format (05.10.): neue Matches bekommen hier – nach render, im Hintergrund – ihre Fail-Momente. Nur ins
+        # Log: die JSON-Zeile des Mic-Schritts bleibt gleich, ein Fehler dort kostet den Mic-Schritt nie.
+        from . import fail
+
+        log.info("Fail-Momente: %s", fail.nach_render(con, konfig, session))
+        _json(ergebnis)
         return 0
     if args.session:
         _json({"fehler": "--session gilt nur zusammen mit --clips"})
@@ -420,6 +427,30 @@ def _cmd_merkmale(args, konfig, con) -> int:
     _json({"replay": merkmale.nachtragen_replay(con, konfig, gewichte, version, session=session),
            "mic": mikro.nachtragen(con, konfig, gewichte, version, session=session)})
     return 0
+
+
+def _cmd_fail(args, konfig, con) -> int:
+    """Fail-Momente (05.10.): je eigenem Tod ein Moment aus dem Rohvideo im Puffer (fail.py). --session ID für ein Match,
+    --nachziehen für alle der letzten --tage Tage. Danach Whisper für ein paar Fail-Momente ([fail].mic_je_lauf).
+    Nur getrennter Betrieb, weckt nie, löscht nichts. Exit: 0 ok · 1 mindestens ein Fehler · 2 Konfig/Aufruf."""
+    from . import fail
+
+    try:
+        if args.nachziehen:
+            tage = args.tage if args.tage is not None else int(konfig.wert("puffer.rohdaten_tage", 14))
+            ergebnis = fail.nachziehen(con, konfig, tage=tage)
+        elif args.session:
+            ergebnis = fail.fail_session(con, konfig, verarbeitung.pruefe_id(args.session))
+        else:
+            _json({"fehler": "Aufruf: pipeline fail --session ID oder pipeline fail --nachziehen [--tage 14]"})
+            return 2
+    except KonfigFehler as e:
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
+    ergebnis["mic"] = fail.mic_nachziehen(con, konfig)
+    _json(ergebnis)
+    return 1 if ergebnis["fehler"] else 0
 
 
 def _cmd_momente(args, konfig, con) -> int:
@@ -790,6 +821,12 @@ def baue_parser() -> argparse.ArgumentParser:
     a.add_argument("--probe", action="store_true", help="nur zeigen, was geschähe (schneidet und schreibt nichts)")
     s.set_defaults(fn=_cmd_momente, sperren=True)  # rechenintensiv: Pipeline-Sperre; nicht in WECKEN
 
+    s = unter.add_parser("fail", help="Fail-Momente: je eigenem Tod ein Moment aus dem Rohvideo im Puffer (weckt nie)")
+    s.add_argument("--session", help="Match-ID, z. B. 2026-10-04_21-42-22")
+    s.add_argument("--nachziehen", action="store_true", help="alle Matches der letzten --tage Tage mit Replay im Puffer")
+    s.add_argument("--tage", type=int, default=None, help="mit --nachziehen (Standard: [puffer].rohdaten_tage = 14)")
+    s.set_defaults(fn=_cmd_fail, sperren=True)  # schneidet Videos: Pipeline-Sperre; nicht in WECKEN
+
     s = unter.add_parser("musik", help="Musik: analysieren, hinzufügen (mit Quelle), NCS laden, Liste")
     s.add_argument("aktion", choices=["analysieren", "hinzufuegen", "ncs", "liste"])
     s.add_argument("datei", nargs="?")
@@ -881,7 +918,7 @@ def _vorab_ablehnen(args, konfig) -> int | None:
     Sonst wartete z. B. ein noch aktiver clip-aufraeumen-Timer bis zu [sperre].warten_s auf einen laufenden render
     und endete dann mit „gesperrt“ (Exit 4, im Timer kein Fehler) statt mit dem Hinweis, ihn auszuschalten."""
     # Ohne getrennten Betrieb wäre [speicher].wurzel pve-big selbst – diese Befehle arbeiten nur im Puffer (E19)
-    nur_puffer = {"momente": "momente nachschneiden", "merkmale": "merkmale nachtragen"}
+    nur_puffer = {"momente": "momente nachschneiden", "merkmale": "merkmale nachtragen", "fail": "fail"}
     if args.befehl == "stimmung" and getattr(args, "clips", False):
         nur_puffer["stimmung"] = "stimmung --clips"
     if args.befehl in nur_puffer and not konfig.getrennt:

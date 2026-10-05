@@ -379,6 +379,12 @@ def lernstand_text(con: sqlite3.Connection, konfig: Konfig) -> str:
     from . import stile
 
     teile.append(stile.stil_zeile(con, konfig=konfig))
+    try:  # 🔥 Viral (05.10.): welche Mischung der Bot gerade bevorzugt – nur Anzeige
+        from . import viral
+
+        teile.append(viral.varianten_zeile(con, konfig))
+    except Exception:  # noqa: BLE001 – eine kaputte Anzeige kostet nie den Lernstand
+        log.exception("Viral-Varianten im Lernstand")
     try:  # Cutter-Maßstab 1.0 (Spec §5.5): was er an den Kriterien-Gewichten gelernt hat – nur Anzeige
         from . import massstab
 

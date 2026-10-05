@@ -278,14 +278,15 @@ def tempo_ton(i: int, seg: dict, eingang_start: float) -> str:
     fenster = effekte.tempo_fenster(seg)
     if not fenster:
         return ""
-    arten = {(float(w["ab_s"]), float(w["bis_s"])): w["ton"] for w in (seg.get("raffer"), seg.get("lupe")) if w}
+    arten = {(float(w["ab_s"]), float(w["bis_s"])): w["ton"]
+             for w in (seg.get("raffer"), seg.get("lupe"), seg.get("standbild")) if w}
     grenzen: list[float] = []
     wandel: list[str] = []
     for ab, bis, f in fenster:
         grenzen += [ab - eingang_start, bis - eingang_start]
         ton = arten[(ab, bis)]
-        if ton == "tief":
-            wandel.append(f"asetrate={int(48000 * f)},aresample=48000")
+        if ton == "tief" or f not in ATEMPO:  # Standbild (05.10.): Faktor 0,0625 kennt atempo nicht – asetrate dehnt
+            wandel.append(f"asetrate={int(48000 * f)},aresample=48000" + (",volume=0" if ton == "stumm" else ""))
         else:
             wandel.append(ATEMPO[f] + (",volume=0" if ton == "stumm" else ""))
     n = len(grenzen) + 1  # Stücke: normal, Fenster, normal, …, normal

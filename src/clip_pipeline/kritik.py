@@ -49,10 +49,12 @@ def _kills(liste: dict) -> list[float]:
 
     zeiten = []
     segmente = [s for s in liste.get("segmente") or [] if s.get("rolle") != "hook"]
-    mit_anker = any(s.get("kill_s") for s in segmente)
+    mit_anker = any(s.get("kill_s") or s.get("tod_s") is not None for s in segmente)
     for s in segmente:
-        # Effekte aus (⚙️): kein kill_s – dann die Muss-Spanne (erste Aktion … letzter Kill) als Näherung
-        punkte = s.get("kill_s") or ([] if mit_anker else list(s.get("muss") or []))
+        # Effekte aus (⚙️): kein kill_s – dann die Muss-Spanne (erste Aktion … letzter Kill) als Näherung;
+        # Fail-Momente (05.10.): der sichtbare Tod (tod_s) zählt wie ein Kill
+        punkte = s.get("kill_s") or ([s["tod_s"]] if s.get("tod_s") is not None else []) \
+            or ([] if mit_anker else list(s.get("muss") or []))
         for k in punkte:
             if s["quelle_start_s"] - 1e-6 <= k <= s["quelle_ende_s"] + 1e-6:
                 zeiten.append(auf_zeitleiste(s, float(k)))
