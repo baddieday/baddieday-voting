@@ -426,13 +426,15 @@ class Uebergaenge(unittest.TestCase):
     def test_profile_passen_zum_schema(self):
         arten = set(effekte.uebergangs_arten())
         segment = schema.lade("regie")["properties"]["segmente"]["items"]["properties"]
-        texte = set(segment["effekte"]["items"]["properties"]["text"]["enum"])
+        text = segment["effekte"]["items"]["properties"]["text"]   # 05.10.: Muster statt Liste (Fail-Titel aus Fakten)
         looks = set(schema.lade("regie")["properties"]["effekte"]["properties"]["look"]["enum"])
         for stimmung, prof in effekte.PROFIL.items():
             self.assertEqual({a for a, _ in prof["uebergaenge"]} - arten, set(), stimmung)
             self.assertEqual(prof["look"][0], effekte.LOOK_JE_STIMMUNG[stimmung])
             self.assertEqual(effekte.STAERKEN - set(prof), set(), stimmung)
-        self.assertEqual({*effekte.TITEL.values(), effekte.MULTI, effekte.VICTORY}, texte)
+        for titel in (*effekte.TITEL.values(), effekte.MULTI, effekte.VICTORY, "PLATZ 2 – VOM BOT", "3 KILLS … UND WEG"):
+            self.assertEqual(schema.pruefe(titel, text), [], titel)
+        self.assertNotEqual(schema.pruefe("PLATZ 2 😭", text), [])              # DejaVu kann keine Emojis
         self.assertEqual(set(effekte.LOOKS), looks)
         self.assertEqual(set(segment["effekte"]["items"]["properties"]["art"]["enum"]), ERLAUBT)
         self.assertEqual(set(segment["effekte"]["items"]["properties"]["klang"]["enum"]),

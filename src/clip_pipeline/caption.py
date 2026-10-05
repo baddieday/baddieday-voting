@@ -152,6 +152,11 @@ def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig) -> str:
     if groesste is not None:
         teile.append(typ_name(int(groesste["max_gruppe"])))
     teile.append("1 Moment" if len(momente) == 1 else f"{len(momente)} Momente")
+    fails = _fails(con, momente)  # 🔥 Viral (05.10.): Fakten der Fail-Momente aus momente.merkmale
+    if fails and liste.get("variante") == "fail":
+        return _fail_caption(liste, fails, konfig)
+    if fails:
+        teile.append("1 Fail" if len(fails) == 1 else f"{len(fails)} Fails")
     beschreibung = "Fortnite-Highlights: " + " · ".join(teile)
     # {killtyp} wie in baue(): Victory Royale schlägt die Kill-Gruppe; ohne Clip bleibt nur „fortnite“
     if victory:
@@ -165,6 +170,48 @@ def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig) -> str:
 
     # Pflicht (Spec §10.4, Lizenz): mit Musik steht ihre Quellenangabe als eigener Block am Ende – unverändert,
     # auch wenn sie mehrere Zeilen hat (NCS verlangt „Song: …“ und „Music provided by …“)
+    if m := liste.get("musik"):
+        quelle = str(m.get("quelle") or "").strip()
+        if not quelle:
+            raise CaptionFehler(f"Musik „{m.get('titel', '?')}“ ohne Quellenangabe – ohne Lizenzhinweis kein Upload")
+        text += "\n\n🎵 " + quelle
+    return text
+
+
+def _fails(con: sqlite3.Connection, momente: set[str]) -> list[dict]:
+    """momente.merkmale der Fail-Momente (fail:…) dieses Entwurfs, der schlimmste (höchster fail_score) zuerst."""
+    namen = sorted(m for m in momente if m.startswith("fail:"))
+    if not namen:
+        return []
+    zeilen = con.execute(f"SELECT merkmale FROM momente WHERE schluessel IN ({','.join('?' for _ in namen)})", namen)
+    ergebnis = []
+    for z in zeilen:
+        try:
+            mk = json.loads(z["merkmale"])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(mk, dict):
+            ergebnis.append(mk)
+    return sorted(ergebnis, key=lambda mk: -float(mk.get("fail_score") or 0))
+
+
+def _fail_caption(liste: dict, fails: list[dict], konfig) -> str:
+    """Caption des reinen Fail-Videos (05.10.): Fakten des schlimmsten Fails, Mitmach-Frage und clip-battle.de-Hinweis
+    aus [caption].vorlage_fail – nur Daten, nichts erfunden. Musik-Quellenangabe wie bei jedem Entwurf (Pflicht)."""
+    schlimmster = fails[0]
+    teile = []
+    if isinstance(schlimmster.get("platz"), int) and schlimmster["platz"] <= 10:
+        teile.append(f"Platz {schlimmster['platz']}")
+    if schlimmster.get("killer_bot"):
+        teile.append("vom Bot erledigt")
+    if schlimmster.get("selbst"):
+        teile.append("selbst erledigt")
+    if (n := int(schlimmster.get("kills_vorher_30s") or 0)) > 0:
+        teile.append(f"{n} Kill{'s' if n != 1 else ''} davor")
+    teile.append("1 Fail" if len(fails) == 1 else f"{len(fails)} Fails")
+    vorlage = konfig.projektpfad(konfig.wert("caption.vorlage_fail", "templates/caption-fail.txt")).read_text(
+        encoding="utf-8")
+    text = fuelle(vorlage, {"beschreibung": "Fortnite-Fails: " + " · ".join(teile) + " 💀"}).strip()
     if m := liste.get("musik"):
         quelle = str(m.get("quelle") or "").strip()
         if not quelle:

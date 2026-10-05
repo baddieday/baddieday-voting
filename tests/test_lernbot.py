@@ -131,6 +131,29 @@ class LernBot(MitRegieMaterial):
         q = self.klick(f"g:{eid}:nix")                    # unbekannter Grund: klare Antwort statt Absturz
         self.assertEqual(q.antworten, ["Unbekannter Knopf."])
 
+    def test_entwurf_fail_baut_und_schickt_fail_video(self):
+        # 05.10. (Fail-Format/🔥 Viral): /entwurf fail nimmt der Bot an, baut ein Fail-Video (Standbild, Hook) und
+        # schickt es mit Viral-Zeile; „Nächster Entwurf“ führt wieder zu 🔥 Viral (der Bot wählt neu)
+        self.context.args = ["fail"]
+        asyncio.run(lernbot.cmd_entwurf(SimpleNamespace(effective_message=None), self.context))
+        self.assertEqual(len(self.aufgaben), 1)
+        self.konfig.daten["regie"]["effekte"]["an"] = True
+        self.konfig.daten.setdefault("viral", {})["werkzeuge"] = {"hook_teaser": 1.0, "tod_lupe": 1.0,
+                                                                   "tod_standbild": 1.0}
+        self.fails_anlegen()
+        self.musik_anlegen(120, "frustriert")
+        eid = lernbot.baue_entwurf(self.konfig, "fail")
+        zeile = self.con.execute("SELECT * FROM entwuerfe WHERE id = ?", (eid,)).fetchone()
+        self.assertEqual((zeile["format"], zeile["variante"], zeile["status"]), ("short", "fail", "gerendert"))
+        liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
+        self.assertEqual(liste["segmente"][0]["rolle"], "hook")
+        self.assertTrue(any(s.get("standbild") for s in liste["segmente"]))
+        asyncio.run(lernbot.sende_entwuerfe(self.app))
+        video = self.bot.videos[0]
+        self.assertIn("💀 Fail-Video", video["caption"])
+        knoepfe = [b.callback_data for reihe in video["reply_markup"].inline_keyboard for b in reihe]
+        self.assertIn("k:0:viral", knoepfe)
+
     def test_clip_auswahl_ein_match(self):
         # 29.09. (⚙️ Einstellungen): nur Momente aus dem gewählten Match; der Hinweis steht vorn im Entwurf
         from clip_pipeline import einstellungen

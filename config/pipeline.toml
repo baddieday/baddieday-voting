@@ -238,6 +238,35 @@ bild_technik = 8
 lesbarkeit = 2
 effektdosis = 7
 
+[viral]
+# 🔥 Viral-Video (05.10., src/clip_pipeline/viral.py, Florian: „nur den Button drücken – professioneller Schnitt mit einem
+# Hauch Humor, lernen aus Daten statt aus 100 Bewertungen“). Im Lern-Bot /viral bzw. Knopf „🔥 Viral-Video“.
+# Variante: "auto" = der Bot wählt selbst (Thompson-Sampling über Cutter-Noten und Publikum); fest: twist (Highlights
+# mit 1–2 Fails/Gags), highlight, fail. In ⚙️ Einstellungen umstellbar.
+variante = "auto"
+# KI-Einschätzung je Moment (claude -p, nur Leserecht, zählt gegen das Abo): viral/humor/spannung + Titel aus Fakten.
+# Je Moment einmal; danach bzw. darüber gilt die Regel (Startwert).
+ki = true
+ki_pro_tag = 40            # höchstens so viele Momente am Tag
+ki_je_lauf = 12            # je Viral-Entwurf höchstens so viele neue
+ki_je_aufruf = 6           # so viele Momente in einem claude-Aufruf
+ki_gewicht = 1.0           # Auswahl-Bonus: ki_gewicht × (viral − 50) / 10 Punkte
+timeout_s = 240
+prompt = "templates/viral-prompt.txt"
+versuche_max = 3           # so viele Fassungen baut /viral höchstens; gesendet wird die beste (Cutter-Note)
+
+[viral.prior]
+# Startwissen der Variantenwahl als Beta(a, b) – der Twist ist der Hauptweg, die Noten verschieben das
+twist = [3.0, 1.0]
+highlight = [2.0, 1.0]
+fail = [1.0, 1.0]
+
+[viral.werkzeuge]
+# Wahrscheinlichkeit je Entwurf (keine Pflicht – was ankommt, lernt das Publikums-Modell)
+hook_teaser = 0.6          # 1–1,5 s Teaser des Höhepunkts ganz vorn
+tod_lupe = 0.7             # Zeitlupe kurz vor dem Tod eines Fails
+tod_standbild = 0.6        # 0,64 s Standbild am Tod
+
 [sitzungen]
 # "Session vorbei"-Dateien des Gaming-PCs (windows/Uebertragung.ps1, SessionVorbeiMinuten)
 ordner = "sitzungen"
@@ -580,6 +609,8 @@ archiv_ab_kills = 3
 
 [caption]
 vorlage = "templates/caption.txt"
+# Reines Fail-Video (🔥 Viral, 05.10.): Mitmach-Frage und „Größter Fail der Woche – stimm ab auf clip-battle.de“
+vorlage_fail = "templates/caption-fail.txt"
 beschreibungen = "templates/beschreibungen.toml"
 # Optional: `claude -p` formuliert die Beschreibung um (nur mit Faktenprüfung)
 ki = false

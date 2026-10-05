@@ -33,6 +33,11 @@ Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der K
                  ein harter Schnitt auf den Drop.
   6. Effekte     effekte.plane: Zoom-Punch, Kill-Titel, Zähler, Klänge, Look – als Plan in der Schnittliste
                  (version 4). Aus mit [regie.effekte] an = false: Schnitt und Übergänge wie vorher.
+🔥 Viral (05.10., viral.py): erstelle(…, variante="twist"|"highlight"|"fail") baut einen Short, dessen Mischung der
+Bot selbst wählt – Highlights, Highlights mit 1–2 Fails/Gags als Twist oder ein reines Fail-Video. Auswahl und
+Reihenfolge nach KI-Einschätzung (viral.py) plus Gelerntem; Werkzeuge wie Hook-Teaser (Segment rolle „hook“ vorn),
+Zeitlupe und Standbild am Tod schaltet der Plan (Parameter), nicht eine feste Regel. Fail-Momente (fail.py) kommen nur
+in dieses Format – die normalen Shorts und Zusammenschnitte bleiben wie bisher.
 Die Schnittliste wird gegen schemas/regie.schema.json und fachlich geprüft, bevor sie gespeichert wird.
 """
 
@@ -176,7 +181,12 @@ MAX_EREIGNISSE = 1500
 MAX_LUPEN = 20                    # obere Grenze im Prüfer (Standard in [regie.effekte].max_lupen: 8)
 MAX_RAFFER = 20                   # obere Grenze im Prüfer (Standard in [regie.effekte].max_raffer: 6)
 HOOK_MAX_S = 2.5
-V4_FELDER = ("rolle", "kill_s", "lupe", "raffer", "effekte")
+HOOK_S = 1.25                     # Hook-Teaser (05.10.): so lang, auf einen Beat zwischen HOOK_MIN_S und HOOK_LANG_S
+HOOK_MIN_S, HOOK_LANG_S = 1.0, 1.5
+HOOK_VOR_S = 0.8                  # so viel vor dem Anker (Finisher bzw. Tod) beginnt der Teaser
+FAIL_VOR_S, FAIL_NACH_S = 6.5, 2.5  # Fail-Moment: Kern um den Tod (Anlauf, Nachlauf)
+FAIL_MUSS = (2.0, 0.4)            # … und was davon nie fehlen darf (vor, nach dem Tod)
+V4_FELDER = ("rolle", "kill_s", "lupe", "raffer", "effekte", "standbild", "tod_s")
 
 
 class RegieFehler(RuntimeError):
@@ -206,6 +216,9 @@ class Kandidat:
     victory: bool = False          # Victory Royale – Titel VICTORY ROYALE
     gesperrt: bool = False         # Cooldown: in einem der letzten cooldown_entwuerfe Entwürfe – nur Reserve
     start_utc: str | None = None   # Beginn des Moments (momente.start_utc) – Reihenfolge „chronologisch“
+    fail: bool = False             # Fail-Moment (fail.py): Kern um den Tod, nur im Format 🔥 Viral
+    ki: dict | None = None         # Einschätzung viral/humor/spannung (viral.py; quelle ki oder regel)
+    titel: str | None = None       # Titel im Rand (nur aus Fakten geprüft) – bei Fails statt eines Kill-Titels
 
     def __post_init__(self) -> None:
         if not self.teile:  # alte Momente: genau ein Teil = Kern (wie bisher)
@@ -242,7 +255,11 @@ def _aktionen(mk: dict) -> list[float] | None:
 
 def _kern(mk: dict, dauer: float, p: dict) -> tuple[tuple[float, float], tuple[float, float], str]:
     kills = sorted(mk.get("kill_sekunden") or [])
-    if kills:
+    if mk.get("fail") and mk.get("tod_sekunde") is not None:  # Fail-Moment (05.10.): Anlauf, Tod, kurzer Nachlauf
+        tod = float(mk["tod_sekunde"])
+        kern = (tod - float(p.get("fail_vor_s", FAIL_VOR_S)), tod + float(p.get("fail_nach_s", FAIL_NACH_S)))
+        muss, grund = (tod - FAIL_MUSS[0], tod + FAIL_MUSS[1]), "Fail"
+    elif kills:
         aktionen = _aktionen(mk)
         erste = min(kills[0], *aktionen) if aktionen else kills[0]  # mit Aktionen: ab dem ersten Umhauen
         kern = (erste - p["puffer_vor_s"], kills[-1] + p["puffer_nach_s"])
@@ -382,7 +399,8 @@ def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None
 
 def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None = None, *,
                            gewichte: dict[str, float], kill_tabelle: list[float], konfig: Konfig | None = None,
-                           nur_matches: set[str] | None = None) -> tuple[list[Kandidat], dict[str, int]]:
+                           nur_matches: set[str] | None = None, fails: str = "ohne"
+                           ) -> tuple[list[Kandidat], dict[str, int]]:
     """Alle Momente mit Stimmung als Kandidaten: Stärke, Punkte für die Auswahl, Kern und Teile für den Schnitt.
 
     Bericht (zweiter Wert): {"ohne_datei": übersprungen, weil weder Moment-Datei noch Bot-Clip da sind;
@@ -406,7 +424,11 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     Fehler: keine eigenen; fehlt ein Gewicht, zählt das Merkmal 0. Die Stärke kann negativ sein (Bot-Opfer, Länge).
     Beispiel: Clip-Moment, clips.merkmale {"kill_punkte": 3, "bot_opfer": 1}, momente {"spitzen": 2}, Startgewichte
     (kill_punkte 1, bot_opfer −2, spitzen 0,25), Status gesendet, Elo 1500 → intensitaet 1.5, punkte 1.5.
+    fails (05.10.): "ohne" (Standard – normale Shorts/Zusammenschnitte sehen keine Fail-Momente), "mit" oder "nur"
+    (🔥 Viral). Ein Fail-Moment hat als Stärke seinen Fail-Score (fail.fail_score mit den aktuellen [fail.gewichte]).
     """
+    from . import fail as fail_modul  # hier: fail importiert über nachschnitt/stimmung viel, regie soll schlank laden
+
     anteil_ab = float(p.get("abwechslung", 0.0))
     schon = abwechslung(frueher or [], anteil_ab)
     alter = zuletzt_gezeigt(frueher or [])
@@ -427,6 +449,9 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
         if nur_matches is not None and z["match_id"] not in nur_matches:
             continue  # Spielabend: fremde Matches zählen auch in der Bilanz nicht mit
         mk = json.loads(z["merkmale"])
+        ist_fail = fail_modul.ist_fail(z["schluessel"], mk)
+        if (fails == "ohne" and ist_fail) or (fails == "nur" and not ist_fail):
+            continue
         datei = z["datei"]
         if not Path(datei).is_file():
             ersatz = _ersatz_datei(konfig, z["clip_pfad"], mk)
@@ -446,6 +471,8 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
         clip_mk = json.loads(z["clip_merkmale"]) if z["clip_merkmale"] is not None else None
         # Die eine Formel (Leitplanke 3); auf 2 Stellen wie bisher – Bogen und Schnittliste zeigen diese Zahl
         intensitaet = round(roh_score(fuer_moment(clip_mk, mk, kill_tabelle), gewichte), 2)
+        if ist_fail:  # Fail: Fallhöhe, Erwartungsbruch, Reaktion (fail.py) – Startwert, die KI-Einschätzung kommt dazu
+            intensitaet = round(fail_modul.fail_score(mk, konfig)[0], 2)
         punkte = intensitaet + float(p["stimmung_bonus"].get(z["stimmung"], 0.0))
         # freigegeben, veröffentlicht, im Highlight: von dir für gut befunden. Eine Auto-Freigabe folgt aus genau
         # diesem Score – mit Bonus zählte er doppelt (30.09.)
@@ -465,7 +492,8 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
         ergebnis.append(Kandidat(z["schluessel"], datei, dauer, z["stimmung"], intensitaet,
                                  round(punkte - abzug, 2), z["clip_id"], z["match_id"], kern, muss, grund, mk,
                                  abzug, gezeigt, teile, teile_muss, serie, max_gruppe=gruppe, victory=bool(victory),
-                                 gesperrt=gesperrt, start_utc=z["start_utc"]))
+                                 gesperrt=gesperrt, start_utc=z["start_utc"], fail=ist_fail,
+                                 titel=mk.get("fail_titel") if ist_fail else None))
     return ergebnis, bericht
 
 
@@ -515,13 +543,16 @@ def frische_soll(n: int, p: dict) -> int:
     return math.ceil(quote * n - 1e-9) if quote > 0 and n > 0 else 0
 
 
-def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandidat], float, list[str]]:
+def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict, pflicht: list[Kandidat] | None = None
+           ) -> tuple[list[Kandidat], float, list[str]]:
     """Beste Momente, bis die Ziel-Dauer erreicht ist. Ziel richtet sich nach dem Material.
 
     Cooldown: gesperrte Momente (frei_von_cooldown) bleiben Reserve. Frische-Quote (p["frische_quote"], nur bei
     abwechslung > 0): mindestens dieser Anteil der gewählten Momente war in keinem Entwurf des Fensters (gezeigt 0);
-    fehlt etwas, tauscht der schwächste „alte“ gegen den stärksten frischen Moment, der die Match-Grenze einhält."""
+    fehlt etwas, tauscht der schwächste „alte“ gegen den stärksten frischen Moment, der die Match-Grenze einhält.
+    pflicht (🔥 Viral, Twist): diese Momente sind immer dabei (auch im Cooldown) und werden nie getauscht."""
     hinweise = []
+    pflicht = list(pflicht or [])
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
     laenge = lambda k: plan_laenge(k, fmt, seg_min)  # noqa: E731
     auswahl, hinweis = frei_von_cooldown(kandidaten_, fmt, p)
@@ -533,8 +564,11 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandid
     if vorrat < fmt["min_s"]:
         hinweise.append(f"nur {vorrat:.0f} s Material – kürzer als {fmt['min_s']:.0f} s")
     max_je_match = int(p["max_je_match"])
-    gewaehlt, summe, je_match = [], 0.0, {}
-    nach_punkten = sorted(auswahl, key=lambda k: (-k.punkte, k.schluessel))
+    gewaehlt, summe, je_match = list(pflicht), sum(laenge(k) for k in pflicht), {}
+    for k in pflicht:
+        if k.match_id:
+            je_match[k.match_id] = je_match.get(k.match_id, 0) + 1
+    nach_punkten = sorted((k for k in auswahl if not any(k is x for x in pflicht)), key=lambda k: (-k.punkte, k.schluessel))
     for k in nach_punkten:
         if (summe >= ziel and len(gewaehlt) >= min_m) or len(gewaehlt) >= max_m:
             break
@@ -548,7 +582,7 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandid
     if soll > 0:
         frische = [k for k in nach_punkten if k.gezeigt == 0 and k not in gewaehlt]
         while sum(1 for k in gewaehlt if k.gezeigt == 0) < soll and frische:
-            alte = [k for k in gewaehlt if k.gezeigt > 0]
+            alte = [k for k in gewaehlt if k.gezeigt > 0 and not any(k is x for x in pflicht)]
             if not alte:
                 break
             raus = min(alte, key=lambda k: (k.punkte, k.schluessel))
@@ -686,14 +720,55 @@ def _mehrteilig(k: Kandidat, t: float, raster: list[float], fmt: dict, seg_min: 
     return stuecke
 
 
+def hook_anker(k: Kandidat) -> float | None:
+    """Wo der Hook-Teaser hinschaut: beim Fail der Tod, sonst die letzte Aktion (Finisher). None = nichts Sichtbares."""
+    nutzbar = max(0.5, k.dauer_s - 0.25)
+    if k.fail and k.merkmale.get("tod_sekunde") is not None:
+        anker = float(k.merkmale["tod_sekunde"])
+    else:
+        paare = effekte.kills_mit_anker(k.merkmale)
+        anker = max((a for _, a in paare if a >= 0), default=None)
+    return anker if anker is not None and 0.0 <= anker <= nutzbar else None
+
+
+def hook_segment(k: Kandidat, raster: list[float]) -> dict | None:
+    """Hook-Teaser (05.10., 🔥 Viral): 1–1,5 s aus dem Höhepunkt ganz vorn (rolle „hook“, wie pruefe_liste es kennt) –
+    Ende auf einem Beat, wenn einer zwischen HOOK_MIN_S und HOOK_LANG_S liegt. Trägt kill_s (Finisher) bzw. tod_s
+    (Fail) als sichtbaren Anker. None, wenn der Moment keinen Anker hat oder zu kurz ist."""
+    anker = hook_anker(k)
+    if anker is None:
+        return None
+    nutzbar = max(0.5, k.dauer_s - 0.25)
+    passend = [b for b in raster if HOOK_MIN_S - 1e-6 <= b <= HOOK_LANG_S + 1e-6]
+    laenge = round(naechster(passend, HOOK_S) if passend else HOOK_S, 3)
+    if laenge > nutzbar:
+        return None
+    von = round(min(max(0.0, anker - HOOK_VOR_S), nutzbar - laenge), 3)
+    bis = round(von + laenge, 3)
+    segment = {"nr": 1, "moment": k.schluessel, "clip_id": k.clip_id, "match_id": k.match_id, "datei": k.datei,
+               "stimmung": k.stimmung, "intensitaet": k.intensitaet, "grund": "Hook-Teaser",
+               "stimmen": stimmen_gebraucht(k.merkmale, k.stimmung), "punkte": k.punkte, "abzug": k.abzug,
+               "gezeigt": k.gezeigt, "quelle_start_s": von, "quelle_ende_s": bis, "quelle_dauer_s": round(k.dauer_s, 3),
+               "muss": [von, bis], "zeit_start": 0.0, "zeit_ende": laenge, "uebergang": {"art": "schnitt", "dauer_s": 0.0},
+               "auf_beat": bool(passend), "rolle": "hook"}
+    if k.fail:
+        segment["tod_s"] = round(anker, 3)
+    else:
+        segment["kill_s"] = [round(anker, 3)]
+    return segment
+
+
 def plane_zeitleiste(reihe: list[Kandidat], raster: list[float], fmt: dict, p: dict, fps: int,
                      fx: dict | None = None) -> list[dict]:
     """Legt Segmentgrenzen auf Beats. Gibt Segmente mit Quelle (start/ende) und Zeitleiste (zeit_*) zurück.
     Ein Moment mit Jump-Cuts wird zu mehreren aufeinanderfolgenden Segmenten (Feld `teil`, harter Schnitt).
-    fx: effekte.einstellungen() – ohne (oder an = false) Übergänge wie bisher (UEBERGANG)."""
+    fx: effekte.einstellungen() – ohne (oder an = false) Übergänge wie bisher (UEBERGANG).
+    p["hook_teaser"] (🔥 Viral): vorn ein Teaser aus dem Höhepunkt (hook_segment), der Rest beginnt danach."""
     fx = fx or {"an": False}
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
     segmente, t = [], 0.0
+    if p.get("hook_teaser") and len(reihe) >= 2 and (hook := hook_segment(reihe[-1], raster)) is not None:
+        segmente, t = [hook], hook["zeit_ende"]
     je_stimmung: dict[str, int] = {}   # Rotation der Übergänge (ohne Mix): frühere Momente derselben Stimmung
     glitches = 0
     # 28.09.: gemischte Übergänge ohne Wiederholung; Seed = Momentfolge, damit derselbe Entwurf gleich gebaut wird
@@ -789,7 +864,8 @@ def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN, max_raffer: int = M
         if s["quelle_start_s"] > s["muss"][0] + 1e-3 or s["quelle_ende_s"] < s["muss"][1] - 1e-3:
             fehler.append(f"Segment {s['nr']}: schneidet die Action an")
         qs, qe, zuschlag = s["quelle_start_s"], s["quelle_ende_s"], 0.0
-        for feld, name, laengste in (("lupe", "Zeitlupe", effekte.LUPE_MAX_S), ("raffer", "Zeitraffer", effekte.RAFFER_MAX_S)):
+        for feld, name, laengste in (("lupe", "Zeitlupe", effekte.LUPE_MAX_S), ("raffer", "Zeitraffer", effekte.RAFFER_MAX_S),
+                                     ("standbild", "Standbild", effekte.STANDBILD_QUELLE_MAX_S)):
             if w := s.get(feld):
                 lupen += feld == "lupe"
                 raffer += feld == "raffer"
@@ -798,6 +874,10 @@ def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN, max_raffer: int = M
                 zuschlag += (w["bis_s"] - w["ab_s"]) * (1 / w["faktor"] - 1)
         if s.get("lupe") and s.get("raffer") and s["raffer"]["bis_s"] > s["lupe"]["ab_s"] + 1e-3:
             fehler.append(f"Segment {s['nr']}: Zeitraffer muss vor der Zeitlupe enden")
+        if (halt := s.get("standbild")) and any(w and w["bis_s"] > halt["ab_s"] + 1e-3 for w in (s.get("lupe"), s.get("raffer"))):
+            fehler.append(f"Segment {s['nr']}: Zeitlupe/Zeitraffer müssen vor dem Standbild enden")
+        if s.get("tod_s") is not None and not qs - 1e-3 <= s["tod_s"] <= qe + 1e-3:
+            fehler.append(f"Segment {s['nr']}: Tod bei {s['tod_s']} außerhalb des Segments")
         if abs((s["zeit_ende"] - s["zeit_start"]) - ((qe - qs) + zuschlag)) > 1e-3:
             fehler.append(f"Segment {s['nr']}: Länge Quelle ≠ Zeitleiste")
         for k in s.get("kill_s") or []:
@@ -829,8 +909,9 @@ def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN, max_raffer: int = M
             fehler.append(f"Segment {s['nr']}: Hook nur als erstes Segment und höchstens einer")
         if s["zeit_ende"] - s["zeit_start"] > HOOK_MAX_S + 1e-3:
             fehler.append(f"Segment {s['nr']}: Hook länger als {HOOK_MAX_S} s")
-        if len(liste["segmente"]) < 2 or s["moment"] != liste["segmente"][-1]["moment"] or not s.get("kill_s"):
-            fehler.append(f"Segment {s['nr']}: Hook ohne Kill oder nicht aus dem Höhepunkt")
+        anker = s.get("kill_s") or s.get("tod_s") is not None   # Fail-Teaser (05.10.): der Tod ist die Aktion
+        if len(liste["segmente"]) < 2 or s["moment"] != liste["segmente"][-1]["moment"] or not anker:
+            fehler.append(f"Segment {s['nr']}: Hook ohne Kill/Tod oder nicht aus dem Höhepunkt")
     return fehler
 
 
@@ -842,13 +923,24 @@ def ordner(konfig: Konfig) -> Path:
 
 def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, parameter: dict | None = None,
              name: str | None = None, ziel: dict | None = None, nur_matches: set[str] | None = None,
-             hinweise_vorab: list[str] | None = None, gelernt: dict | None = None) -> dict:
+             hinweise_vorab: list[str] | None = None, gelernt: dict | None = None,
+             variante: str | None = None) -> dict:
     """nur_matches: nur Momente aus diesen Matches (z. B. ein Spielabend).
     hinweise_vorab: Hinweise des Aufrufers (z. B. Lern-Bot: Stimmung nachziehen fehlgeschlagen) – kommen vorn in
-    die Schnittliste, damit der Bot sie zeigt (er zeigt die ersten drei)."""
+    die Schnittliste, damit der Bot sie zeigt (er zeigt die ersten drei).
+    variante (🔥 Viral, 05.10.): twist · highlight · fail (viral.VARIANTEN) – nur mit fmt_name "short". Mischung,
+    KI-Bonus und Reihenfolge aus viral.py; Fail-Momente nur hier."""
     if fmt_name not in FORMATE:
         raise RegieFehler(f"Unbekanntes Format {fmt_name!r}")
+    viral = None
+    if variante is not None:
+        from . import viral
+
+        if variante not in viral.VARIANTEN or fmt_name != "short":
+            raise RegieFehler(f"Unbekannte Viral-Variante {variante!r} (nur als Short)")
     fmt, hinweise = format_regeln(konfig, fmt_name)
+    if viral is not None:
+        fmt = viral.format_fuer(fmt, variante)
     hinweise = [*(hinweise_vorab or []), *hinweise]
     p = {**PARAMETER, **(parameter or {})}
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
@@ -865,29 +957,43 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             gewichte[merkmal] += max(-1.0, min(1.0, float(delta)))
     kill_tabelle = [float(x) for x in konfig.wert("vorbewertung.kill_punkte")]
     alle, bericht = kandidaten_mit_bericht(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle, konfig=konfig,
-                                           nur_matches=nur_matches)
+                                           nur_matches=nur_matches, fails=viral.FAILS[variante] if viral else "ohne")
     if bericht["ohne_datei"]:
         hinweise.append(f"{bericht['ohne_datei']} Momente ohne Datei übersprungen"
                         + (f" ({bericht['ersetzt']} weitere: Bot-Clip statt Moment-Datei)" if bericht["ersetzt"] else ""))
     if not alle:
-        raise RegieFehler("Keine Momente mit Stimmung" + (" in diesen Matches" if nur_matches else "")
-                          + " – erst `pipeline stimmung`")
+        raise RegieFehler(("Keine Fail-Momente – erst `pipeline fail --nachziehen`" if variante == "fail" else
+                           "Keine Momente mit Stimmung" + (" in diesen Matches" if nur_matches else "")
+                           + " – erst `pipeline stimmung`"))
+    pflicht: list[Kandidat] = []
+    if viral is not None:  # Einschätzung (KI oder Regel) an jeden Kandidaten, Twist-Momente als Pflicht
+        alle, pflicht, viral_hinweise = viral.mischen(con, konfig, alle, variante, p, fmt)
+        hinweise += viral_hinweise
     # Short: eine Serie, die selbst mit Jump-Cuts nicht in serie_max_s passt, wird nicht gewählt statt zerteilt
     # (im Zusammenschnitt kommt sie ganz)
     zu_lang = [k for k in alle if fmt_name == "short" and serie_zu_lang(k, fmt)]
     if zu_lang:
         alle = [k for k in alle if not any(k is z for z in zu_lang)]
+        pflicht = [k for k in pflicht if not any(k is z for z in zu_lang)]
         if not alle:
             raise RegieFehler(f"Alle {len(zu_lang)} Momente sind Serien, die für einen Short zu lang sind "
                               f"(> {fmt['serie_max_s']:.0f} s am Stück) – Zusammenschnitt nehmen")
-    gewaehlt, ziel_s, wahl_hinweise = waehle(alle, fmt, p)
+    # Pflicht-Momente nur, wenn es welche gibt (alte Aufrufer und Tests ersetzen waehle mit drei Argumenten)
+    gewaehlt, ziel_s, wahl_hinweise = waehle(alle, fmt, p, pflicht) if pflicht else waehle(alle, fmt, p)
     hinweise += wahl_hinweise
     if zu_lang:
         hinweise.append(f"{len(zu_lang)} Serie(n) zu lang für Short (> {fmt['serie_max_s']:.0f} s am Stück)")
     # Nachlegen nimmt aus demselben Vorrat wie die Auswahl: ohne die Momente im Cooldown, außer der reichte nicht
     vorrat, _ = frei_von_cooldown(alle, fmt, p)
-    reihe = bogen(gewaehlt, fmt_name, hook_staerkster=bool(p.get("hook_staerkster", False)),
-                  reihenfolge=str(p.get("reihenfolge", "bogen")))
+
+    def ordne(auswahl: list[Kandidat]) -> list[Kandidat]:
+        """Reihenfolge: Bogen des Stils, bei 🔥 Viral über viral.ordne (Twist-Stellen, Fail steigend)."""
+        def grund_reihe(liste_: list[Kandidat], reihenfolge: str | None) -> list[Kandidat]:
+            return bogen(liste_, fmt_name, hook_staerkster=bool(p.get("hook_staerkster", False)) and not reihenfolge,
+                         reihenfolge=reihenfolge or str(p.get("reihenfolge", "bogen")))
+        return viral.ordne(auswahl, variante, pflicht, grund_reihe) if viral is not None else grund_reihe(auswahl, None)
+
+    reihe = ordne(gewaehlt)
 
     # Vorherrschende Stimmung (nach Länge gewichtet) bestimmt die Musik
     anteile: dict[str, float] = {}
@@ -939,9 +1045,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                 if frische and sum(1 for k in gewaehlt if k.gezeigt == 0) < frische_soll(len(gewaehlt) + 1, p):
                     rest = frische
                 naechster_ = max(rest, key=lambda k: (k.punkte, k.schluessel))
-                neue_reihe = bogen([*gewaehlt, naechster_], fmt_name,
-                                   hook_staerkster=bool(p.get("hook_staerkster", False)),
-                                   reihenfolge=str(p.get("reihenfolge", "bogen")))
+                neue_reihe = ordne([*gewaehlt, naechster_])
                 neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
                 if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
                     passt_nicht.append(naechster_)
@@ -961,7 +1065,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     while segmente and segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6 and len(reihe) > 1:
         # Frische-Quote (Review 27.09.): frische Momente sind meist die punktschwächsten – das Kürzen warf sie
         # als Erste wieder raus. Solange die Quote sonst fiele, wird unter den alten gestrichen.
-        zur_wahl = reihe[:-1]
+        zur_wahl = [k for k in reihe[:-1] if not any(k is x for x in pflicht)] or reihe[:-1]  # Twist bleibt
         alte = [k for k in zur_wahl if k.gezeigt > 0]
         if alte and sum(1 for k in reihe if k.gezeigt == 0) <= frische_soll(len(reihe) - 1, p):
             zur_wahl = alte
@@ -995,8 +1099,17 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         beats = [round(b - versatz, 3) for b in schlaege if 0 < b - versatz < gesamt]
         effekte.plane_tempo(segmente, reihe, p, konfig, fmt_name)  # Zeitlupe/Zeitraffer zuerst: passt die Quelle an
         fx_plan = effekte.plane(segmente, reihe, p, konfig, fmt_name, fps, beats, stimmung=haupt)
+        fx_plan["hook"] = any(s.get("rolle") == "hook" for s in segmente)
     else:
         fx_plan = {"an": False}
+    # Fail-Momente (05.10.): sichtbarer Tod als Anker – Cutter-Maßstab (Hook, Payoff) und Bot sehen ihn wie einen Kill
+    nach_schluessel = {k.schluessel: k for k in reihe}
+    for s in segmente:
+        k = nach_schluessel.get(s["moment"])
+        if s.get("rolle") != "hook" and k is not None and k.fail and k.merkmale.get("tod_sekunde") is not None:
+            tod = float(k.merkmale["tod_sekunde"])
+            if s["quelle_start_s"] - 1e-6 <= tod <= s["quelle_ende_s"] + 1e-6:
+                s["tod_s"] = round(tod, 3)
     # 30.09.: Rahmen-Zoom nur so weit, dass der Kill-Titel über der Bedienzone lesbar bleibt (4:3 ist höher als
     # 16:9). Gespeichert wird der WIRKSAME Wert – Kritik, Bot-Anzeige und Publikums-Modell sehen, was im Video ist.
     if fmt_name == "short" and float(p.get("rahmen_zoom", 1.0) or 1.0) > 1.0:
@@ -1004,7 +1117,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                                                  _quellmasse({s["datei"] for s in segmente}))
 
     if name is None:
-        name = basis = f"{fmt_name}-{jetzt():%Y%m%d-%H%M%S}"
+        name = basis = f"{('viral-' + variante) if variante else fmt_name}-{jetzt():%Y%m%d-%H%M%S}"
         n = 1
         while con.execute("SELECT 1 FROM entwuerfe WHERE name = ?", (name,)).fetchone():
             n += 1
@@ -1033,6 +1146,9 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     }
     if gelernt:  # 27.09.: was deine letzte Bewertung an diesem Entwurf geändert hat (regie_lernen.wirkung)
         liste["gelernt"] = gelernt
+    if viral is not None:  # 🔥 Viral: Mischung und KI-Mittel – Bot-Text, Caption und Publikums-Lernen lesen das
+        liste["variante"] = variante
+        liste["viral"] = viral.bilanz(reihe, variante, p)
     if fehler := pruefe_liste(liste, max_lupen=int(fx["max_lupen"]), max_raffer=int(fx["max_raffer"])):
         raise RegieFehler("Schnittliste ungültig: " + "; ".join(fehler[:3]))
     # Passt der Filtergraph samt Effekten auf die Befehlszeile? Sonst scheiterte erst das Rendern.
@@ -1044,11 +1160,12 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     tmp.write_text(json.dumps(liste, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(ziel_datei)
     cur = con.execute(
-        """INSERT INTO entwuerfe (name, format, schnittliste, parameter, track_id, dauer_s, erstellt)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO entwuerfe (name, format, schnittliste, parameter, track_id, dauer_s, erstellt, variante)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (name, fmt_name, str(ziel_datei), json.dumps(p, ensure_ascii=False), track["id"] if track else None,
-         round(gesamt, 3), iso(jetzt())),
+         round(gesamt, 3), iso(jetzt()), variante),
     )
     return {"entwurf": cur.lastrowid, "name": name, "format": fmt_name, "datei": str(ziel_datei),
             "dauer_s": round(gesamt, 1), "segmente": len(segmente), "momente": len(momente), "stimmung": haupt,
-            "musik": liste["musik"]["titel"] if track else None, "neu": neu, "hinweise": hinweise}
+            "musik": liste["musik"]["titel"] if track else None, "neu": neu, "hinweise": hinweise,
+            "variante": variante}

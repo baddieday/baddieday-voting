@@ -20,6 +20,10 @@ MOMENTE = [
 ]
 
 
+# Fail-Momente (05.10.): (Platz, Kills davor, vom Bot) – der Fail-Score steigt von oben nach unten nicht monoton
+FAILS = [(40, 0, False), (2, 3, False), (12, 1, True), (8, 0, False), (25, 2, False), (5, 0, True)]
+
+
 FARBEN = [(230, 30, 30), (30, 200, 30), (30, 30, 230), (230, 230, 30), (230, 30, 230), (30, 230, 230),
           (250, 140, 20), (140, 20, 250), (120, 120, 120), (250, 250, 250), (20, 120, 60), (120, 60, 20)]
 
@@ -83,6 +87,26 @@ class MitRegieMaterial(MitSpeicher):
                 (f"datei:{i}", match, str(datei), self.DAUER, len(kills), stimmung, json.dumps(mk), iso(jetzt()), iso(jetzt())))
             ids.append(cur.lastrowid)
         return ids
+
+    def fails_anlegen(self, fails=None, match_prefix: str = "f") -> list[str]:
+        """Fail-Momente wie aus fail.py (05.10.): Tod bei 14 s, Fakten je (Platz, Kills davor, vom Bot)."""
+        from clip_pipeline import fail
+
+        schluessel = []
+        for i, (platz, kills, bot) in enumerate(fails or FAILS, 1):
+            datei = testvideo(self.tmp / "fails" / f"{i}.mp4", dauer=self.DAUER)
+            mk = fail.neu_bewerten({"fail": True, "tod": 1, "tod_sekunde": 14.0, "kills": 0, "max_gruppe": 0,
+                                    "kill_sekunden": [], "platz": platz, "verbleibend": platz - 1,
+                                    "kills_vorher_30s": kills, "killer_bot": bot, "selbst": False,
+                                    "knock_erlitten": False, "spitzen": 1, "dauer_s": self.DAUER}, self.konfig)
+            name = f"fail:{match_prefix}{i}:{100 + i}"
+            self.con.execute(
+                """INSERT INTO momente (schluessel, match_id, datei, start_s, ende_s, kills, stimmung, sicherheit,
+                                        quelle, merkmale, erstellt, geaendert)
+                   VALUES (?, ?, ?, 0, ?, 0, 'frustriert', 0.5, 'regel', ?, ?, ?)""",
+                (name, f"{match_prefix}{i}", str(datei), self.DAUER, json.dumps(mk), iso(jetzt()), iso(jetzt())))
+            schluessel.append(name)
+        return schluessel
 
     def musik_anlegen(self, bpm: float, stimmung: str, dauer: float = 330, name: str | None = None):
         datei = klick_musik(self.tmp / "roh" / f"{name or stimmung}.mp3", bpm, dauer)

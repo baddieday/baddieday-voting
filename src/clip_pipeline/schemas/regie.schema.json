@@ -55,6 +55,9 @@
       }
     },
     "hinweise": {"type": "array", "items": {"type": "string"}},
+    "variante": {"type": "string", "enum": ["twist", "highlight", "fail"],
+                 "$comment": "🔥 Viral (05.10., viral.py): Mischung des Shorts – fehlt bei normalen Entwürfen"},
+    "viral": {"type": "object", "$comment": "viral.bilanz: Anteile Fail/Humor, KI-Mittel, Werkzeuge – fürs Lernen"},
     "gelernt": {"type": "object", "additionalProperties": false, "required": ["entwurf", "aenderungen"],
                 "properties": {"entwurf": {"type": "integer", "minimum": 1}, "format": {"type": ["string", "null"]},
                                "aenderungen": {"type": "array", "items": {"type": "string"}}}},
@@ -93,6 +96,20 @@
           "rolle": {"type": "string", "enum": ["moment", "hook"]},
           "kill_s": {"type": "array", "maxItems": 20, "items": {"type": "number", "minimum": 0},
                      "$comment": "sichtbare eigene Kills (Anker: mein Umhauen, sonst der Kill) in Quellsekunden"},
+          "tod_s": {"type": "number", "minimum": 0,
+                    "$comment": "Fail-Moment (05.10.): sichtbarer eigener Tod in Quellsekunden – Anker wie ein Kill"},
+          "standbild": {
+            "$comment": "Standbild am Tod (effekte._standbild_setzen): ab_s … bis_s auf (bis−ab)/faktor gedehnt, Ton stumm",
+            "type": ["object", "null"],
+            "required": ["ab_s", "bis_s", "faktor", "ton"],
+            "additionalProperties": false,
+            "properties": {
+              "ab_s": {"type": "number", "minimum": 0},
+              "bis_s": {"type": "number", "minimum": 0},
+              "faktor": {"type": "number", "minimum": 0.01, "maximum": 0.2},
+              "ton": {"type": "string", "enum": ["stumm"]}
+            }
+          },
           "lupe": {
             "$comment": "Zeitlupe in Quellzeit (effekte.plane_tempo): die Zeitleiste dehnt sich um (bis−ab)·(1/faktor−1)",
             "type": ["object", "null"],
@@ -132,8 +149,8 @@
                 "t_s": {"type": "number", "minimum": 0},
                 "dauer_s": {"type": "number", "minimum": 0, "maximum": 30},
                 "staerke": {"type": "number", "minimum": 0, "maximum": 1},
-                "text": {"type": "string", "enum": ["DOUBLE KILL", "TRIPLE KILL", "QUAD KILL", "PENTA KILL", "MULTI KILL",
-                                                     "VICTORY ROYALE"]},
+                "text": {"type": "string", "minLength": 1, "maxLength": 30, "pattern": "^[A-Z0-9ÄÖÜ .,!?…–-]+$",
+                         "$comment": "Kill-Titel (DOUBLE KILL … VICTORY ROYALE) oder Fail-Titel aus Fakten (05.10.) – ohne Emoji, DejaVu"},
                 "zahl": {"type": "integer", "minimum": 1, "maximum": 99},
                 "klang": {"type": "string", "enum": ["basshit", "tick", "whoosh", "pop", "einschlag", "riser"]}
               }
