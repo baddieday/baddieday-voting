@@ -71,7 +71,7 @@ def bewertungen(con: sqlite3.Connection, *, mit_ki: bool = True) -> list[sqlite3
               SELECT k.entwurf_id, k.daumen, k.gruende, k.erstellt, k.erstellt, 'ki', {felder}
                 FROM kritiken k JOIN entwuerfe e ON e.id = k.entwurf_id
                 LEFT JOIN tracks t ON t.id = e.track_id
-               WHERE k.daumen IS NOT NULL
+               WHERE k.daumen IS NOT NULL AND e.variante IS NULL
                  AND NOT EXISTS (SELECT 1 FROM entwurf_bewertungen b WHERE b.entwurf_id = k.entwurf_id)"""
     return con.execute(sql + " ORDER BY erstellt, entwurf_id").fetchall()
 

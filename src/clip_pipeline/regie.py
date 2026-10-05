@@ -1148,7 +1148,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         liste["gelernt"] = gelernt
     if viral is not None:  # 🔥 Viral: Mischung und KI-Mittel – Bot-Text, Caption und Publikums-Lernen lesen das
         liste["variante"] = variante
-        liste["viral"] = viral.bilanz(reihe, variante, p)
+        liste["viral"] = viral.bilanz(reihe, variante, p, segmente)
     if fehler := pruefe_liste(liste, max_lupen=int(fx["max_lupen"]), max_raffer=int(fx["max_raffer"])):
         raise RegieFehler("Schnittliste ungültig: " + "; ".join(fehler[:3]))
     # Passt der Filtergraph samt Effekten auf die Befehlszeile? Sonst scheiterte erst das Rendern.

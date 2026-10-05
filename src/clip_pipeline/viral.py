@@ -39,7 +39,7 @@ from pathlib import Path
 
 from . import db, medien, schema
 from .konfig import Konfig
-from .zeit import iso, jetzt
+from .zeit import aus_iso, iso, jetzt
 
 log = logging.getLogger("pipeline")
 
@@ -96,7 +96,24 @@ def pruefe_titel(text: str | None, fakten: dict) -> str | None:
     if not sauber or len(sauber) > TITEL_MAX:
         return None
     erlaubt = {str(int(v)) for v in _flach(fakten) if _zahl(v) and float(v) == int(v)}
-    return sauber if set(re.findall(r"\d+", sauber)) <= erlaubt else None
+    if not set(re.findall(r"\d+", sauber)) <= erlaubt:
+        return None
+    return sauber if all(passt(fakten) for muster, passt in WORT_PRUEFUNG if re.search(muster, sauber)) else None
+
+
+def _serie(f: dict) -> int:
+    return max(int(f.get("kills_serie") or 0), int(f.get("kills_vorher_30s") or 0))
+
+
+# Wortaussagen im KI-Titel brauchen ihren Fakt (nichts erfinden): sonst gilt der Regel-Titel
+WORT_PRUEFUNG = (
+    (r"\bBOTS?\b", lambda f: bool(f.get("killer_bot")) if f.get("art") == "fail" else bool(f.get("bot_opfer"))),
+    (r"\b(SELBST|STURM|FALLSCHADEN)\b", lambda f: bool(f.get("selbst"))),
+    (r"\b(VICTORY|SIEG|GEWONNEN)\b", lambda f: bool(f.get("victory_royale"))),
+    (r"\bDOUBLE\b", lambda f: _serie(f) >= 2),
+    (r"\bTRIPLE\b", lambda f: _serie(f) >= 3),
+    (r"\bQUAD", lambda f: _serie(f) >= 4),
+)
 
 
 def _flach(d) -> list:
@@ -148,9 +165,12 @@ def _anker(mk: dict, dauer: float) -> float:
 
 
 def kontaktbogen(datei: Path, ziel: Path, anker: float, dauer: float) -> Path:
-    """5 Standbilder (je BILD_B px breit) nebeneinander um den Anker – ein ffmpeg-Aufruf."""
+    """5 Standbilder (je BILD_B px breit) nebeneinander um den Anker – ein ffmpeg-Aufruf. Je Zeitpunkt genau ein
+    Bild: das erste ab dem Zeitpunkt (Fenster 0,25 s), weitere im selben Fenster sperrt der Mindestabstand – sonst
+    füllten bei 60 fps zwei Bilder je Zeitpunkt die Kachel, und Tod/Kill fehlten (Prüfer 05.10.)."""
     zeiten = sorted({round(min(max(0.0, anker + d), max(0.0, dauer - 0.1)), 2) for d in BILDER})
-    auswahl = "+".join(f"between(t,{t - 0.017:.3f},{t + 0.016:.3f})" for t in zeiten)
+    fenster = "+".join(f"between(t,{t:.3f},{t + 0.25:.3f})" for t in zeiten)
+    auswahl = f"({fenster})*(isnan(prev_selected_t)+gte(t-prev_selected_t,0.3))"
     medien.fuehre_aus(["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(datei),
                        "-vf", f"select='{auswahl}',scale={BILD_B}:-2,tile={len(zeiten)}x1",
                        "-frames:v", "1", "-q:v", "5", str(ziel)], "Kontaktbogen Moment", timeout=60)
@@ -296,7 +316,39 @@ def mischen(con: sqlite3.Connection, konfig: Konfig, alle: list, variante: str, 
         hinweise.append("Twist: kein Fail und kein Gag im Material – nur Highlights")
     # Übrige Fails fallen weg (höchstens twist_anzahl Fails); lustige Highlights bleiben Highlights
     rest = [k for k in alle if not k.fail and not any(k is t for t in pflicht)]
+    # Ein Highlight, das dieselbe Szene zeigt wie ein Twist (gleiches Match, Zeitspannen überlappen – z. B. Triple
+    # und Tod 5 s später), fällt weg: sonst stünde sie doppelt im Video und das Tor „doppelt“ deckelte die Note
+    doppelt = [k for k in rest if any(_ueberlappt(k, t) for t in pflicht)]
+    if doppelt:
+        rest = [k for k in rest if not any(k is d for d in doppelt)]
+        hinweise.append(f"Twist: {len(doppelt)} Highlight(s) mit derselben Szene weggelassen")
+    # Der Twist ist nie der Höhepunkt: Seine Intensität (beim Fail der fail_score, eine andere Skala) bleibt unter
+    # dem Median der Highlights – sonst gälte er beim Payoff-Kriterium als Höhepunkt bei ~60 % (Teilnote 0)
+    if rest and pflicht:
+        werte = sorted(k.intensitaet for k in rest)
+        deckel = round(werte[len(werte) // 2] - 0.01, 2)
+        for t in pflicht:
+            t.intensitaet = min(t.intensitaet, deckel)
     return rest + pflicht, pflicht, hinweise
+
+
+def _spanne(k) -> tuple[float, float] | None:
+    """UTC-Spanne der Moment-Datei in Sekunden (None ohne start_utc)."""
+    if not k.start_utc:
+        return None
+    try:
+        a = aus_iso(k.start_utc).timestamp()
+    except ValueError:
+        return None
+    return a, a + float(k.dauer_s)
+
+
+def _ueberlappt(a, b) -> bool:
+    """Zeigen zwei Momente desselben Matches dieselbe Szene? Ihre Dateien überlappen um mehr als 1 s."""
+    if not a.match_id or a.match_id != b.match_id:
+        return False
+    sa, sb = _spanne(a), _spanne(b)
+    return bool(sa and sb and min(sa[1], sb[1]) - max(sa[0], sb[0]) > 1.0)
 
 
 def ordne(gewaehlt: list, variante: str, pflicht: list, grund_reihe) -> list:
@@ -335,9 +387,19 @@ def parameter(con: sqlite3.Connection, konfig: Konfig, variante: str, p: dict) -
     return p
 
 
-def bilanz(reihe: list, variante: str, p: dict) -> dict:
+def werkzeuge_im_video(segmente: list[dict]) -> dict[str, bool]:
+    """Welche Werkzeuge wirklich im Video stecken (nicht nur gewürfelt): Hook-Segment, Standbild, Zeitlupe, die
+    kurz vor dem Tod endet."""
+    return {"hook_teaser": any(s.get("rolle") == "hook" for s in segmente),
+            "tod_standbild": any(s.get("standbild") for s in segmente),
+            "tod_lupe": any(s.get("lupe") and s.get("tod_s") is not None
+                            and float(s["tod_s"]) - 0.5 <= float(s["lupe"]["bis_s"]) <= float(s["tod_s"]) + 1e-3
+                            for s in segmente)}
+
+
+def bilanz(reihe: list, variante: str, p: dict, segmente: list[dict] | None = None) -> dict:
     """Was im Video steckt – für Bot-Text, Caption und Publikums-Lernen (lern_features): Anteile Fail/Humor,
-    KI-Mittel (nur echte KI-Einschätzungen), Anteil mit KI, Werkzeuge."""
+    KI-Mittel (nur echte KI-Einschätzungen), Anteil mit KI, Werkzeuge (aus den Segmenten, sonst die Würfel)."""
     n = max(1, len(reihe))
     mit_ki = [k for k in reihe if (k.ki or {}).get("quelle") == "ki"]
     mittel = {f"ki_{f}": round(sum(k.ki[f] for k in mit_ki) / len(mit_ki), 1) if mit_ki else None for f in KI_FELDER}
@@ -346,7 +408,7 @@ def bilanz(reihe: list, variante: str, p: dict) -> dict:
             "humor_anteil": round(sum(1 for k in reihe if (k.ki or {}).get("humor", 0) >= HUMOR_TWIST_AB
                                       or k.stimmung == "lustig") / n, 3),
             "ki_anteil": round(len(mit_ki) / n, 3), **mittel,
-            "werkzeuge": {w: bool(p.get(w)) for w in WERKZEUGE}}
+            "werkzeuge": werkzeuge_im_video(segmente) if segmente is not None else {w: bool(p.get(w)) for w in WERKZEUGE}}
 
 
 # --- 3. Variantenwahl ---------------------------------------------------------------------------------

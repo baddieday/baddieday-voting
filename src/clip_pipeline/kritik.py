@@ -411,7 +411,8 @@ def schwelle(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> float:
     ab_n = int(konfig.wert("regie.massstab.schwelle_ab_n", 20))
     noten = []
     for z in con.execute("""SELECT k.score, k.details FROM kritiken k JOIN entwuerfe e ON e.id = k.entwurf_id
-                             WHERE e.format = ? AND k.mess_version >= 1 ORDER BY k.entwurf_id DESC""", (fmt,)):
+                             WHERE e.format = ? AND k.mess_version >= 1 AND e.variante IS NULL
+                             ORDER BY k.entwurf_id DESC""", (fmt,)):
         try:
             if json.loads(z["details"] or "{}").get("normiert"):
                 noten.append(float(z["score"]))

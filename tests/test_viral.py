@@ -22,6 +22,7 @@ class Titel(unittest.TestCase):
     def test_erfundene_zahl_wird_verworfen(self):
         self.assertIsNone(viral.pruefe_titel("PLATZ 1 – FAST", {"platz": 2}))
         self.assertIsNone(viral.pruefe_titel("X" * 31, {}))
+        self.assertIsNone(viral.pruefe_titel("Vom Bot erledigt", {"art": "fail", "killer_bot": False}))  # Wort ohne Fakt
 
 
 @unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
@@ -97,7 +98,25 @@ class Formate(MitFails):
         fails = [i for i, m in enumerate(momente) if m.startswith("fail:")]
         self.assertEqual(len(fails), 1)
         self.assertTrue(0 < fails[0] < len(momente) - 1)                   # nie vorn, nie als Höhepunkt
+        self.assertLess(liste["bogen"][fails[0]], max(liste["bogen"]))     # auch nicht für das Payoff-Kriterium
         self.assertEqual(liste["viral"]["fails"], 1)
+
+    def test_twist_ohne_doppelte_szene(self):
+        def k(schluessel, start, intensitaet, match="m1", fail=False):
+            return regie.Kandidat(schluessel=schluessel, datei="x.mp4", dauer_s=15.0, stimmung="episch",
+                                  intensitaet=intensitaet, punkte=intensitaet, clip_id=None, match_id=match,
+                                  kern=(0.0, 10.0), muss=(2.0, 8.0), grund="", start_utc=start, fail=fail,
+                                  merkmale={"fail": True, "fail_score": 8} if fail else {})
+        triple = k("triple", "2026-10-01T20:00:00Z", 6.0)                 # Tod 10 s nach Beginn des Triples
+        frueher = k("frueher", "2026-10-01T19:50:00Z", 4.0)
+        fremd = k("fremd", "2026-10-01T20:00:00Z", 2.0, match="m2")
+        tod = k("fail:m1:30", "2026-10-01T20:00:10Z", 8.0, fail=True)
+        alle, pflicht, hinweise = viral.mischen(self.con, self.konfig, [triple, frueher, fremd, tod], "twist",
+                                                {"twist_anzahl": 1}, {})
+        self.assertEqual([x.schluessel for x in pflicht], ["fail:m1:30"])
+        self.assertEqual(sorted(x.schluessel for x in alle), ["fail:m1:30", "fremd", "frueher"])
+        self.assertIn("derselben Szene", hinweise[0])
+        self.assertLess(tod.intensitaet, 4.0)                              # unter dem Median der Highlights
 
     def test_normale_shorts_ohne_fails(self):
         self.momente_anlegen(MOMENTE[:10])
