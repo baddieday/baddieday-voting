@@ -286,3 +286,17 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     (20 Bilder + Wellenform), Publikum, dein 👍/👎. Schwelle = Q20 der eigenen Noten (40–50), ab 20 gemessenen Entwürfen.
   - `pipeline kritik --id N`, `pipeline massstab --nachmessen`; Doku `docs/REGIE.md` „Cutter-Maßstab“, Annahmen
     `docs/ENTSCHEIDUNGEN.md`.
+- 2026-10-05 (Fail-Format, Florian: „Es soll Viewer ziehen, nicht nur lustig sein“ und „nur den Button drücken … mit KI
+  und aus Daten lernen, nicht durch 100te Bewertungen … professioneller Schnitt mit einem Hauch Humor“):
+  - **Fail-Momente als Material** (`fail.py`): je eigenem Tod ein Moment aus dem Rohvideo im Puffer (12 s vor bis 3 s
+    nach dem Tod, `fail:<match>:<sekunde>`). Fakten: Platz, Kills davor, Bot, selbst, Waffe. Automatisch im Mic-Schritt
+    nach render, von Hand `pipeline fail --session ID | --nachziehen`. n8n-Vertrag und render-JSON unverändert.
+  - Kein starres Regelwerk: Der Fail-Score ist nur Startwert. Die **KI schätzt je Moment** viral/humor/spannung ein
+    (`viral.py`, claude -p, Kontaktbogen + Fakten + Transkript, Tageslimit, je Moment einmal). Titel nur aus Fakten,
+    ohne Emoji.
+  - **Ein Knopf „🔥 Viral-Video“** (`/viral`): Der Bot wählt die Mischung selbst (Twist = Highlights + 1–2
+    Fails/Gags, Highlights oder reines Fail-Video). Die Wahl lernt per Thompson-Sampling über Cutter-Noten und
+    Publikum. Der Bot baut mehrere Fassungen und schickt die beste.
+  - Hook-Teaser, Zeitlupe und Standbild am Tod sind Werkzeuge mit Wahrscheinlichkeit, keine Pflicht. Variante,
+    Mischung, KI-Mittel und Werkzeuge sind Merkmale fürs Publikums-Lernen. Fail-Momente kommen nur in 🔥 Viral.
+    Doku `docs/REGIE.md` „Fail-Format und 🔥 Viral-Video“.
