@@ -37,6 +37,8 @@ class MitSpeicher(unittest.TestCase):
         self.konfig.daten.setdefault("viral", {})["ki"] = False
         # Schnittstil (30.09.): fest „klassik“ (= der bisherige Aufbau), damit alte Tests nicht von der Stilwahl abhängen
         self.konfig.daten["regie"]["stil"] = "klassik"
+        # Effekt-Klänge in den Test-Ordner: der Standard /var/lib/clip-pipeline/sfx ist auf CI nicht beschreibbar
+        self.konfig.daten["regie"].setdefault("effekte", {})["sfx_ordner"] = str(self.tmp / "sfx")
         # Auto-Freigabe im Clip-Bot (30.09.): aus, damit alte Tests unverändert bleiben – neue Tests schalten sie an
         self.konfig.daten.setdefault("auto_freigabe", {})["modus"] = "aus"
         for name in ("eingang", "replays", "sessions", "highlights", "musik", "archiv", "papierkorb"):
