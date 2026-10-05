@@ -28,7 +28,8 @@ plane() in dieser Reihenfolge:
    5. Zähler       „KILLS n“ je sichtbarem Kill, laufende Summe im Video (nur Short). Short: Titel und Zähler enden
                    spätestens am Anfang einer Zoom-Blende (xfade zoomin vergrößert das ganze Bild, das Spielbild
                    wüchse unter den Text)
-   6. Tod          Wackeln (Stärke tod_punch) + Blitz + Einschlag (nur frustriert hat dafür Stärke), kein Titel
+   6. Tod          Wackeln (Stärke tod_punch) + Blitz + Einschlag (nur frustriert hat dafür Stärke); ein Fail-Moment
+                   (🔥 Viral, 05.10.) bekommt seinen Titel aus Fakten (Kandidat.titel) kurz nach dem Tod
    7. Jubel        Meme-Zoom + Pop auf der ersten Jubel-Spitze (nur lustig)
    8. Riser        endet auf dem ersten Kill des Höhepunkts (wenn davor ≥ 1,5 s Video liegen)
    9. Whoosh       auf jedem weichen Übergang (nicht Schnitt, nicht Abblende über Schwarz)
@@ -231,6 +232,12 @@ RAFFER_MIN_S = 1.5                     # kürzer lohnt kein Raffer
 RAFFER_ANLAUF_S = 3.0                  # erst ab so viel Anlauf vor der ersten Aktion
 RAFFER_ABSTAND_S = 0.8                 # der Raffer endet so weit vor der ersten Aktion – die sieht man normal
 QUELLE_REST_S = 0.25                   # am Dateiende bleibt so viel frei (wie regie.plane_zeitleiste: nutzbar)
+# 🔥 Viral (05.10.): Werkzeuge am Tod eines Fail-Moments – nur, wenn der Plan sie wählt (p["tod_lupe"], p["tod_standbild"])
+TOD_LUPE_VOR_S, TOD_LUPE_LUECKE_S = 0.8, 0.05   # Zeitlupe (Faktor 0,5) von 0,8 s bis kurz vor dem Tod
+STANDBILD_QUELLE_S = 0.04              # Standbild: so viel Quelle (1–2 Bilder) …
+STANDBILD_FAKTOR = 0.0625              # … auf das 16-Fache gedehnt = 0,64 s im Video (Zuschlag genau 0,6 s), Ton stumm
+STANDBILD_QUELLE_MAX_S = 0.1           # Prüfer: längstes Standbild-Fenster in der Quelle
+FAIL_TITEL_S = 2.0                     # Fail-Titel steht so lange (bis zum Segmentende, höchstens TEXT_MAX_S)
 
 
 @dataclass
@@ -462,7 +469,7 @@ def tempo_fenster(seg: dict) -> list[tuple[float, float, float]]:
     """(ab, bis, faktor) der Tempo-Fenster eines Segments in Quellzeit, aufsteigend – der Zeitraffer (raffer, im
     Anlauf) liegt vor der Zeitlupe (lupe, um den Finisher). Leer ohne beides."""
     return sorted((float(w["ab_s"]), float(w["bis_s"]), float(w["faktor"]))
-                  for w in (seg.get("raffer"), seg.get("lupe")) if w)
+                  for w in (seg.get("raffer"), seg.get("lupe"), seg.get("standbild")) if w)
 
 
 def _zuschlag(seg: dict, t_q: float) -> float:
@@ -556,6 +563,24 @@ def _lupe_setzen(segmente: list[dict], grenzen: list, i: int, ab: float, bis: fl
     return False
 
 
+def _standbild_setzen(segmente: list[dict], grenzen: list, i: int, t: float) -> bool:
+    """Standbild am Tod (🔥 Viral): STANDBILD_QUELLE_S Quelle ab t auf 0,64 s gedehnt, Ton stumm – wie die Zeitlupe
+    bleibt die Zeitleiste, die Quelle wird hinten um den Zuschlag kürzer (nie in die Muss-Zone, den Griff, nach einer
+    Zeitlupe/Zeitraffer). Rückgabe: gesetzt?"""
+    s = segmente[i]
+    ab, bis = round(t, 3), round(t + STANDBILD_QUELLE_S, 3)
+    if not (grenzen[i][0] - 1e-6 <= ab and bis <= grenzen[i][1] + 1e-6):
+        return False
+    if any(w and w["bis_s"] > ab + 1e-6 for w in (s.get("lupe"), s.get("raffer"))):
+        return False
+    qe_neu = round(s["quelle_ende_s"] - (bis - ab) * (1 / STANDBILD_FAKTOR - 1), 3)
+    if qe_neu < max(s["muss"][1], bis + RAND_S + _r_hinten(segmente, i)) - 1e-6:
+        return False
+    s["standbild"] = {"ab_s": ab, "bis_s": bis, "faktor": STANDBILD_FAKTOR, "ton": "stumm"}
+    s["quelle_ende_s"] = qe_neu
+    return True
+
+
 def _raffer_setzen(segmente: list[dict], i: int, ab: float, bis: float) -> bool:
     """Zeitraffer (Faktor 2) ab … bis (Quelle) in Segment i: das Fenster wird halb so lang, dafür nimmt das Segment
     hinten die andere Hälfte mehr Quelle – nur so weit, wie die Datei (QUELLE_REST_S, hinterer Griff) und ein
@@ -581,7 +606,8 @@ def plane_tempo(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_
     Höchstens [regie.effekte].max_lupen bzw. max_raffer je Video – Vorrang: der
     Höhepunkt, dann die längere Serie, dann mehr Punkte; Raffer: der längere Anlauf. Stärke wie jeder Effekt:
     Profil (lupe, raffer) × gelernte effekt_staerke, unter der Schwelle keiner. Die Zeitleiste (Beats) bleibt –
-    _lupe_setzen/_raffer_setzen passen nur die Quelle an. Rückgabe {"lupen": n, "raffer": n}."""
+    _lupe_setzen/_raffer_setzen passen nur die Quelle an. Rückgabe {"lupen": n, "raffer": n} (dazu "standbilder": n,
+    wenn am Tod eines Fail-Moments ein Standbild gesetzt wurde)."""
     e, _ = einstellungen(konfig)
     prof, schwelle = e["profile"], e["schwelle"]
     kette_s = float(konfig.wert("vorbewertung.multikill_fenster_s", 10.0))
@@ -589,6 +615,7 @@ def plane_tempo(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_
     for s in segmente:  # neu planen = von vorn
         s.pop("lupe", None)
         s.pop("raffer", None)
+        s.pop("standbild", None)
     grenzen = [_sichtbar(segmente, i) for i in range(len(segmente))]
     lupen: list[tuple[tuple, int, float, float, float]] = []
     raffer: list[tuple[float, int, float, float]] = []
@@ -623,7 +650,22 @@ def plane_tempo(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_
         if n_raffer >= int(e["max_raffer"]):
             break
         n_raffer += _raffer_setzen(segmente, i, ab, bis)
-    return {"lupen": n_lupen, "raffer": n_raffer}
+    # 🔥 Viral (05.10.): am Tod eines Fail-Moments Zeitlupe davor und Standbild – Werkzeuge, die der Plan wählt
+    standbilder = 0
+    for moment, idx in _je_moment(segmente).items():
+        k = momente.get(moment)
+        if k is None or not getattr(k, "fail", False) or k.merkmale.get("tod_sekunde") is None:
+            continue
+        tod = float(k.merkmale["tod_sekunde"])
+        if (i := _wo(grenzen, idx, tod)) is None:
+            continue
+        st = segmente[i]["stimmung"]
+        if p.get("tod_lupe") and n_lupen < int(e["max_lupen"]) and not segmente[i].get("lupe") \
+                and staerke(prof[st]["lupe"], p, st, "lupe", schwelle) > 0:
+            n_lupen += _lupe_setzen(segmente, grenzen, i, tod - TOD_LUPE_VOR_S, tod - TOD_LUPE_LUECKE_S, 0.5)
+        if p.get("tod_standbild"):
+            standbilder += _standbild_setzen(segmente, grenzen, i, tod)
+    return {"lupen": n_lupen, "raffer": n_raffer, **({"standbilder": standbilder} if standbilder else {})}
 
 
 def _wichtig(e: _Plan) -> int:
@@ -663,8 +705,9 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
         if wert > 0:
             ziel.append(_Plan(art, i, round(t, 3), wert, **felder))
 
-    for s in segmente:  # neu planen = von vorn
-        s.pop("kill_s", None)
+    for s in segmente:  # neu planen = von vorn (der Hook-Teaser bringt seinen Anker selbst mit)
+        if s.get("rolle") != "hook":
+            s.pop("kill_s", None)
         s.pop("effekte", None)
     je_moment = _je_moment(segmente)  # Hook (Stufe 4) plant seine Ereignisse selbst
     grenzen = [_sichtbar(segmente, i) for i in range(len(segmente))]
@@ -740,6 +783,12 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
             dazu(plan, "shake", i, t, stark(i, pr["tod_punch"], "shake"), dauer=SHAKE_S, rang=RANG_FINISHER)
             dazu(plan, "flash", i, t, stark(i, pr["flash"], "flash"), dauer=FLASH_S)
             dazu(plan, "sfx", i, t, stark(i, pr["einschlag"], "einschlag"), klang="einschlag")
+            if k is not None and getattr(k, "fail", False) and getattr(k, "titel", None):
+                # Fail-Titel (nur aus Fakten, viral.pruefe_titel/fail.titel) – wie VICTORY ROYALE: ersetzt Kill-Titel
+                # (steht er im Standbild, ist er ohne Bewegung darunter gut lesbar)
+                t_titel = t + TITEL_VERSATZ_S
+                dazu(victory, "titel", i, t_titel, stark(i, 1.0, "titel"), text=k.titel,
+                     dauer=min(TEXT_MAX_S, FAIL_TITEL_S, segmente[i]["zeit_ende"] - t_titel), rang=98)
         for jubel in sorted(float(x) for x in mk.get("jubel_laut_s") or []):
             if (i := wo(idx, jubel)) is not None:
                 pr, t = prof[segmente[i]["stimmung"]], auf_zeitleiste(segmente[i], jubel)

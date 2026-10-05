@@ -62,6 +62,11 @@ MIGRATIONEN += [("kritiken", "teile", "TEXT"), ("kritiken", "plan_teile", "TEXT"
                 ("kritiken", "mess_version", "INTEGER"), ("kritiken", "ki_version", "TEXT"),
                 ("kritiken", "massstab_version", "INTEGER")]
 
+# 🔥 Viral (05.10., viral.py): Mischung eines Viral-Videos (twist · highlight · fail), NULL = normaler Entwurf. Eigene
+# Spalte statt neuem Format – die CHECK-Liste von entwuerfe.format ließe sich nur mit Tabellen-Umbau ändern; gerendert
+# wird ein Viral-Video wie jeder Short (format = 'short').
+MIGRATIONEN += [("entwuerfe", "variante", "TEXT")]
+
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
     pfad = Path(pfad)

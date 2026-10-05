@@ -293,6 +293,7 @@ class Ereignisse:
     hook_kills: list[float] = field(default_factory=list)
     zeitleiste: list = field(default_factory=list)        # alle Ereignisse aus effekte.zeitleiste
     tempo: list[tuple[float, float]] = field(default_factory=list)   # Zeitlupen-Fenster auf der Zeitleiste
+    halt: list[tuple[float, float]] = field(default_factory=list)    # geplante Standbilder (🔥 Viral, 05.10.)
     ydif: list[float] = field(default_factory=list)       # ŶDIF je Bild (leer ohne Messung)
     c_aus_plan: bool = False
 
@@ -307,12 +308,15 @@ def _uebergang(s: dict) -> dict:
 
 def kills_je_segment(liste: dict) -> list[tuple[dict, list[float]]]:
     """(Segment, Kill-Zeiten im Video) – dieselbe Regel wie kritik._kills (kill_s, ohne Anker die Muss-Spanne),
-    hier aber mit Hook-Segmenten (der Aufrufer filtert)."""
+    hier aber mit Hook-Segmenten (der Aufrufer filtert). Fail-Momente (05.10.): der sichtbare Tod (tod_s) ist der
+    Anker, wie ein Kill – so sehen Hook und Payoff auch ein Fail-Video."""
     segs = _segmente(liste)
-    mit_anker = any(s.get("kill_s") for s in segs if s.get("rolle") != "hook")
+    def anker(s: dict) -> list:
+        return list(s.get("kill_s") or ([s["tod_s"]] if s.get("tod_s") is not None else []))
+    mit_anker = any(anker(s) for s in segs if s.get("rolle") != "hook")
     ergebnis = []
     for s in segs:
-        punkte = s.get("kill_s") or ([] if mit_anker or s.get("rolle") == "hook" else list(s.get("muss") or []))
+        punkte = anker(s) or ([] if mit_anker or s.get("rolle") == "hook" else list(s.get("muss") or []))
         zeiten = []
         for k in punkte:
             if "quelle_start_s" in s and s["quelle_start_s"] - 1e-6 <= k <= s.get("quelle_ende_s", k) + 1e-6:
@@ -367,9 +371,12 @@ def ereignisse(liste: dict, m) -> Ereignisse:
         if (lupe := s.get("lupe")) and "quelle_start_s" in s:
             ev.tempo.append((effekte.auf_zeitleiste(s, float(lupe["ab_s"])),
                              effekte.auf_zeitleiste(s, float(lupe["bis_s"]))))
+        if (halt := s.get("standbild")) and "quelle_start_s" in s:
+            ev.halt.append((effekte.auf_zeitleiste(s, float(halt["ab_s"])),
+                            effekte.auf_zeitleiste(s, float(halt["bis_s"]))))
     tempo_grenzen = []
     for s in segs:
-        for w in (s.get("lupe"), s.get("raffer")):
+        for w in (s.get("lupe"), s.get("raffer"), s.get("standbild")):
             if w and "quelle_start_s" in s:
                 tempo_grenzen += [effekte.auf_zeitleiste(s, float(w["ab_s"])),
                                   effekte.auf_zeitleiste(s, float(w["bis_s"]))]
@@ -816,11 +823,14 @@ def _bild_technik(x: _Lage) -> Teilnote | None:
     if not x.gemessen or not x.ev.ydif:
         return None
     zeiten, y = _bild_zeiten(x.m), x.ev.ydif
-    in_lupe = [v for t, v in zip(zeiten, y) if any(a <= t <= b for a, b in x.ev.tempo)]
-    sonst = [v for t, v in zip(zeiten, y) if not any(a <= t <= b for a, b in x.ev.tempo)]
+    # geplante Standbilder (🔥 Viral) sind gewollt: ihre Bilder zählen weder als doppelt noch als Standbild-Macke
+    halt = lambda a, b: any(ha - 0.05 <= b and a <= hb + 0.05 for ha, hb in x.ev.halt)  # noqa: E731
+    in_lupe = [v for t, v in zip(zeiten, y) if any(a <= t <= b for a, b in x.ev.tempo) and not halt(t, t)]
+    sonst = [v for t, v in zip(zeiten, y) if not any(a <= t <= b for a, b in x.ev.tempo) and not halt(t, t)]
     dopp = max([sum(1 for v in r if v < 0.05) / len(r) for r in (in_lupe, sonst) if r] or [0.0])
     stand_iv = getattr(x.m, "stand", None)
-    stand = None if stand_iv is None else sum(1 for a, b in stand_iv if 0.5 <= float(b) - float(a) < 1.0)
+    stand = None if stand_iv is None else sum(1 for a, b in stand_iv if 0.5 <= float(b) - float(a) < 1.0
+                                              and not halt(float(a), float(b)))
     effekt_zeit = [(t, t + max(d, 0.1)) for _, t, d in x.ev.e]
     yavg = _liste(getattr(x.m, "yavg_b", None))
     licht = None

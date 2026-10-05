@@ -9,7 +9,9 @@ Was er tut:
   - speichert die Bewertungen (entwurf_bewertungen) – der nächste `compose` lernt daraus (regie_lernen.py)
   - analysiert vor jedem Entwurf ein paar weitere Clips (Stimmung), damit die Auswahl wächst
   - schickt Meldungen aus lern_meldungen (Alarme, abends ein Satz zum Stand, Abschlussbericht)
-Befehle: /entwurf [short|zusammenschnitt] · /musik · /lernstand · /stand · /hilfe
+Befehle: /viral · /entwurf [short|zusammenschnitt|viral|twist|highlight|fail] · /musik · /lernstand · /stand · /hilfe
+🔥 /viral (05.10.): ein Knopf – der Bot wählt die Mischung selbst (viral.py), schätzt die Momente per KI ein, baut bis
+zu [viral].versuche_max Fassungen, lässt den Cutter-Maßstab benoten und schickt nur die beste.
 """
 
 from __future__ import annotations
@@ -27,14 +29,16 @@ from html import escape
 from pathlib import Path
 
 from . import (autonom, big, db, einstellungen, entwurf, erwartung, kriterien, kritik, massstab, musik, regie,
-               regie_lernen, stile, stimmung)
+               regie_lernen, stile, stimmung, viral)
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import iso, jetzt, utc_zu_lokal
 
 log = logging.getLogger("lern-bot")
 TEXT_MAX = 4000
-FORMAT_NAMEN = {"short": "Short", "zusammenschnitt": "Zusammenschnitt"}
+FORMAT_NAMEN = {"short": "Short", "zusammenschnitt": "Zusammenschnitt", "viral": "🔥 Viral-Video",
+                "twist": "😅 Viral-Video mit Twist", "highlight": "⚡ Viral-Video (Highlights)", "fail": "💀 Fail-Video"}
+ENTWURF_ZIELE = (*regie.FORMATE, *viral.KNOEPFE)   # was /entwurf und die Knöpfe bauen können
 
 HILFE = """<b>Autonomes Lernen des Regisseurs</b>
 Veröffentlichte Videos und ihre Publikumszahlen verbessern die nächsten Entwürfe automatisch.
@@ -42,6 +46,8 @@ Veröffentlichte Videos und ihre Publikumszahlen verbessern die nächsten Entwü
 🎵 <b>Musik schicken:</b> Audiodatei mit Bildunterschrift = Quellenangabe
    (z. B. „Song: Künstler - Titel / Music provided by NoCopyrightSounds / …“), optional <code>#episch</code>,
    <code>#spannend</code>, <code>#lustig</code>, <code>#frustriert</code> oder <code>#chill</code>.
+🔥 /viral – ein Knopf: ich wähle die Mischung (Highlights, Twist mit Fail, reines Fail-Video), benote mich selbst
+   und schicke nur die beste Fassung. Fest: /entwurf <code>twist</code>, <code>highlight</code> oder <code>fail</code>
 🎬 /entwurf <code>short</code> oder /entwurf <code>zusammenschnitt</code> – neuen Entwurf bauen
 👍/👎 bleiben freiwilliges Zusatzfeedback; danach bei Bedarf Gründe antippen und ✅ fertig.
 /musik – Titel · /lernstand – autonomer Lernfortschritt · /stand – kurzer Stand
@@ -53,9 +59,10 @@ Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 # Kurzbefehle (27.09.): Knöpfe im Chat wie beim Bewerten (Florian: „nicht die Tastatur ersetzen“). Callback k:0:<ziel>.
 # KURZBEFEHLE bleibt für Taps auf die alte Ersatz-Tastatur, bis sie weg ist (ReplyKeyboardRemove).
 KURZBEFEHLE = {"🎬 Short": "short", "🎞️ Zusammenschnitt": "zusammenschnitt", "🧠 Lernstand": "lernstand",
-               "📋 Stand": "stand", "📊 Publikum": "publikum", "🎵 Musik": "musik", "⚙️ Einstellungen": "einstellungen"}
-KURZ_REIHEN = [["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"], ["📊 Publikum", "🎵 Musik"],
-               ["⚙️ Einstellungen"]]
+               "📋 Stand": "stand", "📊 Publikum": "publikum", "🎵 Musik": "musik", "⚙️ Einstellungen": "einstellungen",
+               "🔥 Viral-Video": "viral"}
+KURZ_REIHEN = [["🔥 Viral-Video"], ["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"],
+               ["📊 Publikum", "🎵 Musik"], ["⚙️ Einstellungen"]]
 KREISE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"
 
 
@@ -65,13 +72,37 @@ def knoepfe_daumen(eid: int) -> list[list[tuple[str, str]]]:
     return [[("👍", f"d:{eid}:1"), ("👎", f"d:{eid}:-1")]]
 
 
-def knoepfe_entwurf(eid: int, fmt: str) -> list[list[tuple[str, str]]]:
-    """Upload und nächsten Entwurf ohne Bewertungsrunde erreichen."""
+def knoepfe_entwurf(eid: int, fmt: str, naechster: str | None = None) -> list[list[tuple[str, str]]]:
+    """Upload und nächsten Entwurf ohne Bewertungsrunde erreichen. naechster: Ziel des Knopfs „Nächster Entwurf“
+    (🔥 Viral: "viral"), sonst dasselbe Format."""
     from . import lernbot_paket
 
     return [*(lernbot_paket.knoepfe_nach_fertig(eid, None, fmt) or []),
-            [("🎬 Nächster Entwurf", f"k:0:{fmt}"), ("🧠 Lernstand", "k:0:lernstand")],
+            [("🎬 Nächster Entwurf", f"k:0:{naechster or fmt}"), ("🧠 Lernstand", "k:0:lernstand")],
             *knoepfe_daumen(eid)]
+
+
+def naechstes_ziel(zeile: sqlite3.Row) -> str:
+    """Was nach diesem Entwurf als Nächstes kommt: ein Viral-Video wieder als 🔥 Viral (Bot wählt neu), sonst das Format."""
+    return "viral" if "variante" in zeile.keys() and zeile["variante"] else zeile["format"]
+
+
+def viral_zeile(liste: dict) -> str | None:
+    """„🔥 😅 Highlights mit Twist · 1 Fail · KI 6/7 Momente (viral Ø 71) · Hook ✓ · Standbild ✓“ – None ohne Viral."""
+    v = liste.get("viral")
+    if not isinstance(v, dict) or v.get("variante") not in viral.VARIANTEN:
+        return None
+    teile = [f"🔥 {viral.VARIANTEN[v['variante']]}"]
+    if v.get("fails"):
+        teile.append("1 Fail" if v["fails"] == 1 else f"{v['fails']} Fails")
+    if v.get("ki_anteil"):
+        teile.append(f"KI {round(v['ki_anteil'] * v.get('momente', 0))}/{v.get('momente', 0)} Momente"
+                     + (f" (viral Ø {v['ki_viral']:.0f})" if v.get("ki_viral") is not None else ""))
+    else:
+        teile.append("Einschätzung per Regel")
+    werkzeuge = {"hook_teaser": "Hook", "tod_lupe": "Zeitlupe am Tod", "tod_standbild": "Standbild"}
+    teile += [f"{name} ✓" for w, name in werkzeuge.items() if (v.get("werkzeuge") or {}).get(w)]
+    return escape(" · ".join(teile))
 
 
 def knoepfe_gruende(eid: int, gewaehlt: list[str]) -> list[list[tuple[str, str]]]:
@@ -153,6 +184,8 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
     teile = [f"🎬 <b>Entwurf #{zeile['id']}</b> · {FORMAT_NAMEN[liste['format']]} {liste['dauer_s']:.0f} s · "
              f"Stimmung <b>{liste['stimmung']}</b> · {momente} Momente",
              f"Bogen {_balken(liste['bogen'])}"]
+    if zeile_viral := viral_zeile(liste):
+        teile.insert(1, zeile_viral)
     if a := liste.get("auswahl"):
         zeile = f"🆕 {a['neu']} neue · {a['schon_gezeigt']} schon gezeigt · Auswahl aus {a['kandidaten']} Momenten"
         if a.get("gesperrt"):
@@ -288,16 +321,24 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
             t1 = time.monotonic()
             nachgezogen = stimmung_nachziehen(con, konfig, nur_matches)
             t2 = time.monotonic()
-            parameter, ziel = regie_lernen.aktuelle(con, konfig, fmt)
+            variante = None
+            if fmt in viral.KNOEPFE:   # 🔥 Viral (05.10.): Mischung wählt der Bot, Momente schätzt die KI ein
+                variante = viral.waehle_variante(con, konfig) if fmt == "viral" else fmt
+                nachgezogen["hinweise"] += viral.einschaetzen(con, konfig)["hinweise"]
+                nur_matches, quell_hinweis = None, None   # Fails und Twists brauchen Material über mehrere Matches
+            regie_fmt = "short" if variante else fmt
+            parameter, ziel = regie_lernen.aktuelle(con, konfig, regie_fmt)
+            if variante:
+                parameter = viral.parameter(con, konfig, variante, parameter)
             try:  # nur eine Anzeige – ein Fehler hier darf den Entwurf nicht kosten
-                gelernt = regie_lernen.wirkung(con, konfig, fmt)
+                gelernt = regie_lernen.wirkung(con, konfig, regie_fmt)
             except Exception:
                 log.exception("Wirkung der letzten Bewertung")
                 gelernt = None
             try:
-                e = regie.erstelle(con, konfig, fmt, parameter=parameter, ziel=ziel, nur_matches=nur_matches,
+                e = regie.erstelle(con, konfig, regie_fmt, parameter=parameter, ziel=ziel, nur_matches=nur_matches,
                                    hinweise_vorab=[*filter(None, [quell_hinweis]), *nachgezogen["hinweise"]],
-                                   gelernt=gelernt)
+                                   gelernt=gelernt, variante=variante)
             except regie.RegieFehler as fehler:
                 if not nur_matches:
                     raise
@@ -357,6 +398,13 @@ def pruefe_auto_verwerfen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: i
     if wahrschein is None or wahrschein >= schwelle:
         return None
     return f"Erwartung {round(100 * wahrschein)} % unter Schwelle {round(100 * schwelle)} %"
+
+
+def beste_fassung(con: sqlite3.Connection, ids: list[int]) -> int:
+    """Die Fassung mit der höchsten Cutter-Note (ohne Note zählt 0; bei Gleichstand die neuere)."""
+    noten = {z["entwurf_id"]: float(z["score"]) for z in con.execute(
+        f"SELECT entwurf_id, score FROM kritiken WHERE entwurf_id IN ({','.join('?' for _ in ids)})", ids)}
+    return max(ids, key=lambda i: (noten.get(i, 0.0), i))
 
 
 def nimm_musik(konfig: Konfig, datei: Path, bildunterschrift: str, dateiname: str) -> dict:
@@ -420,7 +468,8 @@ async def _sende_entwuerfe(app) -> int:
         with pfad.open("rb") as datei:
             nachricht = await app.bot.send_video(
                 chat_id=chat, video=datei, caption=entwurf_text(z, _liste(z), erwartung=wert, kritik_text=kritik.kritik_zeile(con, z["id"])), parse_mode="HTML",
-                reply_markup=_markup(knoepfe_entwurf(z["id"], z["format"])), supports_streaming=True,
+                reply_markup=_markup(knoepfe_entwurf(z["id"], z["format"], naechstes_ziel(z))),
+                supports_streaming=True,
                 read_timeout=300, write_timeout=300, connect_timeout=30,
             )
         con.execute("UPDATE entwuerfe SET status = 'gesendet', tg_nachricht_id = ? WHERE id = ?",
@@ -529,19 +578,26 @@ async def neuer_entwurf(app, fmt: str) -> int | None:
         con = app.bot_data["con"]
         konfig = einstellungen.anwenden(con, app.bot_data["konfig"])   # ⚙️ Vorfilter usw. (29.09.)
         wach = await asyncio.to_thread(speicher_da, konfig)
-        await app.bot.send_message(chat, f"🎬 Baue einen {FORMAT_NAMEN[fmt]} …"
+        await app.bot.send_message(chat, (f"🎬 Baue ein {FORMAT_NAMEN[fmt]} …" if fmt in viral.KNOEPFE else
+                                          f"🎬 Baue einen {FORMAT_NAMEN[fmt]} …")
                                    + ("" if wach else " 💤 pve-big schläft – ich wecke ihn (bis zu 3 min)."),
                                    reply_markup=ohne_tastatur())
-        versuche_max = max(1, int(konfig.wert("lernbot.auto_versuche_max", 3)))
+        ist_viral = fmt in viral.KNOEPFE
+        versuche_max = max(1, int(konfig.wert("viral.versuche_max" if ist_viral else "lernbot.auto_versuche_max", 3)))
         aussortiert = []
         for versuch in range(versuche_max):
             eid = await asyncio.to_thread(baue_entwurf, konfig, fmt)
-            grund = None if versuch == versuche_max - 1 else pruefe_auto_verwerfen(con, konfig, eid)
+            letzter = versuch == versuche_max - 1
+            grund = pruefe_auto_verwerfen(con, konfig, eid) if ist_viral or not letzter else None
             if grund is None:
                 break
             con.execute("UPDATE entwuerfe SET auto_verworfen = ? WHERE id = ?", (grund, eid))
             log.info("Entwurf #%s automatisch aussortiert: %s", eid, grund)
             aussortiert.append(eid)
+            if letzter:  # 🔥 Viral: keine Fassung schaffte die Hürde – die beste nach Cutter-Note kommt trotzdem
+                eid = beste_fassung(con, aussortiert)
+                con.execute("UPDATE entwuerfe SET auto_verworfen = NULL WHERE id = ?", (eid,))
+                aussortiert.remove(eid)
         if aussortiert:
             wort = "Entwurf" if len(aussortiert) == 1 else "Entwürfe"
             await app.bot.send_message(chat, f"🤖 {len(aussortiert)} {wort} automatisch aussortiert (Cutter-Note oder "
@@ -560,11 +616,17 @@ async def neuer_entwurf(app, fmt: str) -> int | None:
 
 async def cmd_entwurf(update, context) -> None:
     fmt = (context.args or ["short"])[0].lower()
-    if fmt not in regie.FORMATE:
-        await update.effective_message.reply_text("Aufruf: /entwurf short oder /entwurf zusammenschnitt")
+    if fmt not in ENTWURF_ZIELE:
+        await update.effective_message.reply_text("Aufruf: /entwurf short · zusammenschnitt · viral · twist · "
+                                                  "highlight · fail")
         return
     # Im Hintergrund wie nach einer Bewertung: sonst stehen alle anderen Knöpfe, bis der Entwurf fertig ist
     context.application.create_task(neuer_entwurf(context.application, fmt))
+
+
+async def cmd_viral(update, context) -> None:
+    """🔥 /viral: ein Knopf – Mischung, Einschätzung, Fassungen und Auswahl macht der Bot selbst (im Hintergrund)."""
+    context.application.create_task(neuer_entwurf(context.application, "viral"))
 
 
 async def bei_kurzknopf(update, context) -> None:
@@ -577,7 +639,7 @@ async def bei_kurzknopf(update, context) -> None:
     if ziel not in KURZBEFEHLE.values():
         await query.answer("Unbekannter Knopf.")
         return
-    await query.answer(f"🎬 {FORMAT_NAMEN[ziel]} kommt …" if ziel in regie.FORMATE else None)
+    await query.answer(f"🎬 {FORMAT_NAMEN[ziel]} kommt …" if ziel in ENTWURF_ZIELE else None)
     await _kurzbefehl(ziel, update, context)
 
 
@@ -590,7 +652,7 @@ async def bei_kurzbefehl(update, context) -> None:
 
 
 async def _kurzbefehl(ziel: str | None, update, context) -> None:
-    if ziel in regie.FORMATE:
+    if ziel in ENTWURF_ZIELE:
         context.application.create_task(neuer_entwurf(context.application, ziel))
     elif ziel == "lernstand":
         await cmd_lernstand(update, context)
@@ -679,7 +741,7 @@ async def bei_klick(update, context) -> None:
         knoepfe = lernbot_paket.knoepfe_nach_fertig(eid, bewertung, zeile["format"])
         knoepfe = [*(knoepfe or []), *knoepfe_kurzbefehle()]  # 27.09.: Kurzbefehle nach dem Bewerten
         if weiter:  # Lernschleife: sofort der nächste Entwurf, schon mit dieser Bewertung eingerechnet
-            context.application.create_task(neuer_entwurf(context.application, zeile["format"]))
+            context.application.create_task(neuer_entwurf(context.application, naechstes_ziel(zeile)))
     gespeichert = time.monotonic()
     try:
         await query.edit_message_caption(caption=entwurf_text(zeile, _liste(zeile), bewertung,
@@ -748,7 +810,8 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     app.bot_data.update(con=db.verbinde(konfig.datenbank), konfig=konfig, erlaubt=erlaubt)
     nur_ich = filters.User(user_id=erlaubt)
     for name, funktion in (("start", cmd_hilfe), ("hilfe", cmd_hilfe), ("help", cmd_hilfe), ("stand", cmd_stand),
-                           ("lernstand", cmd_lernstand), ("musik", cmd_musik), ("entwurf", cmd_entwurf)):
+                           ("lernstand", cmd_lernstand), ("musik", cmd_musik), ("entwurf", cmd_entwurf),
+                           ("viral", cmd_viral)):
         app.add_handler(CommandHandler(name, funktion, filters=nur_ich))
     app.add_handler(MessageHandler(nur_ich & (filters.AUDIO | filters.Document.AUDIO), bei_audio))
     # Kurzbefehle VOR dem freien Text der Zahlen-Eingabe (lernbot_zahlen.bei_text nimmt sonst jeden Text)

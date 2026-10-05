@@ -238,6 +238,35 @@ bild_technik = 8
 lesbarkeit = 2
 effektdosis = 7
 
+[viral]
+# 🔥 Viral-Video (05.10., src/clip_pipeline/viral.py, Florian: „nur den Button drücken – professioneller Schnitt mit einem
+# Hauch Humor, lernen aus Daten statt aus 100 Bewertungen“). Im Lern-Bot /viral bzw. Knopf „🔥 Viral-Video“.
+# Variante: "auto" = der Bot wählt selbst (Thompson-Sampling über Cutter-Noten und Publikum); fest: twist (Highlights
+# mit 1–2 Fails/Gags), highlight, fail. In ⚙️ Einstellungen umstellbar.
+variante = "auto"
+# KI-Einschätzung je Moment (claude -p, nur Leserecht, zählt gegen das Abo): viral/humor/spannung + Titel aus Fakten.
+# Je Moment einmal; danach bzw. darüber gilt die Regel (Startwert).
+ki = true
+ki_pro_tag = 40            # höchstens so viele Momente am Tag
+ki_je_lauf = 12            # je Viral-Entwurf höchstens so viele neue
+ki_je_aufruf = 6           # so viele Momente in einem claude-Aufruf
+ki_gewicht = 1.0           # Auswahl-Bonus: ki_gewicht × (viral − 50) / 10 Punkte
+timeout_s = 240
+prompt = "templates/viral-prompt.txt"
+versuche_max = 3           # so viele Fassungen baut /viral höchstens; gesendet wird die beste (Cutter-Note)
+
+[viral.prior]
+# Startwissen der Variantenwahl als Beta(a, b) – der Twist ist der Hauptweg, die Noten verschieben das
+twist = [3.0, 1.0]
+highlight = [2.0, 1.0]
+fail = [1.0, 1.0]
+
+[viral.werkzeuge]
+# Wahrscheinlichkeit je Entwurf (keine Pflicht – was ankommt, lernt das Publikums-Modell)
+hook_teaser = 0.6          # 1–1,5 s Teaser des Höhepunkts ganz vorn
+tod_lupe = 0.7             # Zeitlupe kurz vor dem Tod eines Fails
+tod_standbild = 0.6        # 0,64 s Standbild am Tod
+
 [sitzungen]
 # "Session vorbei"-Dateien des Gaming-PCs (windows/Uebertragung.ps1, SessionVorbeiMinuten)
 ordner = "sitzungen"
@@ -408,6 +437,30 @@ sniper = []
 nahkampf = []          # Shotgun, SMG, Spitzhacke
 sonstige = []          # bekannte andere Waffen (schaltet die Meldung für diese Zahl ab)
 
+[fail]
+# Fail-Momente (05.10., src/clip_pipeline/fail.py): je eigenem Tod ein Moment aus dem Rohvideo im Puffer – automatisch
+# im Mic-Schritt nach render (clip-mikro), von Hand `pipeline fail --session ID` bzw. `--nachziehen [--tage 14]`
+an = true
+vor_s = 12.0             # so lange vor dem Tod beginnt der Moment
+nach_s = 3.0             # so lange danach endet er
+kills_fenster_s = 30.0   # eigene Kills so lange vor dem Tod zählen als Fallhöhe
+knock_fenster_s = 30.0   # selbst umgehauen so lange vorher zählt
+kills_deckel = 4
+auto_tage = 2            # nach render: Matches der letzten n Tage prüfen (Vorhandenes wird übersprungen)
+mic_je_lauf = 2          # Whisper für so viele Fail-Momente je Lauf
+
+[fail.gewichte]
+# Startwert/Rückfall des Fail-Scores, solange keine KI-Einschätzung da ist (viral.py)
+platz_10 = 2.0           # beim Tod höchstens Platz 10
+platz_3 = 3.0            # zusätzlich, wenn höchstens Platz 3
+kill_vorher = 1.0        # je eigener Kill in den 30 s davor (Fallhöhe)
+bot = 3.0                # vom Bot erledigt
+selbst = 2.5             # selbst erledigt (Sturm, Sturz, eigene Explosion)
+knock = 0.5              # vorher selbst umgehauen
+mic_frust = 0.5          # je Frust-Wort (Deckel 3)
+mic_laut = 0.5           # je laute Mikro-Stelle (Deckel 3)
+mic_lachen = 0.75        # je Lachen (Deckel 3)
+
 [lernen]
 # Erst ab so vielen Bewertungen (Freigaben/Verwerfungen + Battles) wird gelernt. 27.09. (B3): 10 statt 20 – das
 # Vertrauen wächst ohnehin mit n (10 von 60 = 17 %), und die Schranken (nie schlechter als die Startgewichte) bleiben.
@@ -556,6 +609,8 @@ archiv_ab_kills = 3
 
 [caption]
 vorlage = "templates/caption.txt"
+# Reines Fail-Video (🔥 Viral, 05.10.): Mitmach-Frage und „Größter Fail der Woche – stimm ab auf clip-battle.de“
+vorlage_fail = "templates/caption-fail.txt"
 beschreibungen = "templates/beschreibungen.toml"
 # Optional: `claude -p` formuliert die Beschreibung um (nur mit Faktenprüfung)
 ki = false
