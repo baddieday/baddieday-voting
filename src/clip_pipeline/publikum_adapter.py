@@ -22,6 +22,7 @@ from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from . import publikum
+from .sperre import Gesperrt, sperre
 from .zeit import aus_iso, iso, jetzt
 
 log = logging.getLogger("pipeline")
@@ -132,6 +133,31 @@ def _json(url: str, token: str | None = None, *, daten=None, formular=False) -> 
 
 
 ANMELDUNG = "anmeldung"   # Seed einer Anmeldung per /tiktok (tiktok_anmeldung) – geht vor dem Refresh-Token aus .env
+TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
+VIDEO_LIST_HINWEIS = ("Das Recht video.list fehlt – ohne kommen keine Zahlen. Im Portal Display API/video.list "
+                      "anhaken, dann /tiktok noch einmal.")
+ANMELDUNG_UNGUELTIG = "TikTok-Anmeldung abgelaufen oder widerrufen – im Lern-Bot /tiktok neu verbinden"
+# Ein Access-Token gilt noch als frisch, wenn er länger als so viele Sekunden hält (sonst erneuern)
+TOKEN_RESERVE_S = 300
+# So lange wartet ein Lauf auf die Sperre, wenn gerade ein anderer (Bot oder Timer) den Token erneuert
+SPERRE_WARTEN_S = 60
+
+
+class AnmeldungUngueltig(AdapterFehler):
+    """Die TikTok-Anmeldung ist abgelaufen oder widerrufen – ein Refresh hilft nicht mehr, nur /tiktok im Lern-Bot.
+    Text: ANMELDUNG_UNGUELTIG, ggf. mit dem Grund des gescheiterten Refresh in Klammern."""
+
+
+def anmeldung_endet_tage(cache: dict, zeit: datetime) -> int | None:
+    """Volle Tage, bis der Refresh-Token (die Anmeldung) abläuft – die einzige Stelle mit dieser Formel:
+    floor((refresh_expires_at − jetzt) / 86400). Negativ = abgelaufen. None, wenn der Cache kein
+    refresh_expires_at hat (Anmeldungen vor dieser Änderung: keine Prüfung) oder der Wert keine Zahl ist.
+    Beispiel: Ablauf in 10 Tagen und 5 Stunden → 10; vor einer Stunde → −1."""
+    try:
+        ablauf = float(cache["refresh_expires_at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return math.floor((ablauf - zeit.timestamp()) / 86400)
 
 
 def cache_pfad(konfig) -> Path:
@@ -169,11 +195,59 @@ def schreibe_cache(pfad: Path, daten: dict) -> None:
             os.unlink(tmp)
 
 
+def _passt(cache: dict, client: str, seed: str) -> bool:
+    """Gehört der Cache zu dieser App und diesem Refresh-Token? Andere App-Konfiguration darf keine alten Tokens
+    verwenden."""
+    return cache.get("client_key") == client and cache.get("seed") == seed
+
+
+def _frischer_token(cache: dict, client: str, seed: str, zeit: datetime) -> str | None:
+    """Der Access-Token aus dem Cache, wenn er zur App passt und noch länger als TOKEN_RESERVE_S gilt – sonst None."""
+    if _passt(cache, client, seed) and cache.get("access_token") \
+            and float(cache.get("expires_at", 0)) > zeit.timestamp() + TOKEN_RESERVE_S:
+        return str(cache["access_token"])
+    return None
+
+
+def _tiktok_erneuern(pfad: Path, cache: dict, client: str, secret: str, seed: str, refresh: str,
+                     zeit: datetime) -> str:
+    """Refresh-Aufruf und Cache schreiben (nur innerhalb der Sperre aufrufen). Übernommen werden open_id, scope,
+    display_name und refresh_expires_at; scope und refresh_expires_at erneuert die Antwort, wenn sie sie enthält.
+    AnmeldungUngueltig, wenn TikTok den Refresh ablehnt (Token widerrufen/abgelaufen) oder der Aufruf scheitert."""
+    alt = cache if _passt(cache, client, seed) else {}
+    refresh = alt.get("refresh_token") or refresh
+    try:
+        antwort = _json(TIKTOK_TOKEN_URL, daten={"grant_type": "refresh_token", "client_key": client,
+                                                 "client_secret": secret, "refresh_token": refresh}, formular=True)
+    except AdapterFehler as fehler:
+        raise AnmeldungUngueltig(f"TikTok-Anmeldung abgelaufen oder widerrufen ({fehler}) – im Lern-Bot /tiktok neu "
+                                 "verbinden", code=fehler.code) from None
+    if not antwort.get("access_token"):
+        raise AdapterFehler("TikTok-Token konnte nicht erneuert werden")
+    neu = {k: v for k, v in alt.items() if k in ("open_id", "scope", "display_name", "refresh_expires_at")}
+    neu.update(client_key=client, seed=seed, access_token=antwort["access_token"],
+               refresh_token=antwort.get("refresh_token") or refresh,
+               expires_at=zeit.timestamp() + float(antwort.get("expires_in", 0)),
+               scope=antwort.get("scope") or alt.get("scope"))
+    if antwort.get("refresh_expires_in") is not None:
+        neu["refresh_expires_at"] = zeit.timestamp() + float(antwort["refresh_expires_in"])
+    schreibe_cache(pfad, neu)
+    return str(antwort["access_token"])
+
+
 def _token(plattform: str, konfig, zeit: datetime) -> str | None:
-    """Access-Token bzw. automatische Erneuerung; rotierte TikTok-Refresh-Tokens
-    bleiben atomar in einer privaten Datei neben der DB (Linux 0600), nie im Repo.
-    TikTok: Eine Anmeldung per /tiktok (seed "anmeldung") reicht – dann braucht .env nur Key und Secret.
-    """
+    """Access-Token der Plattform bzw. automatische Erneuerung; None, wenn kein Zugang konfiguriert ist (dann kein Netz).
+
+    YouTube: Refresh-Token nur in .env, Access-Token je Aufruf neu (Google gibt beim Refresh keinen neuen Refresh-Token).
+    TikTok: Eine Anmeldung per /tiktok (seed ANMELDUNG) reicht – .env braucht dann nur Key und Secret. Rotierte
+    Refresh-Tokens liegen atomar in der privaten Datei neben der DB (0600), nie im Repo. Reihenfolge:
+      (a) Anmeldung mit gespeichertem Scope ohne video.list → AdapterFehler(VIDEO_LIST_HINWEIS, code
+          scope_not_authorized) ohne Netz (Tokens aus .env ohne gespeicherten Scope: keine Prüfung)
+      (b) Anmeldung abgelaufen (anmeldung_endet_tage < 0) → AnmeldungUngueltig ohne Netz
+      (c) Access-Token hält noch länger als TOKEN_RESERVE_S → zurück, ohne Sperre
+      (d) sonst unter der Sperre publikum-oauth.lock (Bot und Timer erneuern nie gleichzeitig) den Cache noch einmal
+          lesen – frisch → der; sonst Refresh und Cache schreiben. Sperre belegt → AdapterFehler („gerade erneuert“).
+    Beispiel: _token("tiktok", konfig, jetzt()) → "act.…" oder None ohne Key/Secret."""
     prefix = plattform.upper()
     direkt = os.environ.get(f"{prefix}_ACCESS_TOKEN", "").strip()
     refresh = os.environ.get(f"{prefix}_REFRESH_TOKEN", "").strip()
@@ -194,21 +268,24 @@ def _token(plattform: str, konfig, zeit: datetime) -> str | None:
         if not antwort.get("access_token"):
             raise AdapterFehler("YouTube-Token konnte nicht erneuert werden")
         return str(antwort["access_token"])
+    if angemeldet:
+        scope = str(cache.get("scope") or "")
+        if scope and "video.list" not in scope.split(","):
+            raise AdapterFehler(VIDEO_LIST_HINWEIS, code="scope_not_authorized")
+        tage = anmeldung_endet_tage(cache, zeit)
+        if tage is not None and tage < 0:
+            raise AnmeldungUngueltig(ANMELDUNG_UNGUELTIG)
     seed = ANMELDUNG if angemeldet else hashlib.sha256(refresh.encode()).hexdigest()
-    # Andere App-Konfiguration darf keine alten Tokens verwenden.
-    if cache.get("client_key") == client and cache.get("seed") == seed:
-        refresh = cache.get("refresh_token") or refresh
-        if cache.get("access_token") and float(cache.get("expires_at", 0)) > zeit.timestamp() + 300:
-            return str(cache["access_token"])
-    antwort = _json("https://open.tiktokapis.com/v2/oauth/token/", daten={"grant_type": "refresh_token",
-                     "client_key": client, "client_secret": secret, "refresh_token": refresh}, formular=True)
-    if not antwort.get("access_token"):
-        raise AdapterFehler("TikTok-Token konnte nicht erneuert werden")
-    schreibe_cache(pfad, {**{k: v for k, v in cache.items() if k in ("open_id", "scope")},
-                          "client_key": client, "seed": seed, "access_token": antwort["access_token"],
-                          "refresh_token": antwort.get("refresh_token") or refresh,
-                          "expires_at": zeit.timestamp() + float(antwort.get("expires_in", 0))})
-    return str(antwort["access_token"])
+    token = _frischer_token(cache, client, seed, zeit)
+    if token:
+        return token
+    try:
+        with sperre(pfad.with_suffix(".lock"), warten_s=SPERRE_WARTEN_S):
+            cache = lies_cache(pfad)   # ein anderer Lauf war vielleicht schneller
+            return _frischer_token(cache, client, seed, zeit) or _tiktok_erneuern(pfad, cache, client, secret, seed,
+                                                                                   refresh, zeit)
+    except Gesperrt:
+        raise AdapterFehler("TikTok-Token wird gerade erneuert – später noch einmal") from None
 
 
 def normalisiere(plattform: str, antwort: dict) -> dict:

@@ -177,5 +177,95 @@ class PublikumAdapter(unittest.TestCase):
         self.assertEqual(result["ohne_id"], 1)                                  # Liste gesperrt: kein Absturz
 
 
+class Token(MitSpeicher):
+    """_token für TikTok mit einer Anmeldung per /tiktok (seed anmeldung) in der privaten Token-Datei."""
+
+    def setUp(self):
+        super().setUp()
+        self.zeit = datetime(2026, 9, 29, 12, tzinfo=UTC)
+        umgebung = mock.patch.dict(os.environ, ZUGANG)
+        umgebung.start()
+        self.addCleanup(umgebung.stop)
+        self.pfad = adapter.cache_pfad(self.konfig)
+
+    def cache(self, **extra) -> dict:
+        daten = {"client_key": "key123", "seed": adapter.ANMELDUNG, "access_token": "act", "refresh_token": "rft",
+                 "expires_at": (self.zeit + timedelta(hours=20)).timestamp(), "scope": "user.info.basic,video.list",
+                 "open_id": "o1", "display_name": "Baddie", **extra}
+        adapter.schreibe_cache(self.pfad, daten)
+        return daten
+
+    def test_anmeldung_endet_tage(self):
+        self.assertIsNone(adapter.anmeldung_endet_tage({}, self.zeit))                           # Alt-Cache
+        in_zehn = (self.zeit + timedelta(days=10, hours=5)).timestamp()
+        self.assertEqual(adapter.anmeldung_endet_tage({"refresh_expires_at": in_zehn}, self.zeit), 10)
+        vorbei = (self.zeit - timedelta(hours=1)).timestamp()
+        self.assertEqual(adapter.anmeldung_endet_tage({"refresh_expires_at": vorbei}, self.zeit), -1)
+
+    def test_scope_ohne_video_list_sperrt_ohne_netz(self):
+        # B18: Zustimmung ohne video.list → klarer Hinweis statt täglich HTTP 403
+        self.cache(scope="user.info.basic")
+        with patch.object(adapter, "_json") as api:
+            with self.assertRaisesRegex(adapter.AdapterFehler, "video.list") as cm:
+                adapter._token("tiktok", self.konfig, self.zeit)
+        api.assert_not_called()
+        self.assertEqual(cm.exception.code, "scope_not_authorized")
+        self.assertTrue(issubclass(adapter.AnmeldungUngueltig, adapter.AdapterFehler))
+
+    def test_abgelaufene_anmeldung_wirft_ohne_netz(self):
+        # B3: refresh_expires_at in der Vergangenheit – ein Refresh wäre sinnlos, nur /tiktok hilft
+        self.cache(refresh_expires_at=(self.zeit - timedelta(days=1)).timestamp())
+        with patch.object(adapter, "_json") as api:
+            with self.assertRaisesRegex(adapter.AnmeldungUngueltig, "/tiktok"):
+                adapter._token("tiktok", self.konfig, self.zeit)
+        api.assert_not_called()
+
+    def test_refresh_fuehrt_ablauf_scope_und_namen_fort(self):
+        alt_ablauf = (self.zeit + timedelta(days=100)).timestamp()
+        self.cache(expires_at=(self.zeit - timedelta(minutes=1)).timestamp(), refresh_expires_at=alt_ablauf)
+        antwort = {"access_token": "act.2", "refresh_token": "rft.2", "expires_in": 86400}
+        with patch.object(adapter, "_json", return_value=antwort) as api:
+            self.assertEqual(adapter._token("tiktok", self.konfig, self.zeit), "act.2")
+        self.assertEqual(api.call_args.kwargs["daten"]["refresh_token"], "rft")
+        cache = adapter.lies_cache(self.pfad)
+        self.assertEqual(cache["refresh_expires_at"], alt_ablauf)                       # ohne refresh_expires_in: bleibt
+        self.assertEqual((cache["display_name"], cache["scope"], cache["refresh_token"]),
+                         ("Baddie", "user.info.basic,video.list", "rft.2"))
+        self.assertNotIn("act", open(self.pfad, encoding="utf-8").read().replace("act.2", ""))  # alter Token weg
+        # mit refresh_expires_in und neuem Scope → beides neu
+        antwort = {**antwort, "access_token": "act.3", "refresh_expires_in": 31536000,
+                   "scope": "user.info.basic,video.list,user.info.profile"}
+        spaeter = self.zeit + timedelta(days=2)
+        with patch.object(adapter, "_json", return_value=antwort):
+            self.assertEqual(adapter._token("tiktok", self.konfig, spaeter), "act.3")
+        cache = adapter.lies_cache(self.pfad)
+        self.assertEqual(cache["refresh_expires_at"], spaeter.timestamp() + 31536000)
+        self.assertEqual(cache["scope"], "user.info.basic,video.list,user.info.profile")
+        self.assertEqual(adapter.anmeldung_endet_tage(cache, spaeter), 365)
+
+    def test_refresh_scheitert_heisst_anmeldung_ungueltig(self):
+        self.cache(expires_at=(self.zeit - timedelta(minutes=1)).timestamp())
+        fehler = adapter.AdapterFehler("API HTTP 400: invalid_grant", code="invalid_grant")
+        with patch.object(adapter, "_json", side_effect=fehler):
+            with self.assertRaisesRegex(adapter.AnmeldungUngueltig, "invalid_grant.*\\/tiktok") as cm:
+                adapter._token("tiktok", self.konfig, self.zeit)
+        self.assertEqual(cm.exception.code, "invalid_grant")
+
+    def test_sperre_zweites_lesen_spart_den_aufruf(self):
+        # B20: Bot und Timer erneuern nicht gleichzeitig – in der Sperre noch einmal lesen
+        abgelaufen = self.cache(expires_at=(self.zeit - timedelta(minutes=1)).timestamp())
+        frisch = {**abgelaufen, "access_token": "act.frisch", "expires_at": (self.zeit + timedelta(hours=23)).timestamp()}
+        with patch.object(adapter, "lies_cache", side_effect=[abgelaufen, frisch]), patch.object(adapter, "_json") as api:
+            self.assertEqual(adapter._token("tiktok", self.konfig, self.zeit), "act.frisch")
+        api.assert_not_called()
+        # Sperre belegt (anderer Lauf erneuert gerade) → nach warten_s aufgeben, verständlicher Fehler
+        from clip_pipeline.sperre import sperre
+        with sperre(self.pfad.with_suffix(".lock")), patch.object(adapter, "SPERRE_WARTEN_S", 0), \
+                patch.object(adapter, "_json") as api:
+            with self.assertRaisesRegex(adapter.AdapterFehler, "gerade erneuert"):
+                adapter._token("tiktok", self.konfig, self.zeit)
+        api.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
