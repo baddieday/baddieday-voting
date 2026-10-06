@@ -389,13 +389,17 @@ def post_zu(con: sqlite3.Connection, art: str, ziel_id: int, plattform: str) -> 
 
 def posts_ohne_messung(con: sqlite3.Connection, *, stunden: float = 24, grenze: int = 5,
                        zeit: datetime | None = None) -> list[sqlite3.Row]:
-    """Die jüngsten `grenze` Posts, die in den letzten `stunden` keine Messung bekommen haben – für die Knöpfe,
-    wenn ein Screenshot ohne „#Nummer“ kommt (Spec §7.1, Annahme A12). Neueste zuerst.
-    Beispiel: 7 Posts, einer heute Morgen gemessen → die 5 jüngsten der übrigen 6."""
+    """Die jüngsten `grenze` Posts, die in den letzten `stunden` keine Messung MIT Wiedergabe bekommen haben – für
+    die Knöpfe, wenn ein Screenshot ohne „#Nummer“ kommt (Spec §7.1, Annahme A12). Neueste zuerst.
+    Tägliche API-Messungen zählen nicht als versorgt: Die Display API liefert keine Wiedergabe, die kommt nur per
+    Screenshot/Hand (L4) – sonst verschwänden die Knöpfe, sobald die API misst (B11, 05.10.).
+    Beispiel: 7 Posts, einer heute Morgen per Screenshot gemessen, einer nur per API → die 5 jüngsten der übrigen 6."""
     seit = iso((zeit or jetzt()) - timedelta(hours=stunden))
     return con.execute(
         """SELECT p.* FROM posts p
-            WHERE NOT EXISTS (SELECT 1 FROM publikum_messungen m WHERE m.post_id = p.id AND m.gemessen_utc >= ?)
+            WHERE NOT EXISTS (SELECT 1 FROM publikum_messungen m
+                               WHERE m.post_id = p.id AND m.gemessen_utc >= ?
+                                 AND (m.wiedergabe_s IS NOT NULL OR m.voll_prozent IS NOT NULL))  -- = hat_wiedergabe
             ORDER BY p.gepostet_utc DESC, p.id DESC
             LIMIT ?""",
         (seit, grenze),
@@ -529,9 +533,19 @@ def speichere_messung(con: sqlite3.Connection, post_id: int, werte: dict, quelle
 
 # --- Score (Spec §6) --------------------------------------------------------------------
 
+def hat_wiedergabe(messung: sqlite3.Row | dict | None) -> bool:
+    """Ist das eine Messung MIT Wiedergabe – kennt sie Ø Wiedergabe (wiedergabe_s) oder „ganz angesehen“
+    (voll_prozent)? Die eine Stelle für diese Frage: komponenten (gibt es ein r?), waehle_messung (Wiedergabe
+    zuerst) und – als SQL-Fassung `m.wiedergabe_s IS NOT NULL OR m.voll_prozent IS NOT NULL` – posts_ohne_messung
+    und lernbot_publikum. Die Display API liefert beides nie (nur Screenshot/Hand, L4).
+    Beispiel: hat_wiedergabe({"views": 1240}) → False; hat_wiedergabe({"voll_prozent": 0.0}) → True (0 % ist
+    eine Messung, kein „fehlt“)."""
+    return _feld(messung, "wiedergabe_s") is not None or _feld(messung, "voll_prozent") is not None
+
+
 def komponenten(messung: sqlite3.Row | dict, dauer_s: float) -> dict:
     """r, e, v einer Messung (Spec §6.2) – die einzige Stelle, an der diese Formeln stehen:
-      r = min(1,2; wiedergabe_s / dauer_s), sonst voll_prozent / 100, sonst None
+      r = min(1,2; wiedergabe_s / dauer_s), sonst voll_prozent / 100, sonst None (hat_wiedergabe entscheidet)
       e = (likes + 2·shares + saves + kommentare) / max(views, 1) – fehlende Zähler zählen 0 (Annahme A10)
       v = ln(1 + views)
     Ohne views: e und v sind None. Beispiel: views 1000, likes 50, shares 5, wiedergabe 6 s bei 20 s Dauer →
@@ -543,12 +557,12 @@ def komponenten(messung: sqlite3.Row | dict, dauer_s: float) -> dict:
 
     # r – Wiedergabe: welcher Anteil des Videos im Schnitt gesehen wurde
     wiedergabe, voll = _feld(messung, "wiedergabe_s"), _feld(messung, "voll_prozent")
-    if wiedergabe is not None:
-        r = min(R_MAX, wiedergabe / dauer_s)
-    elif voll is not None:
-        r = voll / 100  # Prozent → Anteil; der schwächere Ersatz, wenn TikTok keine Ø Wiedergabe zeigt
-    else:
+    if not hat_wiedergabe(messung):
         r = None
+    elif wiedergabe is not None:
+        r = min(R_MAX, wiedergabe / dauer_s)
+    else:
+        r = voll / 100  # Prozent → Anteil; der schwächere Ersatz, wenn TikTok keine Ø Wiedergabe zeigt
 
     # e – Engagement je View; Shares zählen doppelt (wer teilt, bringt neue Zuschauer). v – Reichweite, als
     # Logarithmus, weil 10 000 statt 1 000 Views ein ähnlich großer Schritt ist wie 1 000 statt 100.
@@ -567,19 +581,66 @@ def komponenten(messung: sqlite3.Row | dict, dauer_s: float) -> dict:
 
 
 def waehle_messung(post: sqlite3.Row | dict, messungen: list, konfig: Konfig) -> sqlite3.Row | dict | None:
-    """Die Messung, deren Alter (gemessen − gepostet) [publikum].alter_tage (7) am nächsten liegt – nur Messungen,
-    die mindestens mindest_alter_tage (3) alt sind und views haben. Gleichstand: die spätere. Keine → None.
-    Beispiel: Messungen an Tag 3,5 / 6 / 9 → Tag 6 (1 Tag Abstand); an Tag 6 und 8 → Tag 8."""
+    """Die Messung, aus der der Score gerechnet wird. Kandidat ist nur, was mindestens [publikum].mindest_alter_tage
+    (3) alt ist und Views hat – 0 Views sind keine Views (Spec §6.1 „mit Views“; Sandbox und zurückgehaltene
+    Zähler liefern 0, das darf keinen Score um −2,5 einfrieren, B6). Unter den Kandidaten gilt, in dieser Reihenfolge:
+      1. Messungen MIT Wiedergabe (hat_wiedergabe) vor Messungen ohne – die Wiedergabe ist das Hauptsignal (L4),
+         und sie kommt nur per Screenshot/Hand, nie von der API (B8, geändert 05.10.).
+      2. Alter (gemessen − gepostet) am nächsten an [publikum].alter_tage (7).
+      3. Gleichstand: die spätere (größeres Alter, dann größere id).
+    Keine Kandidaten → None.
+    Der Preis der Regel 1, gewollt: Ein Screenshot an Tag 3 mit Wiedergabe schlägt eine API-Messung an Tag 7 – auch
+    bei e und v, die dann aus den jüngeren Zahlen von Tag 3 kommen. Lieber ein ehrliches r mit etwas jüngeren
+    Zählern als ein Score ohne Hauptsignal (Score-Teile nennen messung_alter_tage, das bleibt nachvollziehbar).
+    Beispiele: Messungen an Tag 3,5 / 6 / 9 (alle ohne Wiedergabe) → Tag 6 (1 Tag Abstand); an Tag 6 und 8 → Tag 8;
+    Screenshot Tag 5 mit Wiedergabe + API Tag 6,9 ohne → der Screenshot."""
     ziel_tage = float(einstellung(konfig, "alter_tage"))
     mindest_tage = float(einstellung(konfig, "mindest_alter_tage"))
     kandidaten = []
     for messung in messungen:
         alter = alter_in_tagen(post["gepostet_utc"], messung["gemessen_utc"])
-        if _feld(messung, "views") is None or alter < mindest_tage:
+        if not _feld(messung, "views") or alter < mindest_tage:  # None und 0 fallen gleich durch
             continue
-        # Sortierschlüssel: Abstand zum Ziel, bei Gleichstand die spätere (größeres Alter, dann größere id)
-        kandidaten.append(((abs(alter - ziel_tage), -alter, -(_feld(messung, "id") or 0)), messung))
+        # Sortierschlüssel: Wiedergabe zuerst, dann Abstand zum Ziel, bei Gleichstand die spätere (größeres Alter,
+        # dann größere id)
+        kandidaten.append(((0 if hat_wiedergabe(messung) else 1, abs(alter - ziel_tage), -alter,
+                            -(_feld(messung, "id") or 0)), messung))
     return min(kandidaten, key=lambda k: k[0])[1] if kandidaten else None
+
+
+def _zaehler_ergaenzen(post: sqlite3.Row | dict, messung: sqlite3.Row | dict,
+                       messungen: list) -> tuple[dict, list[str]]:
+    """Fehlende Zähler der gewählten Messung aus einer Nachbarmessung desselben Posts ergänzen (B9, 05.10.).
+
+    Die Display API kennt keine Saves (kein `favorites_count`, tiktok-api-fakten.md); ohne diese Regel hätte jeder
+    API-gemessene Post weniger Engagement als ein Screenshot-Post mit denselben Zahlen. Darum: Fehlt in `messung`
+    ein Zähler aus HAND_FELDER_ZUSATZ (kommentare, shares, saves), wird er aus der zeitlich nächsten ANDEREN Messung
+    des Posts übernommen, die ihn kennt – Abstand in Tagen zur gewählten Messung, Gleichstand → die spätere, dann
+    die größere id (wie waehle_messung). Views, Likes und die Wiedergabe werden nie übernommen: sie bestimmen r
+    und v und müssen aus EINER Messung stammen.
+
+    Rückgabe (werte, vermerke): `werte` ist ein dict mit allen FELDER (Grundlage für komponenten – die bleibt die
+    einzige Formelstelle), `vermerke` nennt je übernommenem Feld die Quelle, z. B. „Saves aus Tag 5“ (Tag =
+    abgerundetes Alter der Spender-Messung). Ohne Spender bleibt der Zähler None, komponenten vermerkt dann wie
+    bisher „Engagement unvollständig“.
+    Beispiel: gewählt Tag 7 (API, saves None), Hand-Messung Tag 5,2 mit saves 12 → saves 12, ["Saves aus Tag 5"]."""
+    werte = {feld: _feld(messung, feld) for feld in FELDER}
+    vermerke: list[str] = []
+    alter_gewaehlt = alter_in_tagen(post["gepostet_utc"], messung["gemessen_utc"])
+    for feld in HAND_FELDER_ZUSATZ:
+        if werte[feld] is not None:
+            continue
+        spender = []
+        for andere in messungen:
+            if andere is messung or _feld(andere, feld) is None:
+                continue
+            alter = alter_in_tagen(post["gepostet_utc"], andere["gemessen_utc"])
+            spender.append(((abs(alter - alter_gewaehlt), -alter, -(_feld(andere, "id") or 0)), alter, andere))
+        if spender:
+            _, alter, andere = min(spender, key=lambda s: s[0])
+            werte[feld] = _feld(andere, feld)
+            vermerke.append(f"{ZAEHLER_NAMEN[feld]} aus Tag {math.floor(alter)}")
+    return werte, vermerke
 
 
 def ist_faellig(post: sqlite3.Row | dict, konfig: Konfig, zeit: datetime | None = None) -> bool:
@@ -707,6 +768,9 @@ def score_fuer(post: sqlite3.Row | dict, messungen: list, basis: list[dict],
     """Publikums-Score eines Posts (Spec §6), deterministisch.
 
     Rückgabe (score, score_teile). score None = noch keine passende Messung („noch nicht bewertet“).
+    Die Messung wählt waehle_messung (Wiedergabe zuerst, dann Nähe zu 7 Tagen); fehlen ihr Kommentare, Shares oder
+    Saves, ergänzt _zaehler_ergaenzen sie aus der zeitlich nächsten anderen Messung des Posts, die sie kennt
+    (Vermerk z. B. „Saves aus Tag 5“; B9, 05.10.) – score_teile.messung_id bleibt die gewählte Messung.
     score = 0,5·z_r + 0,3·z_e + 0,2·z_v ([publikum.gewichte]); ohne r: die Gewichte von e und v auf 1 hochgerechnet
     (0,3/0,5 = 0,6 und 0,2/0,5 = 0,4) mit Vermerk „ohne Wiedergabe“.
 
@@ -730,7 +794,8 @@ def score_fuer(post: sqlite3.Row | dict, messungen: list, basis: list[dict],
     if messung is None:
         return None, {"vermerke": ["keine Messung ab dem Mindestalter mit Views"]}
 
-    k = komponenten(messung, float(post["dauer_s"]))
+    werte, ergaenzt = _zaehler_ergaenzen(post, messung, messungen)
+    k = komponenten(werte, float(post["dauer_s"]))
     minima = _mad_minima(konfig)
     basis_r = [b["r"] for b in basis if b["r"] is not None]
     teile: dict = {"r": k["r"], "e": k["e"], "v": k["v"], "z_r": None, "z_e": None, "z_v": None,
@@ -739,7 +804,7 @@ def score_fuer(post: sqlite3.Row | dict, messungen: list, basis: list[dict],
                    "messung_id": _feld(messung, "id"),
                    # auf zwei Stellen: „7,1 Tage“ reicht zum Nachvollziehen, mehr ist Rauschen der Uhrzeit
                    "messung_alter_tage": round(alter_in_tagen(post["gepostet_utc"], messung["gemessen_utc"]), 2),
-                   "basis_n": len(basis), "basis_n_r": len(basis_r), "vermerke": list(k["vermerke"])}
+                   "basis_n": len(basis), "basis_n_r": len(basis_r), "vermerke": [*ergaenzt, *k["vermerke"]]}
 
     # Fachliche Regel 1 (Spec §6.3): Unter 5 Vergleichsposts wird nichts gelernt – alle z = 0, Score 0.
     if len(basis) < MINDEST_BASIS:

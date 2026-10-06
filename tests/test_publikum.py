@@ -197,12 +197,37 @@ class MessungWaehlen(MitPublikum):
         self.post_zeile = {"gepostet_utc": iso(T0)}
 
     @staticmethod
-    def m(nr: int, tage: float, views: int | None = 100) -> dict:
-        return {"id": nr, "gemessen_utc": iso(tag(tage)), "views": views}
+    def m(nr: int, tage: float, views: int | None = 100, **werte) -> dict:
+        return {"id": nr, "gemessen_utc": iso(tag(tage)), "views": views, **werte}
 
     def test_naechste_an_sieben_tagen(self):
         messungen = [self.m(1, 3.5), self.m(2, 6.0), self.m(3, 9.0)]
         self.assertEqual(publikum.waehle_messung(self.post_zeile, messungen, self.konfig)["id"], 2)
+
+    def test_wiedergabe_schlaegt_naehe(self):
+        """B8 (05.10.): Die Wiedergabe ist das Hauptsignal (L4) – ein Screenshot an Tag 5 MIT Wiedergabe schlägt
+        eine API-Messung an Tag 6,9 ohne, obwohl die näher an 7 Tagen liegt."""
+        messungen = [self.m(1, 5.0, wiedergabe_s=6.8), self.m(2, 6.9)]
+        self.assertEqual(publikum.waehle_messung(self.post_zeile, messungen, self.konfig)["id"], 1)
+        # unter Messungen mit Wiedergabe entscheidet wieder die Nähe zu 7 Tagen
+        messungen = [self.m(1, 5.0, wiedergabe_s=6.8), self.m(2, 6.9, wiedergabe_s=7.0)]
+        self.assertEqual(publikum.waehle_messung(self.post_zeile, messungen, self.konfig)["id"], 2)
+
+    def test_voll_prozent_zaehlt_als_wiedergabe(self):
+        messungen = [self.m(1, 5.0, voll_prozent=30.0), self.m(2, 6.9)]
+        self.assertEqual(publikum.waehle_messung(self.post_zeile, messungen, self.konfig)["id"], 1)
+
+    def test_null_views_zaehlt_nicht(self):
+        """B6 (05.10.): 0 Views (Sandbox, zurückgehaltene Zähler) sind keine Views – Spec §6.1 „mit Views“."""
+        messungen = [self.m(1, 7.0, views=0), self.m(2, 6.5, views=1240)]
+        self.assertEqual(publikum.waehle_messung(self.post_zeile, messungen, self.konfig)["id"], 2)
+        self.assertIsNone(publikum.waehle_messung(self.post_zeile, [self.m(1, 7.0, views=0)], self.konfig))
+
+    def test_hat_wiedergabe(self):
+        self.assertTrue(publikum.hat_wiedergabe({"wiedergabe_s": 6.8}))
+        self.assertTrue(publikum.hat_wiedergabe({"voll_prozent": 0.0}))  # 0 % ist eine Messung, nicht „fehlt“
+        self.assertFalse(publikum.hat_wiedergabe({"views": 1240, "wiedergabe_s": None, "voll_prozent": None}))
+        self.assertFalse(publikum.hat_wiedergabe({}))
 
     def test_nichts_unter_drei_tagen(self):
         self.assertIsNone(publikum.waehle_messung(self.post_zeile, [self.m(1, 1.0), self.m(2, 2.9)], self.konfig))
@@ -420,6 +445,46 @@ class Score(MitPublikum):
         self.assertIsNone(score)
         self.assertTrue(teile["vermerke"])
 
+    def test_saves_aus_anderer_messung(self):
+        """B9 (05.10.): Die API kennt keine Saves. Fehlt der gewählten Messung ein Zähler, kommt er aus der zeitlich
+        nächsten anderen Messung desselben Posts, die ihn kennt – sonst hätten API-Posts immer weniger Engagement
+        als Screenshot-Posts. Die gewählte Messung bleibt die gewählte (messung_id, Alter)."""
+        post_zeile = {"id": 99, "gepostet_utc": iso(T0), "dauer_s": 20.0}
+        gewaehlt = {"id": 7, "gemessen_utc": iso(tag(7.0)), "views": 1000, "likes": 50, "kommentare": 4, "shares": 3,
+                    "saves": None, "wiedergabe_s": 10.0, "voll_prozent": None}
+        hand_tag5 = {"id": 5, "gemessen_utc": iso(tag(5.2)), "views": 800, "likes": 40, "kommentare": 2, "shares": 1,
+                     "saves": 12, "wiedergabe_s": 9.0, "voll_prozent": 30.0}
+        score, teile = publikum.score_fuer(post_zeile, [hand_tag5, gewaehlt], self.basis(6), self.konfig)
+        self.assertEqual(teile["messung_id"], 7)
+        self.assertAlmostEqual(teile["messung_alter_tage"], 7.0)
+        self.assertAlmostEqual(teile["e"], (50 + 2 * 3 + 12 + 4) / 1000)   # Saves 12 aus Tag 5
+        self.assertIn("Saves aus Tag 5", teile["vermerke"])
+        self.assertNotIn("Engagement unvollständig", teile["vermerke"])
+
+        # Gegenfall: keine andere Messung → wie heute, Saves zählen 0 und der Vermerk sagt es
+        _, allein = publikum.score_fuer(post_zeile, [gewaehlt], self.basis(6), self.konfig)
+        self.assertAlmostEqual(allein["e"], (50 + 2 * 3 + 4) / 1000)
+        self.assertIn("Engagement unvollständig", allein["vermerke"])
+        self.assertFalse([v for v in allein["vermerke"] if v.startswith("Saves aus")])
+
+        # Zwei Posts mit denselben Zahlen – einer mit Saves direkt, einer per Übernahme – haben dasselbe e
+        direkt = {**gewaehlt, "saves": 12}
+        _, mit_saves = publikum.score_fuer(post_zeile, [direkt], self.basis(6), self.konfig)
+        self.assertEqual(mit_saves["e"], teile["e"])
+        self.assertEqual(mit_saves["z_e"], teile["z_e"])
+
+    def test_zaehler_kommt_aus_der_zeitlich_naechsten_messung(self):
+        """Mehrere Spender: der mit dem kleinsten Abstand zur gewählten Messung; Gleichstand → der spätere."""
+        post_zeile = {"id": 99, "gepostet_utc": iso(T0), "dauer_s": 20.0}
+        gewaehlt = {"id": 7, "gemessen_utc": iso(tag(7.0)), "views": 1000, "likes": 50, "kommentare": 0, "shares": 0,
+                    "wiedergabe_s": 10.0}
+        weit = {"id": 1, "gemessen_utc": iso(tag(3.0)), "views": 500, "saves": 1}
+        nah = {"id": 2, "gemessen_utc": iso(tag(6.0)), "views": 900, "saves": 8}
+        spaeter = {"id": 3, "gemessen_utc": iso(tag(8.0)), "views": 1100, "saves": 9}   # ebenfalls 1 Tag Abstand
+        _, teile = publikum.score_fuer(post_zeile, [weit, nah, gewaehlt, spaeter], self.basis(6), self.konfig)
+        self.assertAlmostEqual(teile["e"], (50 + 9) / 1000)
+        self.assertIn("Saves aus Tag 8", teile["vermerke"])
+
     def test_deterministisch(self):
         ergebnisse = {json.dumps(self.score(self.basis(9, n_r=7), views=321, likes=17, shares=2,
                                             wiedergabe_s=8.5), sort_keys=True) for _ in range(3)}
@@ -604,13 +669,22 @@ class Posts(MitPublikum):
         alt = self.post(gepostet=tag(0))
         gemessen = self.post(gepostet=tag(1))
         frisch = [self.post(gepostet=tag(2 + i / 10)) for i in range(5)]
-        self.messung(gemessen, tag(2.5), views=10)
-        self.messung(alt, tag(1), views=10)   # älter als 24 h vor „jetzt“ → zählt als ohne Messung
+        self.messung(gemessen, tag(2.5), views=10, wiedergabe_s=5.0)
+        self.messung(alt, tag(1), views=10, wiedergabe_s=5.0)   # älter als 24 h vor „jetzt“ → zählt als ohne Messung
         zeilen = publikum.posts_ohne_messung(self.con, zeit=tag(3))
         self.assertEqual([z["id"] for z in zeilen], frisch[::-1])        # neueste zuerst, höchstens 5
         zeilen = publikum.posts_ohne_messung(self.con, grenze=10, zeit=tag(3))
         self.assertEqual([z["id"] for z in zeilen], [*frisch[::-1], alt])
         self.assertNotIn(gemessen, [z["id"] for z in zeilen])
+
+    def test_posts_ohne_messung_api_zaehlt_nicht_als_versorgt(self):
+        """B11 (05.10.): Die tägliche API-Messung hat keine Wiedergabe (die kommt nur per Screenshot/Hand, L4) –
+        der Post bleibt in der Knopfliste, bis eine Messung MIT Wiedergabe da ist."""
+        pid = self.post(gepostet=tag(1))
+        publikum.speichere_messung(self.con, pid, {"views": 10}, "api", zeit=tag(3) - timedelta(hours=2))
+        self.assertEqual([z["id"] for z in publikum.posts_ohne_messung(self.con, zeit=tag(3))], [pid])
+        self.messung(pid, tag(3) - timedelta(hours=1), views=12, voll_prozent=30.0)
+        self.assertEqual(publikum.posts_ohne_messung(self.con, zeit=tag(3)), [])
 
 
 class PostPlattformen(MitPublikum):
