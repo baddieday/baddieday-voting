@@ -283,6 +283,149 @@ class PublikumAdapter(unittest.TestCase):
         kleiner = {"data": {"videos": [{"id": "123456789", "view_count": 900, "like_count": 30, "comment_count": 0,
                                         "share_count": 0}]}, "error": {"code": "ok"}}
         self.assertIsNotNone(adapter.importiere(self.con, self.konfig, self.pid, kleiner, zeit=tag7))
+        # im Abruf: zählt zurueckgehalten, kein Fehler, kein Exit 1
+        nullen_video = {"123456789": nullen["data"]["videos"][0]}
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=self.api(nullen_video)), \
+                self.assertLogs("pipeline", "INFO") as logs:
+            result = adapter.abrufen(self.con, self.konfig, tag7 + timedelta(hours=8))
+        self.assertEqual((result["zurueckgehalten"], result["fehler"], result["gespeichert"]), (1, 0, 0))
+        self.assertTrue(any("zurückgehalten" in z for z in logs.output), logs.output)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM publikum_messungen").fetchone()[0], 2)
+
+    def test_bloecke_von_20_ids(self):
+        # B7: 45 Posts → 3 Anfragen (20 + 20 + 5) statt 45
+        videos = {"123456789": self.payload["data"]["videos"][0]}
+        for i in range(44):
+            vid = str(900_000 + i)
+            self.post(100 + i, video_id=vid, tage=2 + i % 5)
+            videos[vid] = {"id": vid, "view_count": 100 + i, "like_count": 3, "comment_count": 0, "share_count": 1}
+        fake = self.api(videos)
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=fake):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        self.assertEqual((result["gespeichert"], result["fehler"], result["meldung"]), (45, 0, False))
+        self.assertEqual([len(ids) for ids in fake.aufrufe], [20, 20, 5])
+        self.assertEqual(sorted(i for ids in fake.aufrufe for i in ids), sorted(videos))
+
+    def test_blockfehler_sperrt_den_lauf_und_meldet_einmal(self):
+        videos = {}
+        for i in range(44):
+            vid = str(900_000 + i)
+            self.post(100 + i, video_id=vid, tage=2)
+        fehler = adapter.AdapterFehler("API HTTP 429: rate_limit_exceeded", code="rate_limit_exceeded")
+        liste = {"data": {"videos": [], "has_more": False}, "error": {"code": "ok"}}
+
+        def api(url, token=None, daten=None, **kw):
+            if "/video/list/" in url:
+                return liste
+            videos.setdefault("aufrufe", []).append(1)
+            raise fehler
+
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=api), \
+                self.assertLogs("pipeline", "WARNING") as logs:
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        self.assertEqual((len(videos["aufrufe"]), result["fehler"], result["ohne_zugang"]), (1, 1, 45))
+        self.assertIn("429", result["grund"])
+        self.assertTrue(any("API HTTP 429" in z for z in logs.output), logs.output)
+        self.assertTrue(result["meldung"])
+        meldung = self.meldung("publikum:api:2026-09-29")
+        self.assertIn("morgen wieder", meldung)
+        self.assertIn("45 Posts ohne Zahlen", meldung)
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=api), \
+                self.assertLogs("pipeline", "WARNING"):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=1))
+        self.assertFalse(result["meldung"])
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM lern_meldungen WHERE schluessel LIKE 'publikum:api:%'")
+                         .fetchone()[0], 1)
+
+    def test_nicht_verbunden_wird_einmal_gemeldet(self):
+        # B1/B5: Key und Secret da, aber nie /tiktok gemacht – statt stiller ohne_zugang-Zähler ein Hinweis im Lern-Bot
+        with mock.patch.dict(os.environ, ZUGANG), patch.object(adapter, "_json") as api, \
+                self.assertLogs("pipeline", "WARNING") as logs:
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        api.assert_not_called()
+        self.assertEqual((result["ohne_zugang"], result["fehler"], result["nicht_verbunden"], result["meldung"]),
+                         (1, 0, True, True))
+        self.assertTrue(any("nicht verbunden" in z for z in logs.output), logs.output)
+        self.assertIn("/tiktok", self.meldung("publikum:api:2026-09-29"))
+        # ohne Key/Secret (setUp): still – wer die API gar nicht nutzt, bekommt keine Erinnerung
+        with patch.object(adapter, "_json") as api:
+            result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(days=1))
+        self.assertEqual((result["ohne_zugang"], result["nicht_verbunden"], result["meldung"]), (1, False, False))
+        self.assertIsNone(self.meldung("publikum:api:2026-09-30"))
+        # Token ungültig (401) → kein „nicht verbunden“, sondern ⚠️ mit Rat
+        fehler = adapter.AdapterFehler("API HTTP 401", code="access_token_invalid")
+        with patch.object(adapter, "_token", side_effect=fehler), self.assertLogs("pipeline", "WARNING"):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(days=2))
+        self.assertEqual((result["fehler"], result["nicht_verbunden"], result["ohne_zugang"]), (1, False, 1))
+        meldung = self.meldung("publikum:api:2026-10-01")
+        self.assertTrue(meldung.startswith("⚠️"), meldung)
+        self.assertIn("/tiktok neu verbinden", meldung)
+
+    def test_video_nicht_gefunden_ist_kein_fehler(self):
+        # B17: gelöschtes oder privates Video → Hinweis einmal, Exit bleibt 0, der Nachbar im Block wird gespeichert
+        pid2 = self.post(51, video_id="555", tage=2)
+        videos = {"555": {"id": "555", "view_count": 10, "like_count": 1, "comment_count": 0, "share_count": 0}}
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=self.api(videos)), \
+                self.assertLogs("pipeline", "WARNING") as logs:
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        self.assertEqual((result["fehler"], result["nicht_gefunden"], result["gespeichert"]), (0, 1, 1))
+        self.assertTrue(any(f"#{self.pid}" in z and "auffindbar" in z for z in logs.output), logs.output)
+        self.assertIn("/link 7 ", self.meldung(f"publikum:nicht-gefunden:{self.pid}"))
+        self.assertIsNotNone(publikum.letzte_messung(self.con, pid2))
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=self.api(videos)), \
+                self.assertLogs("pipeline", "WARNING"):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=8))
+        self.assertEqual(result["nicht_gefunden"], 1)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM lern_meldungen WHERE schluessel LIKE 'publikum:nicht-gefunden:%'")
+                         .fetchone()[0], 1)
+
+    def test_unbewertete_posts_zuerst(self):
+        # B23: 150 Posts, Platz für 100 – die 50 noch unbewerteten müssen jedes Mal dabei sein
+        self.konfig.daten["publikum"]["api_max_posts"] = 100
+        videos, unbewertet = {"123456789": self.payload["data"]["videos"][0]}, {str(123456789)}
+        with autonom.gebuendelt():   # 100 Messungen anlegen, ohne 100-mal zu lernen
+            for i in range(100):
+                vid = str(700_000 + i)
+                pid = self.post(200 + i, video_id=vid, tage=20)
+                videos[vid] = {"id": vid, "view_count": 500, "like_count": 20, "comment_count": 1, "share_count": 2}
+                publikum.speichere_messung(self.con, pid, {"views": 500, "likes": 20, "kommentare": 1, "shares": 2}, "api",
+                                           zeit=self.zeit - timedelta(days=10), konfig=self.konfig)
+                self.con.execute("UPDATE posts SET bewertet_utc = ?, score = 0 WHERE id = ?", (iso(self.zeit), pid))
+            for i in range(49):
+                vid = str(800_000 + i)
+                self.post(300 + i, video_id=vid, tage=3)
+                videos[vid] = {"id": vid, "view_count": 50 + i, "like_count": 2, "comment_count": 0, "share_count": 0}
+                unbewertet.add(vid)
+        for lauf in (self.zeit, self.zeit + timedelta(hours=8)):
+            fake = self.api(videos)
+            with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=fake):
+                result = adapter.abrufen(self.con, self.konfig, lauf)
+            gefragt = {i for ids in fake.aufrufe for i in ids}
+            self.assertEqual(len(gefragt), 100)
+            self.assertTrue(unbewertet <= gefragt, unbewertet - gefragt)
+            self.assertEqual(result["fehler"], 0)
+
+    def test_intervall_zaehler_und_deaktiviert(self):
+        # B12: ein Post mit frischer API-Messung wird nicht angefragt – und steht als Zahl in der JSON-Zeile
+        pid2 = self.post(61, video_id="555", tage=2)
+        publikum.speichere_messung(self.con, pid2, {"views": 10}, "api", zeit=self.zeit - timedelta(hours=2), konfig=self.konfig)
+        videos = {"123456789": self.payload["data"]["videos"][0]}
+        fake = self.api(videos)
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=fake):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        self.assertEqual((result["uebersprungen_intervall"], result["gespeichert"]), (1, 1))
+        self.assertEqual(fake.aufrufe, [["123456789"]])
+        schluessel = {"gespeichert", "unveraendert", "zurueckgehalten", "nicht_gefunden", "ohne_zugang", "ohne_id",
+                      "zugeordnet", "mehrdeutig", "ohne_post", "uebersprungen_intervall", "fehler", "grund",
+                      "anmeldung_endet_tage", "nicht_verbunden", "zugang_ungueltig", "meldung", "deaktiviert"}
+        self.assertEqual(set(result), schluessel)                                # JSON-Zeile stabil
+        self.konfig.daten["publikum"]["api_abruf"] = False
+        with patch.object(adapter, "_json") as api:
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        api.assert_not_called()
+        self.assertTrue(result.pop("deaktiviert"))
+        self.assertEqual(set(result), schluessel - {"deaktiviert"})
+        self.assertFalse(any(result[k] for k in result))                         # alle Zähler 0 / False / None
 
     def test_gebuendelt_lernt_einmal_am_ende(self):
         # B22: der Timer-Lauf importiert bis zu 100 Posts – eine lernstaende-Version je Lauf, nicht je Import
@@ -392,6 +535,67 @@ class Token(MitSpeicher):
             with self.assertRaisesRegex(adapter.AdapterFehler, "gerade erneuert"):
                 adapter._token("tiktok", self.konfig, self.zeit)
         api.assert_not_called()
+
+    # --- im Abruf -----------------------------------------------------------------------------------------------
+
+    LEER = {"data": {"videos": [], "has_more": False}, "error": {"code": "ok"}}
+
+    def tiktok_post(self) -> int:
+        pid, _ = publikum.post_anlegen(self.con, art="entwurf", ziel_id=7, plattform="tiktok",
+            daten={"dauer_s": 65, "format": "short", "rezept": {}, "merkmale": {}}, zeit=self.zeit - timedelta(days=3))
+        publikum.link_nachtragen(self.con, pid, "https://www.tiktok.com/@test/video/123456789")
+        return pid
+
+    def meldungen(self, praefix: str) -> list:
+        return [z[0] for z in self.con.execute("SELECT text FROM lern_meldungen WHERE schluessel LIKE ? ORDER BY id",
+                                               (praefix + "%",))]
+
+    def test_vorwarnung_vor_dem_ablauf(self):
+        # B3: 14 Tage vorher erinnert der Lern-Bot – ohne Erinnerung käme das Ende der Anmeldung (365 Tage) still
+        self.tiktok_post()
+        self.cache(refresh_expires_at=(self.zeit + timedelta(days=10, hours=3)).timestamp())
+        with patch.object(adapter, "_json", return_value=self.LEER):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        self.assertEqual((result["anmeldung_endet_tage"], result["zugang_ungueltig"]), (10, False))
+        self.assertIn("/tiktok", self.meldungen("publikum:tiktok-ablauf:")[0])
+        self.assertEqual(self.meldungen("publikum:api:"), [])
+        self.cache(refresh_expires_at=(self.zeit + timedelta(days=30)).timestamp())
+        with patch.object(adapter, "_json", return_value=self.LEER):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(days=1))
+        self.assertEqual((result["anmeldung_endet_tage"], len(self.meldungen("publikum:tiktok-ablauf:"))), (29, 1))
+
+    def test_abgelaufene_anmeldung_im_abruf(self):
+        self.tiktok_post()
+        self.cache(refresh_expires_at=(self.zeit - timedelta(days=1)).timestamp())
+        with patch.object(adapter, "_json") as api, self.assertLogs("pipeline", "WARNING"):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        api.assert_not_called()
+        self.assertEqual((result["fehler"], result["zugang_ungueltig"], result["ohne_zugang"]), (1, True, 1))
+        meldung = self.meldungen("publikum:api:")[0]
+        self.assertTrue(meldung.startswith("⛔"), meldung)
+        self.assertIn("/tiktok", meldung)
+
+    def test_scope_ohne_video_list_im_abruf(self):
+        # B18: statt täglich HTTP 403 ein Hinweis, was im Portal fehlt
+        self.tiktok_post()
+        self.cache(scope="user.info.basic")
+        with patch.object(adapter, "_json") as api, self.assertLogs("pipeline", "WARNING"):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        api.assert_not_called()
+        self.assertEqual(result["fehler"], 1)
+        meldung = self.meldungen("publikum:api:")[0]
+        self.assertIn("video.list", meldung)
+        self.assertIn("Portal", meldung)
+
+    def test_kaputte_token_datei_im_abruf(self):
+        # B19: "[]" in der Token-Datei → fehler 1 statt Absturz des Timers, Datei bleibt, wie sie ist
+        self.tiktok_post()
+        self.pfad.write_text("[]", encoding="utf-8")
+        with patch.object(adapter, "_json") as api, self.assertLogs("pipeline", "WARNING"):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        api.assert_not_called()
+        self.assertEqual((result["fehler"], result["ohne_zugang"]), (1, 1))
+        self.assertEqual(self.pfad.read_text(encoding="utf-8"), "[]")
 
 
 if __name__ == "__main__":
