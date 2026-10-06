@@ -13,6 +13,7 @@ import hashlib
 import logging
 import math
 import os
+import re
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,6 +25,12 @@ from . import publikum
 from .zeit import aus_iso, iso, jetzt
 
 log = logging.getLogger("pipeline")
+
+# Fehlercodes der Plattform (TikTok error.code wie access_token_invalid, OAuth error wie invalid_grant): nur so
+# gebaute Codes landen im Fehlertext – alles andere heißt "unbekannt", damit nie ein Body-Fragment durchrutscht.
+CODE_MUSTER = re.compile(r"[a-z_]{1,40}")
+GRUND_MAX = 200
+FEHLER_BODY_MAX = 65_536
 
 ALIASE = {
     "tiktok": {"views": "view_count", "likes": "like_count", "kommentare": "comment_count",
@@ -38,8 +45,27 @@ ALIASE = {
 ZAEHLER = {*publikum.ZAEHLER, "impressions", "follows", "profilaufrufe", "rewatches"}
 
 
+def _fehlercode(code) -> str:
+    """Ein Plattform-Fehlercode, wenn er wie einer aussieht (CODE_MUSTER), sonst "unbekannt"."""
+    return code if isinstance(code, str) and CODE_MUSTER.fullmatch(code) else "unbekannt"
+
+
 class AdapterFehler(RuntimeError):
-    """Absichtlich ohne URL, Antwortbody oder Tokens im Fehlertext."""
+    """Ein Plattformzugang hat nicht geliefert – der Text ist für Log und Lern-Bot gedacht.
+
+    Nie Body, URL, Token oder log_id im Text: der Text wird geloggt und per Telegram gezeigt.
+    Attribute:
+      code  – Fehlercode der Plattform (TikTok error.code bzw. OAuth error), nur ^[a-z_]{1,40}$, sonst "unbekannt"
+      grund – error.message bzw. error_description, höchstens GRUND_MAX druckbare Zeichen, sonst ""
+    Der Konstruktor bleibt message-kompatibel: AdapterFehler("API HTTP 401") wie bisher (code "unbekannt", grund "").
+    Beispiel: AdapterFehler("API HTTP 401: access_token_invalid", code="access_token_invalid", grund="The access
+    token is invalid") → str(…) == "API HTTP 401: access_token_invalid", .code == "access_token_invalid"."""
+
+    def __init__(self, text, *, code: str = "unbekannt", grund: str = ""):
+        super().__init__(text)
+        self.code = _fehlercode(code)
+        grund = str(grund or "")[:GRUND_MAX]
+        self.grund = grund if grund.isprintable() else ""
 
 
 class _KeineWeiterleitung(HTTPRedirectHandler):
@@ -47,7 +73,32 @@ class _KeineWeiterleitung(HTTPRedirectHandler):
         raise AdapterFehler("API-Weiterleitung abgelehnt")
 
 
+def _fehler_felder(wert) -> tuple[str, str]:
+    """(code, beschreibung) aus einer Fehlerantwort: Display-Form {"error": {"code", "message"}} oder OAuth-Form
+    {"error": "…", "error_description": "…"}; ("", "") wenn keine von beiden."""
+    fehler = wert.get("error") if isinstance(wert, dict) else None
+    if isinstance(fehler, dict):
+        return str(fehler.get("code") or ""), str(fehler.get("message") or "")
+    if isinstance(fehler, str):
+        return fehler, str(wert.get("error_description") or "")
+    return "", ""
+
+
+def _fehler_aus_body(exc: HTTPError) -> tuple[str, str]:
+    """Code und Beschreibung aus dem Body einer HTTP-Fehlerantwort (höchstens FEHLER_BODY_MAX Bytes);
+    ("", "") bei leerem oder ungültigem Body."""
+    if getattr(exc, "fp", None) is None:
+        return "", ""
+    try:
+        return _fehler_felder(json.loads(exc.read(FEHLER_BODY_MAX)))
+    except (OSError, ValueError, UnicodeError):
+        return "", ""
+
+
 def _json(url: str, token: str | None = None, *, daten=None, formular=False) -> dict:
+    """Ein JSON-Aufruf gegen eine feste Adresse. AdapterFehler bei HTTP-Fehler („API HTTP 401: access_token_invalid“
+    – Code und grund aus dem Body, wenn TikTok einen liefert), Netzfehler, Nicht-JSON und bei HTTP 200 mit
+    error.code ≠ ok („API abgelehnt: scope_not_authorized“)."""
     headers = {"Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -62,7 +113,10 @@ def _json(url: str, token: str | None = None, *, daten=None, formular=False) -> 
             raise AdapterFehler("API-Antwort zu groß")
         wert = json.loads(roh)
     except HTTPError as exc:
-        raise AdapterFehler(f"API HTTP {exc.code}") from None
+        code, grund = _fehler_aus_body(exc)
+        code = _fehlercode(code)
+        text = f"API HTTP {exc.code}" + (f": {code}" if code != "unbekannt" else "")
+        raise AdapterFehler(text, code=code, grund=grund) from None
     except (URLError, TimeoutError, OSError):
         raise AdapterFehler("API nicht erreichbar") from None
     except (ValueError, UnicodeError):
@@ -71,7 +125,9 @@ def _json(url: str, token: str | None = None, *, daten=None, formular=False) -> 
         raise AdapterFehler("API liefert kein Objekt")
     fehler = wert.get("error")
     if fehler and (not isinstance(fehler, dict) or fehler.get("code") not in (None, "ok")):
-        raise AdapterFehler("API hat die Anfrage abgelehnt (Zugang/Berechtigungen prüfen)")
+        code, grund = _fehler_felder(wert)
+        code = _fehlercode(code)
+        raise AdapterFehler(f"API abgelehnt: {code}", code=code, grund=grund)
     return wert
 
 
@@ -84,12 +140,17 @@ def cache_pfad(konfig) -> Path:
 
 
 def lies_cache(pfad: Path) -> dict:
+    """Die private Token-Datei als dict; fehlt sie, {}. AdapterFehler („TikTok-Token-Datei ist nicht lesbar“),
+    wenn sie nicht lesbar, kein JSON oder kein Objekt ist (z. B. "[]") – die Datei bleibt unangetastet."""
     if not pfad.is_file():
         return {}
     try:
-        return json.loads(pfad.read_text(encoding="utf-8"))
+        wert = json.loads(pfad.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise AdapterFehler("TikTok-Token-Datei ist nicht lesbar") from None
+    if not isinstance(wert, dict):
+        raise AdapterFehler("TikTok-Token-Datei ist nicht lesbar")
+    return wert
 
 
 def schreibe_cache(pfad: Path, daten: dict) -> None:

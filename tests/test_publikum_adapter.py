@@ -1,20 +1,107 @@
-"""Zwei Integrationsfälle: echter Speicherweg und begrenzter offizieller Abruf."""
+"""Offizieller Abruf (publikum_adapter): Speicherweg, Blöcke, Token-Pflege, Zuordnung und Lern-Meldungen."""
+import io
+import os
+import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
+from urllib.error import HTTPError
 
-from clip_pipeline import db, publikum, publikum_adapter as adapter
+from clip_pipeline import autonom, db, publikum, publikum_adapter as adapter
 from clip_pipeline.konfig import Konfig
 from clip_pipeline.zeit import UTC, iso
+from tests.hilfen import MitSpeicher
+
+ZUGANG = {"TIKTOK_CLIENT_KEY": "key123", "TIKTOK_CLIENT_SECRET": "geheim", "TIKTOK_REFRESH_TOKEN": "",
+          "TIKTOK_ACCESS_TOKEN": ""}
+OHNE_ZUGANG = {k: "" for k in ZUGANG}
+
+
+class _Antwort(io.BytesIO):
+    """Stellvertreter für die Antwort von build_opener().open(): Kontextmanager mit read()."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _opener(ergebnis):
+    """build_opener-Ersatz: open() liefert ergebnis bzw. wirft es, wenn es eine Ausnahme ist."""
+    def oeffnen(*a, **kw):
+        if isinstance(ergebnis, BaseException):
+            raise ergebnis
+        return _Antwort(ergebnis)
+    return mock.Mock(return_value=mock.Mock(open=oeffnen))
+
+
+class Fehlertyp(unittest.TestCase):
+    def test_http_fehler_nennt_code_und_grund_ohne_log_id(self):
+        # B2: Display-API-Form {"error": {"code", "message", "log_id"}} – Code im Text, log_id nirgends
+        body = b'{"error":{"code":"access_token_invalid","message":"m","log_id":"L1"}}'
+        with patch.object(adapter, "build_opener", _opener(HTTPError("https://x", 401, "x", {}, io.BytesIO(body)))):
+            with self.assertRaises(adapter.AdapterFehler) as cm:
+                adapter._json("https://open.tiktokapis.com/v2/video/query/", "tok", daten={})
+        self.assertEqual((cm.exception.code, str(cm.exception), cm.exception.grund),
+                         ("access_token_invalid", "API HTTP 401: access_token_invalid", "m"))
+        self.assertNotIn("L1", str(cm.exception) + cm.exception.grund)
+        # OAuth-Form {"error": "…", "error_description": "…"}
+        body = b'{"error":"invalid_request","error_description":"Redirect_uri or scope is invalid.","log_id":"L2"}'
+        with patch.object(adapter, "build_opener", _opener(HTTPError("https://x", 400, "x", {}, io.BytesIO(body)))):
+            with self.assertRaises(adapter.AdapterFehler) as cm:
+                adapter._json("https://open.tiktokapis.com/v2/oauth/token/", daten={}, formular=True)
+        self.assertEqual((cm.exception.code, str(cm.exception)), ("invalid_request", "API HTTP 400: invalid_request"))
+        self.assertIn("Redirect_uri", cm.exception.grund)
+        # leerer Body → wie bisher
+        with patch.object(adapter, "build_opener", _opener(HTTPError("https://x", 401, "x", {}, io.BytesIO(b"")))):
+            with self.assertRaises(adapter.AdapterFehler) as cm:
+                adapter._json("https://open.tiktokapis.com/v2/video/query/", "tok", daten={})
+        self.assertEqual((str(cm.exception), cm.exception.code, cm.exception.grund), ("API HTTP 401", "unbekannt", ""))
+
+    def test_abgelehnt_bei_http_200(self):
+        body = b'{"data":{},"error":{"code":"scope_not_authorized","message":"needs video.list","log_id":"L3"}}'
+        with patch.object(adapter, "build_opener", _opener(body)):
+            with self.assertRaises(adapter.AdapterFehler) as cm:
+                adapter._json("https://open.tiktokapis.com/v2/video/list/", "tok", daten={})
+        self.assertEqual((str(cm.exception), cm.exception.code, cm.exception.grund),
+                         ("API abgelehnt: scope_not_authorized", "scope_not_authorized", "needs video.list"))
+
+    def test_adapterfehler_bereinigt_attribute(self):
+        alt = adapter.AdapterFehler("API HTTP 401")                       # message-kompatibel wie bisher
+        self.assertEqual((str(alt), alt.code, alt.grund), ("API HTTP 401", "unbekannt", ""))
+        krumm = adapter.AdapterFehler("x", code="Bad Code!", grund="a" * 300)
+        self.assertEqual((krumm.code, len(krumm.grund)), ("unbekannt", 200))
+        self.assertEqual(adapter.AdapterFehler("x", grund="zeile\nzwei").grund, "")  # nicht druckbar → leer
+
+    def test_lies_cache_lehnt_liste_ab(self):
+        # B19: eine Token-Datei mit "[]" ist kein Cache – gleicher Fehlertext wie bei ungültigem JSON
+        with tempfile.TemporaryDirectory() as tmp:
+            pfad = Path(tmp) / "publikum-oauth.json"
+            pfad.write_text("[]", encoding="utf-8")
+            with self.assertRaisesRegex(adapter.AdapterFehler, "nicht lesbar"):
+                adapter.lies_cache(pfad)
+            pfad.write_text("{kaputt", encoding="utf-8")
+            with self.assertRaisesRegex(adapter.AdapterFehler, "nicht lesbar"):
+                adapter.lies_cache(pfad)
+            self.assertEqual(adapter.lies_cache(Path(tmp) / "fehlt.json"), {})
 
 
 class PublikumAdapter(unittest.TestCase):
     def setUp(self):
         self.con = db.verbinde(":memory:")
         self.addCleanup(self.con.close)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        umgebung = mock.patch.dict(os.environ, OHNE_ZUGANG)   # kein Zugang aus der echten Umgebung
+        umgebung.start()
+        self.addCleanup(umgebung.stop)
         self.zeit = datetime(2026, 9, 29, 12, tzinfo=UTC)
-        self.konfig = Konfig({"publikum": {}, "datenbank": {"pfad": ":memory:"}}, Path("test.toml"))
+        # datenbank.pfad im Temp-Ordner: sonst zeigte cache_pfad auf ./publikum-oauth.json
+        self.konfig = Konfig({"publikum": {}, "datenbank": {"pfad": str(Path(self._tmp.name) / "test.db")}},
+                             Path("test.toml"))
         self.pid, _ = publikum.post_anlegen(self.con, art="entwurf", ziel_id=7, plattform="tiktok",
             daten={"dauer_s": 65, "format": "short", "rezept": {}, "merkmale": {}},
             zeit=self.zeit - timedelta(days=3))
@@ -69,13 +156,14 @@ class PublikumAdapter(unittest.TestCase):
                                       "share_url": "https://www.tiktok.com/@t/video/555"},
                                      {"id": "123456789", "create_time": gepostet - 60, "duration": 45}],  # vergeben
                           "has_more": False}, "error": {"code": "ok"}}
-        werte = {"data": {"videos": [{"id": "555", "view_count": 10, "like_count": 1, "comment_count": 0,
-                                      "share_count": 0}]}, "error": {"code": "ok"}}
+        werte = {"555": {"id": "555", "view_count": 10, "like_count": 1, "comment_count": 0, "share_count": 0},
+                 "123456789": self.payload["data"]["videos"][0]}
 
         def api(url, token, daten=None, **kw):
             if "/video/list/" in url:
                 return liste
-            return self.payload if daten["filters"]["video_ids"] == ["123456789"] else werte
+            ids = daten["filters"]["video_ids"]                                 # Block-Antwort: nur die gefragten
+            return {"data": {"videos": [werte[i] for i in ids if i in werte]}, "error": {"code": "ok"}}
 
         with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=api):
             result = adapter.abrufen(self.con, self.konfig, self.zeit)
