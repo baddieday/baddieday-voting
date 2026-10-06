@@ -384,7 +384,7 @@ class LernBot(MitRegieMaterial):
         db.lern_meldung(self.con, "bericht", "Abschlussbericht\n" + ("x" * 3000 + "\n") * 3)
         self.assertEqual(asyncio.run(lernbot.sende_meldungen(self.app)), 2)
         self.assertEqual(asyncio.run(lernbot.sende_meldungen(self.app)), 0)
-        self.assertIn("Stand:", self.bot.texte[0][1])
+        self.assertTrue(self.bot.texte[0][1].startswith("📋 Stand"))   # 06.10.: im einfachen Modus die kurze Fassung
         self.assertEqual(len(self.bot.texte), 1 + 3)  # Bericht in 3 Stücke geteilt
         self.assertTrue(all(len(t) <= lernbot.TEXT_MAX for _, t in self.bot.texte))
 
