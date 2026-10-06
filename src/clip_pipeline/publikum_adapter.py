@@ -21,7 +21,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from . import autonom, publikum
+from . import autonom, db, publikum
 from .sperre import Gesperrt, sperre
 from .zeit import aus_iso, iso, jetzt
 
@@ -374,28 +374,54 @@ def importiere(con, konfig, post_id: int, antwort: dict, *, zeit: datetime | Non
                                      roh=json.dumps(werte, ensure_ascii=False, allow_nan=False))
 
 
-def _tiktok_zuordnen(con, konfig, token: str, posts: list, zeit: datetime) -> dict[int, str]:
+TIKTOK_LISTE_URL = "https://open.tiktokapis.com/v2/video/list/"
+LISTE_FELDER = "id,create_time,duration,share_url"
+# Ein Video ohne Post wird erst gemeldet, wenn es so alt ist – sonst meldet der 10-Uhr-Lauf, was du vormittags noch abhakst
+OHNE_POST_AB_S = 86400
+
+
+def _tiktok_liste(token: str, cursor=None) -> dict:
+    """Eine Seite der eigenen Videoliste (/v2/video/list/, Scope video.list, bis 20 Videos, neueste zuerst) – die
+    einzige Stelle für diesen Aufruf. cursor: data.cursor der vorigen Seite (UTC-ms) für die nächste.
+    Rückgabe: der data-Teil {"videos": [{id, create_time, duration, share_url}, …], "cursor": …, "has_more": bool}.
+    AdapterFehler wie _json."""
+    antwort = _json(TIKTOK_LISTE_URL + "?" + urlencode({"fields": LISTE_FELDER}), token,
+                    daten={"max_count": 20, **({"cursor": cursor} if cursor else {})})
+    return antwort.get("data") or {}
+
+
+def _link_nr(post) -> str:
+    """Die Nummer, die /link erwartet: im Lern-Bot die Entwurfsnummer, im Clip-Bot die Clip-Nummer."""
+    return str(post["entwurf_id"] if post["art"] == "entwurf" else post["clip_id"])
+
+
+def _tiktok_zuordnen(con, konfig, token: str, posts: list, zeit: datetime,
+                     erste_seite: dict | None = None) -> tuple[dict[int, str], int]:
     """TikTok-Posts ohne Video-Nummer (kein Link oder Kurzlink vm.tiktok.com) selbst zuordnen (30.09., Spec §7.2):
-    eigene Videoliste über /v2/video/list/ (Scope video.list), je Post das Video, das höchstens
-    [publikum].zuordnung_stunden (72) vor dem Häkchen/Link bis 30 min danach erstellt wurde und dessen Länge auf
-    ±2 s passt – das zeitlich nächste. Ein Video gehört nie zu zwei Posts. Trägt video_id (und url, falls leer) nach.
-    Rückgabe: {post_id: video_id}."""
+    eigene Videoliste (_tiktok_liste; erste_seite = die schon in abrufen geholte Seite, weitere Seiten bis
+    [publikum].zuordnung_seiten lädt nur die Zuordnung), je Post die Videos, die höchstens [publikum].zuordnung_stunden
+    (72) vor dem Häkchen/Link bis 30 min danach erstellt wurden und deren Länge auf ±2 s passt. Genau eines → zugeordnet
+    (video_id, und url nur, wenn noch keine steht). Zwei oder mehr → nicht raten (B10): der Post bleibt offen, zählt
+    mehrdeutig, und du bekommst die Kandidaten. Ein Video gehört nie zu zwei Posts.
+    Eine Lern-Meldung am Tag (publikum:zuordnung:<datum>) mit jeder Zuordnung („#17 → <share_url> (falsch? /link 41
+    <Link>)“) und jedem Mehrdeutigen („Entwurf 41: 2 passende Videos (…) – /link 41 <Link>“) – nur, wenn es etwas
+    zu sagen gibt. Rückgabe: ({post_id: video_id}, Anzahl mehrdeutig). AdapterFehler, wenn eine weitere Seite scheitert."""
     fenster = timedelta(hours=float(konfig.wert("publikum.zuordnung_stunden", 72)))
     frueheste = min(aus_iso(p["gepostet_utc"]) for p in posts) - fenster
-    videos, cursor = [], None
+    videos, cursor, daten = [], None, erste_seite
     for _ in range(int(konfig.wert("publikum.zuordnung_seiten", 10))):  # je 20 Videos, neueste zuerst
-        antwort = _json("https://open.tiktokapis.com/v2/video/list/?" + urlencode(
-            {"fields": "id,create_time,duration,share_url"}), token,
-            daten={"max_count": 20, **({"cursor": cursor} if cursor else {})})
-        daten = antwort.get("data") or {}
+        if daten is None:
+            daten = _tiktok_liste(token, cursor)
         seite = daten.get("videos") or []
         videos += seite
         cursor = daten.get("cursor")
         if not daten.get("has_more") or not seite or not cursor or \
                 min(float(v.get("create_time") or 0) for v in seite) < frueheste.timestamp():
             break
+        daten = None
     vergeben = {z[0] for z in con.execute("SELECT video_id FROM posts WHERE plattform = 'tiktok' AND video_id IS NOT NULL")}
     zugeordnet: dict[int, str] = {}
+    mehrdeutig, zeilen = 0, []
     for post in sorted(posts, key=lambda z: z["gepostet_utc"]):
         gepostet = aus_iso(post["gepostet_utc"]).timestamp()
         passend = [v for v in videos if str(v.get("id") or "") and str(v["id"]) not in vergeben
@@ -403,14 +429,47 @@ def _tiktok_zuordnen(con, konfig, token: str, posts: list, zeit: datetime) -> di
                    and abs(float(v.get("duration") or 0) - float(post["dauer_s"])) <= 2.0]
         if not passend:
             continue
-        video = min(passend, key=lambda v: abs(gepostet - float(v["create_time"])))
+        nr = _link_nr(post)
+        if len(passend) > 1:
+            mehrdeutig += 1
+            links = ", ".join(str(v.get("share_url") or v["id"]) for v in passend)
+            zeilen.append(f"{'Entwurf' if post['art'] == 'entwurf' else 'Clip'} {nr}: {len(passend)} passende Videos "
+                          f"({links}) – /link {nr} <Link>")
+            log.info("Publikum: Post #%s – %s passende TikTok-Videos, nicht zugeordnet", post["id"], len(passend))
+            continue
+        video = passend[0]
         vid = str(video["id"])
         con.execute("UPDATE posts SET video_id = ?, url = COALESCE(url, ?) WHERE id = ? AND video_id IS NULL",
                     (vid, video.get("share_url"), post["id"]))
         vergeben.add(vid)
         zugeordnet[int(post["id"])] = vid
+        zeilen.append(f"#{post['id']} → {video.get('share_url') or vid} (falsch? /link {nr} <Link>)")
         log.info("Publikum: Post #%s ist TikTok-Video %s (per Zeit und Länge zugeordnet)", post["id"], vid)
-    return zugeordnet
+    if zeilen:
+        db.lern_meldung(con, f"publikum:zuordnung:{zeit:%Y-%m-%d}", "🔗 TikTok-Zuordnung:\n" + "\n".join(zeilen))
+    return zugeordnet, mehrdeutig
+
+
+def _tiktok_ohne_post(con, konfig, videos: list, zeit: datetime) -> int:
+    """Videos der eigenen Liste, zu denen kein Post gehört (B21): keine posts.video_id (tiktok) gleich str(id),
+    create_time innerhalb [publikum].zuordnung_stunden und mindestens OHNE_POST_AB_S alt. Je Video einmal eine
+    Lern-Meldung publikum:ohne-post:<id> mit share_url und /link-Hinweis. Rückgabe: Anzahl solcher Videos
+    (auch wenn die Meldung von einem früheren Lauf schon da ist). Nach der Zuordnung aufrufen – was gerade
+    zugeordnet wurde, hat dann einen Post."""
+    fenster_s = float(konfig.wert("publikum.zuordnung_stunden", 72)) * 3600
+    bekannt = {z[0] for z in con.execute("SELECT video_id FROM posts WHERE plattform = 'tiktok' AND video_id IS NOT NULL")}
+    anzahl = 0
+    for video in videos:
+        vid = str(video.get("id") or "")
+        alter_s = zeit.timestamp() - float(video.get("create_time") or 0)
+        if not vid or vid in bekannt or not (OHNE_POST_AB_S <= alter_s <= fenster_s):
+            continue
+        anzahl += 1
+        link = str(video.get("share_url") or vid)
+        db.lern_meldung(con, f"publikum:ohne-post:{vid}",
+                        f"📎 TikTok-Video ohne Post ({int(float(video.get('duration') or 0))} s, vor "
+                        f"{int(alter_s // 3600)} h): {link} – /link <entwurf> {link}")
+    return anzahl
 
 
 def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
@@ -420,7 +479,8 @@ def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
     pro Lauf einmal erneuert. Ein defekter Zugang stoppt nicht andere Plattformen.
     """
     zeit = zeit or jetzt()
-    ergebnis = dict(gespeichert=0, unveraendert=0, ohne_zugang=0, ohne_id=0, zugeordnet=0, fehler=0)
+    ergebnis = dict(gespeichert=0, unveraendert=0, ohne_zugang=0, ohne_id=0, zugeordnet=0, mehrdeutig=0, ohne_post=0,
+                    fehler=0)
     if not konfig.wert("publikum.api_abruf", True):
         ergebnis["deaktiviert"] = True
         return ergebnis
@@ -435,17 +495,30 @@ def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
                         (seit, vor, int(konfig.wert("publikum.api_max_posts", 100)))).fetchall()
     tokens = {}
     zugeordnet: dict[int, str] = {}
-    ohne = [p for p in posts if p["plattform"] == "tiktok" and not p["video_id"]]
-    if ohne:  # Kurzlink oder gar kein Link: selbst zuordnen, statt dich nach Links zu fragen
+    liste = None
+    if con.execute("SELECT 1 FROM posts WHERE plattform = 'tiktok' AND gepostet_utc >= ? LIMIT 1", (seit,)).fetchone():
+        # B21: die eigene Videoliste genau einmal je Lauf – für die Zuordnung und für Videos ohne Post. Ohne Token
+        # kein Netz; scheitert der Abruf, bleibt TikTok für diesen Lauf gesperrt (kein Weiterhämmern).
         try:
             tokens["tiktok"] = None
             tokens["tiktok"] = _token("tiktok", konfig, zeit)
             if tokens["tiktok"]:
-                zugeordnet = _tiktok_zuordnen(con, konfig, tokens["tiktok"], ohne, zeit)
-                ergebnis["zugeordnet"] = len(zugeordnet)
+                liste = _tiktok_liste(tokens["tiktok"])
+        except (AdapterFehler, ValueError, TypeError, KeyError, OSError) as exc:
+            log.warning("Publikum-API tiktok, Liste: %s", type(exc).__name__)
+            ergebnis["fehler"] += 1
+            tokens["tiktok"] = None
+    ohne = [p for p in posts if p["plattform"] == "tiktok" and not p["video_id"]]
+    if ohne and tokens.get("tiktok"):  # Kurzlink oder gar kein Link: selbst zuordnen, statt dich nach Links zu fragen
+        try:
+            zugeordnet, ergebnis["mehrdeutig"] = _tiktok_zuordnen(con, konfig, tokens["tiktok"], ohne, zeit, liste)
+            ergebnis["zugeordnet"] = len(zugeordnet)
         except (AdapterFehler, ValueError, TypeError, KeyError, OSError) as exc:
             log.warning("Publikum-API tiktok, Zuordnung: %s", type(exc).__name__)
             ergebnis["fehler"] += 1
+            tokens["tiktok"] = None
+    if liste is not None:
+        ergebnis["ohne_post"] = _tiktok_ohne_post(con, konfig, liste.get("videos") or [], zeit)
     with autonom.gebuendelt():   # B22: bis zu 100 Importe, einmal lernen am Ende
         for post in posts:
             plattform = post["plattform"]

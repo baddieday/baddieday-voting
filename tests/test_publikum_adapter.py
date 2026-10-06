@@ -169,12 +169,74 @@ class PublikumAdapter(unittest.TestCase):
             result = adapter.abrufen(self.con, self.konfig, self.zeit)
         self.assertEqual((result["zugeordnet"], result["ohne_id"], result["gespeichert"]), (1, 0, 2))
         self.assertEqual(self.con.execute("SELECT video_id FROM posts WHERE id = ?", (pid,)).fetchone()[0], "555")
+        meldung = self.meldung("publikum:zuordnung:2026-09-29")
+        self.assertIn(f"#{pid} → https://www.tiktok.com/@t/video/555", meldung)   # B10: nachprüfbar, korrigierbar
+        self.assertIn("/link 8 ", meldung)                                         # Entwurfsnummer, nicht Post-Nummer
         with patch.object(adapter, "_token", return_value="t"), \
-                patch.object(adapter, "_json", side_effect=adapter.AdapterFehler("API HTTP 403")), \
+                patch.object(adapter, "_json", side_effect=adapter.AdapterFehler("API HTTP 403")) as api, \
                 self.assertLogs("pipeline", "WARNING"):
             self.con.execute("UPDATE posts SET video_id = NULL WHERE id = ?", (pid,))
             result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=8))
-        self.assertEqual(result["ohne_id"], 1)                                  # Liste gesperrt: kein Absturz
+        self.assertEqual((result["ohne_id"], result["fehler"]), (1, 1))         # Liste gesperrt: kein Absturz
+        self.assertEqual(api.call_count, 1)                                     # … und kein weiterer Aufruf
+
+    def meldung(self, schluessel: str) -> str | None:
+        zeile = self.con.execute("SELECT text FROM lern_meldungen WHERE schluessel = ?", (schluessel,)).fetchone()
+        return zeile[0] if zeile else None
+
+    def test_mehrdeutig_fragt_statt_zu_raten(self):
+        # B10: zwei Entwürfe gleicher Länge zur selben Zeit gepostet, zwei passende Videos – wer ist wer? Du sagst es.
+        a, b = self.post(31, tage=1, dauer=45), self.post(32, tage=1, dauer=45)
+        gepostet = (self.zeit - timedelta(days=1)).timestamp()
+        liste = {"data": {"videos": [
+            {"id": "701", "create_time": gepostet - 300, "duration": 45, "share_url": "https://www.tiktok.com/@t/video/701"},
+            {"id": "702", "create_time": gepostet - 900, "duration": 45, "share_url": "https://www.tiktok.com/@t/video/702"},
+        ], "has_more": False}, "error": {"code": "ok"}}
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=self.api({}, liste)):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        self.assertEqual((result["zugeordnet"], result["mehrdeutig"], result["ohne_id"]), (0, 2, 2))
+        meldung = self.meldung("publikum:zuordnung:2026-09-29")
+        self.assertIn("https://www.tiktok.com/@t/video/701", meldung)
+        self.assertIn("https://www.tiktok.com/@t/video/702", meldung)
+        self.assertIn("Entwurf 31", meldung)
+        self.assertIsNone(self.con.execute("SELECT video_id FROM posts WHERE id = ?", (a,)).fetchone()[0])
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=self.api({}, liste)):
+            adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=8))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM lern_meldungen WHERE schluessel LIKE 'publikum:zuordnung:%'")
+                         .fetchone()[0], 1)                                      # einmal am Tag
+
+    def test_fremdes_video_ohne_post_wird_gemeldet(self):
+        # B21: ein Video auf TikTok, zu dem kein Post gehört – vermutlich vergessen, /link zu schicken
+        pid = self.post(41, tage=1.5, dauer=45)
+        jetzt_s = self.zeit.timestamp()
+        liste = {"data": {"videos": [
+            {"id": "801", "create_time": jetzt_s - 30 * 3600, "duration": 58, "share_url": "https://www.tiktok.com/@t/video/801"},
+            {"id": "802", "create_time": jetzt_s - 2 * 3600, "duration": 58, "share_url": "https://www.tiktok.com/@t/video/802"},
+            {"id": "803", "create_time": jetzt_s - 36.5 * 3600, "duration": 45, "share_url": "https://www.tiktok.com/@t/video/803"},
+        ], "has_more": False}, "error": {"code": "ok"}}
+        videos = {"803": {"id": "803", "view_count": 50, "like_count": 5, "comment_count": 0, "share_count": 0},
+                  "123456789": self.payload["data"]["videos"][0]}
+        fake = self.api(videos, liste)
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=fake):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        self.assertEqual((result["ohne_post"], result["zugeordnet"]), (1, 1))   # 802 zu jung, 803 im selben Lauf zugeordnet
+        meldung = self.meldung("publikum:ohne-post:801")
+        self.assertIn("https://www.tiktok.com/@t/video/801", meldung)
+        self.assertIn("vor 30 h", meldung)
+        self.assertIsNone(self.meldung("publikum:ohne-post:802"))
+        self.assertIsNone(self.meldung("publikum:ohne-post:803"))
+        self.assertEqual(self.con.execute("SELECT video_id FROM posts WHERE id = ?", (pid,)).fetchone()[0], "803")
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=fake):
+            adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=8))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM lern_meldungen WHERE schluessel LIKE 'publikum:ohne-post:%'")
+                         .fetchone()[0], 1)
+        # Listenabruf scheitert → fehler 1, TikTok für den Lauf gesperrt (die Posts zählen ohne_zugang)
+        with patch.object(adapter, "_token", return_value="t"), \
+                patch.object(adapter, "_json", side_effect=adapter.AdapterFehler("API HTTP 429: rate_limit_exceeded",
+                                                                                 code="rate_limit_exceeded")) as api, \
+                self.assertLogs("pipeline", "WARNING"):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=16))
+        self.assertEqual((result["fehler"], result["ohne_zugang"], api.call_count), (1, 2, 1))
 
     def post(self, ziel_id: int, *, tage: float = 3, dauer: float = 65, video_id: str | None = None) -> int:
         """Ein TikTok-Post von vor `tage` Tagen; mit video_id auch gleich der Link dazu."""
@@ -296,7 +358,7 @@ class Token(MitSpeicher):
         self.assertEqual(cache["refresh_expires_at"], alt_ablauf)                       # ohne refresh_expires_in: bleibt
         self.assertEqual((cache["display_name"], cache["scope"], cache["refresh_token"]),
                          ("Baddie", "user.info.basic,video.list", "rft.2"))
-        self.assertNotIn("act", open(self.pfad, encoding="utf-8").read().replace("act.2", ""))  # alter Token weg
+        self.assertNotIn("act", self.pfad.read_text(encoding="utf-8").replace("act.2", ""))   # alter Token weg
         # mit refresh_expires_in und neuem Scope → beides neu
         antwort = {**antwort, "access_token": "act.3", "refresh_expires_in": 31536000,
                    "scope": "user.info.basic,video.list,user.info.profile"}
