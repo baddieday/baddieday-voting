@@ -8,10 +8,11 @@ Anleitung als 🏠-Schritt mit einer Probe.
 
 from __future__ import annotations
 
+import ast
 import re
 import unittest
 
-from clip_pipeline import claude_aufruf, cli
+from clip_pipeline import claude_aufruf, cli, tiktok_anmeldung
 
 from tests.test_deploy_puffer import DEPLOY, KONFIG, PROJEKT, assertReihenfolge, lies_unit
 
@@ -52,6 +53,9 @@ class Units(unittest.TestCase):
         self.assertIn(f"Von Hand: sudo -u pipeline {PIPELINE} publikum bewerten", text)
         self.assertIn("main", text)          # Kommentar: welcher Checkout
         self.assertIn("weckt pve-big NIE", text)
+        # TikTok besser (B14/B20): der Lauf liest TikTok übers Netz und ist auch bei api.fehler rot – kein „reine DB“
+        self.assertIn("api.fehler", text)
+        self.assertNotIn("Reine Datenbank-Arbeit", text)
 
     def test_timer_taeglich_um_zehn(self):
         t = lies_unit(TIMER)
@@ -96,7 +100,10 @@ class Anleitung(unittest.TestCase):
         for thema in ("📦", "/link", "Screenshot", "#17", "Hand-Eingabe", "1240 61 6.8 34", "/publikum",
                       "Basis zu klein", "Ruhezeit", "pipeline publikum bewerten", "## Was tun, wenn",
                       # Florian 25.09.: Hand-Eingabe mit Kommentaren/Shares/Saves, MAD-Minimum je Teil
-                      "#17 1240 61 6.8 34 3 5 2", "4 oder 7", "[publikum.mad_minimum]", "0,27"):
+                      "#17 1240 61 6.8 34 3 5 2", "4 oder 7", "[publikum.mad_minimum]", "0,27",
+                      # TikTok besser (05.10.): Handgriff, Notausgang, Trennen, fehlende Wiedergabe in /publikum
+                      "TikTok-Zahlen ausbleiben", "api_abruf", "pipeline publikum holen", "/tiktok trennen",
+                      "⏱ fehlt"):
             with self.subTest(thema):
                 self.assertIn(thema, self.text)
 
@@ -107,11 +114,28 @@ class Anleitung(unittest.TestCase):
                        if isinstance(inhalt, dict) for k in inhalt]
         self.assertIn("[publikum.mad_minimum].engagement", schluessel)  # die Schleife sieht die neue Tabelle
         schluessel += [f"[lernbot].{k}" for k in KONFIG["lernbot"] if k.startswith("screenshot")]
-        schluessel += ["[decide].programm", "[telegram].leise_von", "[vorschau].max_mb"]
+        schluessel += ["[decide].programm", "[telegram].leise_von", "[vorschau].max_mb", "[tiktok].redirect_uri"]
         tabelle = abschnitt(self.text, "Konfig-Schlüssel")
         for name in schluessel:
             with self.subTest(name):
                 self.assertIn(f"`{name}`", tabelle)
+
+    def test_code_defaults_stehen_in_pipeline_toml(self):
+        """B13: Jeder `konfig.wert("publikum.…", Default)` bzw. `"tiktok.…"` im Code hat seinen Schlüssel sichtbar in
+        pipeline.toml – mit genau dem Default des Codes. Sonst steht die Wahrheit nur im Code, und die Konfig-Tabelle
+        (test_jeder_konfig_schluessel_ist_erklaert läuft über KONFIG) kennt den Schlüssel gar nicht."""
+        muster = re.compile(r'konfig\.wert\(\s*"(publikum|tiktok)\.(\w+)"\s*,\s*([^)]+)\)')
+        treffer = [(datei.name, *m.groups()) for datei in sorted((PROJEKT / "src/clip_pipeline").glob("*.py"))
+                   for m in muster.finditer(datei.read_text(encoding="utf-8"))]
+        self.assertGreaterEqual(len(treffer), 7, treffer)  # sechs api_*/zuordnung_* und redirect_uri
+        for datei, tabelle, name, default in treffer:
+            with self.subTest(f"{datei}: [{tabelle}].{name}"):
+                self.assertIn(tabelle, KONFIG)
+                self.assertIn(name, KONFIG[tabelle])
+                # der Default von redirect_uri ist der Name REDIRECT, kein Literal
+                erwartet = tiktok_anmeldung.REDIRECT if (tabelle, name) == ("tiktok", "redirect_uri") \
+                    else ast.literal_eval(default.strip())
+                self.assertEqual(KONFIG[tabelle][name], erwartet)
 
     def test_installation_in_der_richtigen_reihenfolge(self):
         installation = abschnitt(self.text, "Installation")
@@ -193,7 +217,10 @@ class Anleitung(unittest.TestCase):
     def test_alle_dateien_sind_genannt(self):
         for datei in ("deploy/systemd/clip-publikum.service", "deploy/systemd/clip-publikum.timer",
                       "deploy/systemd/clip-lernbot.service.d/claude.conf", "templates/screenshot-prompt.txt",
-                      "config/lokal.beispiel.toml"):
+                      "config/lokal.beispiel.toml",
+                      # TikTok besser: Abruf, Anmeldung, /tiktok
+                      "src/clip_pipeline/publikum_adapter.py", "src/clip_pipeline/tiktok_anmeldung.py",
+                      "src/clip_pipeline/lernbot_tiktok.py"):
             with self.subTest(datei):
                 self.assertIn(datei, self.text)
                 self.assertTrue((PROJEKT / datei).is_file(), datei)
@@ -215,6 +242,26 @@ class Verweise(unittest.TestCase):
                          "55 schlanke Tests"):
             with self.subTest(veraltet):
                 self.assertNotIn(veraltet, readme)
+
+    def test_autonomes_lernen_kennt_den_bot_weg(self):
+        """B24: Der Zugang läuft über /tiktok und publikum-oauth.json – nicht mehr „OAuth-Freigabe muss vorhanden
+        sein, das Programm stellt keine Entwickler-App bereit“."""
+        text = (PROJEKT / "docs/AUTONOMES_LERNEN.md").read_text(encoding="utf-8")
+        for teil in ("/tiktok", "publikum-oauth.json"):
+            with self.subTest(teil):
+                self.assertIn(teil, text)
+        self.assertNotIn("stellt keine Entwickler-App bereit", text)
+
+    def test_env_vorlage_zeigt_den_notweg_nur_auskommentiert(self):
+        """B24: Access-/Refresh-Token von Hand sind der Notweg – in .env.example nur als Kommentar; der normale Weg
+        (CLIENT_KEY + CLIENT_SECRET, dann /tiktok) bleibt aktiv."""
+        zeilen = (PROJEKT / ".env.example").read_text(encoding="utf-8").splitlines()
+        for name in ("TIKTOK_ACCESS_TOKEN", "TIKTOK_REFRESH_TOKEN"):
+            with self.subTest(name):
+                fundstellen = [z for z in zeilen if name in z]
+                self.assertTrue(fundstellen, f"{name} fehlt ganz")
+                self.assertTrue(all(z.lstrip().startswith("#") for z in fundstellen), fundstellen)
+        self.assertIn("TIKTOK_CLIENT_KEY=", [z.strip() for z in zeilen])
 
 
 def abschnitt_von(text: str, ueberschrift: str) -> str:
