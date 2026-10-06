@@ -48,6 +48,9 @@ class FakeQuery:
     async def edit_message_caption(self, **kw):
         self.bearbeitet.append(kw)
 
+    async def edit_message_reply_markup(self, **kw):
+        self.bearbeitet.append(kw)
+
 
 @unittest.skipIf(lernbot is None or not HAT_FFMPEG, "python-telegram-bot oder ffmpeg fehlt")
 class LernBot(MitRegieMaterial):
@@ -72,9 +75,37 @@ class LernBot(MitRegieMaterial):
     def test_aufbau(self):
         app = lernbot.baue_app(self.konfig, "123456:TEST", 42)
         befehle = {c for h in app.handlers[0] for c in getattr(h, "commands", ())}
-        self.assertTrue({"entwurf", "musik", "lernstand", "stand", "hilfe"} <= befehle)
+        self.assertTrue({"entwurf", "musik", "lernstand", "stand", "hilfe", "experte"} <= befehle)
         self.assertGreater(app.concurrent_updates, 0)   # 27.09.: Klicks warten nicht aufeinander
         app.bot_data["con"].close()
+
+    def test_mehr_gruende_und_stand_kurz(self):
+        """06.10.: „➕ mehr Gründe“ zeigt alle neun ohne die Bewertung zu ändern; 📋 Stand ist im einfachen Modus kurz."""
+        self.momente_anlegen(MOMENTE[:6])
+        self.musik_anlegen(150, "episch")
+        e = regie.erstelle(self.con, self.konfig, "short")
+        eid = e["entwurf"]
+        q = self.klick(f"d:{eid}:-1")
+        knoepfe = [b.callback_data for reihe in q.bearbeitet[0]["reply_markup"].inline_keyboard for b in reihe]
+        self.assertIn(f"g:{eid}:mehr", knoepfe)
+        self.assertNotIn(f"g:{eid}:hektisch", knoepfe)
+        q = self.klick(f"g:{eid}:mehr")
+        self.assertEqual(q.antworten, ["Alle Gründe"])
+        knoepfe = [b.callback_data for reihe in q.bearbeitet[0]["reply_markup"].inline_keyboard for b in reihe]
+        self.assertIn(f"g:{eid}:hektisch", knoepfe)
+        self.assertEqual(self.con.execute("SELECT gruende FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()[0], "[]")
+        text = lernbot.stand_kurz(self.con, self.konfig)
+        self.assertTrue(text.startswith("📋 Stand"))
+        self.assertIn("👍/👎 von dir: 1 (0 👍 · 1 👎)", text)
+        self.assertIn("⏱️ Shorts: Ziel 45 s", text)
+        self.assertLessEqual(len(text.splitlines()), 8)
+        antworten = []
+
+        async def reply_text(text, **_):
+            antworten.append(text)
+
+        asyncio.run(lernbot.cmd_stand(SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text)), self.context))
+        self.assertEqual(antworten, [text])
 
     def test_bildunterschrift_zaehler_und_gelernt(self):
         zeile = {"id": 7}
@@ -190,7 +221,7 @@ class LernBot(MitRegieMaterial):
         self.assertIn(f"Entwurf #{eid}", video["caption"])
         self.assertIn("🆕 ", video["caption"])  # wie viele Momente neu sind
         daten = [b.callback_data for reihe in video["reply_markup"].inline_keyboard for b in reihe]
-        self.assertEqual(daten, [f"pk:{eid}:", "k:0:short", "k:0:lernstand", f"d:{eid}:1", f"d:{eid}:-1"])
+        self.assertEqual(daten, [f"pk:{eid}:", "k:0:short", "k:0:stand", f"d:{eid}:1", f"d:{eid}:-1"])
 
         self.assertEqual(self.klick(f"d:{eid}:-1", von=7).antworten, ["Nicht erlaubt."])  # fremde Person
         q = self.klick(f"d:{eid}:-1")
@@ -353,7 +384,7 @@ class LernBot(MitRegieMaterial):
         db.lern_meldung(self.con, "bericht", "Abschlussbericht\n" + ("x" * 3000 + "\n") * 3)
         self.assertEqual(asyncio.run(lernbot.sende_meldungen(self.app)), 2)
         self.assertEqual(asyncio.run(lernbot.sende_meldungen(self.app)), 0)
-        self.assertIn("Stand:", self.bot.texte[0][1])
+        self.assertTrue(self.bot.texte[0][1].startswith("📋 Stand"))   # 06.10.: im einfachen Modus die kurze Fassung
         self.assertEqual(len(self.bot.texte), 1 + 3)  # Bericht in 3 Stücke geteilt
         self.assertTrue(all(len(t) <= lernbot.TEXT_MAX for _, t in self.bot.texte))
 
@@ -393,6 +424,33 @@ class EntwurfText(unittest.TestCase):
         self.assertIn("✨ Look neutral · 3 Impacts\n", lernbot.entwurf_text({"id": 7}, liste))
         liste["effekte"] = {"an": False}
         self.assertNotIn("✨", lernbot.entwurf_text({"id": 7}, liste))
+
+    def test_einfacher_modus_gruende_und_text(self):
+        """06.10. (Florian: „das wird alles zu kompliziert“): einfach = vier Gründe + „➕ mehr“, kurzer Entwurfstext;
+        ein schon gewählter Experten-Grund zeigt wieder alle neun."""
+        eid = 10 ** 12
+        reihen = lernbot.knoepfe_gruende(eid, [], kurz=True)
+        self.assertEqual([len(r) for r in reihen], [2, 2, 2])
+        self.assertEqual([d for r in reihen for _t, d in r],
+                         [f"g:{eid}:kurz", f"g:{eid}:langweilig", f"g:{eid}:effekte_viel", f"g:{eid}:musik",
+                          f"g:{eid}:mehr", f"x:{eid}:"])
+        self.assertEqual(len([k for r in lernbot.knoepfe_gruende(eid, ["action"], kurz=True) for k in r]), 10)  # alle 9 + ✅
+        self.assertEqual(lernbot.knoepfe_kurzbefehle(), [[("🎬 Neues Video", "k:0:viral")],
+                                                          [("📋 Stand", "k:0:stand"), ("⚙️ Einstellungen", "k:0:einstellungen")]])
+        self.assertEqual(len([k for r in lernbot.knoepfe_kurzbefehle(experte=True) for k in r]), 9)
+        liste = {"format": "short", "dauer_s": 47.0, "stimmung": "episch", "bogen": [1, 3, 2],
+                 "segmente": [{"moment": "a", "bewertet": 2}, {"moment": "b", "bewertet": 0}],
+                 "auswahl": {"neu": 1, "schon_gezeigt": 1, "kandidaten": 30, "gesperrt": 9, "ohne_datei": 1},
+                 "parameter": {"stil": "kino", "rahmen_zoom": 1.3, "autonom": {"version": 2, "confidence": 0.4}},
+                 "effekte": {"an": True, "look": "neutral"}, "gelernt": {"entwurf": 41, "aenderungen": []},
+                 "hinweise": ["a", "b", "c"]}
+        kurz = lernbot.entwurf_text({"id": 7}, liste, erwartung=0.8, kritik_text="🧐 Cutter 61", kurz=True)
+        for weg in ("🔮", "🧐", "🎬 Stil", "✨ Look", "🧠 Publikum", "🔁", "im Cooldown", "ohne Datei", "⚠️ c"):
+            self.assertNotIn(weg, kurz)
+        self.assertIn("🆕 1 neue · 1 schon gezeigt", kurz)
+        self.assertIn("⚠️ b", kurz)
+        voll = lernbot.entwurf_text({"id": 7}, liste, erwartung=0.8, kritik_text="🧐 Cutter 61")
+        self.assertIn("🔮", voll)                                               # Experten-Modus wie bisher
 
     def test_knoepfe_gruende_reihen(self):
         eid = 10 ** 12
@@ -437,6 +495,8 @@ class ErwartungImLernBot(MitErwartung):
             return await senden(**kw)
 
         self.bot.send_video = send_video
+        # 06.10.: die Erwartungs-Zeile steht nur noch im Experten-Modus in der Bildunterschrift
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True
         self.app = SimpleNamespace(bot=self.bot, bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
                                    create_task=lambda koro: koro.close())
         self.context = SimpleNamespace(bot_data=self.app.bot_data, application=self.app, args=[])

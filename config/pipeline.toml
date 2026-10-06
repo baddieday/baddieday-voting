@@ -277,6 +277,9 @@ warten_h = 2
 format = "short"
 
 [lernbot]
+# Experten-Modus (06.10.): aus = ein Knopf, 👍/👎, vier Einstellungen; an = alle Knöpfe, Befehle und Details.
+# Umschalten im Bot: /experte oder ⚙️ → 🔧 Alle Einstellungen
+experte = false
 # Abends einmal ein Satz zum Stand (Ortszeit)
 abendstand = true
 abend_uhrzeit = "21:00"

@@ -78,6 +78,22 @@ class Einstellungen(MitRegieMaterial):
                 klick(falsch)
 
 
+    def test_einfaches_menue_und_alle(self):
+        """06.10.: einfach = vier Einstellungen + „🔧 Alle Einstellungen“; s:a bzw. Experten-Modus zeigt alle."""
+        klick = lambda d: lernbot_einstellungen.verarbeite_klick(self.con, self.konfig, d)  # noqa: E731
+        text, knoepfe, _ = klick("s:m")
+        self.assertEqual(len(knoepfe), len(einstellungen.EINFACH) + 1)
+        self.assertEqual(knoepfe[-1], [("🔧 Alle Einstellungen", "s:a")])
+        self.assertNotIn("Auto-Freigabe", text)
+        text, knoepfe, _ = klick("s:a")
+        self.assertEqual(len(knoepfe), len(einstellungen.KATALOG))
+        self.assertIn("🤖 Auto-Freigabe", text)
+        i = next(n for n, e in enumerate(einstellungen.KATALOG) if e.schluessel == "lernbot.experte")
+        _, _, antwort = klick(f"s:w:{i}:1")                                   # Experten-Modus an
+        self.assertEqual((antwort, einstellungen.experte(self.con, self.konfig)), ("Gespeichert", True))
+        _, knoepfe, _ = klick("s:m")
+        self.assertEqual(len(knoepfe), len(einstellungen.KATALOG))             # jetzt zeigt auch s:m alles
+
     def test_auto_freigabe_im_katalog(self):
         # 30.09.: die vier Werte der Auto-Freigabe – die Datei-Werte (pipeline.toml) passen zum Typ der Optionen,
         # sonst würde ⚙️ sie als „unbekannt“ ablehnen; ein Bot-Wert kommt in auto_freigabe.werte an

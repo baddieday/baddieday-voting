@@ -25,21 +25,34 @@ HERKUNFT = {"bot": "📱", "datei": "🗂", "standard": ""}
 
 # --- Texte und Knöpfe (ohne Telegram testbar) ------------------------------------------------
 
-def menue_text(con: sqlite3.Connection, konfig: Konfig, meldung: str | None = None) -> str:
+def _alle(con: sqlite3.Connection, konfig: Konfig, alle: bool | None) -> bool:
+    """Volles Menü? Ausdrücklich (s:a) oder im Experten-Modus; sonst die vier einfachen (06.10.)."""
+    return bool(alle) or einstellungen.experte(con, konfig)
+
+
+def menue_text(con: sqlite3.Connection, konfig: Konfig, meldung: str | None = None, alle: bool | None = None) -> str:
+    alle = _alle(con, konfig, alle)
     teile = [f"✓ {meldung}" if meldung else None,
+             "⚙️ Einstellungen – gelten ab dem nächsten Video." if not alle else
              "⚙️ Einstellungen – gelten sofort (Clip-Bot) bzw. ab dem nächsten Entwurf.",
-             "📱 = hier im Bot gesetzt · 🗂 = aus der Konfigdatei · ohne Zeichen = Standard"]
+             "📱 = hier im Bot gesetzt · 🗂 = aus der Konfigdatei · ohne Zeichen = Standard" if alle else None]
     for e, wert, herkunft in einstellungen.aktuell(con, konfig):
-        teile.append(f"{e.titel}: {einstellungen.anzeige(e, wert, con, konfig)} {HERKUNFT[herkunft]}".rstrip())
+        if alle or e.schluessel in einstellungen.EINFACH:
+            teile.append(f"{e.titel}: {einstellungen.anzeige(e, wert, con, konfig)} {HERKUNFT[herkunft]}".rstrip())
     _, hinweis = einstellungen.quell_matches(con, einstellungen.anwenden(con, konfig))
     if hinweis:
         teile.append(f"Gerade: {hinweis}")
     return "\n".join(t for t in teile if t)
 
 
-def menue_knoepfe(con: sqlite3.Connection, konfig: Konfig) -> list[list[tuple[str, str]]]:
-    return [[(f"{e.titel}: {einstellungen.anzeige(e, wert, con, konfig)}", f"s:o:{i}")]
-            for i, (e, wert, _h) in enumerate(einstellungen.aktuell(con, konfig))]
+def menue_knoepfe(con: sqlite3.Connection, konfig: Konfig, alle: bool | None = None) -> list[list[tuple[str, str]]]:
+    alle = _alle(con, konfig, alle)
+    reihen = [[(f"{e.titel}: {einstellungen.anzeige(e, wert, con, konfig)}", f"s:o:{i}")]
+              for i, (e, wert, _h) in enumerate(einstellungen.aktuell(con, konfig))
+              if alle or e.schluessel in einstellungen.EINFACH]
+    if not alle:
+        reihen.append([("🔧 Alle Einstellungen", "s:a")])
+    return reihen
 
 
 def optionen_text(i: int) -> str:
@@ -53,7 +66,8 @@ def optionen_knoepfe(con: sqlite3.Connection, konfig: Konfig, i: int) -> list[li
     if e.schluessel == QUELLE:
         gewaehlt = isinstance(wert, str) and wert.startswith("match:") and wert != einstellungen.NEUESTES_MATCH
         reihen.append([(("✓ " if gewaehlt else "") + "📅 Match wählen", "s:l")])
-    reihen.append([("↩️ Standard", f"s:r:{i}"), ("⬅️ zurück", "s:m")])
+    zurueck = "s:m" if e.schluessel in einstellungen.EINFACH else "s:a"
+    reihen.append([("↩️ Standard", f"s:r:{i}"), ("⬅️ zurück", zurueck)])
     return reihen
 
 
@@ -71,6 +85,8 @@ def verarbeite_klick(con: sqlite3.Connection, konfig: Konfig, daten: str) -> tup
     art = teile[1] if len(teile) > 1 else ""
     if art == "m":
         return menue_text(con, konfig), menue_knoepfe(con, konfig), None
+    if art == "a":   # 06.10.: alle Einstellungen (das einfache Menü zeigt nur vier)
+        return menue_text(con, konfig, alle=True), menue_knoepfe(con, konfig, alle=True), None
     if art == "l":
         return "📅 Welches Match? (die neuesten)", match_knoepfe(con, konfig), None
     if art == "x" and len(teile) == 3 and SESSION_ID.fullmatch(teile[2]):
@@ -82,14 +98,15 @@ def verarbeite_klick(con: sqlite3.Connection, konfig: Konfig, daten: str) -> tup
         e = KATALOG[i]
         if art == "o":
             return optionen_text(i), optionen_knoepfe(con, konfig, i), None
+        alle = e.schluessel not in einstellungen.EINFACH or None   # zurück ins Menü, aus dem der Wert kam
         if art == "r":
             einstellungen.zuruecksetzen(con, e.schluessel)
-            return menue_text(con, konfig, f"{e.titel}: wieder aus der Datei bzw. Standard"), \
-                menue_knoepfe(con, konfig), "Standard"
+            return menue_text(con, konfig, f"{e.titel}: wieder aus der Datei bzw. Standard", alle), \
+                menue_knoepfe(con, konfig, alle), "Standard"
         if len(teile) == 4 and teile[3].isdigit() and int(teile[3]) < len(e.optionen):
             wert, text = e.optionen[int(teile[3])]
             einstellungen.setze(con, e.schluessel, wert)
-            return menue_text(con, konfig, f"{e.titel}: {text}"), menue_knoepfe(con, konfig), "Gespeichert"
+            return menue_text(con, konfig, f"{e.titel}: {text}", alle), menue_knoepfe(con, konfig, alle), "Gespeichert"
     raise ValueError(f"Unbekannter Einstellungs-Knopf {daten!r}")
 
 

@@ -84,7 +84,12 @@ KATALOG: tuple[Einstellung, ...] = (
                 ((0.0, "automatisch (lernt)"), (45.0, "mindestens 45 s"), (55.0, "mindestens 55 s"),
                  (65.0, "mindestens 65 s"), (75.0, "75 s")),
                 0.0, "Untergrenze fürs Ziel der Shorts: Lernen, KI-Cutter und Publikum dürfen nur darüber gehen."),
+    # 06.10. (Florian: „das wird alles zu kompliziert“) – aus: ein Knopf, 👍/👎, vier Einstellungen; an: alles wie bisher
+    Einstellung("lernbot.experte", "🔧 Experten-Modus", ((False, "aus"), (True, "an")),
+                False, "An: alle Knöpfe, Befehle, Gründe und Details. Aus: ein Knopf, 👍/👎, vier Einstellungen."),
 )
+# Die vier Einstellungen im einfachen Menü (06.10.); alle anderen hinter „🔧 Alle Einstellungen“
+EINFACH = (QUELLE, "regie.short_mindestens_s", "regie.effekte.an", "musik.genres_bevorzugt")
 NACH_SCHLUESSEL = {e.schluessel: e for e in KATALOG}
 
 
@@ -119,6 +124,14 @@ def setze(con: sqlite3.Connection, schluessel: str, wert: Any) -> None:
 
 def zuruecksetzen(con: sqlite3.Connection, schluessel: str) -> None:
     con.execute("DELETE FROM einstellungen WHERE schluessel = ?", (schluessel,))
+
+
+def experte(con: sqlite3.Connection, konfig: Konfig) -> bool:
+    """Experten-Modus an? (⚙️ oder [lernbot].experte; Standard aus, 06.10.)"""
+    try:
+        return bool(anwenden(con, konfig).wert("lernbot.experte", False))
+    except Exception:  # noqa: BLE001 – ohne Tabelle (alte DB, Tests ohne Regie-Schema): einfach
+        return bool(konfig.wert("lernbot.experte", False))
 
 
 def anwenden(con: sqlite3.Connection, konfig: Konfig) -> Konfig:
