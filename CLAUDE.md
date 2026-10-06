@@ -324,3 +324,12 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     gesperrte Momente („Cooldown aufgehoben – sonst zu kurz“). Gezeigte Momente verlieren weiter Punkte.
   - **⚙️ „Short-Länge“** (`[regie].short_mindestens_s`): Untergrenze fürs Ziel (45/55/65/75 s); Lernen, KI-Cutter und
     Publikum dürfen nur darüber gehen. Standard 0 = wie bisher gelernt.
+- 2026-10-06 (Florian: „Das ist und wird doch alles zu kompliziert. Kannst du das simplifizieren?“): **Einfacher Modus
+  im Lern-Bot ist Standard.** Zählung vorher: 14 Befehle, 9 Menü-Knöpfe, 9 Gründe-Knöpfe, 13 Einstellungen, Lernstand
+  19 Zeilen. Jetzt: ein Knopf „🎬 Neues Video“ (= 🔥 Viral, der Bot wählt Mischung und Fassung), 👍/👎, bei 👎 vier
+  Gründe (zu kurz · langweilig · zu viele Effekte · Musik) + „➕ mehr“, ⚙️ mit vier Einstellungen (Clips, Short-Länge,
+  Effekte, Musik) + „🔧 Alle Einstellungen“, „📋 Stand“ in sechs Zeilen ohne Fachbegriffe, Entwurfstext ohne
+  Lernstand/Stil/Look/Kritik/Erwartung. **Nichts gelöscht:** `/experte` (oder ⚙️ → 🔧 → Experten-Modus) schaltet alles
+  Bisherige wieder ein (`[lernbot].experte`). Clip-Bot, Lern-Systeme und n8n-Vertrag unverändert. Regel für mich:
+  neue Stellschrauben kommen nur noch hinter „🔧 Alle Einstellungen“, und ich erkläre dir Änderungen ohne
+  Fachbegriffe.
