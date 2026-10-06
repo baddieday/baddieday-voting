@@ -40,7 +40,16 @@ FORMAT_NAMEN = {"short": "Short", "zusammenschnitt": "Zusammenschnitt", "viral":
                 "twist": "😅 Viral-Video mit Twist", "highlight": "⚡ Viral-Video (Highlights)", "fail": "💀 Fail-Video"}
 ENTWURF_ZIELE = (*regie.FORMATE, *viral.KNOEPFE)   # was /entwurf und die Knöpfe bauen können
 
-HILFE = """<b>Autonomes Lernen des Regisseurs</b>
+# Einfache Hilfe (06.10., Florian: „das wird alles zu kompliziert“) – die volle unter /experte
+HILFE = """<b>So geht's</b>
+🎬 <b>Neues Video</b> – ein Knopf, den Rest mache ich: Momente wählen, mischen, schneiden, die beste Fassung schicken.
+👍/👎 unter dem Video – mehr brauche ich nicht. Bei 👎 kannst du einen Grund antippen.
+⚙️ <b>Einstellungen</b> – Clips, Short-Länge, Effekte, Musik.
+📋 <b>Stand</b> – was ich von dir gelernt habe.
+🎵 Musik: Audiodatei mit Quellenangabe als Bildunterschrift schicken.
+🔧 /experte – alle Befehle, Gründe und Details ein- oder ausschalten."""
+
+HILFE_EXPERTE = """<b>Autonomes Lernen des Regisseurs</b>
 Veröffentlichte Videos und ihre Publikumszahlen verbessern die nächsten Entwürfe automatisch.
 📦 Upload-Paket direkt am Entwurf öffnen, veröffentlichen und den Link senden. Eine Bewertung ist nicht nötig.
 🎵 <b>Musik schicken:</b> Audiodatei mit Bildunterschrift = Quellenangabe
@@ -61,9 +70,13 @@ Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 # KURZBEFEHLE bleibt für Taps auf die alte Ersatz-Tastatur, bis sie weg ist (ReplyKeyboardRemove).
 KURZBEFEHLE = {"🎬 Short": "short", "🎞️ Zusammenschnitt": "zusammenschnitt", "🧠 Lernstand": "lernstand",
                "📋 Stand": "stand", "📊 Publikum": "publikum", "🎵 Musik": "musik", "⚙️ Einstellungen": "einstellungen",
-               "🔥 Viral-Video": "viral", "🔎 Warum?": "warum"}
-KURZ_REIHEN = [["🔥 Viral-Video"], ["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"],
-               ["📊 Publikum", "🎵 Musik"], ["⚙️ Einstellungen", "🔎 Warum?"]]
+               "🔥 Viral-Video": "viral", "🔎 Warum?": "warum", "🎬 Neues Video": "viral"}
+# 06.10.: einfach = drei Knöpfe; alles Weitere im Experten-Modus (/experte)
+KURZ_REIHEN = [["🎬 Neues Video"], ["📋 Stand", "⚙️ Einstellungen"]]
+EXPERTE_REIHEN = [["🔥 Viral-Video"], ["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"],
+                  ["📊 Publikum", "🎵 Musik"], ["⚙️ Einstellungen", "🔎 Warum?"]]
+# Die vier Gründe, die im einfachen Modus unter einem 👎 stehen; „➕ mehr“ zeigt alle neun
+GRUENDE_EINFACH = ("kurz", "langweilig", "effekte_viel", "musik")
 KREISE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"
 
 
@@ -79,7 +92,7 @@ def knoepfe_entwurf(eid: int, fmt: str, naechster: str | None = None) -> list[li
     from . import lernbot_paket
 
     return [*(lernbot_paket.knoepfe_nach_fertig(eid, None, fmt) or []),
-            [("🎬 Nächster Entwurf", f"k:0:{naechster or fmt}"), ("🧠 Lernstand", "k:0:lernstand")],
+            [("🎬 Nächster Entwurf", f"k:0:{naechster or fmt}"), ("📋 Stand", "k:0:stand")],
             *knoepfe_daumen(eid)]
 
 
@@ -106,7 +119,12 @@ def viral_zeile(liste: dict) -> str | None:
     return escape(" · ".join(teile))
 
 
-def knoepfe_gruende(eid: int, gewaehlt: list[str]) -> list[list[tuple[str, str]]]:
+def knoepfe_gruende(eid: int, gewaehlt: list[str], kurz: bool = False) -> list[list[tuple[str, str]]]:
+    """Gründe-Knöpfe nach 👎/👍. kurz (einfacher Modus, 06.10.): nur GRUENDE_EINFACH und „➕ mehr“ – außer ein anderer
+    Grund ist schon gewählt, dann alle neun wie bisher."""
+    if kurz and all(g in GRUENDE_EINFACH for g in gewaehlt):
+        knoepfe = [(("☑️ " if g in gewaehlt else "") + regie_lernen.GRUENDE[g], f"g:{eid}:{g}") for g in GRUENDE_EINFACH]
+        return [knoepfe[:2], knoepfe[2:], [("➕ mehr Gründe", f"g:{eid}:mehr"), ("✅ fertig", f"x:{eid}:")]]
     reihen, reihe = [], []
     for schluessel, text in regie_lernen.GRUENDE.items():
         reihe.append((("☑️ " if schluessel in gewaehlt else "") + text, f"g:{eid}:{schluessel}"))
@@ -173,9 +191,21 @@ def gelernt_zeile(liste: dict) -> str | None:
     return f"🧠 Aus {quelle}: " + escape(" · ".join(g["aenderungen"][:4]))
 
 
+def hinweis_einfach(h: str) -> str:
+    """Hinweise des Regisseurs ohne Fachbegriffe (einfacher Modus, 06.10.); Unbekanntes bleibt, wie es ist."""
+    if h.startswith(regie.COOLDOWN_AUFGEHOBEN):
+        return "wenig neues Material – ein paar Momente wiederholen sich"
+    if "Momente zur Auswahl" in h:
+        return h.split(" – ")[0]
+    return h
+
+
 def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None,
-                 erwartung: float | None = None, kritik_text: str | None = None) -> str:
+                 erwartung: float | None = None, kritik_text: str | None = None, kurz: bool = False) -> str:
     """Bildunterschrift eines Entwurfs (HTML, höchstens 1000 Zeichen).
+
+    kurz (einfacher Modus, 06.10.): nur Titel, Mischung, Bogen, neu/schon gezeigt, „🧠 Aus #n“, Musik, zwei
+    Hinweise und die Bewertung – ohne Publikums-Lernstand, Stil, Look, Kritik und Erwartung (die zeigt /experte).
 
     erwartung: festgeschriebene Wahrscheinlichkeit für 👍 (erwartung.gespeichert) oder None → „Erwartung: noch
     keine“ (Spec §10.5). Die Zeile steht VOR den Hinweisen: Die Hinweise können lang sein, und alles hinter Zeichen
@@ -189,13 +219,15 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         teile.insert(1, zeile_viral)
     if a := liste.get("auswahl"):
         zeile = f"🆕 {a['neu']} neue · {a['schon_gezeigt']} schon gezeigt · Auswahl aus {a['kandidaten']} Momenten"
-        if a.get("gesperrt"):
+        if a.get("gesperrt") and not kurz:
             zeile += f" · {a['gesperrt']} im Cooldown"
-        if a.get("ohne_datei"):
+        if a.get("ohne_datei") and not kurz:
             zeile += f" · {a['ohne_datei']} ohne Datei"
         teile.append(zeile)
     auto = (liste.get("parameter") or {}).get("autonom") or {}
-    if auto.get("version"):
+    if kurz:
+        teile += [z for z in (gelernt_zeile(liste),) if z]
+    elif auto.get("version"):
         teile.append(f"🧠 Publikum: Lernstand v{auto['version']} · Vertrauen {round(100 * auto.get('confidence', 0))} %")
         if exp := auto.get("exploration"):
             teile.append("🔎 Gezielter Versuch: " + escape(exp["hypothese"]))
@@ -203,6 +235,13 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         teile += [z for z in (bewertet_zeile(liste), gelernt_zeile(liste)) if z]
     if m:
         teile.append(f"🎵 {escape(m['titel'])} – {escape(m.get('kuenstler') or '?')} ({m.get('bpm') or 0:.0f} BPM)")
+    if kurz:
+        for h in liste.get("hinweise", [])[:2]:
+            teile.append(f"⚠️ {escape(hinweis_einfach(h))}")
+        if bewertung is not None:
+            gruende = [regie_lernen.GRUENDE[g] for g in json.loads(bewertung["gruende"])]
+            teile.append(f"Bewertet: {'👍' if bewertung['daumen'] > 0 else '👎'}" + (" · " + ", ".join(gruende) if gruende else ""))
+        return "\n".join(teile)[:1000]
     if (fx := liste.get("effekte") or {}).get("an"):  # Regisseur 2.0: Impacts = Ereignisse im Effekt-Plan
         impacts = sum(len(s.get("effekte") or []) for s in liste["segmente"])
         teile.append(f"✨ Look {escape(str(fx.get('look', 'neutral')))} · {impacts} Impacts"
@@ -238,6 +277,36 @@ def autonom_text(con: sqlite3.Connection) -> str:
         zeilen += ["", "Noch keine belastbare Publikumstendenz. Mit weiteren gemessenen Videos lerne ich dazu."]
     zeilen += ["", "Bewertungen sind optional. Neue Publikumszahlen lösen das Lernen automatisch aus."]
     return "\n".join(zeilen)
+
+
+def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
+    """📋 Stand im einfachen Modus (06.10.): sechs Zeilen – was der Bot von dir gelernt hat, ohne Fachbegriffe."""
+    from . import lernen
+
+    zeilen = regie_lernen.bewertungen(con, mit_ki=False)
+    gut = sum(1 for z in zeilen if z["daumen"] > 0)
+    p, _ = regie_lernen.aktuelle(con, konfig, "short")
+    fmt = regie_lernen.format_regeln(konfig, "short")[0]
+    ziel = regie_lernen.ziel_dauer(fmt, p["dauer_faktor"], ziel_s=p.get("ziel_dauer_s"))
+    kurz_stimmen = sum(1 for z in zeilen if z["format"] == "short" and "kurz" in json.loads(z["gruende"] or "[]"))
+    teile = ["📋 Stand",
+             f"👍/👎 von dir: {len(zeilen)} ({gut} 👍 · {len(zeilen) - gut} 👎)",
+             f"⏱️ Shorts: Ziel {ziel:.0f} s" + (f" ({kurz_stimmen}× „zu kurz“ gezählt)" if kurz_stimmen else "")]
+    try:
+        e = lernen.berechne(con, konfig)
+        teile.append("🎯 Welche Momente du magst: " + ("gelernt und aktiv" if e.aktiv else e.grund))
+    except Exception:  # noqa: BLE001 – der Stand darf nie an einer Lern-Zahl scheitern
+        log.exception("Stand: Moment-Formel")
+    stand = autonom.ueberblick(con)
+    teile.append(f"📊 Publikum: {stand['ausgewertet']} Videos ausgewertet"
+                 + (f" · Vertrauen {round(100 * stand['confidence'])} %" if stand.get("version") else " – noch kein Einfluss"))
+    if stand.get("erkenntnisse"):
+        teile.append("• " + stand["erkenntnisse"][0])
+    momente = con.execute("SELECT COUNT(*) FROM momente").fetchone()[0]
+    tracks = con.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+    entwuerfe = con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0]
+    teile.append(f"🎞️ {momente} Momente · {tracks} Musiktitel · {entwuerfe} Videos gebaut")
+    return "\n".join(teile)
 
 
 def stand_satz(con: sqlite3.Connection) -> str:
@@ -432,9 +501,13 @@ def _markup(knoepfe):
     return InlineKeyboardMarkup([[InlineKeyboardButton(t, callback_data=d) for t, d in reihe] for reihe in knoepfe])
 
 
-def knoepfe_kurzbefehle() -> list[list[tuple[str, str]]]:
-    """Kurzbefehle als Knöpfe im Chat (unter /hilfe und nach ✅ fertig)."""
-    return [[(text, f"k:0:{KURZBEFEHLE[text]}") for text in reihe] for reihe in KURZ_REIHEN]
+def knoepfe_kurzbefehle(experte: bool = False) -> list[list[tuple[str, str]]]:
+    """Kurzbefehle als Knöpfe im Chat (unter /hilfe und nach ✅ fertig): drei im einfachen Modus, alle im Experten-Modus."""
+    return [[(text, f"k:0:{KURZBEFEHLE[text]}") for text in reihe] for reihe in (EXPERTE_REIHEN if experte else KURZ_REIHEN)]
+
+
+def experte_an(con: sqlite3.Connection, konfig: Konfig) -> bool:
+    return einstellungen.experte(con, konfig)
 
 
 def ohne_tastatur():
@@ -473,7 +546,8 @@ async def _sende_entwuerfe(app) -> int:
             wert = None
         with pfad.open("rb") as datei:
             nachricht = await app.bot.send_video(
-                chat_id=chat, video=datei, caption=entwurf_text(z, _liste(z), erwartung=wert, kritik_text=kritik.kritik_zeile(con, z["id"])), parse_mode="HTML",
+                chat_id=chat, video=datei, caption=entwurf_text(z, _liste(z), erwartung=wert, kritik_text=kritik.kritik_zeile(con, z["id"]),
+                                                                kurz=not experte_an(con, konfig)), parse_mode="HTML",
                 reply_markup=_markup(knoepfe_entwurf(z["id"], z["format"], naechstes_ziel(z))),
                 supports_streaming=True,
                 read_timeout=300, write_timeout=300, connect_timeout=30,
@@ -504,7 +578,8 @@ def abendstand(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = 
     stunde, minute = (int(x) for x in str(konfig.wert("lernbot.abend_uhrzeit", "21:00")).split(":"))
     if (lokal.hour, lokal.minute) < (stunde, minute):
         return False
-    return db.lern_meldung(con, f"abend:{lokal:%Y-%m-%d}", stand_satz(con))
+    return db.lern_meldung(con, f"abend:{lokal:%Y-%m-%d}",
+                           stand_satz(con) if experte_an(con, konfig) else stand_kurz(con, konfig))
 
 
 def blick_auf_leerlauf(app) -> None:
@@ -544,13 +619,25 @@ async def _schleife(app) -> None:
 async def cmd_hilfe(update, context) -> None:
     from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
 
-    # HILFE bleibt unverändert; der Teil zur Lernschleife „Publikum“ kommt als Zusatz dahinter
-    await update.effective_message.reply_text(HILFE + lernbot_publikum.HILFE_ZUSATZ, parse_mode="HTML",
-                                              reply_markup=_markup(knoepfe_kurzbefehle()))
+    experte = experte_an(context.bot_data["con"], context.bot_data["konfig"])
+    # Einfach: kurze Hilfe. Experte: die volle, der Teil zur Lernschleife „Publikum“ als Zusatz dahinter
+    text = HILFE_EXPERTE + lernbot_publikum.HILFE_ZUSATZ if experte else HILFE
+    await update.effective_message.reply_text(text, parse_mode="HTML", reply_markup=_markup(knoepfe_kurzbefehle(experte)))
+
+
+async def cmd_experte(update, context) -> None:
+    """🔧 /experte: Experten-Modus umschalten (⚙️ lernbot.experte) und die passende Hilfe zeigen."""
+    con, konfig = context.bot_data["con"], context.bot_data["konfig"]
+    an = not experte_an(con, konfig)
+    einstellungen.setze(con, "lernbot.experte", an)
+    await update.effective_message.reply_text("🔧 Experten-Modus an – alle Knöpfe, Gründe und Details." if an else
+                                              "🔧 Experten-Modus aus – ein Knopf, 👍/👎, vier Einstellungen.")
+    await cmd_hilfe(update, context)
 
 
 async def cmd_stand(update, context) -> None:
-    await update.effective_message.reply_text(stand_satz(context.bot_data["con"]))
+    con, konfig = context.bot_data["con"], context.bot_data["konfig"]
+    await update.effective_message.reply_text(stand_satz(con) if experte_an(con, konfig) else stand_kurz(con, konfig))
 
 
 async def cmd_lernstand(update, context) -> None:
@@ -733,6 +820,14 @@ async def bei_klick(update, context) -> None:
     if zeile is None:
         await query.answer("Entwurf unbekannt.")
         return
+    experte = experte_an(con, context.bot_data["konfig"])
+    if aktion == "g" and extra == "mehr":   # 06.10.: alle neun Gründe statt der vier einfachen
+        await query.answer("Alle Gründe")
+        bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
+        gruende = json.loads(bewertung["gruende"]) if bewertung is not None else []
+        with contextlib.suppress(Exception):   # „message is not modified“ beim Doppelklick ist normal
+            await query.edit_message_reply_markup(reply_markup=_markup(knoepfe_gruende(eid, gruende)))
+        return
     if aktion == "g" and extra not in regie_lernen.GRUENDE:
         await query.answer("Unbekannter Knopf.")
         return
@@ -745,12 +840,12 @@ async def bei_klick(update, context) -> None:
                            "Danke! Was hat gestört? Ohne Grund lernt nur die Moment-Auswahl, nicht der Schnitt.")
         geantwortet = time.monotonic()
         bewertung = regie_lernen.bewerte(con, eid, daumen=int(extra))
-        knoepfe = knoepfe_gruende(eid, json.loads(bewertung["gruende"]))
+        knoepfe = knoepfe_gruende(eid, json.loads(bewertung["gruende"]), kurz=not experte)
     elif aktion == "g":
         await query.answer(regie_lernen.GRUENDE[extra])
         geantwortet = time.monotonic()
         bewertung = regie_lernen.bewerte(con, eid, grund=extra)
-        knoepfe = knoepfe_gruende(eid, json.loads(bewertung["gruende"]))
+        knoepfe = knoepfe_gruende(eid, json.loads(bewertung["gruende"]), kurz=not experte)
     else:
         await query.answer("Gespeichert – der nächste Entwurf kommt gleich." if weiter
                            else "Gespeichert – fließt in den nächsten Entwurf ein.")
@@ -759,14 +854,14 @@ async def bei_klick(update, context) -> None:
         from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
 
         knoepfe = lernbot_paket.knoepfe_nach_fertig(eid, bewertung, zeile["format"])
-        knoepfe = [*(knoepfe or []), *knoepfe_kurzbefehle()]  # 27.09.: Kurzbefehle nach dem Bewerten
+        knoepfe = [*(knoepfe or []), *knoepfe_kurzbefehle(experte)]  # 27.09.: Kurzbefehle nach dem Bewerten
         if weiter:  # Lernschleife: sofort der nächste Entwurf, schon mit dieser Bewertung eingerechnet
             context.application.create_task(neuer_entwurf(context.application, naechstes_ziel(zeile)))
     gespeichert = time.monotonic()
     try:
         await query.edit_message_caption(caption=entwurf_text(zeile, _liste(zeile), bewertung,
                                                               erwartung=erwartung.gespeichert(con, "entwurf", eid),
-                                                              kritik_text=kritik.kritik_zeile(con, eid)),
+                                                              kritik_text=kritik.kritik_zeile(con, eid), kurz=not experte),
                                          parse_mode="HTML",
                                          reply_markup=_markup(knoepfe) if knoepfe else None)
     except Exception as fehler:  # „message is not modified“ beim Doppelklick ist normal; alles andere ins Log
@@ -831,7 +926,7 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     nur_ich = filters.User(user_id=erlaubt)
     for name, funktion in (("start", cmd_hilfe), ("hilfe", cmd_hilfe), ("help", cmd_hilfe), ("stand", cmd_stand),
                            ("lernstand", cmd_lernstand), ("musik", cmd_musik), ("entwurf", cmd_entwurf),
-                           ("viral", cmd_viral), ("warum", cmd_warum)):
+                           ("viral", cmd_viral), ("warum", cmd_warum), ("experte", cmd_experte)):
         app.add_handler(CommandHandler(name, funktion, filters=nur_ich))
     app.add_handler(MessageHandler(nur_ich & (filters.AUDIO | filters.Document.AUDIO), bei_audio))
     # Kurzbefehle VOR dem freien Text der Zahlen-Eingabe (lernbot_zahlen.bei_text nimmt sonst jeden Text)

@@ -510,8 +510,14 @@ class Befehle(MitBewertung):
         self.assertIn("RuntimeError", antworten[0][0])
 
     def test_hilfe_mit_publikum_zusatz(self):
+        ((kurz, kw_kurz),) = self.befehl(lernbot.cmd_hilfe)          # einfacher Modus (06.10.): kurze Hilfe, drei Knöpfe
+        self.assertEqual(kurz, lernbot.HILFE)
+        self.assertIn("/experte", kurz)
+        self.assertEqual([b.callback_data for reihe in kw_kurz["reply_markup"].inline_keyboard for b in reihe],
+                         [d for reihe in lernbot.knoepfe_kurzbefehle() for _, d in reihe])
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True
         ((text, kw),) = self.befehl(lernbot.cmd_hilfe)
-        self.assertEqual(text, lernbot.HILFE + lernbot_publikum.HILFE_ZUSATZ)
+        self.assertEqual(text, lernbot.HILFE_EXPERTE + lernbot_publikum.HILFE_ZUSATZ)
         # Das Alter kommt aus [publikum].alter_tage (Abnahme: 3) – /publikum nennt es, die Hilfe keine feste Zahl
         self.assertNotRegex(lernbot_publikum.HILFE_ZUSATZ, r"\d+ Tag")
         self.assertIn("⏱ Ø Wiedergabe · 🏁 ganz angesehen", lernbot_publikum.HILFE_ZUSATZ)  # die Zeichen erklärt
@@ -525,9 +531,9 @@ class Befehle(MitBewertung):
         self.assertIn("Kommentare, Shares, Saves: <code>#17 1240 61 6.8 34 3 5 2</code>", lernbot_publikum.HILFE_ZUSATZ)
         publikum.lies_hand_eingabe("1240 61 6.8 34 3 5 2")
         self.assertEqual(kw["parse_mode"], "HTML")
-        # seit 27.09. hängen die Kurzbefehle als Knöpfe unter der Hilfe
+        # seit 27.09. hängen die Kurzbefehle als Knöpfe unter der Hilfe (Experte: alle)
         self.assertEqual([b.callback_data for reihe in kw["reply_markup"].inline_keyboard for b in reihe],
-                         [d for reihe in lernbot.knoepfe_kurzbefehle() for _, d in reihe])
+                         [d for reihe in lernbot.knoepfe_kurzbefehle(experte=True) for _, d in reihe])
         self.assertLessEqual(len(text), 4096)  # Telegram: höchstens 4096 Zeichen je Nachricht
         self.assertIn("/publikum", text)
         # Telegram lehnt HTML mit unbekannten oder offenen Tags ab – dann käme gar keine Hilfe
