@@ -3,7 +3,7 @@
 import json
 import unittest
 
-from clip_pipeline import einstellungen, lernbot_einstellungen
+from clip_pipeline import einstellungen, lernbot_einstellungen, regie_lernen
 from clip_pipeline.zeit import iso, jetzt
 from tests.regie_hilfen import MitRegieMaterial
 
@@ -98,3 +98,19 @@ class Einstellungen(MitRegieMaterial):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShortLaenge(MitRegieMaterial):
+    def test_untergrenze_aus_datei_und_aus_dem_bot(self):
+        """06.10. (Florian: „wie kann ich die Videos wieder länger werden lassen?“): ⚙️ Short-Länge ist eine
+        Untergrenze fürs Ziel – Gelerntes darf nur darüber gehen, nie über die 75 s des Formats."""
+        p, _ = regie_lernen.aktuelle(self.con, self.konfig, "short")
+        self.assertEqual(p["ziel_dauer_s"], 45.0)                                     # ohne Vorgabe: gelernt
+        self.konfig.daten["regie"]["short_mindestens_s"] = 65.0
+        p, _ = regie_lernen.aktuelle(self.con, self.konfig, "short")
+        self.assertEqual(p["ziel_dauer_s"], 65.0)
+        einstellungen.setze(self.con, "regie.short_mindestens_s", 75.0)              # der Bot-Wert geht vor
+        p, _ = regie_lernen.aktuelle(self.con, einstellungen.anwenden(self.con, self.konfig), "short")
+        self.assertEqual(p["ziel_dauer_s"], 75.0)
+        with self.assertRaises(ValueError):
+            einstellungen.setze(self.con, "regie.short_mindestens_s", 120.0)

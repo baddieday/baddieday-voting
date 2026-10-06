@@ -156,6 +156,10 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None) ->
         p = stile.anwenden(con, konfig, fmt, p)
         p, ziel = autonom.plan_parameter(con, konfig, fmt, p, ziel)
         grenzen = format_regeln(konfig, fmt)[0]
+        # ⚙️ Short-Länge (06.10.): deine Untergrenze – nichts Gelerntes darf darunter
+        mindestens = float(konfig.wert("regie.short_mindestens_s", 0.0) or 0.0) if fmt == "short" else 0.0
+        if mindestens > 0:
+            p["ziel_dauer_s"] = max(float(p.get("ziel_dauer_s") or 0.0), mindestens)
         if "ziel_dauer_s" in p:
             p["ziel_dauer_s"] = ziel_dauer(grenzen, 1.0, ziel_s=p["ziel_dauer_s"])
     return p, ziel
