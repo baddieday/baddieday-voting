@@ -133,6 +133,8 @@ ordner = "/var/lib/clip-pipeline/regie"
 vaapi = true
 # Lernen aus 👍/👎 ohne Grund erst ab so vielen Bewertungen (Gründe wirken sofort)
 lernen_ab = 3
+# Untergrenze fürs Ziel der Shorts in s (06.10., auch in ⚙️ „Short-Länge“); 0 = nur gelernt (45–75 s)
+short_mindestens_s = 0.0
 # pve-big höchstens so lange für den Final-Render wach halten
 final_halten_min = 60
 # Schnittstil (30.09., stile.py): "auto" = der Bot wählt selbst nach den Noten seines Cutter-Kritikers;

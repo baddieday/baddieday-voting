@@ -342,6 +342,18 @@ class Auswahl(unittest.TestCase):
         self.assertTrue(any(k.gesperrt for k in gewaehlt))
         self.assertTrue(hinweise and hinweise[0].startswith(regie.COOLDOWN_AUFGEHOBEN), hinweise)
 
+    def test_cooldown_weicht_wenn_sonst_das_ziel_fehlt(self):
+        """06.10. (Florian: „schon wieder sackrisch kurz“): reichen die freien Momente nur für 30 s, nicht fürs Ziel
+        (45 s), kommen gesperrte dazu – vorher endete der Short bei 30–35 s."""
+        fmt, p = regie.FORMATE["short"], dict(regie.PARAMETER)
+        frisch = [self.k(f"neu{i}", 5.0, match=f"n{i}") for i in range(4)]             # 4 × 8 s = 32 s: ≥ 30, < 45
+        gesperrt = [self.k(f"cd{i}", 9.0, gezeigt=1, gesperrt=True, match=f"c{i}") for i in range(6)]
+        gewaehlt, ziel, hinweise = regie.waehle(frisch + gesperrt, fmt, p)
+        seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
+        self.assertEqual(ziel, 45.0)
+        self.assertGreaterEqual(sum(regie.plan_laenge(k, fmt, seg_min) for k in gewaehlt), 45.0)
+        self.assertTrue(hinweise and hinweise[0].startswith(regie.COOLDOWN_AUFGEHOBEN), hinweise)
+
     def test_abwechslung_null_schaltet_alles_aus(self):
         fmt, p = regie.FORMATE["short"], {**regie.PARAMETER, "abwechslung": 0.0}
         stark = [self.k(f"alt{i}", 10.0, gezeigt=2, match=f"a{i}") for i in range(6)]

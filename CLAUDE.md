@@ -316,3 +316,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     draußen. Alle gespeicherten Bewertungen wirken sofort; der Lern-Bot rechnet vor jedem Entwurf neu.
   - **🔎 /warum** (Knopf, `pipeline warum`): Material, Wiederholung und Lernstand aus den echten Daten, mit Fazit.
     Nur lesen.
+- 2026-10-06 (Florian: „wie kann ich die Videos wieder länger werden lassen? Der Bot macht sie schon wieder sackrisch
+  kurz“): **Der Cooldown hält jetzt das Ziel ein, nicht nur 30 s.**
+  - Ursache im Code: Die Sperre für Momente aus den letzten 3 Entwürfen wurde nur aufgehoben, wenn die freien Momente
+    nicht einmal 30 s (min_s) ergaben. Bei wenig Material oder enger Clip-Auswahl endeten Shorts bei 30–35 s statt beim
+    Ziel (45–75 s). Im Test wurde ein 65-s-Ziel so zu 34 s. Jetzt zählt das Ziel; das Nachlegen nimmt notfalls
+    gesperrte Momente („Cooldown aufgehoben – sonst zu kurz“). Gezeigte Momente verlieren weiter Punkte.
+  - **⚙️ „Short-Länge“** (`[regie].short_mindestens_s`): Untergrenze fürs Ziel (45/55/65/75 s); Lernen, KI-Cutter und
+    Publikum dürfen nur darüber gehen. Standard 0 = wie bisher gelernt.
