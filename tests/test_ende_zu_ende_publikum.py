@@ -494,7 +494,7 @@ class EndeZuEndePublikum(MitSpeicher):
         (antwort,) = self.lern_bot_befehl(lernbot_publikum.cmd_publikum)
         t = publikum.TAUSENDER  # schmales geschütztes Leerzeichen in „2 000“
         self.assertEqual(antwort.splitlines(), [
-            "📊 Publikum · 2 Posts, 2 mit Score (neueste zuerst)",
+            "📊 Publikum · 2 Posts, 2 mit Score · API-Zahlen: noch keine (neueste zuerst)",
             f"#{entwurf_post} TikTok · Entwurf {ENTWURF} · 8 Tage · 👁 2{t}000 ❤️ 100 ⏱ 15,5 s 🏁 35 % (Tag 7) · "
             "Publikumsscore 0 · Vertrauen 86 %",
             f"#{clip_post} TikTok · Clip 1 · 8 Tage · 👁 5{t}000 ❤️ 300 ⏱ 11 s 🏁 40 % (Tag 7) · Publikumsscore 0 · Vertrauen 89 %",
