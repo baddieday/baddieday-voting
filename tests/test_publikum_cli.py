@@ -358,13 +358,14 @@ class PublikumText(MitBewertung):
         neu = self.entwurf_post(41, self.JETZT - timedelta(days=4, hours=2))
         self.messung(neu, self.JETZT - timedelta(hours=1), views=1240, likes=61, wiedergabe_s=6.8)  # Alter 4 d 1 h
         zeilen = self.text()
-        self.assertEqual(zeilen[0], "📊 Publikum · 3 Posts, 2 mit Score (neueste zuerst)")
+        self.assertEqual(zeilen[0], "📊 Publikum · 3 Posts, 2 mit Score · API-Zahlen: noch keine (neueste zuerst)")
         self.assertTrue(zeilen[1].startswith(f"#{neu} TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s (Tag 4) · "))
         self.assertIn("Publikumsscore", zeilen[1])
         self.assertIn("Vertrauen", zeilen[1])
         self.assertNotIn("ab 7 Tagen", zeilen[1])
-        self.assertEqual(zeilen[2], f"#{ohne_zahlen} TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Plattformzugang "
-                                    f"oder optional Screenshot mit #{ohne_zahlen} · Score offen (braucht eine Messung ab Tag 3 mit Views)")
+        self.assertEqual(zeilen[2], f"#{ohne_zahlen} TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Screenshot mit "
+                                    f"#{ohne_zahlen} schicken (die Wiedergabe kommt nur so) · "
+                                    "Score offen (braucht eine Messung ab Tag 3 mit Views)")
         self.assertIn(f"#{alt} TikTok · Clip 88", zeilen[3])
         self.assertIn("Publikumsscore", zeilen[3])  # spätere Messung hat auch ältere Posts autonom nachgetragen
         self.assertEqual(zeilen[-1], "🤖 Claude diese Woche: 0 Aufrufe")
@@ -377,8 +378,8 @@ class PublikumText(MitBewertung):
         publikum.post_anlegen(self.con, art="entwurf", ziel_id=41, plattform="youtube", daten=daten,
                               zeit=self.JETZT - timedelta(days=1))
         self.assertTrue(self.text()[1].endswith(f"{aktionen.PLATTFORM_NAMEN['youtube']} · Entwurf 41 · 1 Tag · "
-                                                "noch keine Zahlen – Plattformzugang oder optional Screenshot mit #1 · "
-                                                "Score noch offen (ab 7 Tagen)"), self.text()[1])
+                                                "noch keine Zahlen – Screenshot mit #1 schicken (die Wiedergabe kommt "
+                                                "nur so) · Score noch offen (ab 7 Tagen)"), self.text()[1])
 
     def test_ganz_angesehen_mit_eigenem_zeichen(self):
         post_id = self.clip_post(88, self.JETZT - timedelta(days=4))
@@ -405,6 +406,35 @@ class PublikumText(MitBewertung):
         post_id = self.clip_post(88, self.JETZT - timedelta(days=8))
         self.messung(post_id, self.JETZT - timedelta(days=1), views=900)
         self.assertTrue(self.text()[1].endswith("· Score kommt beim nächsten Lauf"), self.text()[1])
+        # nur Views, keine Wiedergabe – und der Post ist schon 7 Tage alt: der Screenshot muss vor dem Lauf kommen
+        self.assertIn(f" · ⏱ fehlt – Screenshot mit #{post_id} vor dem nächsten Lauf · ", self.text()[1])
+
+    def test_api_messung_sichtbar(self):
+        # B11: Der Timer holt Zähler über die API – ohne Wiedergabe. Die Zeile zeigt die Quelle und was noch fehlt.
+        post_id = self.clip_post(88, self.JETZT - timedelta(days=6, hours=1))
+        publikum.speichere_messung(self.con, post_id, {"views": 1350, "likes": 66}, "api",
+                                   zeit=self.JETZT - timedelta(hours=1))
+        zeilen = self.text()
+        self.assertIn(" · API-Zahlen zuletzt heute (1 Posts) (", zeilen[0])
+        self.assertIn(f" · 👁 1{publikum.TAUSENDER}350 ❤️ 66 (Tag 6, API) · ⏱ fehlt – Screenshot mit #{post_id} bis Tag 7 · ",
+                      zeilen[1])
+        # eine Hand-Messung mit Wiedergabe (älter als die API-Messung) reicht – der Hinweis verschwindet
+        self.messung(post_id, self.JETZT - timedelta(days=1), views=1000, likes=50, wiedergabe_s=6.0)
+        zeilen = self.text()
+        self.assertIn("(Tag 6, API) · ", zeilen[1])
+        self.assertNotIn("⏱ fehlt", zeilen[1])
+        # Abruf abgeschaltet → die Kopfzeile sagt es
+        self.konfig.daten["publikum"]["api_abruf"] = False
+        self.assertIn(" · API aus (", self.text()[0])
+
+    def test_api_zahlen_vor_tagen(self):
+        post_id = self.clip_post(88, self.JETZT - timedelta(days=8))
+        publikum.speichere_messung(self.con, post_id, {"views": 10}, "api", zeit=self.JETZT - timedelta(days=1, hours=2))
+        self.assertIn(" · API-Zahlen zuletzt vor 1 Tag (1 Posts) (", self.text()[0])
+        publikum.speichere_messung(self.con, post_id, {"views": 12}, "api", zeit=self.JETZT - timedelta(days=1, hours=1))
+        self.assertIn(" · API-Zahlen zuletzt vor 1 Tag (1 Posts) (", self.text()[0])  # die jüngste zählt
+        self.con.execute("UPDATE publikum_messungen SET gemessen_utc = ?", (iso(self.JETZT - timedelta(days=2, hours=1)),))
+        self.assertIn(" · API-Zahlen zuletzt vor 2 Tagen (1 Posts) (", self.text()[0])
 
     def test_kaputtes_score_teile_zeigt_den_score_trotzdem(self):
         post_id = self.clip_post(88, self.JETZT - timedelta(days=8))
@@ -423,7 +453,8 @@ class PublikumText(MitBewertung):
         for i in range(5):
             self.clip_post(i + 1, self.JETZT - timedelta(days=5 - i))
         zeilen = self.text(grenze=2)
-        self.assertEqual(zeilen[0], "📊 Publikum · 5 Posts, 0 mit Score (die letzten 2, neueste zuerst)")
+        self.assertEqual(zeilen[0], "📊 Publikum · 5 Posts, 0 mit Score · API-Zahlen: noch keine (die letzten 2, "
+                                    "neueste zuerst)")
         self.assertEqual(len(zeilen), 1 + 2 + 1)
         self.assertIn("Clip 5", zeilen[1])
 

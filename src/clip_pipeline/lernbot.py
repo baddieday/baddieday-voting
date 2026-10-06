@@ -53,7 +53,7 @@ Veröffentlichte Videos und ihre Publikumszahlen verbessern die nächsten Entwü
 /musik – Titel · /lernstand – autonomer Lernfortschritt · /stand – kurzer Stand
 ⚙️ /einstellungen – Clip-Auswahl (alle · neuester Spielabend · ein Match), Vorfilter, Effekte, Musik
 🧪 /kalibrieren – neuestes Match zum Nachprüfen: je Clip 3 Standbilder, Stimmung, Kills mit Waffen-Nummer
-🔗 /tiktok – TikTok-Konto verbinden (Zahlen kommen dann automatisch)
+🔗 /tiktok – TikTok-Stand und verbinden · /tiktok neu · /tiktok trennen
 Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 
 # Kurzbefehle (27.09.): Knöpfe im Chat wie beim Bewerten (Florian: „nicht die Tastatur ersetzen“). Callback k:0:<ziel>.

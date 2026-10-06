@@ -4,7 +4,10 @@ Worum es geht: Die Lernschleife „Publikum“ sammelt zu jedem geposteten Short
 nach einer Woche einen Publikums-Score (publikum.py). Dieses Modul ist die Stelle, an der du davon etwas siehst:
   - /publikum zeigt die letzten Posts mit Post-Nummer (die brauchst du für die Screenshots, „#17“), Plattform,
     Alter, letzter Messung und – sobald gesetzt – dem Score mit seinen Teilen in Worten. So siehst du ohne
-    Datenbank, was die Lernschleife gerade weiß und wo noch Zahlen fehlen. Die letzte Zeile zählt die
+    Datenbank, was die Lernschleife gerade weiß und wo noch Zahlen fehlen. Die Kopfzeile sagt, ob und wann die
+    TikTok-API zuletzt Zahlen lieferte (B25); eine Zeile markiert „(Tag 6, API)“, wenn der Timer die Messung holte,
+    und „⏱ fehlt“, wenn noch keine Messung des Posts eine Wiedergabe hat – die API liefert keine Wiedergabezeit,
+    die kommt nur per Screenshot oder Hand (B11, tiktok-api-fakten.md). Die letzte Zeile zählt die
     Claude-Aufrufe der Woche (Spec §12; /lernstand zeigt sie ab Stufe 3 mit der Rezept-Tabelle, Annahme A34).
   - Nach `pipeline publikum bewerten` (täglicher Timer) kommt höchstens eine Meldung am Tag: „📊 2 Posts bewertet …“.
 
@@ -37,7 +40,7 @@ import math
 import sqlite3
 from datetime import datetime, timedelta
 
-from . import claude_aufruf, db, publikum
+from . import claude_aufruf, db, publikum, tiktok_anmeldung
 from .bot import aktionen
 from .konfig import Konfig
 from .zeit import iso, jetzt, utc_zu_lokal  # jetzt im Modul importiert, damit Tests `lernbot_publikum.jetzt` ersetzen
@@ -71,7 +74,7 @@ HILFE_ZUSATZ = """
 📊 <b>Publikum:</b>
 📦 Direkt am Entwurf: „Upload-Paket“ – Video als Datei, Caption zum Kopieren, Häkchen je Plattform.
 🔗 /link <code>41 https://www.tiktok.com/@…/video/…</code> – Post zu Entwurf 41 anlegen, der Bot nennt die Post-Nummer.
-Bei eingerichtetem Plattformzugang kommen Zahlen automatisch. Screenshots und Eingaben bleiben als Ergänzung:
+Mit /tiktok kommen Views, Likes, Kommentare, Shares automatisch – die Wiedergabe (⏱ 🏁) nur per Screenshot oder Hand:
 📸 Screenshot der TikTok-Statistik mit Bildunterschrift <code>#17</code> (Post-Nummer) – Claude liest die Zahlen.
 ✏️ Von Hand: <code>#17 1240 61 6.8 34</code> = Views, Likes, Ø Wiedergabe (s), ganz angesehen (%), „–“ = unbekannt.
 ➕ Optional dahinter Kommentare, Shares, Saves: <code>#17 1240 61 6.8 34 3 5 2</code>
@@ -111,6 +114,12 @@ def _tage(tage: float) -> str:
     if ganz < 1:
         return "heute"
     return "1 Tag" if ganz == 1 else f"{ganz} Tage"
+
+
+def _zuletzt(tage: float) -> str:
+    """„heute“, „vor 1 Tag“, „vor 2 Tagen“ – für „API-Zahlen zuletzt …“ in der Kopfzeile (Tagesrechnung wie _tage)."""
+    text = _tage(tage)
+    return text if text == "heute" else "vor " + text.replace("Tage", "Tagen")
 
 
 def _score_teile(zeile: sqlite3.Row) -> dict:
@@ -186,11 +195,24 @@ def claude_aufrufe_woche(con: sqlite3.Connection, konfig: Konfig, zeit: datetime
                        (claude_aufruf.EREIGNIS_ART, iso(montag))).fetchone()[0]
 
 
-def _zahlen_text(zeile: sqlite3.Row, messung: sqlite3.Row | None) -> str:
+def _hat_wiedergabe(con: sqlite3.Connection, post_id: int) -> bool:
+    """Hat irgendeine Messung des Posts eine Wiedergabe (Ø Sekunden oder ganz angesehen)? Dieselbe Bedingung wie
+    publikum.posts_ohne_messung (Paket 2). Bewusst über alle Messungen, nicht nur die letzte: die tägliche
+    API-Messung ist stets die jüngste und hat nie eine Wiedergabe – ein älterer Screenshot zählt trotzdem."""
+    return con.execute("SELECT 1 FROM publikum_messungen WHERE post_id = ? AND (wiedergabe_s IS NOT NULL OR "
+                       "voll_prozent IS NOT NULL) LIMIT 1", (post_id,)).fetchone() is not None
+
+
+def _zahlen_text(con: sqlite3.Connection, zeile: sqlite3.Row, messung: sqlite3.Row | None, konfig: Konfig,
+                 zeit: datetime) -> str:
     """Die letzte Messung kurz: „👁 1 240 ❤️ 61 ⏱ 6,8 s 🏁 34 % (Tag 4)“ – nur bekannte Werte, kompakt (anders als
-    die Bestätigung nach dem Speichern, die jedes Feld zeigt); ohne Messung ein Hinweis, was zu tun ist."""
+    die Bestätigung nach dem Speichern, die jedes Feld zeigt); „(Tag 4, API)“, wenn der Timer sie geholt hat.
+    Ohne Messung: „noch keine Zahlen – Screenshot mit #16 schicken (die Wiedergabe kommt nur so)“.
+    Ist der Score noch offen (bewertet_utc NULL) und hat keine Messung des Posts eine Wiedergabe (_hat_wiedergabe),
+    hängt dran „ · ⏱ fehlt – Screenshot mit #17 bis Tag 7“ ([publikum].alter_tage) bzw. „… vor dem nächsten Lauf“,
+    wenn der Post schon so alt ist (publikum.ist_faellig) – B11: Die API liefert keine Wiedergabezeit."""
     if messung is None:
-        return f"noch keine Zahlen – Plattformzugang oder optional Screenshot mit #{zeile['id']}"
+        return f"noch keine Zahlen – Screenshot mit #{zeile['id']} schicken (die Wiedergabe kommt nur so)"
     teile = []
     for feld in ("views", "likes"):
         if messung[feld] is not None:
@@ -200,7 +222,15 @@ def _zahlen_text(zeile: sqlite3.Row, messung: sqlite3.Row | None) -> str:
             teile.append(f"{publikum.SYMBOLE[feld]} {publikum.dezimal_text(messung[feld])} {einheit}")
     # Tag der Messung (Alter des Posts beim Messen) – daran siehst du, ob sie schon für den Score zählt (ab Tag 3)
     tag = math.floor(publikum.alter_in_tagen(zeile["gepostet_utc"], messung["gemessen_utc"]))
-    return " ".join(teile or ["Zahlen unbekannt"]) + f" (Tag {tag})"
+    quelle = ", API" if messung["quelle"] == "api" else ""
+    text = " ".join(teile or ["Zahlen unbekannt"]) + f" (Tag {tag}{quelle})"
+    if zeile["bewertet_utc"] is None and not _hat_wiedergabe(con, zeile["id"]):
+        if publikum.ist_faellig(zeile, konfig, zeit):
+            frist = "vor dem nächsten Lauf"
+        else:
+            frist = f"bis Tag {publikum.dezimal_text(publikum.einstellung(konfig, 'alter_tage'))}"
+        text += f" · ⏱ fehlt – Screenshot mit #{zeile['id']} {frist}"
+    return text
 
 
 def _score_zustand(con: sqlite3.Connection, zeile: sqlite3.Row, konfig: Konfig, zeit: datetime) -> str:
@@ -231,9 +261,11 @@ def publikum_text(con: sqlite3.Connection, konfig: Konfig, grenze: int = PUBLIKU
     """Text für /publikum: die letzten `grenze` Posts, neueste zuerst, je Zeile z. B.
     „#17 TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s (Tag 4) · Score noch offen (ab 7 Tagen)“ bzw.
     „#12 TikTok · Clip 88 · 9 Tage · … · Score +0,8 (Wiedergabe über, Reaktionen je View unter deinem Median)“ bzw.
-    „… · Score 0 (Basis zu klein)“. Erste Zeile: „📊 Publikum · 12 Posts, 5 mit Score (die letzten 10, neueste
-    zuerst)“. Letzte Zeile: „🤖 Claude diese Woche: 3 Aufrufe“ (claude_aufrufe_woche). Ohne Posts: kurzer Satz,
-    wie ein Post entsteht (📦 → /link). Nur lesen – der Text ändert nichts in der Datenbank.
+    „… · Score 0 (Basis zu klein)“. Erste Zeile: „📊 Publikum · 12 Posts, 5 mit Score · API-Zahlen zuletzt vor
+    2 Tagen (7 Posts) (die letzten 10, neueste zuerst)“ – ohne API-Messung „API-Zahlen: noch keine“, bei
+    [publikum].api_abruf = false „API aus“ (B25; tiktok_anmeldung.api_stand). Letzte Zeile: „🤖 Claude diese Woche:
+    3 Aufrufe“ (claude_aufrufe_woche). Ohne Posts: kurzer Satz, wie ein Post entsteht (📦 → /link). Nur lesen – der
+    Text ändert nichts in der Datenbank.
     KonfigFehler, wenn [publikum].alter_tage bzw. mindest_alter_tage fehlt (cmd_publikum fängt das ab)."""
     zeitpunkt = zeit or jetzt()
     claude = claude_aufrufe_woche(con, konfig, zeitpunkt)
@@ -245,15 +277,23 @@ def publikum_text(con: sqlite3.Connection, konfig: Konfig, grenze: int = PUBLIKU
         return ("📊 Noch keine Posts. So entsteht einer: Entwurf → 📦 Upload-Paket → auf "
                 "TikTok posten → /link <entwurf> <TikTok-Link>. Im Clip-Bot zählt das Häkchen TikTok bzw. /link dort.\n"
                 + fuss)
+    api = tiktok_anmeldung.api_stand(con)
+    if not konfig.wert("publikum.api_abruf", True):  # Standard wie in publikum_adapter.abrufen
+        api_text = "API aus"
+    elif api["letzte_abholung"]:
+        api_text = (f"API-Zahlen zuletzt {_zuletzt(publikum.alter_in_tagen(api['letzte_abholung'], zeitpunkt))} "
+                    f"({api['posts_mit_api']} Posts)")
+    else:
+        api_text = "API-Zahlen: noch keine"
     auswahl = "neueste zuerst" if anzahl <= grenze else f"die letzten {grenze}, neueste zuerst"
-    zeilen = [f"📊 Publikum · {anzahl} Posts, {bewertet} mit Score ({auswahl})"]
+    zeilen = [f"📊 Publikum · {anzahl} Posts, {bewertet} mit Score · {api_text} ({auswahl})"]
     for zeile in con.execute("SELECT * FROM posts ORDER BY gepostet_utc DESC, id DESC LIMIT ?", (grenze,)).fetchall():
         ziel_id = zeile["clip_id"] if zeile["art"] == "clip" else zeile["entwurf_id"]
         zeilen.append(" · ".join([
             f"#{zeile['id']} {aktionen.PLATTFORM_NAMEN.get(zeile['plattform'], zeile['plattform'])}",
             f"{publikum.ART_NAMEN[zeile['art']]} {ziel_id}",
             _tage(publikum.alter_in_tagen(zeile["gepostet_utc"], zeitpunkt)),
-            _zahlen_text(zeile, publikum.letzte_messung(con, zeile["id"])),
+            _zahlen_text(con, zeile, publikum.letzte_messung(con, zeile["id"]), konfig, zeitpunkt),
             _score_zustand(con, zeile, konfig, zeitpunkt),
         ]))
     zeilen.append(fuss)
