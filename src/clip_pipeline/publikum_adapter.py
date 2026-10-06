@@ -21,7 +21,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from . import publikum
+from . import autonom, publikum
 from .sperre import Gesperrt, sperre
 from .zeit import aus_iso, iso, jetzt
 
@@ -340,18 +340,29 @@ def normalisiere(plattform: str, antwort: dict) -> dict:
     return ergebnis
 
 
-def importiere(con, konfig, post_id: int, antwort: dict, *, zeit: datetime | None = None) -> int | None:
-    """Eindeutig zugeordnete API-/Exportdaten speichern und automatisch lernen.
+class Zurueckgehalten(AdapterFehler):
+    """Die Plattform liefert nur Nullen (Sandbox hält die Zähler zurück) – das ist keine Messung, nichts gespeichert."""
 
-    Idempotenter Replay desselben Exports schreibt keine zweite Messung.
-    Die Post-Plattform stammt aus der DB, nicht aus frei mitgelieferten Daten.
-    """
+
+def importiere(con, konfig, post_id: int, antwort: dict, *, zeit: datetime | None = None) -> int | None:
+    """Eindeutig zugeordnete API-/Exportdaten speichern und automatisch lernen (außer in autonom.gebuendelt()).
+
+    Rückgabe: id der neuen Messung; None, wenn die Antwort keine Messfelder hat oder dieselben Werte wie die
+    letzte API-Messung (idempotenter Replay desselben Exports schreibt keine zweite Messung).
+    Zurueckgehalten (ein AdapterFehler), wenn alle Zähler (publikum.ZAEHLER) fehlen oder 0 sind: die Sandbox hält
+    Zähler zurück – so eine „Messung“ würde eine Screenshot-Messung mit Wiedergabezeit verdrängen und den Score
+    auf −2,5 einfrieren (B6). Gesunkene Zähler sind dagegen erlaubt (acd7fb1: die API darf nach unten korrigieren).
+    ValueError bei unbekanntem Post. Die Post-Plattform stammt aus der DB, nicht aus frei mitgelieferten Daten.
+    Beispiel: importiere(con, konfig, 17, {"data": {"videos": [{"id": "1", "view_count": 8000, …}]},
+    "error": {"code": "ok"}}) → 42."""
     post = publikum.post(con, post_id)
     if post is None:
         raise ValueError(f"Post #{post_id} gibt es nicht")
     werte = normalisiere(post["plattform"], antwort)
     if not any(werte.get(feld) is not None for feld in publikum.MESSFELDER):
         return None
+    if not any(werte.get(feld) for feld in publikum.ZAEHLER):
+        raise Zurueckgehalten("TikTok hält die Zähler zurück (0 Views) – nicht gespeichert")
     letzte = con.execute("SELECT * FROM publikum_messungen WHERE post_id=? AND quelle='api'"
                          " ORDER BY gemessen_utc DESC,id DESC LIMIT 1", (post_id,)).fetchone()
     if letzte is not None and all(letzte[f] == werte.get(f) for f in publikum.MESSFELDER):
@@ -435,42 +446,45 @@ def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
         except (AdapterFehler, ValueError, TypeError, KeyError, OSError) as exc:
             log.warning("Publikum-API tiktok, Zuordnung: %s", type(exc).__name__)
             ergebnis["fehler"] += 1
-    for post in posts:
-        plattform = post["plattform"]
-        video_id = post["video_id"] or zugeordnet.get(int(post["id"]))
-        if not video_id:
-            ergebnis["ohne_id"] += 1
-            continue
-        if plattform not in ("tiktok", "youtube"):
-            ergebnis["ohne_zugang"] += 1
-            continue
-        try:
-            if plattform not in tokens:
-                # Auch ein Fehler wird für diesen Lauf gemerkt, sonst erzeugt
-                # jeder Post einen weiteren fehlgeschlagenen OAuth-Aufruf.
-                tokens[plattform] = None
-                tokens[plattform] = _token(plattform, konfig, zeit)
-            token = tokens[plattform]
-            if not token:
+    with autonom.gebuendelt():   # B22: bis zu 100 Importe, einmal lernen am Ende
+        for post in posts:
+            plattform = post["plattform"]
+            video_id = post["video_id"] or zugeordnet.get(int(post["id"]))
+            if not video_id:
+                ergebnis["ohne_id"] += 1
+                continue
+            if plattform not in ("tiktok", "youtube"):
                 ergebnis["ohne_zugang"] += 1
                 continue
-            if plattform == "tiktok":
-                felder = "id,create_time,duration,view_count,like_count,comment_count,share_count"
-                antwort = _json("https://open.tiktokapis.com/v2/video/query/?" + urlencode({"fields": felder}),
-                                 token, daten={"filters": {"video_ids": [video_id]}})
-                videos = (antwort.get("data") or {}).get("videos") or []
-                if len(videos) != 1 or str(videos[0].get("id")) != video_id:
-                    raise AdapterFehler("TikTok-Video nicht im autorisierten Account gefunden")
-            else:
-                query = {"ids": "channel==MINE", "startDate": aus_iso(post["gepostet_utc"]).date().isoformat(),
-                         "endDate": zeit.date().isoformat(), "filters": f"video=={video_id}",
-                         "metrics": "views,likes,comments,shares,averageViewDuration,averageViewPercentage,subscribersGained"}
-                antwort = _json("https://youtubeanalytics.googleapis.com/v2/reports?" + urlencode(query), token)
-            nummer = importiere(con, konfig, post["id"], antwort, zeit=zeit)
-            ergebnis["gespeichert" if nummer is not None else "unveraendert"] += 1
-        except (AdapterFehler, ValueError, TypeError, KeyError, OSError) as exc:
-            # Nur Fehlerklasse loggen: auch ein fremdes Dateisystem-/JSON-Problem
-            # darf keine Inhalte einer Credential-Datei im Log wiedergeben.
-            log.warning("Publikum-API %s, Post #%s: %s", plattform, post["id"], type(exc).__name__)
-            ergebnis["fehler"] += 1
+            try:
+                if plattform not in tokens:
+                    # Auch ein Fehler wird für diesen Lauf gemerkt, sonst erzeugt
+                    # jeder Post einen weiteren fehlgeschlagenen OAuth-Aufruf.
+                    tokens[plattform] = None
+                    tokens[plattform] = _token(plattform, konfig, zeit)
+                token = tokens[plattform]
+                if not token:
+                    ergebnis["ohne_zugang"] += 1
+                    continue
+                if plattform == "tiktok":
+                    felder = "id,create_time,duration,view_count,like_count,comment_count,share_count"
+                    antwort = _json("https://open.tiktokapis.com/v2/video/query/?" + urlencode({"fields": felder}),
+                                     token, daten={"filters": {"video_ids": [video_id]}})
+                    videos = (antwort.get("data") or {}).get("videos") or []
+                    if len(videos) != 1 or str(videos[0].get("id")) != video_id:
+                        raise AdapterFehler("TikTok-Video nicht im autorisierten Account gefunden")
+                else:
+                    query = {"ids": "channel==MINE", "startDate": aus_iso(post["gepostet_utc"]).date().isoformat(),
+                             "endDate": zeit.date().isoformat(), "filters": f"video=={video_id}",
+                             "metrics": "views,likes,comments,shares,averageViewDuration,averageViewPercentage,subscribersGained"}
+                    antwort = _json("https://youtubeanalytics.googleapis.com/v2/reports?" + urlencode(query), token)
+                nummer = importiere(con, konfig, post["id"], antwort, zeit=zeit)
+                ergebnis["gespeichert" if nummer is not None else "unveraendert"] += 1
+            except (AdapterFehler, ValueError, TypeError, KeyError, OSError) as exc:
+                # Nur Fehlerklasse loggen: auch ein fremdes Dateisystem-/JSON-Problem
+                # darf keine Inhalte einer Credential-Datei im Log wiedergeben.
+                log.warning("Publikum-API %s, Post #%s: %s", plattform, post["id"], type(exc).__name__)
+                ergebnis["fehler"] += 1
+    if ergebnis["gespeichert"]:
+        autonom.aktualisieren(con, konfig)
     return ergebnis

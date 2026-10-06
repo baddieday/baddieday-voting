@@ -100,8 +100,8 @@ class PublikumAdapter(unittest.TestCase):
         self.addCleanup(umgebung.stop)
         self.zeit = datetime(2026, 9, 29, 12, tzinfo=UTC)
         # datenbank.pfad im Temp-Ordner: sonst zeigte cache_pfad auf ./publikum-oauth.json
-        self.konfig = Konfig({"publikum": {}, "datenbank": {"pfad": str(Path(self._tmp.name) / "test.db")}},
-                             Path("test.toml"))
+        self.konfig = Konfig({"publikum": {"alter_tage": 7, "mindest_alter_tage": 3},
+                              "datenbank": {"pfad": str(Path(self._tmp.name) / "test.db")}}, Path("test.toml"))
         self.pid, _ = publikum.post_anlegen(self.con, art="entwurf", ziel_id=7, plattform="tiktok",
             daten={"dauer_s": 65, "format": "short", "rezept": {}, "merkmale": {}},
             zeit=self.zeit - timedelta(days=3))
@@ -175,6 +175,71 @@ class PublikumAdapter(unittest.TestCase):
             self.con.execute("UPDATE posts SET video_id = NULL WHERE id = ?", (pid,))
             result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=8))
         self.assertEqual(result["ohne_id"], 1)                                  # Liste gesperrt: kein Absturz
+
+    def post(self, ziel_id: int, *, tage: float = 3, dauer: float = 65, video_id: str | None = None) -> int:
+        """Ein TikTok-Post von vor `tage` Tagen; mit video_id auch gleich der Link dazu."""
+        pid, _ = publikum.post_anlegen(self.con, art="entwurf", ziel_id=ziel_id, plattform="tiktok",
+            daten={"dauer_s": dauer, "format": "short", "rezept": {}, "merkmale": {}},
+            zeit=self.zeit - timedelta(days=tage))
+        if video_id:
+            publikum.link_nachtragen(self.con, pid, f"https://www.tiktok.com/@test/video/{video_id}")
+        return pid
+
+    @staticmethod
+    def api(videos: dict, liste: dict | None = None):
+        """_json-Ersatz: die Liste für /video/list/, für /video/query/ je Block die gefragten Videos aus `videos`."""
+        aufrufe = []
+
+        def fake(url, token=None, daten=None, **kw):
+            if "/video/list/" in url:
+                return liste or {"data": {"videos": [], "has_more": False}, "error": {"code": "ok"}}
+            ids = daten["filters"]["video_ids"]
+            aufrufe.append(list(ids))
+            return {"data": {"videos": [videos[i] for i in ids if i in videos]}, "error": {"code": "ok"}}
+        fake.aufrufe = aufrufe
+        return fake
+
+    def lernstaende(self) -> int:
+        return self.con.execute("SELECT COUNT(*) FROM lernstaende").fetchone()[0]
+
+    def test_nullen_werden_zurueckgehalten(self):
+        # B6: Sandbox liefert 0/0/0/0 – das ist keine Messung und darf den Screenshot (mit Wiedergabezeit) nicht verdrängen
+        publikum.speichere_messung(self.con, self.pid, {"views": 1240, "likes": 40, "wiedergabe_s": 12.5}, "screenshot",
+                                   zeit=self.zeit - timedelta(days=3) + timedelta(days=6.5), konfig=self.konfig)
+        vorher = self.lernstaende()
+        nullen = {"data": {"videos": [{"id": "123456789", "view_count": 0, "like_count": 0, "comment_count": 0,
+                                       "share_count": 0}]}, "error": {"code": "ok"}}
+        tag7 = self.zeit - timedelta(days=3) + timedelta(days=7)
+        with self.assertRaisesRegex(adapter.Zurueckgehalten, "nicht gespeichert"):
+            adapter.importiere(self.con, self.konfig, self.pid, nullen, zeit=tag7)
+        self.assertTrue(issubclass(adapter.Zurueckgehalten, adapter.AdapterFehler))
+        messungen = self.con.execute("SELECT * FROM publikum_messungen WHERE post_id = ?", (self.pid,)).fetchall()
+        self.assertEqual((len(messungen), self.lernstaende()), (1, vorher))
+        gewaehlt = publikum.waehle_messung(publikum.post(self.con, self.pid), messungen, self.konfig)
+        self.assertEqual((gewaehlt["quelle"], gewaehlt["views"]), ("screenshot", 1240))
+        # gesunkene Zähler sind erlaubt (acd7fb1: die API darf nach unten korrigieren)
+        kleiner = {"data": {"videos": [{"id": "123456789", "view_count": 900, "like_count": 30, "comment_count": 0,
+                                        "share_count": 0}]}, "error": {"code": "ok"}}
+        self.assertIsNotNone(adapter.importiere(self.con, self.konfig, self.pid, kleiner, zeit=tag7))
+
+    def test_gebuendelt_lernt_einmal_am_ende(self):
+        # B22: der Timer-Lauf importiert bis zu 100 Posts – eine lernstaende-Version je Lauf, nicht je Import
+        with autonom.gebuendelt():
+            self.assertEqual(autonom.aktualisieren(self.con, self.konfig), {"geaendert": False, "aufgeschoben": True})
+            adapter.importiere(self.con, self.konfig, self.pid, self.payload, zeit=self.zeit)
+            self.assertEqual(self.lernstaende(), 0)
+        self.assertTrue(autonom.aktualisieren(self.con, self.konfig)["geaendert"])
+        self.assertEqual(self.lernstaende(), 1)
+        videos = {}
+        for ziel_id, vid, views in ((21, "201", 500), (22, "202", 7000), (23, "203", 150)):
+            self.post(ziel_id, video_id=vid, tage=4 + ziel_id % 3)
+            videos[vid] = {"id": vid, "view_count": views, "like_count": views // 10, "comment_count": 1, "share_count": 2}
+        videos["123456789"] = {**self.payload["data"]["videos"][0], "view_count": 9000}
+        vorher = self.lernstaende()
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=self.api(videos)):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=8))
+        self.assertEqual(result["gespeichert"], 4)
+        self.assertEqual(self.lernstaende(), vorher + 1)
 
 
 class Token(MitSpeicher):

@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import math
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,27 @@ from . import lern_features as features
 from .zeit import aus_iso, iso, jetzt
 
 MODELL_VERSION = 1
+
+# Offene gebuendelt()-Blöcke (ein Eintrag je Block). Nicht leer → aktualisieren() schiebt das Lernen auf.
+_GEBUENDELT: list[bool] = []
+
+
+@contextmanager
+def gebuendelt():
+    """Lernen aufschieben: innerhalb des Blocks gibt aktualisieren() sofort {"geaendert": False, "aufgeschoben": True}
+    zurück, ohne zu rechnen. Nur für den Timer-Lauf publikum_adapter.abrufen: der importiert bis zu 100 Posts
+    (publikum.speichere_messung lernt sonst nach jedem einzelnen), danach lernt er einmal – eine lernstaende-Version
+    je Lauf, unabhängig von der Import-Reihenfolge. Ein Parameter `lernen` an publikum.speichere_messung wäre
+    schöner; publikum.py gehört aber Paket 2 – Folgeschritt. Der finally-Zweig setzt immer zurück, auch bei Fehlern.
+    Beispiel:
+        with autonom.gebuendelt():
+            for post in posts: publikum_adapter.importiere(…)
+        autonom.aktualisieren(con, konfig)"""
+    _GEBUENDELT.append(True)
+    try:
+        yield
+    finally:
+        _GEBUENDELT.pop()
 
 
 def _json(x):
@@ -190,7 +212,10 @@ def champion(con):
 
 
 def aktualisieren(con, konfig=None) -> dict:
-    """Atomar und wiederholbar, auch innerhalb einer Messungs-Transaktion."""
+    """Atomar und wiederholbar, auch innerhalb einer Messungs-Transaktion.
+    Innerhalb von gebuendelt(): sofort {"geaendert": False, "aufgeschoben": True} – der Aufrufer lernt am Ende."""
+    if _GEBUENDELT:
+        return {"geaendert": False, "aufgeschoben": True}
     eigenstaendig = not con.in_transaction
     if eigenstaendig:
         con.execute("BEGIN IMMEDIATE")
