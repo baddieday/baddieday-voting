@@ -495,6 +495,8 @@ class ErwartungImLernBot(MitErwartung):
             return await senden(**kw)
 
         self.bot.send_video = send_video
+        # 06.10.: die Erwartungs-Zeile steht nur noch im Experten-Modus in der Bildunterschrift
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True
         self.app = SimpleNamespace(bot=self.bot, bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
                                    create_task=lambda koro: koro.close())
         self.context = SimpleNamespace(bot_data=self.app.bot_data, application=self.app, args=[])
