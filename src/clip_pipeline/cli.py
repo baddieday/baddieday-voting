@@ -624,15 +624,21 @@ def _cmd_bot(args, konfig, con) -> int:
 
 
 def _cmd_publikum(args, konfig, con) -> int:
-    """Lernschleife „Publikum“ (Spec §6, §12): `pipeline publikum bewerten` – täglich per Timer clip-publikum.
+    """Lernschleife „Publikum“ (Spec §6, §12): `pipeline publikum bewerten` – täglich per Timer clip-publikum;
+    dazu `holen` (nur der Plattform-Abruf, Handgriff nach /tiktok), `anmelden` und `importieren`.
 
-    Setzt die Publikums-Scores aller fälligen Posts (publikum.bewerte_alle: ab [publikum].alter_tage, einmal je
-    Post, nie überschrieben) und legt bei neuen Scores eine Lern-Meldung an (höchstens eine am Tag). Reine
-    Datenbank-Arbeit: keine Pipeline-Sperre (sperren=False), nicht in WECKEN – weckt pve-big nie.
+    bewerten holt erst die Plattform-Zahlen (publikum_adapter.abrufen – TikTok-API, nur Posts mit Zugang), setzt dann
+    die Publikums-Scores aller fälligen Posts (publikum.bewerte_alle: ab [publikum].alter_tage, einmal je Post, nie
+    überschrieben) und legt bei neuen Scores eine Lern-Meldung an (höchstens eine am Tag). Liest TikTok über das Netz,
+    schreibt Datenbank, Lern-Meldungen und die Token-Datei publikum-oauth.json; keine Pipeline-Sperre (sperren=False –
+    nur eine kurze eigene Sperre um den Token-Tausch, publikum_adapter._token), nicht in WECKEN – weckt pve-big nie.
     Ein Zeitpunkt für den ganzen Lauf: Fälligkeit, bewertet_utc und das Datum der Meldung passen zusammen.
-    JSON: {"bewertet", "ohne_messung", "noch_zu_jung", "fehler", "posts": [{"id", "score"}], "meldung": bool}.
+    JSON: {"bewertet", "ohne_messung", "noch_zu_jung", "fehler", "posts": [{"id", "score"}], "meldung": bool,
+    "api": {"gespeichert", "unveraendert", "zugeordnet", "ohne_zugang", "ohne_id", "fehler", …}, "autonom": {…}};
+    `holen` gibt nur das api-Objekt aus.
     Exit: 0 ok (auch: nichts fällig) · 1 mindestens ein Post nicht bewertbar (steht mit #Nummer im Log; die anderen
-    sind trotzdem bewertet, die JSON-Zeile kommt trotzdem) · 2 Konfig ([publikum]-Schlüssel fehlt)."""
+    sind trotzdem bewertet, die JSON-Zeile kommt trotzdem) ODER mindestens ein Plattform-Abruf fehlgeschlagen
+    (`api.fehler` in der JSON-Zeile; Scores sind trotzdem gesetzt) · 2 Konfig ([publikum]-Schlüssel fehlt)."""
     from . import autonom, lernbot_publikum, publikum, publikum_adapter
 
     zeit = jetzt()
@@ -656,6 +662,10 @@ def _cmd_publikum(args, konfig, con) -> int:
         mid = publikum_adapter.importiere(con, konfig, args.post, antwort, zeit=zeit)
         _json({"messung": mid, "autonom": autonom.ueberblick(con)})
         return 0
+    if args.aktion == "holen":  # B12 (05.10.): nur der Abruf – zum Ausprobieren nach /tiktok, ohne Scores und Meldung
+        api = publikum_adapter.abrufen(con, konfig, zeit=zeit)
+        _json(api)
+        return 1 if api["fehler"] else 0
     api = publikum_adapter.abrufen(con, konfig, zeit=zeit)
     try:
         ergebnis = publikum.bewerte_alle(con, konfig, zeit)
@@ -897,19 +907,26 @@ def baue_parser() -> argparse.ArgumentParser:
     s = unter.add_parser("bot", help="Telegram-Bot starten (läuft dauerhaft)")
     s.set_defaults(fn=_cmd_bot, sperren=False)
 
-    # Lernschleife „Publikum“ (Spec §12). Unterbefehle wie bei `lager`; `holen` (TikTok-API) kommt in Stufe 4.
+    # Lernschleife „Publikum“ (Spec §12). Unterbefehle wie bei `lager`: bewerten (Timer: TikTok-Zahlen holen + Scores),
+    # holen (nur der Abruf, Handgriff – B12, 05.10.), anmelden, importieren.
     s = unter.add_parser("publikum", help="Lernschleife Publikum: bewerten (Scores ab [publikum].alter_tage, "
-                                               "Standard 7 – Timer clip-publikum)")
+                                               "Standard 7 – Timer clip-publikum), holen, anmelden, importieren")
     publikum_befehle = s.add_subparsers(dest="aktion", required=True)
-    publikum_befehle.add_parser("bewerten", help="Publikums-Scores aller fälligen Posts setzen (einmal je Post, "
-                                                 "weckt nie) – bei neuen Scores eine Meldung im Lern-Bot")
+    publikum_befehle.add_parser("bewerten", help="TikTok-Zahlen holen und Publikums-Scores aller fälligen Posts "
+                                                 "setzen (einmal je Post, weckt nie) – bei neuen Scores eine Meldung "
+                                                 "im Lern-Bot")
+    publikum_befehle.add_parser("holen", help="nur die Plattform-Zahlen holen (TikTok-API), keine Scores – zum "
+                                              "Ausprobieren nach /tiktok; Exit 1 bei api.fehler")
     anmelden = publikum_befehle.add_parser("anmelden", help="TikTok verbinden: ohne --code die Anmelde-Adresse, mit "
                                                             "--code die Adresse nach dem Zustimmen (oder den Code)")
     anmelden.add_argument("--code", default="")
     importer = publikum_befehle.add_parser("importieren", help="Plattform-JSON importieren und automatisch lernen")
     importer.add_argument("--post", type=int, required=True)
     importer.add_argument("--datei", required=True)
-    s.set_defaults(fn=_cmd_publikum, sperren=False)  # reine DB-Arbeit: keine Pipeline-Sperre, nicht in WECKEN
+    # Liest TikTok über das Netz, schreibt Datenbank, Lern-Meldungen und die Token-Datei publikum-oauth.json; keine
+    # Pipeline-Sperre (nur eine kurze eigene Sperre um den Token-Tausch, publikum_adapter._token), nicht in WECKEN –
+    # weckt pve-big nie
+    s.set_defaults(fn=_cmd_publikum, sperren=False)
     return p
 
 

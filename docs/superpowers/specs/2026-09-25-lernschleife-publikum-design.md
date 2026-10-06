@@ -158,6 +158,8 @@ Berechnung in `publikum.py`, `score_fuer(post, messungen, vergleichsbasis)`, det
 
 1. **Messung wählen:** die Messung, die dem Alter `[publikum].alter_tage` (7) am nächsten liegt, frühestens ab
    `mindest_alter_tage` (3). Vorher bleibt `score` NULL („noch nicht bewertet“).
+   *Geändert 05.10.:* Messungen mit Wiedergabe (wiedergabe_s oder voll_prozent) gehen vor der Nähe zu Tag 7;
+   0 Views = keine Messung.
 2. **Komponenten:**
    - Wiedergabe `r = min(1.2, wiedergabe_s / dauer_s)`; fehlt `wiedergabe_s`: `r = voll_prozent / 100`; fehlt
      beides: `r = None`.
@@ -215,6 +217,11 @@ unverändert (`bewertet_utc`). Das hält Paare und Rezept-Stände stabil.
 - Ausfall: einmal am Tag eine Meldung (Schlüssel `publikum:api:<datum>`), sonst still. Liefert die Sandbox
   keine Zähler, bleibt Screenshot der einzige Weg – das reicht für alles Weitere (Wiedergabe kommt ohnehin nur
   von dort).
+
+*Stand 05.10.:* Token-Datei heißt `publikum-oauth.json`; der Abruf steckt in `publikum bewerten`, `publikum holen`
+ist der Handgriff; Zuordnung über 72 h statt ±30 min – bei mehreren Treffern keine Zuordnung, Frage einmal täglich;
+`[tiktok].redirect_uri` statt `callback_url`, kein `sandbox`-Schlüssel; Meldungen `publikum:api:`,
+`publikum:tiktok-ablauf:`, `publikum:zuordnung:`, `publikum:ohne-post:`, `publikum:nicht-gefunden:`.
 
 ## 8. Moment-Modell (eine Bewertung für alle)
 
@@ -416,7 +423,7 @@ Sonntag `[analyst].uhrzeit` (18:00), Timer `clip-wochenbericht`, versandt über 
   0.3, reichweite 0.2}`), `[rezepte]` (Stufen je Stellschraube, `experiment_jeder 3`, `nutzer_gewicht 0.5`),
   `[merkmale]` (`endgame_spieler 10`, `clutch_vor_s 30`, `clutch_nach_s 10`, `mic true`, `[merkmale.waffen]`),
   `[lernbot]` (`screenshot_claude true`, `varianten_je_satz 2`), `[analyst]` (`wochentag "So"`, `uhrzeit
-  "18:00"`, `wochen 4`, `claude true`, `max_hypothesen 3`), `[tiktok]` (`callback_url`, `sandbox true`).
+  "18:00"`, `wochen 4`, `claude true`, `max_hypothesen 3`), `[tiktok]` (`redirect_uri`, `sandbox true`).
 - Secrets: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` in `.env` (`.env.example` ergänzt); Tokens unter
   `/var/lib/clip-pipeline/tiktok.json`; Logs ohne Tokens (httpx auf WARNING wie heute).
 - Claude-Aufrufe: je Screenshot einer, pro Woche einer, sonst wie heute. `/lernstand` zählt die Woche

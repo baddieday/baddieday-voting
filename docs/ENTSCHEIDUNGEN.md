@@ -697,3 +697,24 @@ Beim Zusammenführen (Anbindung) zusätzlich angenommen:
   alten Teile `einstieg`, `action` …; der alte Regeltest ist darauf umgestellt.
 - `normiert` (aus dem Sidecar) steht in `kritiken.details`; nur solche Entwürfe zählen für die Schwelle.
 - Dein ✅ nach 👍/👎 zieht den Maßstab im Hintergrund nach (eigene Datenbank-Verbindung, blockiert den Bot nicht).
+
+### TikTok besser (05.10.2026)
+
+Gegenprüfung der TikTok-Anbindung (Befunde B1–B25; Code in den Paketen P1, P2, P4, Doku in `docs/PUBLIKUM.md`):
+
+- **Wiedergabe schlägt Nähe:** Für den Score zählt eine Messung mit Ø Wiedergabe (Screenshot/Hand, ab Tag 3) vor den
+  täglichen API-Zahlen ohne Wiedergabe – auch wenn die API-Messung näher an Tag 7 liegt. Preis: Der Score kann auf
+  Zahlen von Tag 3–5 ruhen, obwohl jüngere Tag-7-Zahlen (ohne Wiedergabe) vorliegen; das Gewicht 0,5 der Wiedergabe
+  wiegt schwerer als die Nähe. 0 Views = keine Messung.
+- **0-Zähler werden zurückgehalten** (die Sandbox liefert manchmal nur Nullen) und nicht gespeichert; **gesunkene
+  API-Zähler bleiben erlaubt** (TikTok korrigiert nach unten – so schon seit acd7fb1).
+- **Mehrdeutige Zuordnung → Frage statt Zufall:** Passen mehrere eigene Videos (Dauer ±2 s, bis 72 h), wird nicht
+  zugeordnet; der Lern-Bot fragt einmal täglich nach `/link`. `url` bleibt der eingegebene Link (auch ein Kurzlink),
+  nur die Video-Nummer wird nachgetragen.
+- **Lernen gebündelt:** je Abruf eine `lernstaende`-Version über `autonom.gebuendelt()` statt eine je Messung –
+  publikum.py wurde parallel gebaut, deshalb die Klammer außen statt eines Umbaus innen.
+- **`api_max_tage` bleibt 180**, Sortierung unbewertete zuerst (`api_max_posts` je Lauf; bei mehr Posts erhöhen).
+- **`/tiktok trennen` ohne Revoke-Aufruf:** Die Body-Felder von `/v2/oauth/revoke/` sind in den abgerufenen Fakten
+  nicht belegt (Fakten vor Erinnerung); die Token-Datei wird geleert, der Widerruf geschieht in der TikTok-App.
+- **B15 (fester `state`) verworfen:** Der Code kommt aus der eigenen Adresszeile; eine Prüfung des `state` schützt
+  dabei nicht (kein Dritter liefert die Rücksprung-Adresse).

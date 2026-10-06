@@ -11,7 +11,7 @@ Fundament: Posts, Zahlen, Score, Anzeige. Gelernt wird aus dem Score ab Stufe 2.
                                                                         │
      Screenshot „#17“ (Claude liest, nur Leserecht) oder Hand-Eingabe ─► Messungen (Tag 3, Tag 7, …)
                                                                         │
-     10:00 täglich: pipeline publikum bewerten ─► Score (einmal, ab Tag 7) ─► 📊 Meldung · /publikum
+     10:00 täglich: pipeline publikum bewerten ─► TikTok-Zahlen (API, nach /tiktok) · Score (einmal, ab Tag 7) ─► 📊 Meldung · /publikum
 ```
 
 Alles läuft auf dem Mini, im Puffer-Betrieb; **nichts davon weckt pve-big**. Zeichen in dieser Anleitung:
@@ -64,7 +64,9 @@ Alles läuft auf dem Mini, im Puffer-Betrieb; **nichts davon weckt pve-big**. Ze
 - Das Bild wird nach der Auswertung gelöscht – es gibt kein Bildarchiv, nur die Zahlen (und Claudes Antwort als
   Text in der Datenbank, zum Nachprüfen).
 - **Wann?** Der Score nimmt die Messung, die **Tag 7** am nächsten liegt, und nur Messungen ab **Tag 3** (die
-  ersten Tage verteilt TikTok noch). Gut: ein Screenshot um Tag 3 und einer um Tag 7.
+  ersten Tage verteilt TikTok noch). Gut: ein Screenshot um Tag 3 und einer um Tag 7. Eine Messung **mit Ø
+  Wiedergabe** (Screenshot/Hand) ab Tag 3 zählt für den Score immer vor den täglichen API-Zahlen (die haben keine
+  Wiedergabe); 0 Views gelten als keine Messung.
 
 ### 3. Hand-Eingabe
 - Geht immer, auch ohne Bild: `#17 1240 61 6.8 34` = Views, Likes, Ø Wiedergabe **in Sekunden**, „vollständig
@@ -101,19 +103,27 @@ Ohne Wiedergabe werden Reaktionen je View und Views auf 0,6/0,4 hochgerechnet (�
 nichts gelernt. Der Score wird **einmal** gesetzt, sobald der Post 7 Tage alt ist, und danach nie überschrieben;
 spätere Screenshots ändern ihn nicht mehr. Die Rechnung steht in `src/clip_pipeline/publikum.py` (Spec §6).
 
+Saves kommen nur aus Screenshot/Hand – die API liefert keine. Fehlen Kommentare/Shares/Saves in der gewählten
+Messung, nimmt der Score sie aus der zeitlich nächsten anderen Messung desselben Posts (Vermerk „Saves aus Tag 5“),
+sonst zählen sie 0 (A10).
+
 ### 5. /publikum
 Im Lern-Bot: `/publikum` (die letzten 10) oder `/publikum 20` (höchstens 30). Beispiel:
 ```
-📊 Publikum · 12 Posts, 5 mit Score (die letzten 10, neueste zuerst)
-#17 TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s 🏁 34 % (Tag 4) · Score noch offen (ab 7 Tagen)
-#16 TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Screenshot mit #16 schicken · Score offen (braucht eine Messung ab Tag 3 mit Views)
-#12 TikTok · Clip 88 · 9 Tage · 👁 5 000 ❤️ 300 ⏱ 12 s (Tag 7) · Score +0,8 (Wiedergabe über, Reaktionen je View unter, Views über deinem Median)
+📊 Publikum · 12 Posts, 5 mit Score · API-Zahlen zuletzt vor 2 Tagen (7 Posts) (die letzten 10, neueste zuerst)
+#17 TikTok · Entwurf 41 · 6 Tage · 👁 1 350 ❤️ 66 (Tag 6, API) · ⏱ fehlt – Screenshot mit #17 bis Tag 7 · Score noch offen (ab 7 Tagen)
+#16 TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Screenshot mit #16 schicken (die Wiedergabe kommt nur so) · Score offen (braucht eine Messung ab Tag 3 mit Views)
+#15 TikTok · Clip 88 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s 🏁 34 % (Tag 4) · Score noch offen (ab 7 Tagen)
+#12 TikTok · Clip 86 · 9 Tage · 👁 5 000 ❤️ 300 ⏱ 12 s (Tag 7) · Score +0,8 (Wiedergabe über, Reaktionen je View unter, Views über deinem Median)
 🤖 Claude diese Woche: 3 Aufrufe
 ```
 Zeichen: 👁 Views · ❤️ Likes · ⏱ Ø Wiedergabe · 🏁 ganz angesehen. „(Tag 4)“ ist das Alter des Posts bei der letzten
-Messung. „Score kommt beim nächsten Lauf“ heißt: alles da, der Timer war nur noch nicht dran. Die letzte Zeile zählt
-die Screenshot-Auswertungen seit Montag 00:00, bei denen claude wirklich lief (fand der Dienst claude gar nicht,
-zählt das nicht; `decide` und Stimmung zählen noch nicht mit, Annahme A18).
+Messung; „(Tag 6, API)“ heißt, die Zahlen kamen aus der TikTok-API. „⏱ fehlt“ = noch keine Messung mit Wiedergabe –
+die kommt nur aus der App (Screenshot mit der `#Nummer`, am besten bis Tag 7). Die Kopfzeile „API-Zahlen zuletzt …“
+bzw. „API: noch keine“ / „API aus“ zeigt, ob die Anbindung liefert. „Score kommt beim nächsten Lauf“ heißt: alles
+da, der Timer war nur noch nicht dran. Die letzte Zeile zählt die Screenshot-Auswertungen seit Montag 00:00, bei
+denen claude wirklich lief (fand der Dienst claude gar nicht, zählt das nicht; `decide` und Stimmung zählen noch
+nicht mit, Annahme A18).
 
 ### 5a. TikTok verbinden (Zahlen automatisch, 30.09.)
 1. Im TikTok-Entwicklerportal eine App anlegen: Plattform Web, Produkte **Login Kit** und **Display API**, Scopes
@@ -122,13 +132,28 @@ zählt das nicht; `decide` und Stimmung zählen noch nicht mit, Annahme A18).
 2. Client Key und Client Secret in `/opt/clip-pipeline/.env` eintragen (`TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`),
    Lern-Bot neu starten. Nie in den Chat schreiben.
 3. Im Lern-Bot `/tiktok` → Adresse öffnen, zustimmen → die Adresse, auf der der Browser landet (die Seite darf leer
-   sein), mit `/tiktok <adresse>` zurückschicken. Der Code gilt nur wenige Minuten.
+   sein), mit `/tiktok <adresse>` zurückschicken. Der Code gilt nur wenige Minuten. `/tiktok` ohne Zusatz zeigt den
+   Stand (verbunden als …, Anmeldung hält bis …, letzte API-Zahlen, Rechte); nur wenn nicht verbunden kommt die
+   Anmelde-Adresse, sonst `/tiktok neu`. `/tiktok trennen` leert die Token-Datei (0600 bleibt); den Zugriff selbst
+   entziehst du in der TikTok-App (Einstellungen → Sicherheit → Apps). Danach `[publikum].api_abruf = false`, sonst
+   erinnert der Timer täglich.
 4. Fertig: Die Tokens liegen nur in `publikum-oauth.json` neben der DB (0600), der Timer `clip-publikum` holt die
-   Zahlen täglich und erneuert den Zugang selbst. Ohne Bot: `pipeline publikum anmelden` bzw. `… --code '<adresse>'`.
+   Zahlen täglich und erneuert den Zugang selbst. Ohne Bot: `pipeline publikum anmelden` bzw. `… --code '<adresse>'`;
+   ob die Anbindung liefert, zeigt sofort `pipeline publikum holen` (nur holen, keine Scores).
 Im Sandbox-Modus kann TikTok Zahlen zurückhalten – dann bleibt der Screenshot-Weg.
-Posts ohne Video-Nummer (kein Link, oder Kurzlink `vm.tiktok.com/…` aus der App) ordnet der Abruf selbst zu: eigene
-Videoliste, das Video mit passender Länge (±2 s), erstellt bis 72 h vor dem Häkchen/Link, das zeitlich nächste
-(`[publikum].zuordnung_stunden`). In der JSON-Zeile steht dann `"zugeordnet": n`; `/link` ist nur noch für Ausnahmen.
+
+**Zuordnung:** Posts ohne Video-Nummer (kein Link, oder Kurzlink `vm.tiktok.com/…` aus der App) ordnet der Abruf
+selbst zu: eigene Videoliste (höchstens 20 Video-Nummern je Anfrage, bis `[publikum].zuordnung_seiten` Seiten), das
+Video mit passender Länge (±2 s), erstellt bis 72 h vor dem Häkchen/Link (`[publikum].zuordnung_stunden`). In der
+JSON-Zeile steht dann `"zugeordnet": n`; `/link` ist nur noch für Ausnahmen. Passen mehrere Videos, ordnet der Abruf
+NICHT zu und fragt einmal täglich im Lern-Bot („Entwurf 41: 2 passende Videos – /link 41 <Link>“); jede
+Selbstzuordnung wird dort zur Kontrolle genannt („#17 → <Link>, falsch? /link …“). Videos auf TikTok ohne Post (älter
+als 24 h, bis 72 h) meldet er einmal („📎 TikTok-Video ohne Post …“).
+
+**Meldungen:** Bleiben Zahlen aus, kommt einmal am Tag eine Meldung: ⚠️ TikTok-Abruf … (Fehler mit Grund und Rat),
+ℹ️ TikTok nicht verbunden – /tiktok, ⛔ Anmeldung ungültig/abgelaufen – /tiktok neu verbinden, ⏳ Anmeldung läuft in
+N Tagen ab (ab 14 Tage vorher). Liefert die Sandbox 0 Zähler, wird nichts gespeichert („zurückgehalten“) – Screenshot
+bleibt der Weg. Gelöschte Videos zählen als `nicht_gefunden` (einmalige Meldung), nicht als Fehler.
 
 ### 6. Meldungen und Ruhezeit
 Nach dem täglichen Lauf (10:00) kommt höchstens **eine** Meldung am Tag, nur wenn es neue Scores gibt:
@@ -140,8 +165,12 @@ Ende der Ruhezeit (08:00) zurück; andere Lern-Bot-Meldungen (Abendstand, Fehler
 
 | Wo | Befehl | Was |
 |---|---|---|
-| CT | `pipeline publikum bewerten` | Scores aller fälligen Posts setzen (Timer `clip-publikum`, 10:00); weckt nie, keine Pipeline-Sperre |
+| CT | `pipeline publikum bewerten` | TikTok-Zahlen holen, dann Scores aller fälligen Posts setzen (Timer `clip-publikum`, 10:00); weckt nie, keine Pipeline-Sperre |
+| CT | `pipeline publikum holen` | nur die Plattform-Zahlen holen (TikTok-API), keine Scores – JSON-Zeile mit den `api`-Zählern, Exit 1 bei `fehler`; zum Ausprobieren nach `/tiktok` |
+| CT | `pipeline publikum anmelden [--code <adresse>]` | TikTok ohne Bot verbinden: ohne `--code` die Anmelde-Adresse, mit `--code` die Adresse nach dem Zustimmen |
+| CT | `pipeline publikum importieren --post <nr> --datei <json>` | Plattform-Zahlen aus einer JSON-Datei von Hand übernehmen (Format: `docs/AUTONOMES_LERNEN.md`) |
 | Lern-Bot | `/publikum [anzahl]` | letzte Posts mit Zahlen und Score |
+| Lern-Bot | `/tiktok` · `/tiktok <adresse>` · `/tiktok neu` · `/tiktok trennen` | Stand der TikTok-Anbindung (oder Anmelde-Adresse, wenn nicht verbunden) · Adresse nach dem Zustimmen zurückschicken · neu verbinden (anderes Konto, abgelaufen) · Token-Datei leeren |
 | Lern-Bot | `/link <entwurf> <url>` | Post zu einem Entwurf anlegen bzw. Link korrigieren |
 | Lern-Bot | Foto mit `#17` · Text `#17 1240 61 6.8 34` (optional `3 5 2` dahinter) | Zahlen per Screenshot bzw. von Hand |
 | Lern-Bot | `/hilfe` | alles oben in Kurzform |
@@ -149,10 +178,14 @@ Ende der Ruhezeit (08:00) zurück; andere Lern-Bot-Meldungen (Abendstand, Fehler
 
 `pipeline publikum bewerten` hält den Vertrag aller Befehle ein: Logs auf stderr, letzte Zeile auf stdout = eine
 JSON-Zeile, z. B. `{"bewertet": 1, "ohne_messung": 0, "noch_zu_jung": 3, "fehler": 0, "posts": [{"id": 17,
-"score": 0.0}], "meldung": true}`. Exit 0 ok (auch: nichts fällig) · 1 mindestens ein Post nicht bewertbar (die
-anderen sind trotzdem bewertet) · 2 ein `[publikum]`-Schlüssel fehlt ganz, oder ein Wert in `[publikum.gewichte]`
-bzw. `[publikum.mad_minimum]` ist unbrauchbar (keine Zahl; ein Minimum nicht größer als 0). Beliebig oft
-aufrufbar – ein zweiter Lauf ändert nichts.
+"score": 0.0}], "meldung": true, "api": {…}, "autonom": {…}}`. Das `api`-Objekt (bei `pipeline publikum holen` die
+ganze Ausgabe) zählt den Plattform-Abruf: `gespeichert, unveraendert, zurueckgehalten, nicht_gefunden, ohne_zugang,
+ohne_id, zugeordnet, mehrdeutig, ohne_post, uebersprungen_intervall, fehler, grund, anmeldung_endet_tage, meldung`.
+Exit 0 ok (auch: nichts fällig) · 1 mindestens ein Post nicht bewertbar (die anderen sind trotzdem bewertet) **oder**
+`api.fehler > 0` (Scores trotzdem gesetzt) · 2 ein `[publikum]`-Schlüssel fehlt ganz, oder ein Wert in
+`[publikum.gewichte]` bzw. `[publikum.mad_minimum]` ist unbrauchbar (keine Zahl; ein Minimum nicht größer als 0).
+Beliebig oft aufrufbar – ein zweiter Lauf ändert nichts (ein Post wird frühestens nach `[publikum].api_intervall_stunden`
+erneut abgefragt).
 
 ## Konfig-Schlüssel
 
@@ -169,6 +202,13 @@ Beispiel in `config/lokal.beispiel.toml`). `pipeline …` liest die Konfig bei j
 | `[publikum].paar_abstand` | `0.5` | (ab Stufe 2) Mindestabstand zweier Scores, damit daraus ein Lern-Paar wird |
 | `[publikum].max_paare` | `200` | (ab Stufe 2) höchstens so viele jüngste Publikums-Paare |
 | `[publikum].upload_ordner` | `"export"` | Ordner der Upload-Fassungen im Puffer (`/srv/puffer/export/<name>/`) |
+| `[publikum].api_abruf` | `true` | offizielle TikTok-Zahlen (Display API) täglich holen; `false` = der Timer holt nichts, nur Screenshots/Hand (Notausgang) |
+| `[publikum].api_max_tage` | `180` | so viele Tage zurück werden Posts noch abgefragt (der Score ist ab Tag 7 fest; danach nur fürs autonome Lernen) |
+| `[publikum].api_intervall_stunden` | `6` | ein Post wird frühestens nach so vielen Stunden erneut abgefragt (kein doppeltes Hämmern bei Handläufen) |
+| `[publikum].api_max_posts` | `100` | höchstens so viele Posts je Lauf, unbewertete zuerst; liegen mehr Posts in `api_max_tage`, kommt jeder nur alle (Posts / `api_max_posts`) Tage dran – dann erhöhen |
+| `[publikum].zuordnung_stunden` | `72` | Selbstzuordnung ohne Video-Nummer: das Video darf bis so viele Stunden vor dem Häkchen/Link erstellt sein |
+| `[publikum].zuordnung_seiten` | `10` | … und so viele Listenseiten (je 20 Videos, neueste zuerst) werden dafür höchstens geholt |
+| `[tiktok].redirect_uri` | `"https://clip-battle.de/tiktok/callback"` | Rücksprung-Adresse der TikTok-App (Login Kit) – muss im Portal zeichengleich stehen, auch ohne Schrägstrich am Ende |
 | `[publikum.gewichte].wiedergabe` | `0.5` | Gewicht der Wiedergabe im Score |
 | `[publikum.gewichte].engagement` | `0.3` | Gewicht der Reaktionen je View (Engagement) |
 | `[publikum.gewichte].reichweite` | `0.2` | Gewicht der Views |
@@ -331,7 +371,8 @@ des Benutzers) und warum Dienste `~/.local/bin` nicht im PATH haben.
 **Was:** `clip-publikum.timer` einschalten – jeden Tag um 10:00 `pipeline publikum bewerten`.
 **Warum:** Der Score wird einmal je Post gesetzt, sobald er 7 Tage alt ist. Ein täglicher Lauf reicht; mehrere
 schaden nicht (nichts wird überschrieben, je Tag höchstens eine Meldung).
-**Freigabe nötig?** Ja – neuer Timer. Der Lauf ist reine Datenbank-Arbeit, weckt nie und braucht keine Sperre.
+**Freigabe nötig?** Ja – neuer Timer. Der Lauf liest TikTok, schreibt Datenbank und Token-Datei; weckt nie, keine
+Pipeline-Sperre.
 
 ```bash
 # im CT als root
@@ -509,7 +550,29 @@ Aus: `systemctl disable --now clip-mikro.path clip-mikro.timer` (oder `[merkmale
   Meist ist ein älterer Post in der Vergleichsbasis beschädigt (`score_teile`) – melde dich, bevor du in der
   Datenbank etwas änderst. Steht dort stattdessen „Unerwarteter Fehler … ValueError: could not convert string to
   float“, ist ein `[publikum]`-Wert in `lokal.toml` keine Zahl (z. B. `alter_tage = "drei"`) – korrigieren, dann
-  nochmal laufen lassen.
+  nochmal laufen lassen. Steht dort „Publikum-API tiktok, Post #17: API HTTP 401: access_token_invalid“ (o. ä.),
+  schlug der TikTok-Abruf fehl (`api.fehler` in der JSON-Zeile) – die Scores sind trotzdem gesetzt, an der Datenbank
+  nichts ändern; weiter bei „… TikTok-Zahlen ausbleiben?“.
+- **… TikTok-Zahlen ausbleiben?** Der Reihe nach: 1. `/tiktok` im Lern-Bot zeigt den Stand (verbunden? bis wann?
+  letzte API-Zahlen?). 2. `journalctl -u clip-publikum -n 50` – die Zeile „Publikum-API tiktok …“ nennt den Grund
+  (401 = Anmeldung ungültig, 403 = Recht fehlt, 429 = zu viele Anfragen, `nicht_gefunden` = Video gelöscht oder nicht
+  im Konto). 3. Im Entwicklerportal prüfen: Scope `video.list` angehakt? Dein Konto als Target User der Sandbox?
+  Redirect-URI zeichengleich `[tiktok].redirect_uri`? 4. `/tiktok neu` – neu verbinden. 5. Notausgang: in
+  `config/lokal.toml` unter `[publikum]` `api_abruf = false` (gibt es `[publikum]` schon, die Zeile darunter) – der
+  Timer holt dann nichts mehr, Screenshots und Hand-Eingabe laufen weiter. Zum Ausprobieren ohne Scores:
+  `sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline publikum holen`.
+- **… im Journal „TikTok-Token-Datei ist nicht lesbar“ steht?** `publikum-oauth.json` neben der DB ist beschädigt
+  (kein gültiges JSON) – `/tiktok neu` schreibt sie neu; nichts von Hand hineinschreiben.
+- **… ich TikTok trennen oder das Konto wechseln will?** Anderes Konto: `/tiktok neu` (die neue Anmeldung ersetzt
+  die alte). Zugriff ganz entziehen: in der TikTok-App (Einstellungen → Sicherheit → Apps) die App entfernen, dann
+  `/tiktok trennen` (leert die Token-Datei) und `[publikum].api_abruf = false`, sonst erinnert der Timer täglich an
+  die fehlende Verbindung.
+- **… zwei Läufe gleichzeitig laufen (Timer + Hand)?** Macht nichts: Um den Token-Tausch liegt eine eigene kurze
+  Sperre; der zweite Lauf nimmt den frischen Token. Muss er warten, sagt das Log „wird gerade erneuert“ – einfach
+  nochmal laufen lassen. Ein Post wird ohnehin frühestens nach `api_intervall_stunden` erneut abgefragt.
+- **… `/publikum` „⏱ fehlt“ zeigt?** Die API liefert keine Wiedergabe – einen Screenshot der Statistik mit der
+  `#Nummer` schicken, am besten bis Tag 7. Kommt keiner, rechnet der Score ab Tag 7 ohne Wiedergabe (Vermerk „ohne
+  Wiedergabe“, Reaktionen je View und Views auf 0,6/0,4 hochgerechnet).
 - **… Exit 2 kommt?** Ein `[publikum]`-Schlüssel fehlt ganz (meist nach einem Update: `pipeline.toml` des Checkouts
   prüfen) – die JSON-Zeile nennt ihn. Ebenso, wenn in `[publikum.gewichte]` oder `[publikum.mad_minimum]` ein Wert
   keine Zahl ist (z. B. `engagement = "0,005"` mit Anführungszeichen und Komma) oder ein Minimum 0 bzw. negativ ist –
@@ -547,6 +610,9 @@ Aus: `systemctl disable --now clip-mikro.path clip-mikro.timer` (oder `[merkmale
 | `src/clip_pipeline/lernbot_zahlen.py` · `screenshot.py` · `claude_aufruf.py` | Screenshot und Hand-Eingabe im Lern-Bot |
 | `src/clip_pipeline/lernbot_paket.py` | 📦 Upload-Paket, Häkchen, `/link` im Lern-Bot |
 | `src/clip_pipeline/lernbot_publikum.py` | `/publikum`, Meldung nach dem Bewerten, Ruhezeit |
+| `src/clip_pipeline/publikum_adapter.py` | TikTok-/YouTube-Abruf, Token-Datei `publikum-oauth.json`, Zuordnung, Meldungen |
+| `src/clip_pipeline/tiktok_anmeldung.py` | Anmelde-Adresse, Code-Tausch, Status, Trennen |
+| `src/clip_pipeline/lernbot_tiktok.py` | `/tiktok` im Lern-Bot |
 | `src/clip_pipeline/schemas/publikum.schema.json` | was Claude antworten darf |
 | `templates/screenshot-prompt.txt` | fester Auftrag an Claude |
 | `deploy/systemd/clip-publikum.service` · `deploy/systemd/clip-publikum.timer` | täglicher Lauf 10:00 (P3) |

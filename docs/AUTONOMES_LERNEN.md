@@ -25,21 +25,23 @@ sind keine veröffentlichbaren vollständigen Videos.
 
 Der vorhandene tägliche Dienst `clip-publikum` ruft `pipeline publikum bewerten` auf. Der Befehl holt verfügbare
 API-Daten, aktualisiert die neue Lernschleife und erhält die ältere Wochen-Auswertung. Ohne eingerichteten
-Zugang erfolgen keine API-Aufrufe und es werden keine Messungen erfunden. Unter `[publikum]` steuern
-`api_abruf` (Standard `true`), `api_max_tage` (180), `api_intervall_stunden` (6) und `api_max_posts` (100) den Abruf.
-Der 6-Stunden-Wert begrenzt wiederholte Abrufe; er ersetzt nicht den täglichen systemd-Zeitplan.
+Zugang erfolgen keine API-Aufrufe und es werden keine Messungen erfunden. Die Schlüssel `api_*` und `zuordnung_*`
+stehen mit Standardwerten in der Konfig-Tabelle von docs/PUBLIKUM.md. Der Intervall-Wert begrenzt wiederholte
+Abrufe; er ersetzt nicht den täglichen systemd-Zeitplan. Nur holen, ohne Scores (zum Ausprobieren):
+`pipeline publikum holen`.
 
 | Plattform | Zugang | Tatsächlich automatisch verfügbar |
 |---|---|---|
-| TikTok | `TIKTOK_ACCESS_TOKEN`; für Erneuerung `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REFRESH_TOKEN` | Display API: Views, Likes, Kommentare, Shares. Watchtime, Completion und Saves bleiben unbekannt. |
+| TikTok | `TIKTOK_CLIENT_KEY` + `TIKTOK_CLIENT_SECRET` in `.env`, Anmeldung per `/tiktok` im Lern-Bot (oder `pipeline publikum anmelden`); Tokens in `publikum-oauth.json`, Erneuerung automatisch – docs/PUBLIKUM.md §5a. Notweg ohne Bot: `TIKTOK_ACCESS_TOKEN` (hält 24 h) oder Refresh-Werte von Hand. | Display API: Views, Likes, Kommentare, Shares. Watchtime, Completion und Saves bleiben unbekannt. |
 | YouTube | `YOUTUBE_ACCESS_TOKEN`; für Erneuerung `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` | YouTube Analytics: Views, Likes, Kommentare, Shares, mittlere Wiedergabedauer/-anteil, gewonnene Abonnenten. Autorisierter Kanal und `yt-analytics.readonly` nötig. |
 | Instagram | JSON-Import | Gemeinsames Metrikformat und Insights-Zähler. Kein automatischer Instagram-Abruf implementiert. |
 
-Tokens gehören in die lokale Dienstumgebung bzw. `.env`, siehe `.env.example`. Die initiale OAuth-Freigabe des
-eigenen Accounts muss vorhanden sein; das Programm stellt keine Entwickler-App bereit. Rotierte TikTok-Tokens
-werden atomar in `publikum-oauth.json` neben der Datenbank gespeichert (unter Linux Modus `0600`, Git ignoriert
-die Datei). Plattformen ohne erneuerbaren Zugang benötigen nach Ablauf einen neuen Zugang. Fehler eines Zugangs
-stoppen die anderen Plattformen nicht; die JSON-Ausgabe zählt `ohne_zugang`, `ohne_id` und `fehler` ausdrücklich.
+Secrets gehören in die lokale Dienstumgebung bzw. `.env`, siehe `.env.example`. Die TikTok-App im Entwicklerportal
+legst du weiter selbst an (docs/PUBLIKUM.md §5a); die Freigabe deines Kontos erledigt `/tiktok` im Lern-Bot. Rotierte
+TikTok-Tokens werden atomar in `publikum-oauth.json` neben der Datenbank gespeichert (unter Linux Modus `0600`, Git
+ignoriert die Datei). Plattformen ohne erneuerbaren Zugang benötigen nach Ablauf einen neuen Zugang. Fehler eines
+Zugangs stoppen die anderen Plattformen nicht; die JSON-Ausgabe zählt `ohne_zugang`, `ohne_id` und `fehler`
+ausdrücklich (alle Zähler: docs/PUBLIKUM.md, Abschnitt „Befehle“).
 
 Optional Zahlen importieren:
 

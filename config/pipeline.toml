@@ -320,6 +320,18 @@ paar_abstand = 0.5
 max_paare = 200
 # Upload-Fassungen der Entwürfe (1080×1920) – relativ zu [speicher].wurzel, im Puffer-Betrieb also /srv/puffer/export
 upload_ordner = "export"
+# Offizielle TikTok-Zahlen (Display API) täglich holen; false = der Timer holt nichts, nur Screenshots/Hand (Notausgang)
+api_abruf = true
+# So viele Tage zurück werden Posts noch abgefragt (der Score ist ab Tag 7 fest; danach nur fürs autonome Lernen)
+api_max_tage = 180
+# Ein Post wird frühestens nach so vielen Stunden erneut abgefragt (kein doppeltes Hämmern bei Handläufen)
+api_intervall_stunden = 6
+# Höchstens so viele Posts je Lauf, unbewertete zuerst; liegen mehr Posts in api_max_tage, kommt jeder nur alle (Posts / api_max_posts) Tage dran – dann erhöhen
+api_max_posts = 100
+# Selbstzuordnung ohne Video-Nummer: das Video darf bis so viele Stunden vor dem Häkchen/Link erstellt sein
+zuordnung_stunden = 72
+# … und so viele Listenseiten (je 20 Videos, neueste zuerst) werden dafür höchstens geholt
+zuordnung_seiten = 10
 
 [publikum.gewichte]
 # Score = 0,5·Wiedergabe + 0,3·Engagement + 0,2·Reichweite (je als z-Wert gegen deine letzten Posts).
@@ -343,6 +355,12 @@ engagement = 0.005
 # Reichweite v = ln(1 + Views) streut in ganzen Einheiten (1 000 Views ≈ 6,9; 10 000 ≈ 9,2). 0,1 ≈ 10 % mehr Views
 # (ln 1,1 ≈ 0,095) – kleinere Unterschiede in der Reichweite sind Zufall der TikTok-Verteilung.
 reichweite = 0.1
+
+[tiktok]
+# TikTok-Anmeldung (Login Kit, docs/PUBLIKUM.md §5a). Client Key und Secret stehen in .env, die Tokens nur in
+# publikum-oauth.json neben der Datenbank.
+# Rücksprung-Adresse der TikTok-App (Login Kit) – muss im Portal zeichengleich stehen, auch ohne Schrägstrich am Ende
+redirect_uri = "https://clip-battle.de/tiktok/callback"
 
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.
