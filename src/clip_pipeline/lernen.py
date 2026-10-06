@@ -4,12 +4,16 @@ Idee: Findest du Clip A besser als Clip B, die Formel sieht aber B vorne, werden
 die Gewichte ein kleines Stück in Richtung der Merkmale verschoben, in denen A
 besser war ("paarweises Nachjustieren", ein Perzeptron auf Paaren).
 
-Paare entstehen aus drei Quellen (Spec §8.3), jede mit eigenem Gewicht:
+Paare entstehen aus vier Quellen (Spec §8.3, Entwürfe seit 06.10.), jede mit eigenem Gewicht:
   - Battles: Gewinner > Verlierer                                            (Gewicht 1,0 – direkter Vergleich)
   - Freigaben: jeder freigegebene Clip > jeder verworfene desselben Abends   ([lernen].gewicht_freigabe, 0,5 –
     nur ein indirekter Vergleich: beide Clips standen nie nebeneinander)
   - Publikum: zwei bewertete Posts derselben Plattform und Art, deren Scores weit genug auseinander liegen
                                                                              (Gewicht 1,0 – echte Zuschauer)
+  - Entwürfe (06.10., Florian: „gefühlt bewerte ich genau den gleichen Mist wie früher“): dein 👍/👎 im Lern-Bot.
+    Vorher lernte daraus nur der Bonus genau dieser Momente – die Formel, die neue Momente auswählt, nie. Je Moment
+    wird die Summe deiner Urteile gebildet (👍 +1, „🥱 Clips langweilig“ −1, 👎 ohne Grund −0,5, 👎 nur mit
+    Schnitt-Gründen 0); Momente mit Plus > Momente mit Minus.        ([lernen].gewicht_entwurf, 0,5 – indirekt)
 
 Lernidee in Alltagssprache: Jedes Paar ist eine kleine Prüfungsfrage „welcher von beiden ist besser?“. Die
 Gewichte werden so lange ein bisschen verschoben, bis die Formel möglichst viele Fragen richtig beantwortet.
@@ -62,7 +66,10 @@ NEUE_MERKMALE = frozenset(merkmal_modul.REPLAY_MERKMALE + merkmal_modul.MIC_MERK
 # Fehlt eins davon auf einer Seite eines Paars, wird es nicht verglichen: die neuen zwölf und laenge/lautstaerke
 # (die fehlen bei Datei-Momenten – „Datei gegen Clip“ ist kein Unterschied in der Länge)
 UNBEKANNT_WENN_FEHLT = NEUE_MERKMALE | {"laenge", "lautstaerke"}
-QUELLEN = ("battle", "freigabe", "publikum")
+QUELLEN = ("battle", "freigabe", "entwurf", "publikum")
+# Entwurf-Paare (06.10.): so wirkt eine Bewertung je Moment. Nur Inhalt – Schnitt-Gründe (zu lang, Musik …) sagen
+# nichts über den Moment; Fail-Momente haben ihre eigene Formel (fail.fail_score) und bleiben draußen
+ENTWURF_STIMME = {"gut": 1.0, "langweilig": -1.0, "ohne_grund": -0.5}
 # B2/L-A: die jüngsten so viel Prozent eines Abschnitts sind Holdout – nie trainiert, nur für die ehrliche
 # Out-of-Sample-Quote in /gewichte (siehe _holdout, _holdout_trefferquote)
 HOLDOUT_ANTEIL = 0.2
@@ -74,15 +81,15 @@ log = logging.getLogger("pipeline")
 class Paar:
     besser: dict[str, float]      # NICHT mit 0 auffüllen: fehlt = unbekannt (Annahme S2-A17)
     schlechter: dict[str, float]
-    art: str  # battle | freigabe | publikum  (= Quelle, Spec §8.3)
-    gewicht: float = 1.0          # battle 1,0 · freigabe [lernen].gewicht_freigabe · publikum 1,0
+    art: str  # battle | freigabe | entwurf | publikum  (= Quelle, Spec §8.3)
+    gewicht: float = 1.0          # battle 1,0 · freigabe/entwurf [lernen].gewicht_freigabe/_entwurf · publikum 1,0
 
 
 @dataclass
 class Ergebnis:
     werte: dict[str, float]
     start: dict[str, float]
-    datenbasis: int  # Anzahl Bewertungen: Freigaben/Verwerfungen + Battles + Posts in Publikums-Paaren
+    datenbasis: int  # Anzahl Bewertungen: Freigaben/Verwerfungen + Battles + Entwürfe + Posts in Publikums-Paaren
     freigaben: int
     battles: int
     vertrauen: float
@@ -106,6 +113,7 @@ class Ergebnis:
     # Ab so vielen Publikums-Paaren prüft die Schranke die Publikums-Quote ([lernen].mindest_publikum_paare) –
     # /gewichte braucht die Zahl für „zählt für die Schranke erst ab 10“. Standard wie config/pipeline.toml.
     mindest_publikum_paare: int = 10
+    entwuerfe: int = 0          # deine Entwurf-Bewertungen, die eine Moment-Stimme gaben (06.10.)
 
 
 def startgewichte(konfig) -> dict[str, float]:
@@ -240,6 +248,59 @@ def sammle_paare(con: sqlite3.Connection, *, zonen_name: str, wechsel_stunde: in
         for gut, schlecht in _round_robin(gruppe["gut"], gruppe["schlecht"], max_pro_abend):
             paare.append(Paar(gut, schlecht, "freigabe"))
     return paare, len(entschieden), len(battles)
+
+
+def _moment_merkmale(con: sqlite3.Connection, schluessel: str, kill_tabelle: list[float]) -> dict | None:
+    """Aktuelle Merkmale eines Regisseur-Moments wie im Regisseur (merkmale.fuer_moment) – None, wenn der Moment
+    unbekannt oder ein Fail ist."""
+    z = con.execute("""SELECT m.merkmale, c.merkmale AS clip_merkmale FROM momente m
+                         LEFT JOIN clips c ON c.id = m.clip_id WHERE m.schluessel = ?""", (schluessel,)).fetchone()
+    if z is None:
+        return None
+    mk = json.loads(z["merkmale"] or "{}")
+    if mk.get("fail") or schluessel.startswith("fail:"):
+        return None
+    clip_mk = json.loads(z["clip_merkmale"]) if z["clip_merkmale"] is not None else None
+    return merkmal_modul.fuer_moment(clip_mk, mk, kill_tabelle)
+
+
+def entwurf_paare(con: sqlite3.Connection, kill_tabelle: list[float], maximal: int) -> tuple[list[Paar], int]:
+    """(Paare, Anzahl Bewertungen mit Stimme) aus deinen Entwurf-Bewertungen im Lern-Bot (06.10.).
+
+    Je Moment die Summe deiner Urteile über alle Entwürfe, in denen er war (ENTWURF_STIMME); Hook-Segmente zählen
+    nicht extra. Plus-Momente > Minus-Momente, die deutlichsten zuerst, reihum (_round_robin) bis maximal Paare.
+    Beispiel: Entwurf A (clip:1, clip:2) 👍, Entwurf B (clip:3) 👎 „langweilig“ → (clip:1 > clip:3), (clip:2 > clip:3).
+    Fehlende Schnittliste oder Moment: still übersprungen. Ohne Regie-Tabellen (alte DB): ([], 0)."""
+    try:
+        zeilen = con.execute("""SELECT b.daumen, b.gruende, e.schnittliste FROM entwurf_bewertungen b
+                                  JOIN entwuerfe e ON e.id = b.entwurf_id ORDER BY b.erstellt, b.entwurf_id""").fetchall()
+    except sqlite3.OperationalError:
+        return [], 0
+    summe: dict[str, float] = {}
+    n = 0
+    for z in zeilen:
+        gruende = set(json.loads(z["gruende"] or "[]"))
+        stimme = (ENTWURF_STIMME["gut"] if z["daumen"] > 0 else ENTWURF_STIMME["langweilig"] if "langweilig" in gruende
+                  else ENTWURF_STIMME["ohne_grund"] if not gruende else 0.0)
+        if not stimme:
+            continue
+        try:
+            with open(z["schnittliste"], encoding="utf-8") as f:
+                segmente = json.load(f).get("segmente") or []
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+        momente = {s.get("moment") for s in segmente if isinstance(s, dict) and s.get("rolle") != "hook"} - {None}
+        if momente:
+            n += 1
+        for m in momente:
+            summe[m] = summe.get(m, 0.0) + stimme
+    merkmale_je: dict[str, dict] = {}
+    for m in summe:
+        if summe[m] and (mk := _moment_merkmale(con, m, kill_tabelle)) is not None:
+            merkmale_je[m] = mk
+    gut = [merkmale_je[m] for m in sorted(merkmale_je, key=lambda m: (-summe[m], m)) if summe[m] > 0]
+    schlecht = [merkmale_je[m] for m in sorted(merkmale_je, key=lambda m: (summe[m], m)) if summe[m] < 0]
+    return [Paar(g, s, "entwurf") for g, s in _round_robin(gut, schlecht, maximal)], n
 
 
 def _hook_merkmale(con: sqlite3.Connection, post: sqlite3.Row, kill_tabelle: list[float]) -> tuple[str, dict] | None:
@@ -433,13 +494,20 @@ def berechne(con: sqlite3.Connection, konfig) -> Ergebnis:
     )
     gewicht_freigabe = float(einstellungen["gewicht_freigabe"])
     nutzer = [replace(p, gewicht=gewicht_freigabe) if p.art == "freigabe" else p for p in nutzer]
+    # Entwürfe (06.10.): dein 👍/👎 im Lern-Bot lehrt jetzt auch die Formel, nicht nur den Bonus dieser Momente
+    kill_tabelle = list(konfig.abschnitt("vorbewertung")["kill_punkte"])
+    gewicht_entwurf = float(einstellungen.get("gewicht_entwurf", 0.5))
+    entwurf, n_entwuerfe = entwurf_paare(con, kill_tabelle, int(einstellungen.get("max_paare_entwurf", 300)))
+    nutzer += [replace(p, gewicht=gewicht_entwurf) for p in entwurf]
     pub, post_ids = _publikum_paare_mit_posts(con, konfig)
     mindest_publikum = int(einstellungen["mindest_publikum_paare"])
 
-    n = n_freigaben + n_battles + len(post_ids)
+    n = n_freigaben + n_battles + n_entwuerfe + len(post_ids)
     vertrauen = min(1.0, n / max(1, int(einstellungen["voll_vertrauen"])))
     tq_start, tqp_start = trefferquote(start, nutzer), trefferquote(start, pub)
     je_quelle = {q: sum(1 for p in nutzer + pub if p.art == q) for q in QUELLEN}
+    if not je_quelle["entwurf"]:  # erst zeigen, wenn es Entwurf-Paare gibt (gespeicherte Versionen bleiben gleich)
+        del je_quelle["entwurf"]
     ohne_mic = ohne_mic_analyse(con)  # dieselbe Zählung wie „offen“ in mikro.clips_nachziehen
     tq_holdout = _holdout_trefferquote(nutzer, pub, start, vertrauen, einstellungen)
 
@@ -449,7 +517,7 @@ def berechne(con: sqlite3.Connection, konfig) -> Ergebnis:
                         ohne_mic=ohne_mic, auseinander=auseinander_satz(nutzer, pub, mindest_publikum),
                         mindest_publikum_paare=mindest_publikum, trefferquote_holdout=tq_holdout,
                         mindestens=int(einstellungen["mindestens"]),
-                        voll_vertrauen=int(einstellungen["voll_vertrauen"]))
+                        voll_vertrauen=int(einstellungen["voll_vertrauen"]), entwuerfe=n_entwuerfe)
 
     if n < int(einstellungen["mindestens"]):
         return ergebnis(dict(start), False, f"noch {int(einstellungen['mindestens']) - n} Bewertungen bis zum Lernen",
@@ -514,7 +582,8 @@ def anzeige_zeilen(e: Ergebnis) -> list[str]:
         zeilen.append(f"Holdout-Quote (jüngste {round(HOLDOUT_ANTEIL * 100)} %, nie trainiert): "
                       f"{prozent(e.trefferquote_holdout)} %")
     zeilen.append(f"Paare: {e.paare_je_quelle.get('battle', 0)} Battles · {e.paare_je_quelle.get('freigabe', 0)} "
-                  f"Freigaben · {n_pub} Publikum")
+                  f"Freigaben · " + (f"{e.paare_je_quelle['entwurf']} aus Entwürfen · "
+                                     if e.paare_je_quelle.get("entwurf") else "") + f"{n_pub} Publikum")
     zeilen.append(f"ohne Mic-Analyse: {e.ohne_mic} {'Clip' if e.ohne_mic == 1 else 'Clips'}")
     if e.auseinander:
         zeilen.append(e.auseinander)
@@ -524,9 +593,9 @@ def anzeige_zeilen(e: Ergebnis) -> list[str]:
 def datenbasis_text(e: Ergebnis) -> str:
     """„Datenbasis: 52 Bewertungen (40 Freigaben/Verwerfungen, 2 Battles, 10 Posts)“ – Posts = die in
     Publikums-Paaren (datenbasis − freigaben − battles)."""
-    posts = e.datenbasis - e.freigaben - e.battles
+    posts = e.datenbasis - e.freigaben - e.battles - e.entwuerfe
     return (f"Datenbasis: {e.datenbasis} Bewertungen ({e.freigaben} Freigaben/Verwerfungen, {e.battles} Battles, "
-            f"{posts} Posts)")
+            + (f"{e.entwuerfe} Entwürfe, " if e.entwuerfe else "") + f"{posts} Posts)")
 
 
 def aktuelle(con: sqlite3.Connection, konfig) -> tuple[int, dict[str, float]]:
