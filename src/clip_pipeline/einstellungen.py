@@ -79,6 +79,11 @@ KATALOG: tuple[Einstellung, ...] = (
                 "auto", "Automatisch wählt der Bot die Mischung selbst nach Cutter-Noten und Publikum."),
     Einstellung("viral.ki", "🔥 KI-Einschätzung", ((True, "an"), (False, "aus")),
                 True, "Claude schätzt je Moment viral/humor/spannung ein (zählt gegen dein Abo, höchstens 40 am Tag)."),
+    # 06.10. (Florian: „wie kann ich die Videos wieder länger werden lassen?“) – hinten angehängt (s:o:<i> bleiben)
+    Einstellung("regie.short_mindestens_s", "⏱️ Short-Länge",
+                ((0.0, "automatisch (lernt)"), (45.0, "mindestens 45 s"), (55.0, "mindestens 55 s"),
+                 (65.0, "mindestens 65 s"), (75.0, "75 s")),
+                0.0, "Untergrenze fürs Ziel der Shorts: Lernen, KI-Cutter und Publikum dürfen nur darüber gehen."),
 )
 NACH_SCHLUESSEL = {e.schluessel: e for e in KATALOG}
 

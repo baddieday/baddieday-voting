@@ -525,14 +525,18 @@ def serie_zu_lang(k: Kandidat, fmt: dict) -> bool:
 COOLDOWN_AUFGEHOBEN = "Cooldown aufgehoben"
 
 
-def frei_von_cooldown(kandidaten_: list[Kandidat], fmt: dict, p: dict) -> tuple[list[Kandidat], str | None]:
-    """Kandidaten ohne die gesperrten (Cooldown) – außer die freien reichen nicht für einen Entwurf (min_s):
-    dann alle, mit Hinweis. Eine Regel für Auswahl und Nachlegen."""
+def frei_von_cooldown(kandidaten_: list[Kandidat], fmt: dict, p: dict, ziel: float | None = None
+                      ) -> tuple[list[Kandidat], str | None]:
+    """Kandidaten ohne die gesperrten (Cooldown) – außer die freien reichen nicht bis zum Ziel (ziel, sonst min_s):
+    dann alle, mit Hinweis. Eine Regel für Auswahl und Nachlegen.
+    06.10. (Florian: „der Bot macht die schon wieder sackrisch kurz“): vorher reichte min_s (30 s) – bei wenig
+    Material oder enger Clip-Auswahl sperrte der Cooldown so viel, dass die Shorts bei 30–35 s statt beim Ziel
+    (45–75 s) endeten. Die Abwechslung bleibt trotzdem: gezeigte Momente verlieren weiter Punkte (abwechslung)."""
     frei = [k for k in kandidaten_ if not k.gesperrt]
     if len(frei) == len(kandidaten_):
         return frei, None
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
-    if sum(plan_laenge(k, fmt, seg_min) for k in frei) >= fmt["min_s"]:
+    if sum(plan_laenge(k, fmt, seg_min) for k in frei) >= max(fmt["min_s"], float(ziel or 0.0)):
         return frei, None
     return list(kandidaten_), f"{COOLDOWN_AUFGEHOBEN} – nur {len(frei)} frische Momente"
 
@@ -555,11 +559,12 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict, pflicht: list[Kandid
     pflicht = list(pflicht or [])
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
     laenge = lambda k: plan_laenge(k, fmt, seg_min)  # noqa: E731
-    auswahl, hinweis = frei_von_cooldown(kandidaten_, fmt, p)
+    # Ziel aus dem ganzen Material; reichen die freien Momente nicht bis dahin, hebt frei_von_cooldown die Sperre auf
+    ziel = ziel_dauer(fmt, float(p["dauer_faktor"]), sum(laenge(k) for k in kandidaten_), ziel_s=p.get("ziel_dauer_s"))
+    auswahl, hinweis = frei_von_cooldown(kandidaten_, fmt, p, ziel)
     if hinweis:
         hinweise.append(hinweis)
     vorrat = sum(laenge(k) for k in auswahl)
-    ziel = ziel_dauer(fmt, float(p["dauer_faktor"]), vorrat, ziel_s=p.get("ziel_dauer_s"))
     min_m, max_m = momente_grenzen(fmt)
     if vorrat < fmt["min_s"]:
         hinweise.append(f"nur {vorrat:.0f} s Material – kürzer als {fmt['min_s']:.0f} s")
@@ -984,7 +989,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     if zu_lang:
         hinweise.append(f"{len(zu_lang)} Serie(n) zu lang für Short (> {fmt['serie_max_s']:.0f} s am Stück)")
     # Nachlegen nimmt aus demselben Vorrat wie die Auswahl: ohne die Momente im Cooldown, außer der reichte nicht
-    vorrat, _ = frei_von_cooldown(alle, fmt, p)
+    vorrat, _ = frei_von_cooldown(alle, fmt, p, ziel_s)
 
     def ordne(auswahl: list[Kandidat]) -> list[Kandidat]:
         """Reihenfolge: Bogen des Stils, bei 🔥 Viral über viral.ordne (Twist-Stellen, Fail steigend)."""
@@ -1029,14 +1034,17 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         """Beat-Raster kürzt Segmente -> bis zum Ziel nachlegen: erst mit Match-Grenze, notfalls ohne.
         Nur Momente, die unter max_s passen; die anderen merkt sich passt_nicht."""
         min_m, max_m = momente_grenzen(fmt)
-        for mit_grenze in (True, False):
+        # Stufen: mit Match-Grenze, ohne – und zuletzt (06.10.) auch gesperrte Momente: lieber ein schon gezeigter
+        # Moment als ein Short, der weit unter dem Ziel endet (die Schätzung vorab ist nur ungefähr)
+        for quelle, mit_grenze in ((vorrat, True), (vorrat, False), (alle, False)):
+            vorher = len(gewaehlt)
             # bis zum Ziel – und bis mindestens min_momente (Short: 4), nie über max_momente (Short: 10)
             while segmente and len(gewaehlt) < max_m and (segmente[-1]["zeit_ende"] < ziel_s - 1e-6
                                                          or len(gewaehlt) < min_m):
                 je_match: dict[str, int] = {}
                 for k in reihe:
                     je_match[k.match_id or ""] = je_match.get(k.match_id or "", 0) + 1
-                rest = [k for k in vorrat if k not in gewaehlt and k not in passt_nicht
+                rest = [k for k in quelle if k not in gewaehlt and k not in passt_nicht
                         and (not mit_grenze or not k.match_id or je_match.get(k.match_id, 0) < int(p["max_je_match"]))]
                 if not rest:
                     break
@@ -1054,6 +1062,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                 reihe, segmente = neue_reihe, neue_segmente
                 if not mit_grenze and (h := f"mehr als {p['max_je_match']} Momente aus einem Match") not in hinweise:
                     hinweise.append(h)
+            if quelle is alle and len(gewaehlt) > vorher and not any(COOLDOWN_AUFGEHOBEN in h for h in hinweise):
+                hinweise.append(f"{COOLDOWN_AUFGEHOBEN} – sonst zu kurz")
         return reihe, segmente
 
     reihe, segmente = nachlegen(reihe, segmente)
