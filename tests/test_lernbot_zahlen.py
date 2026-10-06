@@ -114,8 +114,9 @@ class MitLernBot(MitClaudeKonfig):
                                            daten=daten, zeit=gepostet)
         return post_id
 
-    def alte_messung(self, post_id: int, *, am: datetime = T - timedelta(days=1), **werte) -> None:
-        publikum.speichere_messung(self.con, post_id, werte, "hand", zeit=am)
+    def alte_messung(self, post_id: int, *, am: datetime = T - timedelta(days=1), quelle: str = "hand",
+                     **werte) -> None:
+        publikum.speichere_messung(self.con, post_id, werte, quelle, zeit=am)
 
     def messungen(self, post_id: int) -> list:
         return self.con.execute("SELECT * FROM publikum_messungen WHERE post_id = ? ORDER BY id",
@@ -281,7 +282,7 @@ class Screenshot(MitLernBot):
 
     def test_ohne_nummer_knoepfe_dann_klick(self):
         gemessen = self.post(gepostet=T - timedelta(days=4))
-        self.alte_messung(gemessen, am=T - timedelta(hours=2), views=10)
+        self.alte_messung(gemessen, am=T - timedelta(hours=2), views=10, wiedergabe_s=5.0)
         aelter = self.post(gepostet=T - timedelta(days=3))
         neu = self.post(gepostet=T - timedelta(days=1))
         fake = FakeClaude()
@@ -306,11 +307,22 @@ class Screenshot(MitLernBot):
 
     def test_ohne_nummer_und_ohne_offenen_post(self):
         pid = self.post()
-        self.alte_messung(pid, am=T - timedelta(hours=1), views=10)
+        self.alte_messung(pid, am=T - timedelta(hours=1), views=10, wiedergabe_s=5.0)
         self.foto("Screenshot von heute")
-        self.assertIn("keinen Post ohne Messung", self.letzte())
+        self.assertIn("keinen Post ohne Wiedergabe-Messung", self.letzte())
         self.assertEqual(self.temp_reste(), [])
         self.assertIsNone(self.vorgang())
+
+    def test_api_messung_ohne_wiedergabe_laesst_den_knopf_stehen(self):
+        """B11 (05.10.): Die tägliche API-Messung bringt keine Wiedergabe – der Post bleibt zur Wahl, damit die
+        Wiedergabe per Screenshot noch reinkommt."""
+        pid = self.post()
+        self.alte_messung(pid, am=T - timedelta(hours=2), quelle="api", views=10)
+        with FakeClaude().aktiv():
+            self.foto(None)
+        text, knoepfe = self.bot.nachrichten[-1]
+        self.assertIn("Zu welchem Post", text)
+        self.assertEqual(knoepfe, [[(f"#{pid} · Entwurf 41 · TikTok · 23.09.", f"pl:{pid}:")]])
 
     def test_unbekannte_post_nummer(self):
         with FakeClaude().aktiv() as (lauf, _):

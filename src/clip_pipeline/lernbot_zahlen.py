@@ -4,8 +4,9 @@ So läuft es für dich:
   1. Du schickst dem Lern-Bot einen Screenshot der TikTok-Statistik, Bildunterschrift „#17“ (= Post-Nummer,
      die der Bot nach /link nennt; /publikum zeigt sie auch). Am besten als Foto; als Datei gehen JPG, PNG und
      WebP (HEIC vom iPhone nicht – dann bittet der Bot, es als Foto zu schicken).
-     Ohne Nummer fragt der Bot mit Knöpfen der letzten fünf Posts ohne Messung (`pl:<post_id>:`); das Bild
-     wartet so lange (höchstens 10 min, dann verworfen mit Hinweis).
+     Ohne Nummer fragt der Bot mit Knöpfen der letzten fünf Posts ohne Wiedergabe-Messung (`pl:<post_id>:`;
+     eine API-Messung ohne Wiedergabe zählt nicht); das Bild wartet so lange (höchstens 10 min, dann verworfen
+     mit Hinweis).
   2. Claude liest die Zahlen (screenshot.py). Passen sie zur letzten Messung (publikum.pruefe_plausibel), werden
      sie gespeichert und der Bot bestätigt sie. Sonst zeigt er die gelesenen Zahlen, nennt den Verstoß und fragt
      „Stimmt das? ✅ / ✏️ von Hand“ (`pm:<post_id>:ok` / `pm:<post_id>:hand`).
@@ -125,8 +126,9 @@ def lies_text_eingabe(text: str) -> tuple[int, dict] | None:
 
 def knoepfe_posts(posts: list, *, zeitzone: str = "UTC") -> Knoepfe:
     """Ein Knopf je Post („#17 · Entwurf 41 · TikTok · 26.09.“, `pl:17:`), untereinander. posts: Zeilen aus
-    `posts` (publikum.posts_ohne_messung). Das Datum ist der Post-Tag in `zeitzone` (der Lern-Bot gibt
-    [zeit].zeitzone mit – sonst stünde ein Post von 00:30 Uhr beim Vortag)."""
+    `posts` (publikum.posts_ohne_messung – die jüngsten ohne Wiedergabe-Messung in den letzten 24 h; eine
+    API-Messung ohne Wiedergabe zählt nicht als versorgt). Das Datum ist der Post-Tag in `zeitzone` (der Lern-Bot
+    gibt [zeit].zeitzone mit – sonst stünde ein Post von 00:30 Uhr beim Vortag)."""
     knoepfe: Knoepfe = []
     for p in posts:
         ziel_id = p["clip_id"] if p["art"] == "clip" else p["entwurf_id"]
@@ -339,12 +341,13 @@ async def bei_foto(update, context) -> None:
                "roh": None, "seit": jetzt()}
     app.bot_data[ZUSTAND] = vorgang
 
-    if nummer is None:  # welcher Post? – die jüngsten ohne Messung in den letzten 24 h zur Wahl (Annahme A12)
+    if nummer is None:  # welcher Post? – die jüngsten ohne Wiedergabe-Messung in den letzten 24 h (Annahme A12, B11)
         posts = publikum.posts_ohne_messung(con, zeit=jetzt())
         if not posts:
             _verwerfen(app.bot_data)
-            await _sag(app, "🤷 Ich finde keinen Post ohne Messung aus den letzten 24 h. Schick den Screenshot bitte "
-                            "mit #Nummer in der Bildunterschrift (/publikum zeigt die Nummern).")
+            await _sag(app, "🤷 Ich finde keinen Post ohne Wiedergabe-Messung (Ø Wiedergabe oder ganz angesehen) aus "
+                            "den letzten 24 h. Schick den Screenshot bitte mit #Nummer in der Bildunterschrift "
+                            "(/publikum zeigt die Nummern).")
             return
         frage = await _sag(app, f"📊 Zu welchem Post gehört der Screenshot? (Das Bild wartet {WARTEN_MIN} min.)",
                            knoepfe_posts(posts, zeitzone=konfig.wert("zeit.zeitzone", "Europe/Berlin")))
