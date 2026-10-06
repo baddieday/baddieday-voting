@@ -107,3 +107,20 @@ API-Referenzen: [TikTok Video Query](https://developers.tiktok.com/docs/en/tikto
 [TikTok OAuth](https://developers.tiktok.com/docs/en/oauth-user-access-token-management),
 [YouTube Analytics](https://developers.google.com/youtube/analytics/reference/reports/query),
 [YouTube-Metriken](https://developers.google.com/youtube/analytics/metrics).
+
+## Entwurf-Bewertungen lehren die Moment-Formel (06.10.)
+
+Bis zum 06.10. lernte die Formel, die Momente auswählt (`lernen.py`), nur aus Clip-Bot-Freigaben, Battles und
+Publikum. Dein 👍/👎 im Lern-Bot wirkte nur auf den Schnitt und auf genau die gezeigten Momente
+(`moment_bonus`). Neue Momente wurden also immer mit derselben Formel gewählt.
+
+Neu ist die vierte Paar-Quelle `entwurf` (`lernen.entwurf_paare`):
+- **Stimme je Moment:** Für jeden Moment wird die Summe deiner Urteile über alle Entwürfe gebildet, in denen er war:
+  - 👍 +1,
+  - „🥱 Clips langweilig“ −1,
+  - 👎 ohne Grund −0,5,
+  - 👎 nur mit Schnitt-Gründen 0.
+- **Paare:** Momente mit Plus stehen über Momenten mit Minus, die deutlichsten zuerst. Die Paare zählen halb wie eine Freigabe (`[lernen].gewicht_entwurf`).
+- **Sicherungen:** Es gelten dieselben wie bisher (Mindestmenge, Leine, nie schlechter als die Startgewichte).
+
+`🔎 /warum` zeigt, wie viele Paare daraus entstehen und was die Formel gelernt hat.

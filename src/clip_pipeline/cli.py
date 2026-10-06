@@ -602,6 +602,15 @@ def _cmd_bewerte(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_warum(args, konfig, con) -> int:
+    """Nur lesen (warum.py): Text nach stderr, JSON-Zeile mit den Kernzahlen nach stdout."""
+    from . import warum
+
+    print(warum.text(con, konfig), file=sys.stderr)
+    _json({"ok": True})
+    return 0
+
+
 def _cmd_lernstand(args, konfig, con) -> int:
     from . import autonom, regie_lernen
 
@@ -885,6 +894,9 @@ def baue_parser() -> argparse.ArgumentParser:
 
     s = unter.add_parser("lernstand", help="Was hat der Regisseur gelernt? (inkl. deiner Vorgaben)")
     s.set_defaults(fn=_cmd_lernstand, sperren=False)
+
+    s = unter.add_parser("warum", help="Sieht alles gleich aus? Material, Wiederholung, Lernen der Moment-Formel")
+    s.set_defaults(fn=_cmd_warum, sperren=False)
 
     s = unter.add_parser("big", help="pve-big: Status, Wächter, Herunterfahren, Halten")
     s.add_argument("aktion", choices=["status", "pruefen", "waechter", "aus", "halten", "loesen"])

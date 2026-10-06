@@ -28,8 +28,8 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from . import (autonom, big, db, einstellungen, entwurf, erwartung, kriterien, kritik, massstab, musik, regie,
-               regie_lernen, stile, stimmung, viral)
+from . import (autonom, big, db, einstellungen, entwurf, erwartung, kriterien, kritik, lernen, massstab, musik,
+               regie, regie_lernen, stile, stimmung, viral)
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import iso, jetzt, utc_zu_lokal
@@ -51,6 +51,7 @@ Veröffentlichte Videos und ihre Publikumszahlen verbessern die nächsten Entwü
 🎬 /entwurf <code>short</code> oder /entwurf <code>zusammenschnitt</code> – neuen Entwurf bauen
 👍/👎 bleiben freiwilliges Zusatzfeedback; danach bei Bedarf Gründe antippen und ✅ fertig.
 /musik – Titel · /lernstand – autonomer Lernfortschritt · /stand – kurzer Stand
+🔎 /warum – sieht alles gleich aus? Material, Wiederholung und was die Moment-Auswahl aus deinen 👍/👎 lernt
 ⚙️ /einstellungen – Clip-Auswahl (alle · neuester Spielabend · ein Match), Vorfilter, Effekte, Musik
 🧪 /kalibrieren – neuestes Match zum Nachprüfen: je Clip 3 Standbilder, Stimmung, Kills mit Waffen-Nummer
 🔗 /tiktok – TikTok-Konto verbinden (Zahlen kommen dann automatisch)
@@ -60,9 +61,9 @@ Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 # KURZBEFEHLE bleibt für Taps auf die alte Ersatz-Tastatur, bis sie weg ist (ReplyKeyboardRemove).
 KURZBEFEHLE = {"🎬 Short": "short", "🎞️ Zusammenschnitt": "zusammenschnitt", "🧠 Lernstand": "lernstand",
                "📋 Stand": "stand", "📊 Publikum": "publikum", "🎵 Musik": "musik", "⚙️ Einstellungen": "einstellungen",
-               "🔥 Viral-Video": "viral"}
+               "🔥 Viral-Video": "viral", "🔎 Warum?": "warum"}
 KURZ_REIHEN = [["🔥 Viral-Video"], ["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"],
-               ["📊 Publikum", "🎵 Musik"], ["⚙️ Einstellungen"]]
+               ["📊 Publikum", "🎵 Musik"], ["⚙️ Einstellungen", "🔎 Warum?"]]
 KREISE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"
 
 
@@ -320,6 +321,11 @@ def baue_entwurf(konfig: Konfig, fmt: str) -> int:
                 big.herzschlag(konfig, "lernbot"):
             t1 = time.monotonic()
             nachgezogen = stimmung_nachziehen(con, konfig, nur_matches)
+            try:  # 06.10.: deine Bewertungen bis eben lehren die Moment-Formel (lernen.entwurf_paare) – vor jedem Entwurf
+                version, gelernt_formel = lernen.aktualisiere(con, konfig)
+                log.info("Moment-Formel Version %s (%s)", version, gelernt_formel.grund)
+            except Exception:  # noqa: BLE001 – der Entwurf ist wichtiger; dann gelten die bisherigen Gewichte
+                log.exception("Moment-Formel nachlernen")
             t2 = time.monotonic()
             variante = None
             if fmt in viral.KNOEPFE:   # 🔥 Viral (05.10.): Mischung wählt der Bot, Momente schätzt die KI ein
@@ -551,6 +557,18 @@ async def cmd_lernstand(update, context) -> None:
     await update.effective_message.reply_text(autonom_text(context.bot_data["con"]))
 
 
+async def cmd_warum(update, context) -> None:
+    """🔎 /warum (06.10.): Material, Wiederholung, Lernen der Moment-Formel – aus den echten Daten (warum.py)."""
+    from . import warum
+
+    try:
+        antwort = warum.text(context.bot_data["con"], context.bot_data["konfig"])
+    except Exception as fehler:  # noqa: BLE001 – lieber kurz sagen, was los ist
+        log.exception("/warum")
+        antwort = f"⚠️ /warum fehlgeschlagen: {type(fehler).__name__}: {str(fehler)[:200]}"
+    await update.effective_message.reply_text(antwort[:TEXT_MAX])
+
+
 async def cmd_musik(update, context) -> None:
     zeilen = context.bot_data["con"].execute(
         "SELECT id, titel, kuenstler, bpm, energie, stimmungen FROM tracks ORDER BY id DESC LIMIT 30").fetchall()
@@ -660,6 +678,8 @@ async def _kurzbefehl(ziel: str | None, update, context) -> None:
         await cmd_stand(update, context)
     elif ziel == "musik":
         await cmd_musik(update, context)
+    elif ziel == "warum":
+        await cmd_warum(update, context)
     elif ziel == "publikum":
         from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
 
@@ -811,7 +831,7 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     nur_ich = filters.User(user_id=erlaubt)
     for name, funktion in (("start", cmd_hilfe), ("hilfe", cmd_hilfe), ("help", cmd_hilfe), ("stand", cmd_stand),
                            ("lernstand", cmd_lernstand), ("musik", cmd_musik), ("entwurf", cmd_entwurf),
-                           ("viral", cmd_viral)):
+                           ("viral", cmd_viral), ("warum", cmd_warum)):
         app.add_handler(CommandHandler(name, funktion, filters=nur_ich))
     app.add_handler(MessageHandler(nur_ich & (filters.AUDIO | filters.Document.AUDIO), bei_audio))
     # Kurzbefehle VOR dem freien Text der Zahlen-Eingabe (lernbot_zahlen.bei_text nimmt sonst jeden Text)

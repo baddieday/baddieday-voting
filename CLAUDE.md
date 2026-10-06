@@ -307,3 +307,12 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - Hook-Teaser, Zeitlupe und Standbild am Tod sind Werkzeuge mit Wahrscheinlichkeit, keine Pflicht. Variante,
     Mischung, KI-Mittel und Werkzeuge sind Merkmale fürs Publikums-Lernen. Fail-Momente kommen nur in 🔥 Viral.
     Doku `docs/REGIE.md` „Fail-Format und 🔥 Viral-Video“.
+- 2026-10-06 (Florian: „gefühlt bewerte ich genau den gleichen Mist wie früher … liegt zu wenig Material vor?“):
+  **Deine Entwurf-Bewertungen lehren jetzt die Moment-Formel.** Ursache im Code: Dein 👍/👎 im Lern-Bot änderte nur
+  den Schnitt und den Bonus genau der gezeigten Momente. Die Formel, die neue Momente auswählt (`lernen.py`), lernte
+  nur aus Clip-Bot-Freigaben und Battles, und Freigaben machst du seit der Auto-Freigabe (30.09.) nicht mehr.
+  - Neue Paar-Quelle `entwurf`: je Moment die Summe deiner Urteile (👍 +1, „🥱 langweilig“ −1, 👎 ohne Grund −0,5,
+    nur Schnitt-Gründe 0); Plus-Momente > Minus-Momente, Gewicht 0,5 (`[lernen].gewicht_entwurf`). Fails bleiben
+    draußen. Alle gespeicherten Bewertungen wirken sofort; der Lern-Bot rechnet vor jedem Entwurf neu.
+  - **🔎 /warum** (Knopf, `pipeline warum`): Material, Wiederholung und Lernstand aus den echten Daten, mit Fazit.
+    Nur lesen.
