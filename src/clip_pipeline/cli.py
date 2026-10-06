@@ -659,7 +659,13 @@ def _cmd_publikum(args, konfig, con) -> int:
             return 1
     if args.aktion == "importieren":
         antwort = json.loads(Path(args.datei).read_text(encoding="utf-8"))
-        mid = publikum_adapter.importiere(con, konfig, args.post, antwort, zeit=zeit)
+        try:
+            mid = publikum_adapter.importiere(con, konfig, args.post, antwort, zeit=zeit)
+        except publikum_adapter.AdapterFehler as e:  # auch Zurueckgehalten: nur Nullen/gesunkene Zähler → nichts gespeichert
+            log.error("Import für Post #%s: %s", args.post, e)
+            _json({"messung": None, "fehler": "zurueckgehalten" if isinstance(e, publikum_adapter.Zurueckgehalten)
+                   else "adapter", "hinweis": str(e)})
+            return 1
         _json({"messung": mid, "autonom": autonom.ueberblick(con)})
         return 0
     if args.aktion == "holen":  # B12 (05.10.): nur der Abruf – zum Ausprobieren nach /tiktok, ohne Scores und Meldung

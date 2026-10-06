@@ -210,19 +210,34 @@ def _frischer_token(cache: dict, client: str, seed: str, zeit: datetime) -> str 
     return None
 
 
+def _refresh_abgelehnt(fehler: AdapterFehler) -> bool:
+    """Hat TikTok den Refresh fachlich abgelehnt (Anmeldung ungültig) – oder war nur die Verbindung gestört?
+    Abgelehnt: HTTP 400/401/403 (invalid_grant, access_token_invalid, …) oder HTTP 200 mit error-Objekt („API
+    abgelehnt: …“). NICHT abgelehnt: Netz/Timeout („API nicht erreichbar“), 429, 5xx, kein JSON – da hilft der
+    nächste Lauf, nicht eine neue Anmeldung (Prüfer-Befund 06.10.: ein Netzaussetzer ist kein Widerruf).
+    Beispiel: AdapterFehler("API HTTP 401: access_token_invalid") → True · AdapterFehler("API nicht erreichbar") → False."""
+    text = str(fehler)
+    return text.startswith("API abgelehnt") or text.startswith(("API HTTP 400", "API HTTP 401", "API HTTP 403"))
+
+
 def _tiktok_erneuern(pfad: Path, cache: dict, client: str, secret: str, seed: str, refresh: str,
                      zeit: datetime) -> str:
     """Refresh-Aufruf und Cache schreiben (nur innerhalb der Sperre aufrufen). Übernommen werden open_id, scope,
     display_name und refresh_expires_at; scope und refresh_expires_at erneuert die Antwort, wenn sie sie enthält.
-    AnmeldungUngueltig, wenn TikTok den Refresh ablehnt (Token widerrufen/abgelaufen) oder der Aufruf scheitert."""
+    AnmeldungUngueltig nur, wenn TikTok den Refresh ablehnt (_refresh_abgelehnt); Netz-/Serverfehler bleiben ein
+    AdapterFehler („nicht erneuert“), die Anmeldung gilt weiter."""
     alt = cache if _passt(cache, client, seed) else {}
     refresh = alt.get("refresh_token") or refresh
     try:
         antwort = _json(TIKTOK_TOKEN_URL, daten={"grant_type": "refresh_token", "client_key": client,
                                                  "client_secret": secret, "refresh_token": refresh}, formular=True)
     except AdapterFehler as fehler:
-        raise AnmeldungUngueltig(f"TikTok-Anmeldung abgelaufen oder widerrufen ({fehler}) – im Lern-Bot /tiktok neu "
-                                 "verbinden", code=fehler.code) from None
+        if _refresh_abgelehnt(fehler):
+            raise AnmeldungUngueltig(f"TikTok-Anmeldung abgelaufen oder widerrufen ({fehler}) – im Lern-Bot /tiktok "
+                                     "neu verbinden", code=fehler.code, grund=fehler.grund) from None
+        # Verbindung gestört oder TikTok überlastet: Anmeldung bleibt gültig, der nächste Lauf versucht es wieder
+        raise AdapterFehler(f"TikTok-Token nicht erneuert ({fehler}) – nächster Lauf versucht es wieder",
+                            code=fehler.code, grund=fehler.grund) from None
     if not antwort.get("access_token"):
         raise AdapterFehler("TikTok-Token konnte nicht erneuert werden")
     neu = {k: v for k, v in alt.items() if k in ("open_id", "scope", "display_name", "refresh_expires_at")}

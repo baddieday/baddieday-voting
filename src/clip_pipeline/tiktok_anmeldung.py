@@ -259,7 +259,12 @@ def trennen(konfig: Konfig) -> dict:
     (Annahme: den Zugriff entziehst du selbst in der TikTok-App; Fakten vor Erinnerung).
     Rückgabe {"getrennt": True, "env_tokens": [Namen aus ENV_TOKENS, die noch gesetzt sind]} – nur Namen, nie
     Werte: mit einem Refresh-Token in .env meldet sich der Abruf beim nächsten Lauf wieder an."""
-    publikum_adapter.schreibe_cache(publikum_adapter.cache_pfad(konfig), {})
+    try:
+        # dieselbe Sperre wie Tausch und Timer-Refresh: sonst schriebe ein gerade laufender Refresh die Tokens zurück
+        with sperre(_sperre_pfad(konfig), warten_s=SPERRE_WARTEN_S):
+            publikum_adapter.schreibe_cache(publikum_adapter.cache_pfad(konfig), {})
+    except Gesperrt:
+        raise AnmeldeFehler("Der Timer erneuert gerade den Token – in einer Minute noch einmal /tiktok trennen") from None
     return {"getrennt": True, "env_tokens": [name for name in ENV_TOKENS if os.environ.get(name, "").strip()]}
 
 

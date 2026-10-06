@@ -209,7 +209,7 @@ unverändert (`bewertet_utc`). Das hält Paare und Rezept-Stände stabil.
 - Rücksprung: statische Seite `https://clip-battle.de/tiktok/callback` (nur HTML: zeigt den `code`-Parameter
   groß an). `pipeline publikum anmelden` gibt die Anmelde-URL aus (auch der Bot per `/tiktok`), du öffnest sie am
   Handy, kopierst den Code, `/tiktok <code>` tauscht ihn gegen Tokens. Tokens in
-  `/var/lib/clip-pipeline/tiktok.json` (0600), Refresh automatisch, nie im Repo, nie im Log.
+  `/var/lib/clip-pipeline/publikum-oauth.json` (0600), Refresh automatisch, nie im Repo, nie im Log.
 - `pipeline publikum holen`: `/v2/video/list/` (Felder `id, create_time, share_url, duration, view_count,
   like_count, comment_count, share_count`), seitenweise bis 60 Tage zurück. Zuordnung zu `posts`: erst
   `video_id`, sonst `gepostet_utc` ± 30 min und Dauer ± 2 s (dann wird `video_id` nachgetragen). Nicht
@@ -423,9 +423,9 @@ Sonntag `[analyst].uhrzeit` (18:00), Timer `clip-wochenbericht`, versandt über 
   0.3, reichweite 0.2}`), `[rezepte]` (Stufen je Stellschraube, `experiment_jeder 3`, `nutzer_gewicht 0.5`),
   `[merkmale]` (`endgame_spieler 10`, `clutch_vor_s 30`, `clutch_nach_s 10`, `mic true`, `[merkmale.waffen]`),
   `[lernbot]` (`screenshot_claude true`, `varianten_je_satz 2`), `[analyst]` (`wochentag "So"`, `uhrzeit
-  "18:00"`, `wochen 4`, `claude true`, `max_hypothesen 3`), `[tiktok]` (`redirect_uri`, `sandbox true`).
+  "18:00"`, `wochen 4`, `claude true`, `max_hypothesen 3`), `[tiktok]` (`redirect_uri`).
 - Secrets: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` in `.env` (`.env.example` ergänzt); Tokens unter
-  `/var/lib/clip-pipeline/tiktok.json`; Logs ohne Tokens (httpx auf WARNING wie heute).
+  `/var/lib/clip-pipeline/publikum-oauth.json`; Logs ohne Tokens (httpx auf WARNING wie heute).
 - Claude-Aufrufe: je Screenshot einer, pro Woche einer, sonst wie heute. `/lernstand` zählt die Woche
   (`lern_meldungen`-unabhängig, Tabelle `ereignisse`, `art = 'claude'`).
 - Idempotenz: `publikum holen`/`bewerten`/`wochenbericht` können beliebig oft laufen; Scores werden nie

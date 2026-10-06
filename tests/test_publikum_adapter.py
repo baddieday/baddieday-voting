@@ -521,6 +521,24 @@ class Token(MitSpeicher):
                 adapter._token("tiktok", self.konfig, self.zeit)
         self.assertEqual(cm.exception.code, "invalid_grant")
 
+    def test_netzfehler_beim_refresh_ist_keine_ungueltige_anmeldung(self):
+        # Prüfer-Befund 06.10.: Netzaussetzer, 429 und 5xx sind kein Widerruf – nächster Lauf versucht es wieder
+        self.cache(expires_at=(self.zeit - timedelta(minutes=1)).timestamp(),
+                   refresh_expires_at=(self.zeit + timedelta(days=200)).timestamp())
+        for text in ("API nicht erreichbar", "API HTTP 429: rate_limit_exceeded", "API HTTP 503",
+                     "API liefert kein gültiges JSON"):
+            with self.subTest(text):
+                with patch.object(adapter, "_json", side_effect=adapter.AdapterFehler(text)):
+                    with self.assertRaisesRegex(adapter.AdapterFehler, "nicht erneuert") as cm:
+                        adapter._token("tiktok", self.konfig, self.zeit)
+                self.assertNotIsInstance(cm.exception, adapter.AnmeldungUngueltig)
+        self.assertEqual(adapter.lies_cache(self.pfad)["refresh_token"], "rft")   # Anmeldung unangetastet
+        # fachliche Ablehnung bleibt eine ungültige Anmeldung
+        with patch.object(adapter, "_json", side_effect=adapter.AdapterFehler("API HTTP 401: access_token_invalid",
+                                                                              code="access_token_invalid")):
+            with self.assertRaises(adapter.AnmeldungUngueltig):
+                adapter._token("tiktok", self.konfig, self.zeit)
+
     def test_sperre_zweites_lesen_spart_den_aufruf(self):
         # B20: Bot und Timer erneuern nicht gleichzeitig – in der Sperre noch einmal lesen
         abgelaufen = self.cache(expires_at=(self.zeit - timedelta(minutes=1)).timestamp())

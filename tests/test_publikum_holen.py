@@ -32,6 +32,18 @@ class Holen(MitBewertung):
         zeilen = aus.getvalue().strip().splitlines()
         return code, json.loads(zeilen[-1]), zeilen
 
+    def test_importieren_meldet_zurueckgehaltene_nullen(self):
+        # Prüfer-Befund 06.10. (P1 „Offen“): eine Nullen-Datei endet mit Exit 1 und Hinweis, nicht als „Unerwarteter Fehler“
+        from clip_pipeline import publikum_adapter
+        datei = self.tmp / "nullen.json"
+        datei.write_text('{"data": {"videos": [{"id": "1", "view_count": 0, "like_count": 0}]}}', encoding="utf-8")
+        with mock.patch.object(publikum_adapter, "importiere",
+                               side_effect=publikum_adapter.Zurueckgehalten("nur Nullen – Sandbox hält die Zähler zurück")):
+            code, ergebnis, zeilen = self.lauf(["publikum", "importieren", "--post", "1", "--datei", str(datei)])
+        self.assertEqual((code, len(zeilen)), (1, 1))
+        self.assertEqual((ergebnis["messung"], ergebnis["fehler"]), (None, "zurueckgehalten"))
+        self.assertIn("Nullen", ergebnis["hinweis"])
+
     def test_holen_ruft_nur_den_abruf(self):
         api = {"gespeichert": 2, "fehler": 0}
         with mock.patch("clip_pipeline.publikum_adapter.abrufen", return_value=api) as abrufen, \

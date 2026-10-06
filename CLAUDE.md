@@ -307,3 +307,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - Hook-Teaser, Zeitlupe und Standbild am Tod sind Werkzeuge mit Wahrscheinlichkeit, keine Pflicht. Variante,
     Mischung, KI-Mittel und Werkzeuge sind Merkmale fürs Publikums-Lernen. Fail-Momente kommen nur in 🔥 Viral.
     Doku `docs/REGIE.md` „Fail-Format und 🔥 Viral-Video“.
+- 2026-10-06: **TikTok-Anbindung verlässlich.** Zähler je 20 Videos in einem Aufruf; Fehler erreichen den Lern-Bot
+  (ℹ️ nicht verbunden · ⛔ Anmeldung ungültig · ⏳ Anmeldung läuft ab · ⚠️ Abruf-Fehler mit Grund); Netzaussetzer sind
+  kein Widerruf. API-Messungen verdrängen nie die Wiedergabezeit aus dem Screenshot (Zähler werden ergänzt), Sandbox-
+  Nullen und gesunkene Zähler werden zurückgehalten. `/tiktok` zeigt den Stand (Konto, Ablauf, letzte Abholung),
+  `/tiktok neu`, `/tiktok trennen`; `pipeline publikum holen` nur zum Abrufen.

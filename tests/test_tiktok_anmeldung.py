@@ -168,6 +168,17 @@ class Anmeldung(MitSpeicher):
                     self.assertIn("nicht lesbar", s["fehler"])
                     self.assertIn("/tiktok trennen", tiktok_anmeldung.status_text(s, self.konfig))
 
+    def test_trennen_wartet_auf_die_sperre(self):
+        # Prüfer-Befund 06.10.: hält der Timer gerade die Sperre (Refresh), darf trennen nicht dazwischenschreiben
+        from clip_pipeline.sperre import sperre
+        with mock.patch.dict(os.environ, ZUGANG):
+            self.tausche()
+            pfad = publikum_adapter.cache_pfad(self.konfig)
+            with sperre(pfad.with_suffix(".lock")), mock.patch.object(tiktok_anmeldung, "SPERRE_WARTEN_S", 0):
+                with self.assertRaisesRegex(tiktok_anmeldung.AnmeldeFehler, "/tiktok trennen"):
+                    tiktok_anmeldung.trennen(self.konfig)
+            self.assertTrue(publikum_adapter.lies_cache(pfad).get("refresh_token"))       # nichts geleert
+
     def test_trennen(self):
         with mock.patch.dict(os.environ, ZUGANG):
             self.tausche()
