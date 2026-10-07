@@ -1,6 +1,7 @@
 """Session vorbei (`pipeline sitzungen`, Timer alle 10 min): Gaming-PC meldet das Ende eines Spielabends.
 
-Der Windows-Helfer schreibt sitzungen/session_<zeit>.json (Match-IDs des Abends) auf den Speicher. Hier:
+Der Windows-Helfer schreibt sitzungen/session_<zeit>.json (Match-IDs des Abends) auf den Speicher – oder der Mini
+erkennt das Abend-Ende selbst (auto_abend: 45 min kein neues Match). Hier:
   1. neue Dateien lesen – pve-big wird dafür NICHT geweckt (schläft er, nächster Versuch beim nächsten Timer)
   2. warten, bis n8n alle Matches verarbeitet hat (höchstens `warten_h`, danach mit Hinweis weiter)
   3. Stimmung für neue Momente, dann ein Short nur aus den Momenten dieses Abends -> der Lern-Bot schickt ihn
@@ -33,6 +34,7 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
     ordner = konfig.wurzel / str(konfig.wert("sitzungen.ordner", "sitzungen"))
     fertig = {z["name"] for z in con.execute("SELECT name FROM sitzungen")}
     ergebnis: dict = {"neu": [], "wartet": [], "fehler": [], "nachgeholt": _nachholen(con, konfig)}
+    abende: list[tuple[str, list[str], object]] = []
     for datei in sorted(ordner.glob("session_*.json")) if ordner.is_dir() else []:
         name = datei.stem
         if name in fertig or not SESSION_ID.fullmatch(name):
@@ -44,6 +46,10 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             ergebnis["fehler"].append(f"{name}: {e}")
             continue
+        abende.append((name, matches, ende))
+    if (selbst := auto_abend(con, konfig, [m for _, ms, _ in abende for m in ms])) is not None:
+        abende.append(selbst)            # ohne Datei vom PC: der Mini hat das Abend-Ende selbst erkannt
+    for name, matches, ende in abende:
         status = {z["id"]: z["status"] for z in con.execute(
             f"SELECT id, status FROM matches WHERE id IN ({','.join('?' for _ in matches) or 'NULL'})", matches)}
         offen = [m for m in matches if status.get(m) != "verarbeitet"]
@@ -83,6 +89,53 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
         _merke(con, name, matches, ende, entwurf_id, hinweis)
         ergebnis["neu"].append({"sitzung": name, "matches": len(matches), "entwurf": entwurf_id, "hinweis": hinweis})
     return ergebnis
+
+
+def auto_abend(con: sqlite3.Connection, konfig: Konfig, schon: list[str] = ()) -> tuple[str, list[str], object] | None:
+    """Abend-Ende ohne den Gaming-PC erkennen (07.10., Florian: „es kommen immer noch die Clips von vor 14 Tagen, nicht
+    die neueste Session“ – die Datei vom PC kam nie, SessionVorbeiMinuten steht ab Werk auf 0). Der letzte Block von
+    Matches (Lücke ≤ 2 h, Start in den letzten 18 h) gilt als Abend, wenn seit dem letzten Match-Ende
+    [sitzungen].ruhe_min (45) vergangen sind und noch keine Sitzung eines seiner Matches kennt. Name: abend_<1. Match>.
+    Ältere Abende werden nie nachgeholt (kein Video-Schwall nach dem Update)."""
+    ruhe = float(konfig.wert("sitzungen.ruhe_min", 45) or 0)
+    if ruhe <= 0:
+        return None
+    jetzt_utc = jetzt()
+    zeilen = []                                       # (id, Start, Ende) – unlesbare Zeiten überspringen
+    for z in con.execute("SELECT id, start_utc, ende_utc FROM matches WHERE start_utc >= ?",
+                         (iso(jetzt_utc - timedelta(hours=18)),)):
+        start, ende = _zeit(z["start_utc"]), _zeit(z["ende_utc"])
+        if start is not None and start <= jetzt_utc:
+            zeilen.append((z["id"], start, ende or start))
+    if not zeilen:
+        return None
+    zeilen.sort(key=lambda x: x[1])
+    block = [zeilen[-1]]
+    for z in reversed(zeilen[:-1]):
+        if block[0][1] - z[2] > timedelta(hours=2):   # mehr als 2 h Pause: ein früherer Abend
+            break
+        block.insert(0, z)
+    ende = max(z[2] for z in block)
+    if jetzt_utc - ende < timedelta(minutes=ruhe):
+        return None                                   # vielleicht wird noch gespielt
+    ids = [z[0] for z in block]
+    bekannt = set(schon)
+    for z in con.execute("SELECT matches FROM sitzungen"):
+        try:
+            bekannt.update(json.loads(z["matches"] or "[]"))
+        except ValueError:
+            continue
+    if bekannt & set(ids):
+        return None
+    name = f"abend_{ids[0]}"
+    return (name, ids, ende) if SESSION_ID.fullmatch(name) else None
+
+
+def _zeit(text):
+    try:
+        return aus_iso(text) if text else None
+    except (TypeError, ValueError):
+        return None
 
 
 def kein_video_text(tag: str, z: regie.ZuWenigSzenen, offen: int = 0) -> str:

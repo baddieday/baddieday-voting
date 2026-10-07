@@ -295,11 +295,11 @@ class LernBot(MitRegieMaterial):
                                return_value={"analysiert": 3, "stimmungen": {"episch": 3}}) as analyse:
             lernbot.baue_entwurf(self.konfig, "short")
         self.assertEqual((analyse.call_args.kwargs["claude"], analyse.call_args.kwargs["maximal"]), (False, 10))
-        self.konfig.daten["lernbot"] = {"stimmung_je_entwurf": 0}
+        self.konfig.daten["lernbot"] = {"stimmung_je_entwurf": 0, "quelle": "alle"}
         with mock.patch.object(lernbot.stimmung, "analysiere") as analyse:
             lernbot.baue_entwurf(self.konfig, "short")
         analyse.assert_not_called()
-        self.konfig.daten["lernbot"] = {"stimmung_je_entwurf": 5}
+        self.konfig.daten["lernbot"] = {"stimmung_je_entwurf": 5, "quelle": "alle"}
         with mock.patch.object(lernbot.stimmung, "analysiere", side_effect=RuntimeError("Whisper kaputt")), \
                 self.assertLogs("lern-bot", "ERROR"):
             eid = lernbot.baue_entwurf(self.konfig, "short")
