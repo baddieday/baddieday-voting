@@ -193,6 +193,43 @@ class RegieFehler(RuntimeError):
     pass
 
 
+class ZuWenigSzenen(RegieFehler):
+    """Stufe 1 (07.10., Florian: „lieber kein Video“): weniger starke Szenen als ein Short braucht – kein Video mit
+    Füllmaterial, sondern eine klare Zeile für dich."""
+
+    def __init__(self, stark: int, mindestens: int, gesamt: int):
+        self.stark, self.mindestens, self.gesamt = stark, mindestens, gesamt
+        self.quelle: str | None = None   # „🎯 nur Match …“, wenn deine Clip-Auswahl (⚙️) das Material eingeengt hat
+        super().__init__(f"nur {stark} starke Szene{'n' if stark != 1 else ''} (mindestens {mindestens})")
+
+    def kopf(self) -> str:
+        return (f"nur {self.stark} starke Szene{'n' if self.stark != 1 else ''} (Multikill, Clutch oder Endkampf), "
+                f"ein Video braucht {self.mindestens}")
+
+    def tipp(self) -> str:
+        """Was helfen würde – nur, wenn es wirklich hilft (sonst leer)."""
+        if self.quelle:
+            return f"Deine Clip-Auswahl ist eingeschränkt ({self.quelle}) – für alle Clips: ⚙️ → 🔧 → 🎯 Clips."
+        if self.gesamt >= self.mindestens:
+            return "Mit Einzelkills ginge es: ⚙️ → 🎯 Szenen → „auch Einzelkills“."
+        return ""
+
+
+def ist_stark(gruppe: int, victory: bool, clip_mk: dict | None, mk: dict) -> bool:
+    """Starke Szene (Stufe 1, 07.10.): Multikill (≥ 2 in Serie), Victory Royale, Clutch oder ein Kill im Endkampf.
+    Einzelkills im frühen Spiel und Szenen ohne Kill zählen nicht (Spannung ohne Kill erkennt Stufe 2)."""
+    werte = {**(mk or {}), **(clip_mk or {})}
+
+    def zahl(name: str) -> float:
+        try:
+            return float(werte.get(name) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    kills = max(gruppe, int(zahl("kills")), len(werte.get("kill_sekunden") or []))
+    return gruppe >= 2 or bool(victory) or zahl("clutch") > 0 or (zahl("endgame") > 0 and kills >= 1)
+
+
 @dataclass
 class Kandidat:
     schluessel: str
@@ -215,6 +252,7 @@ class Kandidat:
     max_gruppe: int = 0            # größte Kill-Serie (wie Bot und Elo zählen) – Kill-Titel
     victory: bool = False          # Victory Royale – Titel VICTORY ROYALE
     gesperrt: bool = False         # Cooldown: in einem der letzten cooldown_entwuerfe Entwürfe – nur Reserve
+    stark: bool = False            # Multikill, Victory, Clutch oder Kill im Endkampf (ist_stark, Stufe 1)
     start_utc: str | None = None   # Beginn des Moments (momente.start_utc) – Reihenfolge „chronologisch“
     fail: bool = False             # Fail-Moment (fail.py): Kern um den Tod, nur im Format 🔥 Viral
     ki: dict | None = None         # Einschätzung viral/humor/spannung (viral.py; quelle ki oder regel)
@@ -435,6 +473,10 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     cooldown = int(p.get("cooldown_entwuerfe", 0)) if anteil_ab > 0 else 0
     historisch = max(0.0, min(1.0, float((p.get("autonom") or {}).get("historischer_anteil", 1.0))))
     bericht = {"ohne_datei": 0, "ersetzt": 0, "gesperrt": 0}
+    try:  # deine Sperren (🥱 langweilig, Stufe 1): diese Szenen kommen nie wieder
+        dauerhaft = {z[0] for z in con.execute("SELECT schluessel FROM sperren WHERE art = 'moment'")}
+    except sqlite3.OperationalError:
+        dauerhaft = set()
     zeilen = con.execute(
         """SELECT m.*, c.status AS clip_status, c.elo AS elo, c.merkmale AS clip_merkmale,
                   c.max_gruppe AS max_gruppe, c.victory_royale AS victory_royale, c.clip_pfad AS clip_pfad,
@@ -444,8 +486,8 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     ).fetchall()
     ergebnis = []
     for z in zeilen:
-        if hart_verworfen(z["clip_status"], z["clip_quelle"]):
-            continue  # nur dein 🗑️ schließt aus – automatisch aussortierte bleiben Material (30.09.)
+        if hart_verworfen(z["clip_status"], z["clip_quelle"]) or z["schluessel"] in dauerhaft:
+            continue  # nur dein 🗑️ bzw. 🥱 schließt aus – automatisch aussortierte bleiben Material (30.09.)
         if nur_matches is not None and z["match_id"] not in nur_matches:
             continue  # Spielabend: fremde Matches zählen auch in der Bilanz nicht mit
         mk = json.loads(z["merkmale"])
@@ -493,7 +535,8 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
                                  round(punkte - abzug, 2), z["clip_id"], z["match_id"], kern, muss, grund, mk,
                                  abzug, gezeigt, teile, teile_muss, serie, max_gruppe=gruppe, victory=bool(victory),
                                  gesperrt=gesperrt, start_utc=z["start_utc"], fail=ist_fail,
-                                 titel=mk.get("fail_titel") if ist_fail else None))
+                                 titel=mk.get("fail_titel") if ist_fail else None,
+                                 stark=not ist_fail and ist_stark(gruppe, bool(victory), clip_mk, mk)))
     return ergebnis, bericht
 
 
@@ -661,6 +704,16 @@ def waehle_musik(con: sqlite3.Connection, stimmung: str, gesamt_s: float, p: dic
     schlagen die alten EDM-Titel, solange Stimmung und Tempo halbwegs passen."""
     ziel = ziel or ZIEL
     tracks = con.execute("SELECT * FROM tracks WHERE beats IS NOT NULL ORDER BY id").fetchall()
+    try:  # deine Sperren (🎵 Musik, Stufe 1): dieser Song nie wieder
+        gesperrt = {z[0] for z in con.execute("SELECT schluessel FROM sperren WHERE art = 'track'")}
+    except sqlite3.OperationalError:
+        gesperrt = set()
+    tracks = [t for t in tracks if str(t["id"]) not in gesperrt]
+    rotation = min(int(p.get("musik_rotation", 0) or 0), len(tracks) - 1)
+    if rotation > 0:  # Stufe 1: vorher gewann ein passender Song bis zu 13-mal hintereinander (Abzug nur 0,15 je Einsatz)
+        zuletzt = {z[0] for z in con.execute(
+            "SELECT track_id FROM entwuerfe WHERE track_id IS NOT NULL ORDER BY id DESC LIMIT ?", (rotation,))}
+        tracks = [t for t in tracks if t["id"] not in zuletzt] or tracks
     if not tracks:
         return None, {}
     energien = [float(t["energie"] or 0) for t in tracks]
@@ -966,6 +1019,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     if bericht["ohne_datei"]:
         hinweise.append(f"{bericht['ohne_datei']} Momente ohne Datei übersprungen"
                         + (f" ({bericht['ersetzt']} weitere: Bot-Clip statt Moment-Datei)" if bericht["ersetzt"] else ""))
+    if p.get("nur_starke") and viral is None:   # Stufe 1: lieber kein Video als eins mit Füllmaterial
+        stark = [k for k in alle if k.stark]
+        if len(stark) < momente_grenzen(fmt)[0]:
+            raise ZuWenigSzenen(len(stark), momente_grenzen(fmt)[0], len(alle))
+        alle = stark
     if not alle:
         raise RegieFehler(("Keine Fail-Momente – erst `pipeline fail --nachziehen`" if variante == "fail" else
                            "Keine Momente mit Stimmung" + (" in diesen Matches" if nur_matches else "")

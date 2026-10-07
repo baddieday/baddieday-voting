@@ -66,6 +66,9 @@ MIGRATIONEN += [("kritiken", "teile", "TEXT"), ("kritiken", "plan_teile", "TEXT"
 # Spalte statt neuem Format – die CHECK-Liste von entwuerfe.format ließe sich nur mit Tabellen-Umbau ändern; gerendert
 # wird ein Viral-Video wie jeder Short (format = 'short').
 MIGRATIONEN += [("entwuerfe", "variante", "TEXT")]
+# Stufe 1 (07.10.): Telegram-Nachricht je Lern-Meldung – die Statuszeile „🎮 Abend erkannt“ wird später durch das
+# Video ersetzt (gelöscht) bzw. zu „kein Video, weil …“ umgeschrieben, statt eine zweite Nachricht zu schicken
+MIGRATIONEN += [("lern_meldungen", "tg_nachricht_id", "INTEGER")]
 
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:

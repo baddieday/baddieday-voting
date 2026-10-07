@@ -152,3 +152,13 @@ CREATE TABLE IF NOT EXISTS moment_einschaetzungen (
     version    TEXT NOT NULL,               -- sha256(Prompt + Schema)[:12]
     erstellt   TEXT NOT NULL
 );
+
+-- Deine Sperren (Stufe 1, 07.10., regeln.py): 🥱 langweilig sperrt die schwächeren Szenen eines Videos, 🎵 Musik den
+-- Song – für immer, bis du sie selbst wieder freigibst. Kein Lernen, keine KI kann sie überstimmen.
+CREATE TABLE IF NOT EXISTS sperren (
+    art        TEXT NOT NULL CHECK (art IN ('moment', 'track')),
+    schluessel TEXT NOT NULL,               -- momente.schluessel bzw. tracks.id als Text
+    grund      TEXT,
+    erstellt   TEXT NOT NULL,
+    PRIMARY KEY (art, schluessel)
+);
