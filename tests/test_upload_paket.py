@@ -451,16 +451,16 @@ class EntwurfCaption(MitSpeicher):
         self.assertIn("#multikill", text)
         self.assertLessEqual(caption._zahlen(self.beschreibung(text)), {"4", "2"})
 
-    def test_momente_ohne_clip_ergeben_fortnite(self):
+    def test_momente_ohne_clip_ergeben_fortnitehighlights(self):
         text = caption.entwurf_caption(self.con, self.liste([("datei:1", None), ("datei:2", None)]), self.konfig)
-        self.assertIn("#gaming #fortnite #clipbattle", text)
+        self.assertIn("#gaming #fortnitehighlights #clipbattle", text)
         self.assertNotIn("Kill", self.beschreibung(text))
         self.assertIn("2 Momente", self.beschreibung(text))
         self.assertLessEqual(caption._zahlen(self.beschreibung(text)), {"2"})
 
     def test_unbekannter_clip_zaehlt_als_moment_ohne_gruppe(self):
         text = caption.entwurf_caption(self.con, self.liste([("clip:777", 777)]), self.konfig)
-        self.assertIn("#gaming #fortnite #clipbattle", text)
+        self.assertIn("#gaming #fortnitehighlights #clipbattle", text)
         self.assertIn("1 Moment", self.beschreibung(text))
 
     def test_ohne_musik_keine_quellenzeile(self):

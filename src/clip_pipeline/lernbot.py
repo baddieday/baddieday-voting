@@ -21,6 +21,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 import tempfile
@@ -44,9 +45,9 @@ ENTWURF_ZIELE = (*regie.FORMATE, *viral.KNOEPFE)   # was /entwurf und die Knöpf
 HILFE = """<b>So geht's</b>
 🎮 Nach dem Zocken baue ich dein Video von selbst – nur aus den starken Szenen des Abends.
 ✅ <b>Hochladen</b> – du bekommst Video und Text zum Hochladen.
-❌ <b>Nicht gut</b> – ein Tipp auf den Grund: Ich ändere es sofort, für immer, und baue neu.
+❌ <b>Nicht gut</b> – tipp auf den Grund, ich baue sofort neu. Länge, Musik und Effekte merke ich mir.
 🎬 <b>Neues Video</b> – jederzeit von Hand.
-⚙️ <b>Einstellungen</b> – Short-Länge, Szenen, Effekte, Musik.
+⚙️ <b>Einstellungen</b> – Clips, Short-Länge, Szenen, Effekte, Musik.
 📋 <b>Stand</b> – deine Regeln und was zuletzt passiert ist.
 🎵 Musik: Audiodatei mit Quellenangabe als Bildunterschrift schicken.
 🔧 /experte – alle Befehle und Details ein- oder ausschalten."""
@@ -207,25 +208,64 @@ def gelernt_zeile(liste: dict) -> str | None:
     return f"🧠 Aus {quelle}: " + escape(" · ".join(g["aenderungen"][:4]))
 
 
-def hinweis_einfach(h: str) -> str:
-    """Hinweise des Regisseurs ohne Fachbegriffe (einfacher Modus, 06.10.); Unbekanntes bleibt, wie es ist."""
+def hinweis_einfach(h: str, auswahl: dict | None = None) -> str | None:
+    """Hinweise des Regisseurs ohne Fachbegriffe (einfacher Modus, 06.10.); None = im einfachen Modus weglassen.
+    07.10. (Florian: „fehlerhafte Texte“): „mehr als 3 Momente aus einem Match“ und „nur 6 Momente zur Auswahl“ sind
+    bei einem Abend der Normalfall und keine Warnung; „ein paar wiederholen sich“ stand auch da, wenn sich alle
+    wiederholten; Szenen statt Momente."""
+    h = h.removeprefix("⚠️ ")
     if h.startswith(regie.COOLDOWN_AUFGEHOBEN):
-        return "wenig neues Material – ein paar Momente wiederholen sich"
-    if "Momente zur Auswahl" in h:
-        return h.split(" – ")[0]
-    return h
+        if auswahl and auswahl.get("schon_gezeigt"):
+            n = int(auswahl.get("neu", 0)) + int(auswahl["schon_gezeigt"])
+            return f"wenig neues Material – {auswahl['schon_gezeigt']} von {n} Szenen kennst du schon"
+        return "wenig neues Material – ein paar Szenen kennst du schon"
+    if (h.startswith("mehr als ") and h.endswith("aus einem Match")) or "Momente zur Auswahl" in h:
+        return None   # bei einem Abend der Normalfall; Wiederholungen sagt schon „wenig neues Material“
+    return re.sub(r"\bMomente\b", "Szenen", h)
+
+
+def _szenen_zahl(n: int, art: str = "") -> str:
+    return f"{n} {art}Szene{'n' if n != 1 else ''}"
+
+
+def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None) -> str:
+    """Bildunterschrift im einfachen Modus (07.10., Florian: „fehlerhafte Texte … vereinfachen“): Video statt Entwurf,
+    Szenen statt Momente, ✅/❌ wie die Knöpfe – ohne Bogen, Stimmung, BPM und „🧠 Aus #…“ (das sagt der Satz nach
+    deinem Grund schon). Deine Clip-Auswahl („🎯 nur Spielabend …“) steht als normale Zeile, nicht als Warnung."""
+    n = len({s["moment"] for s in liste["segmente"]})
+    art = "" if liste["format"] == "short" else f"{FORMAT_NAMEN.get(liste['format'], liste['format'])} · "
+    teile = [f"🎬 <b>Video #{zeile['id']}</b> · {art}{liste['dauer_s']:.0f} s · {_szenen_zahl(n)}"]
+    if zeile_viral := viral_zeile(liste):
+        teile.append(zeile_viral)
+    a = liste.get("auswahl")
+    if a:
+        teile.append(f"🆕 {_szenen_zahl(int(a['neu']), 'neue ')} · {a['schon_gezeigt']} schon gezeigt")
+    if m := liste.get("musik"):
+        teile.append(f"🎵 {escape(m['titel'])}" + (f" – {escape(m['kuenstler'])}" if m.get("kuenstler") else ""))
+    warnungen: list[str] = []
+    for h in liste.get("hinweise", []):
+        if h.startswith("🎯"):
+            teile.append(escape(h))
+        elif (text := hinweis_einfach(h, a)) and text not in warnungen:
+            warnungen.append(text)
+    teile += [f"⚠️ {escape(w)}" for w in warnungen[:2]]
+    if bewertung is not None:
+        gruende = [regie_lernen.GRUENDE[g] for g in json.loads(bewertung["gruende"])]
+        teile.append(f"Bewertet: {'✅' if bewertung['daumen'] > 0 else '❌'}" + (" · " + ", ".join(gruende) if gruende else ""))
+    return "\n".join(teile)[:1000]
 
 
 def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None,
                  erwartung: float | None = None, kritik_text: str | None = None, kurz: bool = False) -> str:
     """Bildunterschrift eines Entwurfs (HTML, höchstens 1000 Zeichen).
 
-    kurz (einfacher Modus, 06.10.): nur Titel, Mischung, Bogen, neu/schon gezeigt, „🧠 Aus #n“, Musik, zwei
-    Hinweise und die Bewertung – ohne Publikums-Lernstand, Stil, Look, Kritik und Erwartung (die zeigt /experte).
+    kurz (einfacher Modus): entwurf_text_einfach – ohne Publikums-Lernstand, Stil, Look, Kritik und Erwartung.
 
     erwartung: festgeschriebene Wahrscheinlichkeit für 👍 (erwartung.gespeichert) oder None → „Erwartung: noch
     keine“ (Spec §10.5). Die Zeile steht VOR den Hinweisen: Die Hinweise können lang sein, und alles hinter Zeichen
     1000 schneidet der Schluss ab. Beispiel: erwartung 0,8 → „🔮 Erwartung: 👍 80 %“, 0,3 → „🔮 Erwartung: 👎 70 %“."""
+    if kurz:   # 07.10.: eigene, einfache Bildunterschrift
+        return entwurf_text_einfach(zeile, liste, bewertung)
     m = liste.get("musik")
     momente = len({s["moment"] for s in liste["segmente"]})  # ein Moment mit Jump-Cut hat mehrere Segmente
     teile = [f"🎬 <b>Entwurf #{zeile['id']}</b> · {FORMAT_NAMEN[liste['format']]} {liste['dauer_s']:.0f} s · "
@@ -235,15 +275,13 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         teile.insert(1, zeile_viral)
     if a := liste.get("auswahl"):
         zeile = f"🆕 {a['neu']} neue · {a['schon_gezeigt']} schon gezeigt · Auswahl aus {a['kandidaten']} Momenten"
-        if a.get("gesperrt") and not kurz:
+        if a.get("gesperrt"):
             zeile += f" · {a['gesperrt']} im Cooldown"
-        if a.get("ohne_datei") and not kurz:
+        if a.get("ohne_datei"):
             zeile += f" · {a['ohne_datei']} ohne Datei"
         teile.append(zeile)
     auto = (liste.get("parameter") or {}).get("autonom") or {}
-    if kurz:
-        teile += [z for z in (gelernt_zeile(liste),) if z]
-    elif auto.get("version"):
+    if auto.get("version"):
         teile.append(f"🧠 Publikum: Lernstand v{auto['version']} · Vertrauen {round(100 * auto.get('confidence', 0))} %")
         if exp := auto.get("exploration"):
             teile.append("🔎 Gezielter Versuch: " + escape(exp["hypothese"]))
@@ -251,13 +289,6 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         teile += [z for z in (bewertet_zeile(liste), gelernt_zeile(liste)) if z]
     if m:
         teile.append(f"🎵 {escape(m['titel'])} – {escape(m.get('kuenstler') or '?')} ({m.get('bpm') or 0:.0f} BPM)")
-    if kurz:
-        for h in liste.get("hinweise", [])[:2]:
-            teile.append(f"⚠️ {escape(hinweis_einfach(h))}")
-        if bewertung is not None:
-            gruende = [regie_lernen.GRUENDE[g] for g in json.loads(bewertung["gruende"])]
-            teile.append(f"Bewertet: {'👍' if bewertung['daumen'] > 0 else '👎'}" + (" · " + ", ".join(gruende) if gruende else ""))
-        return "\n".join(teile)[:1000]
     if (fx := liste.get("effekte") or {}).get("an"):  # Regisseur 2.0: Impacts = Ereignisse im Effekt-Plan
         impacts = sum(len(s.get("effekte") or []) for s in liste["segmente"])
         teile.append(f"✨ Look {escape(str(fx.get('look', 'neutral')))} · {impacts} Impacts"
@@ -296,14 +327,15 @@ def autonom_text(con: sqlite3.Connection) -> str:
 
 
 def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
-    """📋 Stand im einfachen Modus (06.10.): sechs Zeilen – was der Bot von dir gelernt hat, ohne Fachbegriffe."""
-    from . import lernen
-
+    """📋 Stand im einfachen Modus (06.10.): wenige Zeilen – was der Bot von dir gelernt hat, ohne Fachbegriffe.
+    07.10. (Florian: „fehlerhafte Texte“): ✅/❌ wie die Knöpfe; ohne die Zeile zur Moment-Formel („noch 7
+    Bewertungen bis zum Lernen“ neben „11 von dir“ las sich wie ein Widerspruch), ohne Zähler und Version; das
+    Publikum erst, wenn es Zahlen gibt."""
     konfig = einstellungen.anwenden(con, konfig)
     zeilen = regie_lernen.bewertungen(con, mit_ki=False)
     gut = sum(1 for z in zeilen if z["daumen"] > 0)
     teile = ["📋 Stand", regeln.regeln_zeile(con, konfig),
-             f"👍/👎 von dir: {len(zeilen)} ({gut} 👍 · {len(zeilen) - gut} 👎)"]
+             f"✅/❌ von dir: {len(zeilen)} ({gut} ✅ · {len(zeilen) - gut} ❌)"]
     if not regeln.ziel_regel(con, konfig):
         p, _ = regie_lernen.aktuelle(con, konfig, "short")
         fmt = regie_lernen.format_regeln(konfig, "short")[0]
@@ -311,24 +343,11 @@ def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
         teile.append(f"⏱️ Shorts gerade {ziel:.0f} s (automatisch – „⏱️ Zu kurz“ unter ❌ macht daraus eine feste Länge)")
     if abend := letzter_abend_zeile(con, konfig):
         teile.append(abend)
-    try:
-        e = lernen.berechne(con, konfig)
-        teile.append("🎯 Welche Momente du magst: " + ("gelernt und aktiv" if e.aktiv else e.grund))
-    except Exception:  # noqa: BLE001 – der Stand darf nie an einer Lern-Zahl scheitern
-        log.exception("Stand: Moment-Formel")
     if zeile := geschmack.stand_zeile(con):   # Aufbau, Tempo, Zeitlupe (Stufe 2)
         teile.append(zeile)
     stand = autonom.ueberblick(con)
-    teile.append(f"📊 Publikum: {stand['ausgewertet']} Videos ausgewertet"
-                 + (f" · Vertrauen {round(100 * stand['confidence'])} %" if stand.get("version") else " – noch kein Einfluss"))
-    if stand.get("erkenntnisse"):
-        teile.append("• " + stand["erkenntnisse"][0])
-    momente = con.execute("SELECT COUNT(*) FROM momente").fetchone()[0]
-    tracks = con.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-    entwuerfe = con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0]
-    teile.append(f"🎞️ {momente} Momente · {tracks} Musiktitel · {entwuerfe} Videos gebaut")
-    if v := version():
-        teile.append(f"🔧 Version vom {v[1]}")
+    if stand["ausgewertet"]:
+        teile.append(f"📊 Publikum: {stand['ausgewertet']} Video{'s' if stand['ausgewertet'] != 1 else ''} ausgewertet")
     return "\n".join(teile)
 
 
@@ -340,12 +359,15 @@ def letzter_abend_zeile(con: sqlite3.Connection, konfig: Konfig) -> str | None:
         return None
     if z is None:
         return None
-    from .zeit import aus_iso
-
-    tag = f"{utc_zu_lokal(aus_iso(z['ende_utc']), konfig.wert('zeit.zeitzone', 'Europe/Berlin')):%d.%m.}"
+    tag = _tag(z["ende_utc"], konfig)
     if z["entwurf_id"]:
         return f"🎮 Letzter Abend: {tag} → Video #{z['entwurf_id']}"
-    return f"🎮 Letzter Abend: {tag} → kein Video ({(z['hinweis'] or 'unbekannt')[:120]})"
+    # 07.10.: ohne Match-Nummern und Fehlertext – der Grund ist der letzte Teil des Hinweises (sitzung.verarbeite)
+    if con.execute("SELECT 1 FROM lern_meldungen WHERE schluessel = ?", (f"fehler:{z['name']}",)).fetchone():
+        grund = "beim Bauen ging etwas schief"
+    else:
+        grund = (z["hinweis"] or "unbekannt").split("; ")[-1]
+    return f"🎮 Letzter Abend: {tag} → kein Video ({grund[:120]})"
 
 
 def version() -> tuple[str, str] | None:
@@ -488,7 +510,7 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
                 if isinstance(fehler, regie.ZuWenigSzenen):
                     fehler.quelle = quell_hinweis
                     raise
-                raise regie.RegieFehler(f"{fehler} – {quell_hinweis}. In ⚙️ Einstellungen auf „alle Clips“ stellen.") \
+                raise regie.RegieFehler(f"{fehler} – {quell_hinweis}. Andere Auswahl: ⚙️ → 🎯 Clips.") \
                     from fehler
             t3 = time.monotonic()
             entwurf.entwurf(con, konfig, e["entwurf"])
@@ -654,9 +676,11 @@ def _abend_zu(con: sqlite3.Connection, entwurf_id: int) -> sqlite3.Row | None:
 
 
 def _tag(zeit_utc: str, konfig: Konfig) -> str:
+    """Der Spielabend wie in sitzung._tag (Tageswechsel 06:00) – ein Abend bis 01:30 heißt nicht „Abend vom 07.10.“."""
+    from . import sitzung
     from .zeit import aus_iso
 
-    return f"{utc_zu_lokal(aus_iso(zeit_utc), konfig.wert('zeit.zeitzone', 'Europe/Berlin')):%d.%m.}"
+    return sitzung._tag(konfig, aus_iso(zeit_utc))
 
 
 async def _loesche_status(app, con: sqlite3.Connection, schluessel: str) -> None:
@@ -677,9 +701,13 @@ async def sende_meldungen(app) -> int:
     con, chat = app.bot_data["con"], app.bot_data["erlaubt"]
     gesendet = 0
     # Meldungen der Lernschleife (publikum:…, woche:…) warten die Ruhezeit ab, alle anderen kommen sofort (Spec §12)
+    einfach = not experte_an(con, app.bot_data["konfig"])
     for m in lernbot_publikum.faellige_lern_meldungen(con, app.bot_data["konfig"]):
         tg_id = None
         art, _, abend = m["schluessel"].partition(":")
+        if einfach and m["schluessel"].startswith("publikum:bewertet:"):   # 07.10.: Score-Liste nur für /experte
+            con.execute("UPDATE lern_meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
+            continue
         if art in ("kein", "fehler"):   # Stufe 1: aus „🎮 Abend erkannt …“ wird „… kein Video, weil …“ – eine Nachricht
             alt = con.execute("SELECT tg_nachricht_id FROM lern_meldungen WHERE schluessel = ?",
                               (f"abend:{abend}",)).fetchone()
@@ -789,7 +817,8 @@ async def cmd_experte(update, context) -> None:
     an = not experte_an(con, konfig)
     einstellungen.setze(con, "lernbot.experte", an)
     await update.effective_message.reply_text("🔧 Experten-Modus an – alle Knöpfe, Gründe und Details." if an else
-                                              "🔧 Experten-Modus aus – ein Knopf, 👍/👎, vier Einstellungen.")
+                                              "🔧 Experten-Modus aus – einfache Ansicht mit 🎬 Neues Video, "
+                                              "✅/❌ und den wichtigsten Einstellungen.")
     await cmd_hilfe(update, context)
 
 
@@ -835,8 +864,10 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
     Schwelle schafft. Schafft es keiner, kommt trotzdem der letzte Versuch – sonst bekämst du irgendwann nie mehr
     etwas zu sehen, nur weil der Regisseur gerade schwach dasteht."""
     chat = app.bot_data["erlaubt"]
+    einfach = not experte_an(app.bot_data["con"], app.bot_data["konfig"])
     if app.bot_data.get("arbeitet"):
-        await app.bot.send_message(chat, "⏳ Ich baue gerade schon einen Entwurf.")
+        await app.bot.send_message(chat, "⏳ Ich baue gerade schon ein Video." if einfach else
+                                   "⏳ Ich baue gerade schon einen Entwurf.")
         return None
     app.bot_data["arbeitet"] = True
     try:
@@ -877,7 +908,10 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
         return None
     except Exception as e:  # dir kurz sagen, was los ist – Details ins Log
         log.exception("Entwurf fehlgeschlagen")
-        await app.bot.send_message(chat, f"⚠️ Entwurf fehlgeschlagen: {escape(str(e)[:300])}")
+        # 07.10.: ohne escape – die Nachricht ist kein HTML (vorher stand „&quot;“ im Chat); einfach: ohne Fachtext
+        grund = " – der Speicher ist nicht erreichbar und wird jetzt nicht geweckt" if isinstance(e, SpeicherOffline) else ""
+        await app.bot.send_message(chat, f"⚠️ Das Video ließ sich gerade nicht bauen{grund}. Tipp später nochmal auf "
+                                         "🎬 Neues Video." if einfach else f"⚠️ Entwurf fehlgeschlagen: {str(e)[:300]}")
         return None
     finally:
         app.bot_data["arbeitet"] = False
@@ -913,10 +947,9 @@ async def bei_kurzknopf(update, context) -> None:
 
 
 async def bei_kurzbefehl(update, context) -> None:
-    """Tap auf die alte Ersatz-Tastatur: Tastatur wegnehmen, dann wie der Knopf."""
+    """Tap auf die alte Ersatz-Tastatur: wie der Knopf (07.10.: ohne die Extra-Nachricht – „🎬 Baue …“ nimmt die
+    Tastatur ohnehin weg)."""
     ziel = KURZBEFEHLE.get((update.effective_message.text or "").strip())
-    await update.effective_message.reply_text("Die Kurzbefehle sind jetzt Knöpfe im Chat (/hilfe).",
-                                              reply_markup=ohne_tastatur())
     await _kurzbefehl(ziel, update, context)
 
 
@@ -961,7 +994,7 @@ async def bei_audio(update, context) -> None:
             t = await asyncio.to_thread(nimm_musik, context.bot_data["konfig"], ziel, bildunterschrift, name)
         except Exception as e:
             log.exception("Musik")
-            await nachricht.reply_text(f"⚠️ Konnte die Musik nicht übernehmen: {escape(str(e)[:300])}")
+            await nachricht.reply_text(f"⚠️ Konnte die Musik nicht übernehmen: {str(e)[:300]}")   # kein HTML
             return
     await nachricht.reply_text(
         f"🎵 #{t['id']} {t['kuenstler'] or '?'} – {t['titel']}\n{t['bpm']:.0f} BPM · Energie {t['energie']:.2f} · "
@@ -1045,7 +1078,10 @@ async def bei_klick(update, context) -> None:
 
 async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: int, extra: str) -> None:
     """Einfacher Modus (Stufe 1, 07.10.): ✅ → 👍 und Upload-Paket. ❌ → 👎 und sechs Gründe. Ein Grund → feste Regel
-    (regeln.wende_an), ein Satz, was sich ändert, und die neue Fassung aus denselben Matches – kein „✅ fertig“ mehr."""
+    (regeln.wende_an), ein Satz, was sich ändert, und die neue Fassung aus denselben Matches – kein „✅ fertig“ mehr.
+    07.10. (Florian: „fehlerhafte Texte“): ✅ bleibt stehen (ging das Paket schief, tippst du nochmal). ❌ an einem
+    Nicht-Short (Highlight-Video) wendet keine Short-Regel an und baut keinen Short. Baut der Bot gerade, wartet der
+    Grund (sonst hieß es „ich baue neu“ und gleich danach „ich baue schon“ – und es kam nichts)."""
     from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
 
     con, app, chat = context.bot_data["con"], context.application, context.bot_data["erlaubt"]
@@ -1064,11 +1100,16 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
         if context.bot_data.get("paket_arbeitet"):   # Knöpfe bleiben stehen – sonst käme nie ein Paket
             await query.answer("⏳ Ich packe gerade ein anderes Paket – tippe gleich nochmal ✅.")
             return
-        await query.answer("👍 Super – dein Upload-Paket kommt gleich.")
-        await caption(regie_lernen.bewerte(con, eid, daumen=1), None)
-        if lernbot_paket.paket_erlaubt(con, eid) is None:
+        grund = lernbot_paket.paket_erlaubt(con, eid)
+        await query.answer("✅ Super – dein Upload-Paket kommt gleich." if grund is None else grund[:200])
+        await caption(regie_lernen.bewerte(con, eid, daumen=1), [knoepfe_einfach(eid)[0][:1]] if grund is None else None)
+        if grund is None:
             context.bot_data["paket_arbeitet"] = True
             app.create_task(lernbot_paket.sende_paket(app, eid))
+        return
+    if zeile["format"] != "short":   # Highlight-Video: keine Short-Regel, kein neuer Short
+        await query.answer("Verstanden – dieses Video lasse ich weg.")
+        await caption(regie_lernen.bewerte(con, eid, daumen=-1), None)
         return
     if aktion == "d":
         await query.answer("Was passt nicht? Ein Tipp genügt.")
@@ -1076,6 +1117,9 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
         return
     if aktion != "g" or (extra != "neu" and extra not in regie_lernen.GRUENDE):
         await query.answer("Unbekannter Knopf.")
+        return
+    if context.bot_data.get("arbeitet"):   # keine Regel, Knöpfe bleiben – sonst käme die versprochene Fassung nie
+        await query.answer("⏳ Ich baue gerade noch ein Video – tipp gleich nochmal auf deinen Grund.")
         return
     erledigt = context.bot_data.setdefault("regel_erledigt", set())
     if eid in erledigt:   # Doppeltipp, bevor die Knöpfe weg sind: die Regel nicht zweimal anwenden
@@ -1085,12 +1129,14 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
     await query.answer("Verstanden – die neue Fassung kommt.")
     if extra == "neu":
         bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
-        text = "🔁 Verstanden: andere Fassung, gleiche Regeln."
+        text = "🔁 Verstanden: Ich baue eine andere Fassung – gleiche Regeln."
     else:
         bewertung = regie_lernen.bewerte(con, eid, grund=extra)   # bleibt Lern-Material (Schnitt, Aufbau, Tempo)
         text = regeln.wende_an(con, konfig, extra, liste) or f"Verstanden: {regie_lernen.GRUENDE[extra]}."
     await caption(bewertung, None)
-    await app.bot.send_message(chat, f"{text} Ich baue dir jetzt eine neue Fassung.")
+    if extra not in ("neu", "langweilig"):   # 🔁 und 🥱 sagen schon selbst, dass neu gebaut wird
+        text += " Ich baue dir jetzt eine neue Fassung."
+    await app.bot.send_message(chat, text)
     # 🥱 (07.10.): anders geschnitten, die schwächere Hälfte der Szenen gegen neue getauscht (baue_entwurf)
     app.create_task(neuer_entwurf(app, "short", nur_matches=regeln.matches_aus(liste) or None, ansage=False,
                                   anders_als=eid if extra == "langweilig" else None))

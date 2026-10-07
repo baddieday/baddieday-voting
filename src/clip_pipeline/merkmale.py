@@ -382,21 +382,17 @@ def _waffen_text(sid: str, zahlen: list[int]) -> str:
 
 
 def melde_unbekannte_waffen(con: sqlite3.Connection, konfig: Konfig, sid: str, match: Match | None) -> list[int]:
-    """Neue GunType-Zahlen meiner Kills als EINE Sammelmeldung je Session (Annahme S2-A4).
+    """Neue GunType-Zahlen meiner Kills als EINE Log-Zeile je Session (Annahme S2-A4; bis 07.10. eine Bot-Meldung).
 
     Schon gemeldete Zahlen stehen als Vermerk `merkmale:waffe:<n>` in meldungen (mit gesendet = erstellt, der Bot
-    verschickt sie nie). Die Sammelmeldung `merkmale:waffen:<sid>:<n1>-<n2>…` (mit den neuen Zahlen im Schlüssel)
-    wartet die Ruhezeit ab (LEISE_MELDUNGEN). Die Zahlen gehören in den Schlüssel, weil db.meldung einen schon
-    vorhandenen Schlüssel still übergeht: Wird replay.json derselben Session neu erzeugt und bringt eine weitere
-    neue Zahl, käme sonst keine Meldung – der Vermerk stünde aber schon da.
-    Rückgabe: die neu gemeldeten Zahlen, aufsteigend. Beispiel: Kills mit 12, 27, 12, nichts eingetragen → [12, 27],
-    Schlüssel „merkmale:waffen:s1:12-27“.
+    verschickt sie nie) – so steht jede Zahl nur einmal im Log.
+    Rückgabe: die neu gemeldeten Zahlen, aufsteigend. Beispiel: Kills mit 12, 27, 12, nichts eingetragen → [12, 27].
 
     Parameter: con – offene Verbindung; läuft in der Transaktion des Aufrufers (analyze, nachtragen_replay);
     konfig – [merkmale.waffen]; sid – Session-ID für Schlüssel und Text; match – wie bei aus_replay.
     Fehler: sqlite3-Fehler gehen an den Aufrufer. Warum Vermerke statt einer Meldung je Zahl: Die erste Kalibrierung
     brächte sonst Dutzende Nachrichten; so kommt je Match höchstens eine, und nur mit Zahlen, die neu sind.
-    Beispiel zweites Match mit 27 und 31 nach dem ersten → [31], Meldung „… in Match s2: 31 – …“.
+    Beispiel zweites Match mit 27 und 31 nach dem ersten → [31], Log „… in Match s2: 31 – …“.
     """
     unbekannt = _unbekannte_waffen(konfig, match)
     if not unbekannt:
@@ -412,7 +408,9 @@ def melde_unbekannte_waffen(con: sqlite3.Connection, konfig: Konfig, sid: str, m
         # gesendet = erstellt: ein Vermerk, keine Nachricht – aktionen.faellige_meldungen sieht nur gesendet IS NULL
         con.execute("INSERT OR IGNORE INTO meldungen (schluessel, text, erstellt, gesendet) VALUES (?, ?, ?, ?)",
                     (f"merkmale:waffe:{n}", f"Waffen-Nummer {n} gemeldet (Match {sid})", zeit, zeit))
-    db.meldung(con, f"merkmale:waffen:{sid}:{'-'.join(map(str, neu))}", _waffen_text(sid, neu))
+    # 07.10. (Florian: „fehlerhafte Texte“): nur noch ins Log – im Chat war es eine Server-Anleitung, die der stille
+    # Clip-Bot nicht schicken soll; /kalibrieren zeigt fehlende Waffen-Nummern weiterhin
+    log.warning("%s", _waffen_text(sid, neu))
     return neu
 
 

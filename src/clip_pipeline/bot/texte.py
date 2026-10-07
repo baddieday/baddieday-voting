@@ -186,9 +186,7 @@ def highlight_text(h) -> str:
         zeilen.append("Danach „✅ Hochgeladen“ tippen, dann erinnere ich nicht mehr daran.")
     elif h["status"] == "verworfen":
         zeilen.append("🗑️ <b>Verworfen</b> – die Clips sind wieder frei für das nächste Highlight")
-    if "entwurf_id" in h.keys() and h["entwurf_id"]:
-        zeilen.append(f"🧠 Autonomes Lernen: Im Lern-Bot <code>/link {h['entwurf_id']} &lt;Video-URL&gt;</code> "
-                      "schicken. Dort gibt es auch das Upload-Paket ohne Bewertung.")
+    # 07.10.: ohne den Verweis auf /link und das 📦-Paket im Lern-Bot – beides gibt es dort im einfachen Modus nicht
     return "\n".join(zeilen)
 
 
@@ -256,8 +254,8 @@ def auto_text(u: dict) -> str:
 
 HILFE = (
     "🎮 <b>Clip-Bot</b>\n"
-    "Neue Clips entscheidet der Bot sofort selbst (🤖, ohne Ton) – du musst nichts tun. Umdrehen geht am Clip, "
-    "freiwillig; deine Tipps lernt er mit.\n\n"
+    "Jede neue Szene entscheide ich selbst (🤖) – du musst nichts tun. Ab Werk schicke ich dir keine einzelnen "
+    "Szenen, nur Warnungen und das Highlight-Video (umstellen: /einstellungen → 🔧 → 📨 Clip-Bot).\n\n"
     "/battle – zwei freigegebene Clips, du wählst den besseren (Elo)\n"
     "/rangliste – Top 10 der aktuellen Saison\n"
     "/gewichte – was die Vorbewertung gelernt hat\n"

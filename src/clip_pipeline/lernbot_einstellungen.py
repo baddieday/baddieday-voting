@@ -36,9 +36,10 @@ def menue_text(con: sqlite3.Connection, konfig: Konfig, meldung: str | None = No
              "⚙️ Einstellungen – gelten ab dem nächsten Video." if not alle else
              "⚙️ Einstellungen – gelten sofort (Clip-Bot) bzw. ab dem nächsten Entwurf.",
              "📱 = hier im Bot gesetzt · 🗂 = aus der Konfigdatei · ohne Zeichen = Standard" if alle else None]
-    for e, wert, herkunft in einstellungen.aktuell(con, konfig):
+    for e, wert, herkunft in einstellungen.aktuell(con, konfig):   # 📱/🗂 nur im vollen Menü – nur dort erklärt (07.10.)
         if alle or e.schluessel in einstellungen.EINFACH:
-            teile.append(f"{e.titel}: {einstellungen.anzeige(e, wert, con, konfig)} {HERKUNFT[herkunft]}".rstrip())
+            teile.append(f"{e.titel}: {einstellungen.anzeige(e, wert, con, konfig)} {HERKUNFT[herkunft] if alle else ''}"
+                         .rstrip())
     _, hinweis = einstellungen.quell_matches(con, einstellungen.anwenden(con, konfig))
     if hinweis:
         teile.append(f"Gerade: {hinweis}")
@@ -104,7 +105,9 @@ def verarbeite_klick(con: sqlite3.Connection, konfig: Konfig, daten: str) -> tup
         alle = e.schluessel not in einstellungen.EINFACH or None   # zurück ins Menü, aus dem der Wert kam
         if art == "r":
             einstellungen.zuruecksetzen(con, e.schluessel)
-            return menue_text(con, konfig, f"{e.titel}: wieder aus der Datei bzw. Standard", alle), \
+            zurueck = ("wieder aus der Datei bzw. Standard" if _alle(con, konfig, alle)
+                       else "wieder Standard")   # einfaches Menü: ohne „Datei“ (07.10.)
+            return menue_text(con, konfig, f"{e.titel}: {zurueck}", alle), \
                 menue_knoepfe(con, konfig, alle), "Standard"
         if len(teile) == 4 and teile[3].isdigit() and int(teile[3]) < len(e.optionen):
             wert, text = e.optionen[int(teile[3])]

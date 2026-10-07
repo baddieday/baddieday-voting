@@ -268,41 +268,33 @@ class UnbekannteWaffen(MitSpeicher):
         return {z["schluessel"]: z for z in self.con.execute("SELECT * FROM meldungen ORDER BY id")}
 
     def test_zwei_matches_mit_teils_gleichen_zahlen(self):
-        self.assertEqual(self.melde("s1", [12, 27, 12, SNIPER, None, AR]), [12, 27])
-        self.assertEqual(self.melde("s2", [27, 31, SHOTGUN]), [31])
+        with self.assertLogs("pipeline", "WARNING") as log:
+            self.assertEqual(self.melde("s1", [12, 27, 12, SNIPER, None, AR]), [12, 27])
+            self.assertEqual(self.melde("s2", [27, 31, SHOTGUN]), [31])
         self.assertEqual(self.melde("s3", [27, 12]), [])  # nichts Neues → keine Meldung
         z = self.meldungen()
-        self.assertEqual(sorted(z), ["merkmale:waffe:12", "merkmale:waffe:27", "merkmale:waffe:31",
-                                     "merkmale:waffen:s1:12-27", "merkmale:waffen:s2:31"])  # Befund K-6
-        self.assertEqual(z["merkmale:waffen:s1:12-27"]["text"],
-                         "Neue Waffen-Nummern in Match s1: 12, 27 – zählen als sonstige. Eintragen in "
-                         "config/lokal.toml [merkmale.waffen]; bestimmen mit `pipeline replay <datei>`, "
-                         "docs/PUBLIKUM.md")
-        self.assertIn("Match s2: 31 –", z["merkmale:waffen:s2:31"]["text"])
+        # 07.10.: nur noch ins Log – im Chat war es eine Server-Anleitung (Vermerke bleiben, damit jede Zahl einmal kommt)
+        self.assertEqual(sorted(z), ["merkmale:waffe:12", "merkmale:waffe:27", "merkmale:waffe:31"])
+        self.assertIn("Neue Waffen-Nummern in Match s1: 12, 27 – zählen als sonstige.", log.output[0])
+        self.assertIn("Match s2: 31 –", log.output[1])
         for n in (12, 27, 31):  # Vermerke: gleich beim Anlegen als gesendet markiert
             vermerk = z[f"merkmale:waffe:{n}"]
             self.assertEqual(vermerk["gesendet"], vermerk["erstellt"])
 
-    def test_vermerke_nie_faellig_sammelmeldung_wartet_die_ruhezeit(self):
+    def test_vermerke_nie_faellig(self):
         self.melde("s1", [12])
-        tags = [z["schluessel"] for z in aktionen.faellige_meldungen(self.con, self.konfig, _um(9))]
-        self.assertEqual(tags, ["merkmale:waffen:s1:12"])  # Befund K-6: Schlüssel mit den neuen Zahlen
-        nachts = [z["schluessel"] for z in aktionen.faellige_meldungen(self.con, self.konfig, _um(1))]
-        self.assertEqual(nachts, [])
+        self.assertEqual(aktionen.faellige_meldungen(self.con, self.konfig, _um(9)), [])   # kein Chat (07.10.)
 
     def test_wiederholung_meldet_nichts(self):
         self.assertEqual(self.melde("s1", [12]), [12])
         self.assertEqual(self.melde("s1", [12]), [])
-        self.assertEqual(len(self.meldungen()), 2)
+        self.assertEqual(len(self.meldungen()), 1)
 
     def test_neue_zahl_derselben_session_wird_gemeldet(self):
-        # Befund K-6: replay.json derselben Session neu erzeugt, jetzt mit einer weiteren Zahl → zweite Meldung
+        # Befund K-6: replay.json derselben Session neu erzeugt, jetzt mit einer weiteren Zahl → wird gemeldet
         self.assertEqual(self.melde("s1", [12]), [12])
         self.assertEqual(self.melde("s1", [12, 31]), [31])
-        z = self.meldungen()
-        self.assertEqual(sorted(k for k in z if k.startswith("merkmale:waffen:")),
-                         ["merkmale:waffen:s1:12", "merkmale:waffen:s1:31"])
-        self.assertIn("Match s1: 31 –", z["merkmale:waffen:s1:31"]["text"])
+        self.assertEqual(sorted(self.meldungen()), ["merkmale:waffe:12", "merkmale:waffe:31"])
 
     def test_nur_meine_kills_und_ohne_replay(self):
         m = match([elim(100, "X", "Y", waffe=55), elim(110, ICH, "A", knock=True, waffe=66)])  # fremd, nur Knock
@@ -442,9 +434,9 @@ class Analyze(MitSpeicher):
         self.assertEqual(mensch["merkmale"]["sniper"], 0.5)
         self.assertAlmostEqual(mensch["punkte"] - bot["punkte"], 2.0)  # bot_opfer 1 × Startgewicht −2
         self.assertIn("Bot-Opfer", bot["begruendung"])
-        # unbekannte Waffe 42: genau eine Sammelmeldung, auch nach dem zweiten analyze
+        # unbekannte Waffe 42: genau ein Vermerk (seit 07.10. keine Chat-Meldung mehr), auch nach dem zweiten analyze
         schluessel = [z[0] for z in self.con.execute("SELECT schluessel FROM meldungen ORDER BY id")]
-        self.assertEqual(schluessel, ["merkmale:waffe:42", f"merkmale:waffen:{self.SID}:42"])  # Befund K-6
+        self.assertEqual(schluessel, ["merkmale:waffe:42"])
 
     def test_decide_reicht_durch(self):
         self.konfig.daten["decide"]["claude"] = False

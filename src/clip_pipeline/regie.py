@@ -197,6 +197,11 @@ class RegieFehler(RuntimeError):
     pass
 
 
+def _szenen(n: int, art: str = "starke") -> str:
+    """„keine starke Szene“, „nur 1 starke Szene“, „nur 3 starke Szenen“ (07.10.: vorher „nur 0 starke Szenen“)."""
+    return f"keine {art} Szene" if n == 0 else f"nur {n} {art} Szene{'n' if n != 1 else ''}"
+
+
 class ZuWenigSzenen(RegieFehler):
     """Stufe 1 (07.10., Florian: „lieber kein Video“): weniger starke Szenen als ein Short braucht – kein Video mit
     Füllmaterial, sondern eine klare Zeile für dich."""
@@ -204,19 +209,23 @@ class ZuWenigSzenen(RegieFehler):
     def __init__(self, stark: int, mindestens: int, gesamt: int):
         self.stark, self.mindestens, self.gesamt = stark, mindestens, gesamt
         self.quelle: str | None = None   # „🎯 nur Match …“, wenn deine Clip-Auswahl (⚙️) das Material eingeengt hat
-        super().__init__(f"nur {stark} starke Szene{'n' if stark != 1 else ''} (mindestens {mindestens})")
+        super().__init__(f"{_szenen(stark)}, ein Video braucht {mindestens}")
 
     def kopf(self) -> str:
-        return (f"nur {self.stark} starke Szene{'n' if self.stark != 1 else ''} (Multikill, Clutch oder Endkampf), "
-                f"ein Video braucht {self.mindestens}")
+        return f"{_szenen(self.stark)} (Multikill, Victory, Clutch oder Endkampf), ein Video braucht {self.mindestens}"
+
+    def _auswahl_tipp(self) -> str:
+        """Welche Clips angeschaut wurden (07.10.: 🎯 Clips steht im einfachen ⚙️ – vorher „⚙️ → 🔧 → 🎯 Clips“ und
+        der Rat, auf „alle Clips“ zu stellen, obwohl der neueste Abend der Standard ist)."""
+        if not self.quelle:
+            return ""
+        return f"Angeschaut habe ich nur: {self.quelle.removeprefix('🎯 nur ')}. Andere Auswahl: ⚙️ → 🎯 Clips."
 
     def tipp(self) -> str:
         """Was helfen würde – nur, wenn es wirklich hilft (sonst leer)."""
-        if self.quelle:
-            return f"Deine Clip-Auswahl ist eingeschränkt ({self.quelle}) – für alle Clips: ⚙️ → 🔧 → 🎯 Clips."
         if self.gesamt >= self.mindestens:
             return "Mit Einzelkills ginge es: ⚙️ → 🎯 Szenen → „auch Einzelkills“."
-        return ""
+        return self._auswahl_tipp()
 
     def satz(self) -> str:
         """Die Zeile für dich im Lern-Bot."""
@@ -229,10 +238,10 @@ class KeineNeuenSzenen(ZuWenigSzenen):
 
     def __init__(self, ersatz: int, mindestens: int):
         super().__init__(ersatz, mindestens, ersatz)
-        self.args = (f"nur {ersatz} neue Szene{'n' if ersatz != 1 else ''} als Ersatz",)
+        self.args = (self.kopf(),)
 
     def kopf(self) -> str:
-        return f"nur {self.stark} neue Szene{'n' if self.stark != 1 else ''} als Ersatz"
+        return f"{_szenen(self.stark, 'neue')} als Ersatz"
 
     def tipp(self) -> str:
         return ""
@@ -245,6 +254,26 @@ class KeineNeuenSzenen(ZuWenigSzenen):
             anfang = "Neue Szenen als Ersatz habe ich nicht"
         return (f"🎬 Diesmal keine neue Fassung: {anfang}. Alles andere von diesem Abend und die starken Szenen "
                 "früherer Abende hast du schon gesehen. Nach deiner nächsten Runde geht es wieder.")
+
+
+class ZuKurz(ZuWenigSzenen):
+    """Genug Szenen, aber zusammen zu kurz für einen Short (07.10., Florian: „fehlerhafte Texte“ – vorher kam
+    „short: 19.60 s außerhalb 30–75 s – mehr passendes Material wählen oder neu planen“): dieselbe klare Zeile wie bei
+    zu wenig Szenen. stark = Szenen zur Auswahl, gesamt = alle Szenen vor dem Filter „nur starke“."""
+
+    def __init__(self, sekunden: float, mindest_s: float, stark: int, gesamt: int, nur_starke: bool):
+        super().__init__(stark, stark, gesamt)
+        self.sekunden, self.mindest_s, self.nur_starke = sekunden, mindest_s, nur_starke
+        self.args = (self.kopf(),)
+
+    def kopf(self) -> str:
+        return (f"die {'starken ' if self.nur_starke else ''}Szenen ergeben nur {self.sekunden:.0f} s, ein Video braucht "
+                f"mindestens {self.mindest_s:.0f} s")
+
+    def tipp(self) -> str:
+        if self.nur_starke and self.gesamt > self.stark:
+            return "Mit Einzelkills könnte es reichen: ⚙️ → 🎯 Szenen → „auch Einzelkills“."
+        return self._auswahl_tipp()
 
 
 def ist_stark(gruppe: int, victory: bool, clip_mk: dict | None, mk: dict) -> bool:
@@ -1129,6 +1158,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         p["max_je_match"] = max(int(p["max_je_match"]), momente_grenzen(fmt)[1])   # oft nur ein Match am Abend
     else:
         alle = szenen.eine_je_szene(alle, idx)   # nie dieselbe Szene zweimal (vor dem Zählen der starken)
+    szenen_gesamt = len(alle)   # für ZuKurz: ginge es mit Einzelkills?
     if p.get("nur_starke") and viral is None and fassung is None:   # Stufe 1: lieber kein Video als Füllmaterial
         stark = [k for k in alle if k.stark]
         if len(stark) < momente_grenzen(fmt)[0]:
@@ -1269,6 +1299,9 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         ersatz = sum(1 for k in reihe if not any(k is x for x in pflicht))
         if not ersatz or gesamt < fmt["min_s"] - 1e-6 or len(reihe) < momente_grenzen(fmt)[0]:
             raise KeineNeuenSzenen(ersatz, momente_grenzen(fmt)[0])
+    unten = max(float(fmt["min_s"]), DAUER_GRENZEN["short"][0])
+    if fmt_name == "short" and viral is None and gesamt < unten - 1e-6:   # 07.10.: klare Zeile statt Fachtext
+        raise ZuKurz(gesamt, unten, len(alle), szenen_gesamt, bool(p.get("nur_starke")))
     pruefe_dauer(fmt_name, gesamt)
     if gesamt < fmt["min_s"] - 1e-6 or gesamt > fmt["max_s"] + 1e-6:
         raise RegieFehler(f"Dauer {gesamt:.1f} s außerhalb des konfigurierten Bereichs "

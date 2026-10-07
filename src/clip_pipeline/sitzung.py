@@ -24,7 +24,7 @@ from . import db, einstellungen, entwurf, lernen, regeln, regie, regie_lernen, s
 from .konfig import Konfig
 from .medien import MedienFehler
 from .verarbeitung import SESSION_ID
-from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
+from .zeit import aus_iso, iso, jetzt, spielabend
 
 log = logging.getLogger("pipeline")
 
@@ -58,7 +58,8 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
             if jetzt() - ende < timedelta(hours=float(konfig.wert("sitzungen.warten_h", 2))):
                 ergebnis["wartet"].append({"sitzung": name, "offen": offen})
                 continue
-            hinweis = f"{len(offen)} Match(es) nicht verarbeitet: {', '.join(offen[:5])}"
+            hinweis = (f"{len(offen)} Match{'' if len(offen) == 1 else 'es'} nicht verarbeitet: "
+                       f"{', '.join(offen[:5])}")
         tag = _tag(konfig, ende)
         db.lern_meldung(con, f"abend:{name}", f"🎮 Abend vom {tag} erkannt ({len(matches)} Match"
                         f"{'' if len(matches) == 1 else 'es'}) – ich baue dein Video. Das dauert meist 10–30 Minuten.")
@@ -147,14 +148,20 @@ def kein_video_text(tag: str, z: regie.ZuWenigSzenen, offen: int = 0) -> str:
 
 
 def _tag(konfig: Konfig, ende) -> str:
-    return f"{utc_zu_lokal(ende, konfig.wert('zeit.zeitzone', 'Europe/Berlin')):%d.%m.}"
+    """Der Spielabend wie überall (zeit.spielabend, Tageswechsel 06:00). 07.10.: vorher das Datum des Abend-Endes –
+    ein Abend bis 01:30 hieß „Abend vom 07.10.“, während ⚙️ und 🎬 Neues Video „Spielabend 06.10.“ sagten."""
+    zone, wechsel = konfig.wert("zeit.zeitzone", "Europe/Berlin"), int(konfig.wert("zeit.tageswechsel_stunde", 6))
+    return f"{spielabend(ende, zone, wechsel):%d.%m.}"
 
 
 def _melde_fehler(con: sqlite3.Connection, name: str, tag: str, fehler: Exception) -> None:
+    """Die Zeile für dich ohne Fachtext (07.10.: vorher stand die rohe Fehlermeldung darin) – Details ins Log."""
     if not isinstance(fehler, (regie.RegieFehler, MedienFehler)):
         log.error("Abend-Video %s", name, exc_info=fehler)
-    db.lern_meldung(con, f"fehler:{name}", f"⚠️ Für deinen Abend vom {tag} kam kein Video zustande: "
-                                           f"{str(fehler)[:200]}. Beim nächsten Abend versuche ich es wieder.")
+    else:
+        log.warning("Abend-Video %s: %s", name, fehler)
+    db.lern_meldung(con, f"fehler:{name}", f"⚠️ Für deinen Abend vom {tag} kam kein Video zustande – beim Bauen ging "
+                                           "etwas schief. Beim nächsten Abend versuche ich es wieder.")
 
 
 def _nachholen(con: sqlite3.Connection, konfig: Konfig) -> list[str]:

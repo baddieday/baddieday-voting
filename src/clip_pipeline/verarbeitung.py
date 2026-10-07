@@ -393,7 +393,8 @@ def render(con: sqlite3.Connection, konfig: Konfig, sid: str) -> dict:
 
     kills_ohne_video = sum(len(k["kill_zeiten_utc"]) for k in liste.get("ohne_video", []))
     warnung = (
-        f"{kills_ohne_video} Kill(s) ohne Aufnahme – liefen Nvidia Highlights und SteelSeries Moments?"
+        f"{kills_ohne_video} Kill{'' if kills_ohne_video == 1 else 's'} ohne Aufnahme – liefen Nvidia Highlights "
+        "und SteelSeries Moments?"
         if kills_ohne_video else None
     )
     with db.transaktion(con):
