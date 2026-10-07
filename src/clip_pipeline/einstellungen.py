@@ -87,13 +87,14 @@ KATALOG: tuple[Einstellung, ...] = (
                 0.0, "Untergrenze fürs Ziel der Shorts: Lernen, KI-Cutter und Publikum dürfen nur darüber gehen."),
     # 06.10. (Florian: „das wird alles zu kompliziert“) – aus: ein Knopf, 👍/👎, vier Einstellungen; an: alles wie bisher
     Einstellung("lernbot.experte", "🔧 Experten-Modus", ((False, "aus"), (True, "an")),
-                False, "An: alle Knöpfe, Befehle, Gründe und Details. Aus: ein Knopf, 👍/👎, vier Einstellungen."),
+                False, "An: alle Knöpfe, Befehle, Gründe und Details. Aus: einfache Ansicht mit 🎬 Neues Video, ✅/❌ "
+                "und den wichtigsten Einstellungen."),
     # Stufe 1 (07.10., regeln.py): deine Regeln – ⏱️/⏳/😵 unter ❌ stellen sie um, hier siehst und änderst du sie
     Einstellung("regie.short_ziel_s", "⏱️ Short-Länge",
                 ((0.0, "automatisch"), *((float(s), f"{s} s") for s in range(30, 80, 5))),
                 0.0, "So lang werden deine Shorts. „⏱️ Zu kurz“ und „⏳ Zu lang“ unter ❌ verschieben das um 10 s."),
     Einstellung("regie.szenen", "🎯 Szenen",
-                (("stark", "nur starke (Multikill, Clutch, Endkampf)"), ("alle", "auch Einzelkills")),
+                (("stark", "nur starke (Multikill, Victory, Clutch, Endkampf)"), ("alle", "auch Einzelkills")),
                 "stark", "Nur starke Szenen: lieber kein Video als eins mit Füllmaterial."),
     Einstellung("regie.effekt_stufe", "✨ Effekte", ((0, "aus"), (1, "ruhig"), (2, "normal"), (3, "wild")),
                 2, "Wie viele Effekte (Zoom, Blitz, Zeitlupe) ins Video kommen. „😵 Zu hektisch“ stellt eine Stufe ruhiger."),

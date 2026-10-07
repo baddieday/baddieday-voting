@@ -391,3 +391,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     (`szenen.py`). Je Video nur einmal, Abwechslung und Cooldown je Szene – in allen Videos.
   - **Lernen:** 🥱 zählt nicht mehr gegen die Szenen (Moment-Formel und Moment-Bonus), nur gegen Aufbau/Tempo/Zeitlupe.
     Annahmen Z1–Z9: `docs/ENTSCHEIDUNGEN.md`, „🥱 = Schnitt“.
+  - **Texte** (Florian: „fehlerhafte Texte“, vereinfachen): ❌ am Highlight-Video lässt es nur weg (keine Short-Regel,
+    kein Short); baut der Bot gerade, wirkt ein Grund nicht („tipp gleich nochmal“); zu kurze starke Szenen ergeben eine klare
+    „kein Video“-Zeile; „Abend vom“ = Spielabend (06:00); ✅ bleibt stehen; Waffen-Nummern nur ins Log,
+    Publikums-Scores nur unter /experte; im einfachen Modus „Video“/„Szenen“ statt „Entwurf“/„Momente“.

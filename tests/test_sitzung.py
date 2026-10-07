@@ -4,15 +4,25 @@ import contextlib
 import io
 import json
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from clip_pipeline import cli, sitzung
-from clip_pipeline.zeit import iso, jetzt
+from clip_pipeline.zeit import UTC, iso, jetzt
 
 from tests.hilfen import HAT_FFMPEG
 from tests.regie_hilfen import MOMENTE, MitRegieMaterial
+
+
+class AbendDatum(unittest.TestCase):
+    """07.10.: „Abend vom …“ ist der Spielabend (Tageswechsel 06:00) wie in ⚙️ – nicht das Datum des Abend-Endes."""
+
+    def test_abend_ueber_mitternacht_gehoert_zum_vortag(self):
+        konfig = SimpleNamespace(wert=lambda schluessel, standard=None: standard)
+        self.assertEqual(sitzung._tag(konfig, datetime(2026, 10, 6, 21, 30, tzinfo=UTC)), "06.10.")   # 23:30 Ortszeit
+        self.assertEqual(sitzung._tag(konfig, datetime(2026, 10, 6, 23, 30, tzinfo=UTC)), "06.10.")   # 01:30 am 07.10.
 
 
 @unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")

@@ -122,7 +122,7 @@ def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig) -> str:
       - größte Kill-Gruppe und Victory Royale aus clips (max_gruppe, typ, victory_royale) über segmente[].clip_id;
         Momente ohne Clip zählen mit, liefern aber keine Gruppe
       - {killtyp} wie bei Clips: "victoryroyale", sonst KILLTYP_TAG des Clips mit der größten Gruppe, ohne Clip
-        "fortnite"
+        "fortnitehighlights"
     Dazu PFLICHT die Musik-Quellenangabe (liste["musik"]["quelle"] = tracks.quelle, Spec §10.4) als eigene Zeile
     am Ende; ohne Musik keine Quellenzeile. Nicht auf Felder künftiger Schnittlisten (Regisseur 2.0, v4) verlassen.
     Beispiel: 5 Momente, größte Gruppe Triple, Musik „NCS – Titel“ → Beschreibung mit „Triple Kill“, #triplekill,
@@ -158,13 +158,14 @@ def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig) -> str:
     if fails:
         teile.append("1 Fail" if len(fails) == 1 else f"{len(fails)} Fails")
     beschreibung = "Fortnite-Highlights: " + " · ".join(teile)
-    # {killtyp} wie in baue(): Victory Royale schlägt die Kill-Gruppe; ohne Clip bleibt nur „fortnite“
+    # {killtyp} wie in baue(): Victory Royale schlägt die Kill-Gruppe; ohne Clip „fortnitehighlights“ (07.10.: vorher
+    # „fortnite“ – die Vorlage hat #fortnite schon, der Hashtag stand dann doppelt)
     if victory:
         killtyp = "victoryroyale"
     elif groesste is not None:
         killtyp = KILLTYP_TAG[typ(int(groesste["max_gruppe"]))]
     else:
-        killtyp = "fortnite"
+        killtyp = "fortnitehighlights"
     vorlage = konfig.projektpfad(konfig.wert("caption.vorlage")).read_text(encoding="utf-8")
     text = fuelle(vorlage, {"beschreibung": beschreibung, "killtyp": killtyp}).strip()
 
@@ -183,7 +184,11 @@ def _fails(con: sqlite3.Connection, momente: set[str]) -> list[dict]:
     namen = sorted(m for m in momente if m.startswith("fail:"))
     if not namen:
         return []
-    zeilen = con.execute(f"SELECT merkmale FROM momente WHERE schluessel IN ({','.join('?' for _ in namen)})", namen)
+    from . import fail  # fail importiert über verarbeitung dieses Modul
+
+    zeilen = con.execute(f"SELECT schluessel, merkmale FROM momente WHERE schluessel IN "
+                         f"({','.join('?' for _ in namen)})", namen)
+    plaetze = fail.plaetze(con)
     ergebnis = []
     for z in zeilen:
         try:
@@ -191,7 +196,7 @@ def _fails(con: sqlite3.Connection, momente: set[str]) -> list[dict]:
         except json.JSONDecodeError:
             continue
         if isinstance(mk, dict):
-            ergebnis.append(mk)
+            ergebnis.append(fail.mit_platz(mk, z["schluessel"], plaetze))
     return sorted(ergebnis, key=lambda mk: -float(mk.get("fail_score") or 0))
 
 

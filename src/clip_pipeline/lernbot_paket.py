@@ -135,14 +135,22 @@ def knoepfe_checkliste(entwurf_id: int, stand: dict[str, bool]) -> Knoepfe:
             for p, erledigt in stand.items() if not erledigt and p in KUERZEL_VON]
 
 
-def _checkliste_text(entwurf_id: int, stand: dict[str, bool]) -> str:
-    """Text der Checkliste (HTML): je Plattform ✅ oder ⬜ und was als Nächstes zu tun ist."""
+def _checkliste_text(entwurf_id: int, stand: dict[str, bool], einfach: bool = False) -> str:
+    """Text der Checkliste (HTML): je Plattform ✅ oder ⬜ und was als Nächstes zu tun ist. 07.10.: „Häkchen antippen“
+    nur, solange noch eins fehlt; einfach (Lern-Bot ohne /experte): „Video“ statt „Entwurf“, ohne /link."""
     if not stand:
         return "📋 Keine Post-Plattform eingestellt ([publikum].plattformen) – für diesen Entwurf entsteht kein Post."
-    zeilen = [f"📋 <b>Entwurf #{entwurf_id} – Checkliste</b>"]
+    zeilen = [f"📋 <b>{'Video' if einfach else 'Entwurf'} #{entwurf_id} – Checkliste</b>"]
     zeilen += [f"{'✅' if erledigt else '⬜'} {_name(p)}" for p, erledigt in stand.items()]
-    zeilen.append(f"Gepostet? Häkchen antippen und den Link schicken: <code>/link {entwurf_id} https://…</code> – "
-                  "dann bekommst du die Post-Nummer für die Screenshots.")
+    offen = not all(stand.values())
+    if einfach:
+        zeilen.append("Hochgeladen? Tipp unten auf den Knopf." if offen else "Danke – ist vermerkt.")
+    elif offen:
+        zeilen.append(f"Gepostet? Häkchen antippen und den Link schicken: <code>/link {entwurf_id} https://…</code> – "
+                      "dann bekommst du die Post-Nummer für die Screenshots.")
+    else:
+        zeilen.append(f"Link nachreichen: <code>/link {entwurf_id} https://…</code> – dann bekommst du die "
+                      "Post-Nummer für die Screenshots.")
     return "\n".join(zeilen)
 
 
@@ -240,34 +248,44 @@ async def sende_paket(app, entwurf_id: int) -> None:
     ein unerwarteter Fehler nur mit seinem Typ – sein Text könnte Dinge enthalten, die nicht in den Chat gehören."""
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     app.bot_data["paket_arbeitet"] = True
+    # 07.10. (Florian: „fehlerhafte Texte“): im einfachen Modus gibt es keinen 📦-Knopf – dort bleibt ✅ Hochladen
+    # stehen, und die Texte verweisen darauf; „Video“ statt „Entwurf“, ohne Fachbegriffe
+    einfach = not lernbot.experte_an(con, konfig)
+    nochmal = "Tipp später nochmal auf ✅ Hochladen." if einfach else "Drück 📦 später noch einmal."
     try:
-        await app.bot.send_message(chat, f"📦 Baue das Upload-Paket für Entwurf #{entwurf_id} (1080×1920) … "
-                                         "Rendert gerade ein Entwurf, warte ich auf ihn.")
+        await app.bot.send_message(chat, f"📦 Ich mache Video #{entwurf_id} in voller Qualität fertig … Das dauert ein "
+                                         "paar Minuten." if einfach else
+                                   f"📦 Baue das Upload-Paket für Entwurf #{entwurf_id} (1080×1920) … "
+                                   "Rendert gerade ein Entwurf, warte ich auf ihn.")
         try:
             paket = await asyncio.to_thread(baue_paket, konfig, entwurf_id)
         except Gesperrt:
             log.warning("Upload-Paket Entwurf #%s: Pipeline-Sperre belegt", entwurf_id)
-            await app.bot.send_message(chat, "⏳ Gerade läuft ein anderer rechenintensiver Schritt (Pipeline-Sperre). "
-                                             "Drück 📦 später noch einmal.")
+            await app.bot.send_message(chat, ("⏳ Ich rechne gerade noch an etwas anderem. " if einfach else
+                                              "⏳ Gerade läuft ein anderer rechenintensiver Schritt (Pipeline-Sperre). ")
+                                       + nochmal)
             return
         except (MedienFehler, KonfigFehler, caption.CaptionFehler, OSError, ValueError) as fehler:
             log.warning("Upload-Paket Entwurf #%s: %s", entwurf_id, fehler)
-            await app.bot.send_message(chat, f"⚠️ Upload-Paket: {str(fehler)[:FEHLER_MAX]}")
+            await app.bot.send_message(chat, f"⚠️ Upload-Paket: {str(fehler)[:FEHLER_MAX]}"
+                                       + (f" {nochmal}" if einfach else ""))
             return
         with open(paket["datei"], "rb") as datei:
             # Als Datei (nicht als Video): Telegram komprimiert Dateien nicht neu, du lädst genau diese Fassung hoch.
             # Zeitgrenzen wie beim Clip-Bot-Paket: bis 48 MB hochladen dauert, 300 s Lesen/Schreiben, 30 s Verbinden
             await app.bot.send_document(chat, document=datei, filename=paket["dateiname"],
-                                        caption=f"📦 Entwurf #{entwurf_id} – Upload-Fassung",
+                                        caption=f"📦 Video #{entwurf_id} in voller Qualität" if einfach else
+                                        f"📦 Entwurf #{entwurf_id} – Upload-Fassung",
                                         read_timeout=300, write_timeout=300, connect_timeout=30)
         await app.bot.send_message(chat, f"<pre>{escape(paket['caption'])}</pre>", parse_mode="HTML")
         stand = checkliste_stand(con, konfig, entwurf_id)
         knoepfe = knoepfe_checkliste(entwurf_id, stand)
-        await app.bot.send_message(chat, _checkliste_text(entwurf_id, stand), parse_mode="HTML",
+        await app.bot.send_message(chat, _checkliste_text(entwurf_id, stand, einfach), parse_mode="HTML",
                                    reply_markup=lernbot._markup(knoepfe) if knoepfe else None)
     except Exception as fehler:  # der Bot soll weiterlaufen; Details (mit Traceback) nur ins Log
         log.exception("Upload-Paket Entwurf #%s fehlgeschlagen", entwurf_id)
-        await app.bot.send_message(chat, f"⚠️ Upload-Paket fehlgeschlagen ({type(fehler).__name__}) – Details im Log.")
+        await app.bot.send_message(chat, "⚠️ Das Upload-Paket ging gerade schief. " + nochmal if einfach else
+                                   f"⚠️ Upload-Paket fehlgeschlagen ({type(fehler).__name__}) – Details im Log.")
     finally:
         app.bot_data["paket_arbeitet"] = False
 
@@ -313,13 +331,16 @@ async def bei_klick(update, context) -> None:
         log.warning("Häkchen Entwurf #%s: kein Post (%s: %s)", eid, type(fehler).__name__, fehler)
         await query.answer("⚠️ Kein Post angelegt – Details im Log.")
         return
+    einfach = not lernbot.experte_an(con, konfig)
+    if einfach and post_id is not None:   # 07.10.: ohne Post-Nummer und /link
+        text = f"{_name(plattform)} ✅ – vermerkt."
     await query.answer(text[:aktionen.HINWEIS_MAX])
     if post_id is None:
         return
     stand = checkliste_stand(con, konfig, eid)
     knoepfe = knoepfe_checkliste(eid, stand)
     try:
-        await query.edit_message_text(_checkliste_text(eid, stand), parse_mode="HTML",
+        await query.edit_message_text(_checkliste_text(eid, stand, einfach), parse_mode="HTML",
                                       reply_markup=lernbot._markup(knoepfe) if knoepfe else None)
     except BadRequest:  # „message is not modified“ beim Doppelklick – nichts zu tun
         pass

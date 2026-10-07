@@ -306,6 +306,7 @@ class LernBotSendet(MitBewertung):
         self.app = SimpleNamespace(bot=self.bot, bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42})
 
     def test_publikum_nachts_liegen_lassen_und_morgens_schicken(self, _jetzt):
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True   # Score-Liste nur unter /experte (07.10.)
         db.lern_meldung(self.con, "publikum:bewertet:2026-09-24", "📊 1 Post bewertet: #1 0 – /publikum")
         db.lern_meldung(self.con, "abend:2026-09-24", "📋 Stand: …")
         self.assertEqual(asyncio.run(lernbot.sende_meldungen(self.app)), 1)

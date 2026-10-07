@@ -6,8 +6,9 @@ eines verarbeiteten Matches ein eigener Moment geschnitten: aus dem Rohvideo mit
 [fail].vor_s (12 s) vor dem Tod bis [fail].nach_s (3 s) danach.
 
 Was im Moment steht (momente.merkmale, alles aus Daten, nichts erfunden):
-  fail = True, tod_sekunde (Sekunde in der Datei), verbleibend beim Tod und platz = verbleibend + 1 (Annahme: Platz
-  aus Spielersicht, nicht der Team-Platz), kills_vorher_30s (eigene Kills in den 30 s davor = Fallhöhe), selbst
+  fail = True, tod_sekunde (Sekunde in der Datei), verbleibend beim Tod und platz = der Platz, den Fortnite am Ende
+  zeigt (Replay, nur beim letzten eigenen Tod eines Matches ohne Sieg, sonst None – bis 07.10. stand hier „übrige
+  Spieler + 1“, im Duo/Trio/Squad nie der echte Platz; Florian: „die Platzierung ist immer falsch“), kills_vorher_30s (eigene Kills in den 30 s davor = Fallhöhe), selbst
   (Sturm/Sturz/eigene Explosion), killer_bot (vom Bot erledigt), knock_erlitten (vorher selbst umgehauen), waffe_gegner
   (GunType-Zahl) mit Kategorie. Dazu die Mikro-Messung wie bei jedem Moment (stimmung.merkmale: Spitzen, laute
   Mikro-Stellen; Whisper holt mic_nachziehen nach) und fail_score/fail_gruende/fail_titel.
@@ -77,6 +78,7 @@ def tode(match: replay.Match, konfig: Konfig) -> list[dict]:
     Beispiel: Triple Kill 20–10 s vor dem Tod, verbleibend 1 → {"platz": 2, "kills_vorher_30s": 3, …}."""
     fenster_k = timedelta(seconds=_wert(konfig, "kills_fenster_s"))
     fenster_n = timedelta(seconds=_wert(konfig, "knock_fenster_s"))
+    letzter = max((e.zeit_utc for e in match.ereignisse if e.art == "tod"), default=None)
     ergebnis = []
     for e in match.ereignisse:
         if e.art != "tod":
@@ -91,7 +93,7 @@ def tode(match: replay.Match, konfig: Konfig) -> list[dict]:
             "tod_utc": e.zeit_utc,
             "sekunde": max(0, round((e.zeit_utc - match.start_utc).total_seconds())),
             "verbleibend": e.verbleibend,
-            "platz": e.verbleibend + 1 if e.verbleibend is not None else None,
+            "platz": endplatz(match.platzierung, e.zeit_utc == letzter),
             "kills_vorher_30s": len(kills),
             "selbst": e.selbst,
             "killer_bot": bot,
@@ -100,6 +102,36 @@ def tode(match: replay.Match, konfig: Konfig) -> list[dict]:
             "waffe_kategorie": merkmale.waffen_kategorie(waffe, konfig) if waffe is not None else None,
         })
     return ergebnis
+
+
+def endplatz(platzierung, letzter_tod: bool) -> int | None:
+    """Der Platz, den Fortnite am Ende zeigt (Replay ich.platzierung bzw. Team-Platz) – nur beim letzten eigenen Tod
+    eines Matches. Platz 1 (das Team hat danach gewonnen) und unbekannt → None."""
+    return platzierung if letzter_tod and isinstance(platzierung, int) and platzierung > 1 else None
+
+
+def plaetze(con: sqlite3.Connection) -> dict[str, int | None]:
+    """Platz je gespeichertem Fail-Moment, neu aus matches.platzierung – Momente bis 07.10. tragen noch die alte
+    Rechnung (übrige Spieler + 1). Der letzte Fail-Moment eines Matches gilt als letzter Tod. Ohne Match-Zeile:
+    kein Eintrag (unverändert)."""
+    teile = {}
+    for (s,) in con.execute("SELECT schluessel FROM momente WHERE schluessel LIKE ?", (PRAEFIX + "%",)):
+        match_id, _, sek = s[len(PRAEFIX):].rpartition(":")
+        if sek.isdigit():
+            teile[s] = (match_id, int(sek))
+    letzte: dict[str, int] = {}
+    for match_id, sek in teile.values():
+        letzte[match_id] = max(letzte.get(match_id, -1), sek)
+    platz = {z[0]: z[1] for z in con.execute("SELECT id, platzierung FROM matches")}
+    return {s: endplatz(platz[m], sek == letzte[m]) for s, (m, sek) in teile.items() if m in platz}
+
+
+def mit_platz(mk: dict, schluessel: str, plaetze_: dict[str, int | None], konfig: Konfig | None = None) -> dict:
+    """Merkmale eines Fail-Moments mit dem richtigen Platz (plaetze); Score, Gründe und Titel neu, falls er sich
+    ändert. Unbekannter Schlüssel: unverändert."""
+    if schluessel not in plaetze_ or mk.get("platz") == plaetze_[schluessel]:
+        return mk
+    return neu_bewerten({**mk, "platz": plaetze_[schluessel]}, konfig)
 
 
 def fail_score(mk: dict, konfig: Konfig | None = None) -> tuple[float, list[str]]:
@@ -345,7 +377,7 @@ def nach_render(con: sqlite3.Connection, konfig: Konfig, session: str | None) ->
 
 def fakten_text(mk: dict) -> dict:
     """Die Fakten eines Fail-Moments für KI und Caption (nur Daten, keine Pfade)."""
-    return {k: mk.get(k) for k in ("platz", "verbleibend", "kills_vorher_30s", "selbst", "killer_bot",
+    return {k: mk.get(k) for k in ("platz", "kills_vorher_30s", "selbst", "killer_bot",
                                     "knock_erlitten", "waffe_kategorie", "fail_score")}
 
 

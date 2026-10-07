@@ -21,6 +21,7 @@ class Titel(unittest.TestCase):
 
     def test_erfundene_zahl_wird_verworfen(self):
         self.assertIsNone(viral.pruefe_titel("PLATZ 1 – FAST", {"platz": 2}))
+        self.assertIsNone(viral.pruefe_titel("PLATZ 5", {"platz": 11, "fail_score": 5.0}))   # Zahl am falschen Wort
         self.assertIsNone(viral.pruefe_titel("X" * 31, {}))
         self.assertIsNone(viral.pruefe_titel("Vom Bot erledigt", {"art": "fail", "killer_bot": False}))  # Wort ohne Fakt
 
