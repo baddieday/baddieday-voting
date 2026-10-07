@@ -43,6 +43,8 @@ class MitSpeicher(unittest.TestCase):
         # Standards („nur starke Szenen“, „Clip-Bot still“) prüfen eigene Tests ausdrücklich
         self.konfig.daten["regie"]["szenen"] = "alle"
         self.konfig.daten.setdefault("bot", {})["clips_zeigen"] = True
+        # 07.10.: „🎬 Neues Video“ nimmt ab Werk nur den neuesten Spielabend – alte Tests bauen weiter aus allen Clips
+        self.konfig.daten.setdefault("lernbot", {})["quelle"] = "alle"
         # Auto-Freigabe im Clip-Bot (30.09.): aus, damit alte Tests unverändert bleiben – neue Tests schalten sie an
         self.konfig.daten.setdefault("auto_freigabe", {})["modus"] = "aus"
         for name in ("eingang", "replays", "sessions", "highlights", "musik", "archiv", "papierkorb"):

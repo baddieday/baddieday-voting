@@ -371,3 +371,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - 2026-10-07 (Florian: „warum sendet er jetzt immer 2 Videos?“ – zwei verschiedene auf einmal): Die Lern-Bot-Schleife
   schickte gerenderte Entwürfe alle 30 s los, auch während `neuer_entwurf` eine Fassung noch prüfte; fiel sie durch,
   kam die nächste Fassung hinterher. Jetzt schickt die Schleife nichts, solange der Bot baut (`sende_wenn_frei`).
+- 2026-10-07 (Florian: „es kommen immer noch die Clips, die vor 14 Tagen gut waren, nicht die neueste Session“): Drei
+  Ursachen im Code. (1) „🎬 Neues Video“ nahm ab Werk alle Clips im Puffer (14 Tage) – die alten starken gewannen;
+  jetzt ab Werk der neueste Spielabend (`lernbot.quelle = "abend"`), 🎯 Clips wieder im einfachen ⚙️-Menü.
+  (2) Das Abend-Video wartete auf die Datei vom PC, die nur mit `SessionVorbeiMinuten > 0` kommt (ab Werk 0) – jetzt
+  erkennt der Mini das Abend-Ende selbst (`sitzung.auto_abend`: 45 min kein neues Match, nur der letzte Block der
+  letzten 18 h, nie ältere Abende). (3) `alles-aktualisieren.sh` richtete `clip-sitzungen.timer` nie ein – jetzt
+  installiert und schaltet es ihn ein.
