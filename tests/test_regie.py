@@ -296,16 +296,12 @@ class Abwechslung(MitRegieMaterial):
         p, _ = regie_lernen.aktuelle(self.con, self.konfig)
         self.assertEqual({p["moment_bonus"][k] for k in m}, {0.0})
         p_vorher = p
-        regie_lernen.bewerte(self.con, langweilig["entwurf"], grund="langweilig")
+        regie_lernen.bewerte(self.con, langweilig["entwurf"], grund="langweilig")   # 07.10.: 🥱 = der Schnitt
         p, ziel = regie_lernen.aktuelle(self.con, self.konfig)
-        self.assertEqual({p["moment_bonus"][k] for k in m}, {-1.0})
-        self.assertIn("weniger gern gesehen", regie_lernen.lernstand_text(self.con, self.konfig))
-        # Wirkung auf die Rangfolge: genau −1 Punkt je langweiligem Moment. (Bis 28.09. stand hier „andere Clips im
-        # nächsten Entwurf“ – das hing am Kürzen auf 45 s; mit 75 s bleiben Momente mit 3,5+ Punkten vor denen mit 1,25.)
+        self.assertEqual({p["moment_bonus"][k] for k in m}, {0.0})                 # kein Minus für die Szenen
         vorher, nachher = self.punkte(p_vorher), self.punkte(p)
-        # −1 je langweiligem Moment; das 👎 senkt zusätzlich die Hauptstimmung um 0,25 (alle Momente dieser Stimmung)
-        self.assertTrue(all(vorher[k] - nachher[k] >= 1.0 - 1e-9 for k in m), (vorher, nachher))
-        self.assertTrue(all(vorher[k] - nachher[k] <= 0.25 + 1e-9 for k in vorher if k not in m), (vorher, nachher))
+        # nur das 👎 senkt die Hauptstimmung um 0,25 (alle Momente dieser Stimmung)
+        self.assertTrue(all(vorher[k] - nachher[k] <= 0.25 + 1e-9 for k in vorher), (vorher, nachher))
 
     def punkte(self, p):
         _version, gewichte = lernen.aktuelle(self.con, self.konfig)
@@ -659,7 +655,7 @@ class EffekteLernen(MitRegieMaterial):
             self.entwurf(stimmung, gruende, daumen, momente, 2 if musik else None)
         p, ziel = regie_lernen.aktuelle(self.con, self.konfig)
         alt = {"abwechslung": 0.7, "beats_pro_schnitt": 2, "dauer_faktor": 0.9, "luecke_max_s": 4.0,
-               "max_je_match": 3, "moment_bonus": {"a": -0.5, "b": 1.0, "c": -0.5, "e": 0.5, "f": 0.5},
+               "max_je_match": 3, "moment_bonus": {"a": 0.5, "b": 1.0, "c": -0.5, "e": 0.5, "f": 0.5},   # 🥱: 0
                "musik_pegel": 0.35, "puffer_nach_s": 1.8, "puffer_vor_s": 3.0, "seg_min_faktor": 1.322,
                "stimmung_bonus": {"chill": 0.25, "episch": -0.25, "lustig": 0.5, "spannend": -0.25},
                "track_malus": {"2": 1.0}, "uebergang_faktor": 1.21}

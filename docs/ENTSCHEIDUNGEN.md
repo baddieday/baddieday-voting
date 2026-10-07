@@ -697,3 +697,19 @@ Beim Zusammenführen (Anbindung) zusätzlich angenommen:
   alten Teile `einstieg`, `action` …; der alte Regeltest ist darauf umgestellt.
 - `normiert` (aus dem Sidecar) steht in `kritiken.details`; nur solche Entwürfe zählen für die Schwelle.
 - Dein ✅ nach 👍/👎 zieht den Maßstab im Hintergrund nach (eigene Datenbank-Verbindung, blockiert den Bot nicht).
+
+### 🥱 = Schnitt (07.10.2026) – Annahmen bis Florian widerspricht
+Florian: „Ich tippe ❌ → 🥱 und sehe das gleiche Video mit anderen Schnitten.“ 🥱 heißt: der Schnitt langweilt, die
+Szenen sind ok. Code: `szenen.py`, `regeln.neue_fassung`, `geschmack.waehle(anders=…)`, `regie.fassung_kandidaten`.
+
+| Nr. | Annahme |
+|---|---|
+| Z1 | „Neu“ = in keinem Entwurf je gezeigt (je Szene); still aussortierte Entwürfe zählen nicht als gesehen |
+| Z2 | Ersatz nur aus ungesehenen Szenen – auch vom Abend. Eine schon gesehene Abend-Szene kommt als Ersatz nicht zurück; reicht es nicht, kommt kein Video |
+| Z3 | Mindestens eine Ersatz-Szene ist Pflicht, sonst wäre es wieder dasselbe Video |
+| Z4 | Ersatz früherer Abende nur mit Match (Datei-Momente ohne Match bleiben wie im Abend-Weg draußen) |
+| Z5 | Zwei Clips desselben Matches sind nie dieselbe Szene (nur der Puffer überlappt, bis 4,5 s) |
+| Z6 | Fail-Momente bleiben beim Szenen-Abgleich draußen (🔥 Viral unverändert) |
+| Z7 | Das andere Tempo muss die Segmentlänge um mindestens 15 % in seine Richtung ändern; es geht für diese eine Fassung auch vor dem Publikums-Modell |
+| Z8 | Beim zweiten 🥱 bleibt der Abend der des ersten Videos (`parameter.fassung.abend`) |
+| Z9 | Ein 👎 mit 🥱 bildet jetzt ein Paar im Cutter-Maßstab (Schnitt-Urteil), bisher nicht |

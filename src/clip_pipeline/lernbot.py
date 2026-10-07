@@ -4,7 +4,7 @@ Was er tut:
   - nimmt Audiodateien als Musik an: Bildunterschrift = Quellenangabe (Pflicht), "#episch" o. ä. = Stimmung;
     misst Tempo und Energie und antwortet mit dem Ergebnis
   - schickt Entwürfe (Short/Zusammenschnitt) mit direktem Upload-Paket und optionalem 👍/👎-Feedback:
-    Musik passt nicht · zu hektisch · Stimmung getroffen · zu lang · abgeschnitten · Clips langweilig ·
+    Musik passt nicht · zu hektisch · Stimmung getroffen · zu lang · abgeschnitten · Schnitt langweilig ·
     zu viele Effekte · mehr Action (4 Reihen zu je 2 Knöpfen)
   - speichert die Bewertungen (entwurf_bewertungen) – der nächste `compose` lernt daraus (regie_lernen.py)
   - analysiert vor jedem Entwurf ein paar weitere Clips (Stimmung), damit die Auswahl wächst
@@ -426,17 +426,26 @@ def stimmung_nachziehen(con: sqlite3.Connection, konfig: Konfig, matches: set[st
     return {"analysiert": int(e.get("analysiert", 0)), "hinweise": hinweise}
 
 
-def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None) -> int:
+def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, anders_als: int | None = None) -> int:
     """compose + rendern. Läuft in einem Thread; SQLite-Verbindungen dürfen nicht zwischen Threads wandern.
     Schläft pve-big, wird er geweckt – aber nur, wenn er danach sicher wieder ausgeht (big.darf_wecken).
-    nur_matches (07.10.): die neue Fassung nach ❌ kommt aus denselben Matches wie das abgelehnte Video."""
+    nur_matches (07.10.): die neue Fassung nach ❌ kommt aus denselben Matches wie das abgelehnte Video.
+    anders_als (07.10., ❌ → 🥱): Entwurf, den du langweilig fandest – die neue Fassung ist anders geschnitten
+    (Aufbau, Tempo, Song) und tauscht seine schwächere Hälfte gegen neue Szenen (regeln.neue_fassung).
+    Fehler: regie.KeineNeuenSzenen, wenn es dafür keine neuen Szenen gibt."""
     from .sperre import sperre
 
     konfig.pruefe_speicher(wecken=True)  # wirft SpeicherOffline mit Grund, wenn Wecken nicht erlaubt ist
     con = db.verbinde(konfig.datenbank)
     try:
         konfig = einstellungen.anwenden(con, konfig)            # ⚙️ im Bot gesetzte Werte vor den Dateien (29.09.)
-        if nur_matches:
+        fassung = None
+        if anders_als is not None and fmt not in viral.KNOEPFE:
+            zeile = con.execute("SELECT * FROM entwuerfe WHERE id = ?", (anders_als,)).fetchone()
+            fassung = regeln.neue_fassung(regeln.liste_aus(zeile), anders_als) if zeile is not None else None
+        if fassung is not None:   # derselbe Abend wie das abgelehnte Video (auch beim zweiten 🥱)
+            nur_matches, quell_hinweis = set(fassung["abend"]) or None, None
+        elif nur_matches:
             quell_hinweis = None
         else:
             nur_matches, quell_hinweis = einstellungen.quell_matches(con, konfig)
@@ -458,10 +467,12 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None) 
                 nachgezogen["hinweise"] += viral.einschaetzen(con, konfig)["hinweise"]
                 nur_matches, quell_hinweis = None, None   # Fails und Twists brauchen Material über mehrere Matches
             regie_fmt = "short" if variante else fmt
-            parameter, ziel = regie_lernen.aktuelle(con, konfig, regie_fmt)
+            parameter, ziel = regie_lernen.aktuelle(con, konfig, regie_fmt, anders=fassung)
             if variante:
                 parameter = viral.parameter(con, konfig, variante, parameter)
             parameter = regeln.anwenden(con, konfig, regie_fmt, parameter)   # deine Regeln gehen vor (07.10.)
+            if fassung is not None:
+                parameter["fassung"] = fassung   # regie.erstelle: Szenen behalten/tauschen, anderer Song
             try:  # nur eine Anzeige – ein Fehler hier darf den Entwurf nicht kosten
                 gelernt = regie_lernen.wirkung(con, konfig, regie_fmt)
             except Exception:
@@ -814,8 +825,10 @@ async def cmd_musik(update, context) -> None:
     await update.effective_message.reply_text(text[:TEXT_MAX])
 
 
-async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansage: bool = True) -> int | None:
+async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansage: bool = True,
+                        anders_als: int | None = None) -> int | None:
     """Baut einen Entwurf und schickt ihn – für /entwurf und automatisch nach jeder fertigen Bewertung.
+    anders_als (❌ → 🥱): siehe baue_entwurf – gilt für jeden Versuch.
 
     [lernbot].auto_schwelle > 0 (B5): baut bis zu auto_versuche_max Entwürfe, verwirft dabei jeden mit zu
     niedriger Erwartung still (pruefe_auto_verwerfen, kein Foto an dich) und zeigt dir nur den ersten, der die
@@ -839,7 +852,7 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
         versuche_max = max(1, int(konfig.wert("viral.versuche_max" if ist_viral else "lernbot.auto_versuche_max", 3)))
         aussortiert = []
         for versuch in range(versuche_max):
-            eid = await asyncio.to_thread(baue_entwurf, konfig, fmt, nur_matches)
+            eid = await asyncio.to_thread(baue_entwurf, konfig, fmt, nur_matches, anders_als)
             letzter = versuch == versuche_max - 1
             grund = pruefe_auto_verwerfen(con, konfig, eid) if ist_viral or not letzter else None
             if grund is None:
@@ -859,8 +872,8 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
         await sende_entwuerfe(app)
         log.info("Entwurf #%s gesendet in %.0f s", eid, time.monotonic() - t)
         return eid
-    except regie.ZuWenigSzenen as z:   # Stufe 1: lieber kein Video als eins mit Füllmaterial
-        await app.bot.send_message(chat, f"🎬 Kein Video: {z.kopf()}. {z.tipp()}".strip())
+    except regie.ZuWenigSzenen as z:   # Stufe 1: lieber kein Video als eins mit Füllmaterial (🥱: als dasselbe)
+        await app.bot.send_message(chat, z.satz())
         return None
     except Exception as e:  # dir kurz sagen, was los ist – Details ins Log
         log.exception("Entwurf fehlgeschlagen")
@@ -1074,11 +1087,13 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
         bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
         text = "🔁 Verstanden: andere Fassung, gleiche Regeln."
     else:
-        bewertung = regie_lernen.bewerte(con, eid, grund=extra)   # bleibt auch Lern-Material (Moment-Formel)
+        bewertung = regie_lernen.bewerte(con, eid, grund=extra)   # bleibt Lern-Material (Schnitt, Aufbau, Tempo)
         text = regeln.wende_an(con, konfig, extra, liste) or f"Verstanden: {regie_lernen.GRUENDE[extra]}."
     await caption(bewertung, None)
     await app.bot.send_message(chat, f"{text} Ich baue dir jetzt eine neue Fassung.")
-    app.create_task(neuer_entwurf(app, "short", nur_matches=regeln.matches_aus(liste) or None, ansage=False))
+    # 🥱 (07.10.): anders geschnitten, die schwächere Hälfte der Szenen gegen neue getauscht (baue_entwurf)
+    app.create_task(neuer_entwurf(app, "short", nur_matches=regeln.matches_aus(liste) or None, ansage=False,
+                                  anders_als=eid if extra == "langweilig" else None))
 
 
 async def bei_fehler(update, context) -> None:

@@ -117,9 +117,8 @@ Publikum. Dein 👍/👎 im Lern-Bot wirkte nur auf den Schnitt und auf genau di
 Neu ist die vierte Paar-Quelle `entwurf` (`lernen.entwurf_paare`):
 - **Stimme je Moment:** Für jeden Moment wird die Summe deiner Urteile über alle Entwürfe gebildet, in denen er war:
   - 👍 +1,
-  - „🥱 Clips langweilig“ −1,
   - 👎 ohne Grund −0,5,
-  - 👎 nur mit Schnitt-Gründen 0.
+  - 👎 nur mit Schnitt-Gründen 0 (dazu zählt seit 07.10. auch „🥱 langweilig“ – bis dahin −1).
 - **Paare:** Momente mit Plus stehen über Momenten mit Minus, die deutlichsten zuerst. Die Paare zählen halb wie eine Freigabe (`[lernen].gewicht_entwurf`).
 - **Sicherungen:** Es gelten dieselben wie bisher (Mindestmenge, Leine, nie schlechter als die Startgewichte).
 

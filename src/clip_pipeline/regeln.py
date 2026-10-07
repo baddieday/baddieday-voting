@@ -7,14 +7,16 @@ sichtbarer Wirkung – der Bot sagt dir in einem Satz, was er geändert hat:
 
   ⏱️ zu kurz       Ziel der Shorts +10 s (bis 75 s)                         Einstellung regie.short_ziel_s
   ⏳ zu lang       Ziel −10 s (ab 30 s)
-  🥱 langweilig    die schwächere Hälfte der Szenen kommt nie wieder        Tabelle sperren (art moment)
+  🥱 langweilig    der SCHNITT langweilt (07.10.): neue Fassung mit anderem Aufbau, Tempo und Song; die stärkere
+                   Hälfte der Szenen bleibt, die schwächere wird nur in dieser Fassung durch neue ersetzt – keine
+                   Sperre (neue_fassung → geschmack.waehle und regie.fassung_kandidaten)
   🎵 Musik         dieser Song kommt nie wieder                             Tabelle sperren (art track)
   😵 zu hektisch   Effekte eine Stufe ruhiger (wild → normal → ruhig → aus) Einstellung regie.effekt_stufe
   (Experten-Gründe: 🎆 zu viele Effekte wie hektisch, 💥 mehr Action eine Stufe wilder)
 
 anwenden() legt die Regeln NACH allem Gelernten über die Regie-Parameter – sie gehen immer vor. Die Sperren wirken direkt
-in regie.kandidaten_mit_bericht und regie.waehle_musik. Gründe ohne Regel (✂️ abgeschnitten, 🎯 getroffen) lernt der Bot
-wie bisher.
+in regie.kandidaten_mit_bericht und regie.waehle_musik; alte 🥱-Sperren (grund „langweilig“, bis 07.10.) bleiben in der
+Tabelle, gelten aber nicht mehr. Gründe ohne Regel (✂️ abgeschnitten, 🎯 getroffen) lernt der Bot wie bisher.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from . import einstellungen
+from . import einstellungen, stile
 from .konfig import Konfig
 from .zeit import iso, jetzt
 
@@ -42,9 +44,11 @@ REGEL_GRUENDE = ("kurz", "lang", "langweilig", "musik", "hektisch", "effekte_vie
 # --- Sperren ------------------------------------------------------------------------------------------------
 
 def gesperrt(con: sqlite3.Connection, art: str) -> set[str]:
-    """Schlüssel der gesperrten Momente (art "moment") bzw. Songs (art "track", tracks.id als Text)."""
+    """Schlüssel der gesperrten Momente (art "moment") bzw. Songs (art "track", tracks.id als Text). Alte 🥱-Sperren
+    (grund „langweilig“) zählen seit 07.10. nicht mehr – 🥱 ist ein Urteil über den Schnitt, nicht über die Szenen."""
     try:
-        return {z["schluessel"] for z in con.execute("SELECT schluessel FROM sperren WHERE art = ?", (art,))}
+        return {z["schluessel"] for z in con.execute(
+            "SELECT schluessel FROM sperren WHERE art = ? AND COALESCE(grund, '') <> 'langweilig'", (art,))}
     except sqlite3.OperationalError:   # sehr alte Datenbank ohne die Tabelle
         return set()
 
@@ -117,6 +121,54 @@ def _momente(liste: dict) -> list[tuple[str, float]]:
     return list(gesehen.items())
 
 
+def langweilig_teilung(liste: dict) -> tuple[list[str], list[str]]:
+    """(behalten, ohne): die stärkere und die schwächere Hälfte der Szenen eines Videos (ohne die schwächsten
+    max(1, n // 2)), jeweils in Reihenfolge des Videos. Beispiel: Stärken a 6, b 1, c 3, d 0,5 → (["a", "c"], ["b", "d"])."""
+    momente = _momente(liste)
+    ohne = {m for m, _ in sorted(momente, key=lambda x: (x[1], x[0]))[:max(1, len(momente) // 2)]} if momente else set()
+    return [m for m, _ in momente if m not in ohne], [m for m, _ in momente if m in ohne]
+
+
+def neue_fassung(liste: dict, entwurf_id: int) -> dict:
+    """🥱 (07.10., Florian: „ich sehe das gleiche Video mit anderen Schnitten“): wovon sich die neue Fassung abheben muss.
+    Szenen (regie.fassung_kandidaten): behalten/ohne aus langweilig_teilung, abend = die Matches des Videos – beim
+    zweiten 🥱 derselbe Abend wie beim ersten (sonst wüchse er um die Ersatz-Szenen früherer Abende). Schnitt
+    (geschmack.waehle): Reihenfolge, Tempo und Segmentfaktor, wie sie im Video WIRKSAM waren; Song (regie.waehle_musik)."""
+    p = liste.get("parameter") or {}
+    behalten, ohne = langweilig_teilung(liste)
+    return {"anders_als": entwurf_id, "abend": sorted((p.get("fassung") or {}).get("abend") or matches_aus(liste)),
+            "behalten": behalten, "ohne": ohne,
+            "reihenfolge": p.get("reihenfolge") or (stile.STILE.get(p.get("stil")) or {}).get("reihenfolge") or "bogen",
+            "tempo": (p.get("geschmack") or {}).get("tempo"), "seg_min_faktor": p.get("seg_min_faktor"),
+            "track_id": (liste.get("musik") or {}).get("track_id")}
+
+
+def _songs_frei(con: sqlite3.Connection) -> int:
+    try:
+        return int(con.execute("SELECT COUNT(*) FROM tracks WHERE beats IS NOT NULL AND CAST(id AS TEXT) NOT IN "
+                               "(SELECT schluessel FROM sperren WHERE art = 'track')").fetchone()[0])
+    except sqlite3.OperationalError:
+        return 0
+
+
+def _satz_langweilig(con: sqlite3.Connection, konfig: Konfig, liste: dict) -> str:
+    """„🥱 Verstanden: Ich schneide es neu – anderer Aufbau, anderes Tempo, anderer Song. Die 2 besten Szenen bleiben,
+    die 2 schwächeren tausche ich gegen neue.“ – nur, was die neue Fassung auch wirklich anders macht."""
+    fest = str(konfig.wert("regie.stil", "auto") or "auto") in stile.STILE
+    teile = ["gleicher Aufbau (fest eingestellt), anderes Tempo" if fest else "anderer Aufbau, anderes Tempo"]
+    if _songs_frei(con) >= 2:
+        teile.append("anderer Song")
+    text = f"🥱 Verstanden: Ich schneide es neu – {', '.join(teile)}."
+    behalten, ohne = langweilig_teilung(liste)
+    if ohne and behalten:
+        text += (" Die beste Szene bleibt" if len(behalten) == 1 else f" Die {len(behalten)} besten Szenen bleiben")
+        text += (", die schwächere tausche ich gegen eine neue." if len(ohne) == 1
+                 else f", die {len(ohne)} schwächeren tausche ich gegen neue.")
+    elif ohne:
+        text += " Die Szene tausche ich gegen eine neue."
+    return text
+
+
 def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict) -> str | None:
     """Setzt die Regel zu einem Grund und gibt die Bestätigung für dich zurück (ein Satz, ohne Fachbegriffe).
     None = für diesen Grund gibt es keine feste Regel (er wird nur gelernt).
@@ -134,14 +186,8 @@ def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict) -
         if grund == "kurz" and dauer and dauer < alt - 5:
             text += f" Dieses Video hatte nur {dauer:.0f} s – mehr starke Szenen gab es nicht."
         return text
-    if grund == "langweilig":
-        momente = _momente(liste)
-        if not momente:
-            return "🥱 Verstanden – in diesem Video fand ich keine Szenen zum Aussortieren."
-        schwach = [m for m, _ in sorted(momente, key=lambda x: (x[1], x[0]))[:max(1, len(momente) // 2)]]
-        sperre(con, "moment", schwach, "langweilig")
-        return (f"🥱 Verstanden: Die {len(schwach)} schwächsten Szenen dieses Videos nehme ich nie wieder."
-                if len(schwach) > 1 else "🥱 Verstanden: Die schwächste Szene dieses Videos nehme ich nie wieder.")
+    if grund == "langweilig":   # 07.10.: der Schnitt langweilt – keine Sperre; was anders wird, regelt neue_fassung
+        return _satz_langweilig(con, konfig, liste)
     if grund == "musik":
         m = liste.get("musik") or {}
         if m.get("track_id") is None:

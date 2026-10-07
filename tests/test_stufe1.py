@@ -37,8 +37,9 @@ class Regeln(MitRegieMaterial):
         self.assertIn("55 s lang (vorher 45 s)", regeln.wende_an(self.con, self.k(), "kurz", LISTE))
         self.assertIn("65 s lang (vorher 55 s)", regeln.wende_an(self.con, self.k(), "kurz", LISTE))  # wirkt jedes Mal
         self.assertIn("55 s lang (vorher 65 s)", regeln.wende_an(self.con, self.k(), "lang", LISTE))
-        self.assertIn("2 schwächsten", regeln.wende_an(self.con, self.k(), "langweilig", LISTE))
-        self.assertEqual(regeln.gesperrt(self.con, "moment"), {"b", "d"})
+        self.assertIn("2 schwächeren tausche ich gegen neue", regeln.wende_an(self.con, self.k(), "langweilig", LISTE))
+        self.assertEqual(regeln.gesperrt(self.con, "moment"), set())                  # 🥱 sperrt nichts (07.10.)
+        self.assertEqual(regeln.langweilig_teilung(LISTE), (["a", "c"], ["b", "d"]))
         self.assertIn("„Song A“ spiele ich nie wieder", regeln.wende_an(self.con, self.k(), "musik", LISTE))
         self.assertEqual(regeln.gesperrt(self.con, "track"), {"3"})
         self.assertIn("„ruhig“", regeln.wende_an(self.con, self.k(), "hektisch", LISTE))
@@ -72,7 +73,9 @@ class StarkeSzenen(MitRegieMaterial):
     def test_nur_starke_szenen_und_gesperrte_nie(self):
         liste = self.baue()
         self.assertTrue({s["moment"] for s in liste["segmente"]} <= STARK)
-        regeln.sperre(self.con, "moment", ["datei:1", "datei:2", "datei:3"], "langweilig")
+        regeln.sperre(self.con, "moment", ["datei:1", "datei:2", "datei:3"], "langweilig")   # alte 🥱-Sperre
+        self.assertIn("datei:1", {s["moment"] for s in self.baue()["segmente"]})          # wirkt seit 07.10. nicht
+        regeln.sperre(self.con, "moment", ["datei:5", "datei:12", "datei:16"], "von_hand")    # andere Sperren schon
         with self.assertRaises(regie.ZuWenigSzenen) as fehler:                            # nur noch 3 starke
             self.baue()
         self.assertEqual((fehler.exception.stark, fehler.exception.mindestens), (3, 4))

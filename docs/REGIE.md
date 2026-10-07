@@ -64,7 +64,8 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
     Bewertung an genau diesem Entwurf geändert hat. „nichts geändert“ heißt: es kam nur 👍/👎 ohne Schnitt-Grund.
 - **Schnitt lernt je Format** (27.09.): Dauer, Segmentlänge, Übergänge, Anlauf/Ausklang und Effekte lernen nur aus
   Bewertungen desselben Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzt keine Shorts mehr. Was du
-  inhaltlich magst (Momente, Stimmung, Musik, „langweilig“), gilt für beide. `/lernstand` zeigt beide Stände.
+  inhaltlich magst (Momente, Stimmung, Musik), gilt für beide. `/lernstand` zeigt beide Stände. („🥱 langweilig“
+  ist seit 07.10. ein Schnitt-Grund.)
 - **Kurzbefehle** als Knöpfe im Chat, unter /hilfe und nach ✅ fertig: 🎬 Short · 🎞️ Zusammenschnitt ·
   🧠 Lernstand · 📋 Stand · 📊 Publikum · 🎵 Musik. (Die Ersatz-Tastatur vom Vormittag verschwindet mit dem nächsten „🎬 Baue …“.)
 - **Musik nach Genre** (27.09.): `pipeline musik ncs --genre hart --anzahl 40` lädt Techno, Hardcore, Electronic Rock,
@@ -104,7 +105,7 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 | ⏳ zu lang | Ziel-Dauer −10 % (bis 60 %) |
 | ⏱️ zu kurz | Ziel-Dauer +11 % – hebt „zu lang“ wieder auf; beide zugleich: nichts. Short (28.09., Florian): Start 45 s, immer 30–75 s und 4–10 Momente; jede Stimme wirkt bis an diese Grenzen (vorher war bei 45 s Schluss). `pipeline lernstand` bzw. 🧠 Lernstand zeigt „Short-Länge: …“ mit deinen Stimmen |
 | ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills |
-| 🥱 Clips langweilig | jeder Moment dieses Entwurfs −1 Punkt (kommt seltener) |
+| 🥱 Schnitt langweilig | (07.10.) nichts an den Momenten – ein Urteil über den Schnitt; im einfachen Modus lernt `geschmack.py` daraus Aufbau, Tempo und Zeitlupe, und die neue Fassung ist anders geschnitten (bis 07.10.: „Clips langweilig“, jeder Moment −1) |
 | 🎆 zu viele Effekte | Effekt-Stärke der Hauptstimmung ×0,85 (bis 0,1) – alle Effekte dieser Stimmung schwächer, schwache fallen unter die Schwelle weg |
 | 💥 mehr Action | Effekt-Stärke der Hauptstimmung ×1,15 (bis 1,5) |
 | 🎆 + 💥 zugleich | nichts (heben sich auf) |

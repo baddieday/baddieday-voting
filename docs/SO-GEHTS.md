@@ -11,11 +11,11 @@
 - **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen.
 - **❌ Nicht gut** – tipp auf einen Grund. Der Bot sagt dir sofort, was er ändert, und baut eine neue Fassung:
 
-| Grund | Was sich ändert (für immer, bis du es selbst änderst) |
+| Grund | Was sich ändert (für immer, bis du es selbst änderst – außer bei 🥱) |
 |---|---|
 | ⏱️ Zu kurz | Shorts werden 10 Sekunden länger (höchstens 75 s) |
 | ⏳ Zu lang | Shorts werden 10 Sekunden kürzer (mindestens 30 s) |
-| 🥱 Langweilig | Die schwächere Hälfte der Szenen dieses Videos kommt nie wieder |
+| 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen Szenen, die du noch nicht gesehen hast – erst vom selben Abend, dann starke von früheren Abenden. Gibt es keine, kommt kein Video. Gesperrt wird nichts. |
 | 🎵 Musik | Dieser Song kommt nie wieder |
 | 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus) |
 | 🔁 Einfach neu | Andere Fassung, gleiche Regeln |

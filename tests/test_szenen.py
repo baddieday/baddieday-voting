@@ -1,0 +1,176 @@
+"""🥱 = der Schnitt langweilt (07.10., Florian: „Ich tippe ❌ → 🥱 und sehe das gleiche Video mit anderen Schnitten“):
+dieselbe Szene unter mehreren Schlüsseln (szenen.py), die neue Fassung ist anders geschnitten, behält die stärkere
+Hälfte und tauscht die schwächere gegen neue Szenen – erst vom Abend, dann starke ungesehene früherer Abende."""
+
+import asyncio
+import json
+import unittest
+from types import SimpleNamespace
+from unittest import mock
+
+from clip_pipeline import regeln, stile, szenen
+from clip_pipeline.zeit import iso, jetzt
+
+from tests.hilfen import HAT_FFMPEG, MitSpeicher
+from tests.regie_hilfen import MitRegieMaterial
+from tests.test_stufe1 import FakeBot, FakeQuery
+
+try:
+    from clip_pipeline import lernbot
+except ImportError:  # python-telegram-bot fehlt
+    lernbot = None
+
+# (Stimmung, Kills in Serie, Kill-Sekunden, Match) – a1/a2 = der Abend, f1 = ein früherer Abend
+SZENEN = [("episch", 4, [6.0, 8.0, 10.0, 12.5], "a1"), ("episch", 3, [5.0, 7.0, 9.0], "a2"),      # 1, 2 stark
+          ("spannend", 2, [7.0, 9.5], "a1"), ("spannend", 2, [6.0, 10.0], "a2"),                    # 3, 4 schwächer
+          ("episch", 2, [5.0, 7.0], "a2"),                                                          # 5 = Szene von 2
+          ("spannend", 1, [8.0], "a1"), ("lustig", 1, [9.0], "a2"), ("spannend", 1, [7.0], "a1"),   # 6–8 ungesehen
+          ("episch", 3, [5.0, 7.0, 9.0], "f1"), ("spannend", 2, [8.0, 12.0], "f1"),                 # 9 gezeigt, 10 neu
+          ("spannend", 1, [11.0], "f1")]                                                            # 11 schwach
+START = ["2026-10-06T20:00:00Z", "2026-10-06T20:30:00Z", "2026-10-06T20:05:00Z", "2026-10-06T20:35:00Z",
+         "2026-10-06T20:30:03Z", "2026-10-06T20:10:00Z", "2026-10-06T20:40:00Z", "2026-10-06T20:15:00Z",
+         "2026-10-01T20:00:00Z", "2026-10-01T20:10:00Z", "2026-10-01T20:20:00Z"]
+
+
+class Szene(MitSpeicher):
+    def moment(self, schluessel, start, laenge=20.0, match=None):
+        self.con.execute("INSERT INTO momente (schluessel, match_id, datei, start_s, ende_s, start_utc, kills, stimmung, "
+                         "sicherheit, quelle, merkmale, erstellt, geaendert) VALUES (?, ?, '/x.mp4', 0, ?, ?, 1, "
+                         "'episch', 0.8, 'regel', '{}', 'x', 'x')", (schluessel, match, laenge, start))
+
+    def test_dieselbe_szene_und_je_szene_einer(self):
+        self.moment("clip:1", "2026-10-06T20:00:00Z", match="a1")
+        self.moment("datei:1", "2026-10-06T20:00:16Z")          # 4 s Überlappung: dieselbe Szene
+        self.moment("datei:2", "2026-10-06T20:00:34Z")          # 2 s mit datei:1 (10 %): eine andere
+        self.moment("clip:2", "2026-10-06T20:00:16Z", match="a1")   # zwei Clips eines Matches: nie dieselbe
+        self.moment("datei:3", None)                            # ohne Zeit: nur der eigene Schlüssel
+        idx = szenen.index(self.con)
+        self.assertEqual(idx, {"clip:1": {"datei:1"}, "datei:1": {"clip:1", "clip:2"}, "clip:2": {"datei:1"}})
+        k = lambda s, punkte, clip=None: SimpleNamespace(schluessel=s, punkte=punkte, clip_id=clip, fail=False)  # noqa: E731
+        liste = [k("datei:1", 5.0), k("clip:1", 5.0, clip=1), k("clip:2", 1.0, clip=2), k("datei:3", 0.5)]
+        # Gleichstand: der mit Clip; nicht transitiv – clip:2 ist eine andere Szene als clip:1
+        self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx)], ["clip:1", "clip:2", "datei:3"])
+        self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx, {"datei:1"})], ["datei:1", "datei:3"])
+
+    def test_fassung_zweite_aufnahme_ohne_match(self):
+        # Eine lautere Nvidia-Aufnahme (ohne Match) darf ihren Clip nicht als Ersatz verdrängen, und eine behaltene
+        # SteelSeries-Aufnahme zählt zum Match ihres Clips (Abend) – sonst käme der frühere Abend zu früh dran
+        from clip_pipeline import regie
+
+        k = lambda s, match, punkte, stark=True: SimpleNamespace(  # noqa: E731
+            schluessel=s, match_id=match, punkte=punkte, clip_id=1 if match else None, fail=False, stark=stark,
+            gesperrt=False, nachschub=False)
+        idx = {"datei:nv": {"clip:7"}, "clip:7": {"datei:nv"}, "datei:ss": {"clip:6"}, "clip:6": {"datei:ss"}}
+        alle = [k("datei:ss", None, 12.0), k("clip:6", "a1", 11.0), k("clip:7", "a1", 1.0, stark=False),
+                k("datei:nv", None, 5.0), k("clip:13", "a3", 11.0), k("clip:9", "a3", 3.5), k("clip:2", "f1", 3.5)]
+        auswahl, pflicht = regie.fassung_kandidaten(
+            alle, {"behalten": ["datei:ss", "clip:13"], "ohne": ["clip:9"], "abend": ["a3"]}, idx,
+            {"datei:ss", "clip:13", "clip:9"}, {"min_momente": 3})
+        self.assertEqual([x.schluessel for x in pflicht], ["datei:ss", "clip:13"])
+        self.assertEqual({x.schluessel: x.nachschub for x in auswahl if x not in pflicht},
+                         {"clip:7": False, "clip:2": True})
+
+
+@unittest.skipUnless(HAT_FFMPEG and lernbot is not None, "ffmpeg oder python-telegram-bot fehlt")
+class Langweilig(MitRegieMaterial):
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["regie"].update(szenen="stark", stil="auto")   # Standard: nur starke Szenen, Aufbau lernt
+        for i, start in zip(self.momente_anlegen(SZENEN), START):
+            self.con.execute("UPDATE momente SET start_utc = ? WHERE id = ?", (start, i))
+        self.songs = [self.musik_anlegen(bpm, "episch", name=n)["id"] for bpm, n in ((150, "A"), (140, "B"), (160, "C"))]
+        self.alt({"datei:9"})
+        regeln.sperre(self.con, "moment", ["datei:1"], "langweilig")          # alte 🥱-Sperre (bis 07.10.)
+        self.bot, self.aufgaben = FakeBot(), []
+        self.app = SimpleNamespace(bot=self.bot, bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                                   create_task=lambda koro: self.aufgaben.append(koro))
+        self.context = SimpleNamespace(bot_data=self.app.bot_data, application=self.app, args=[])
+
+    def tearDown(self):
+        for koro in self.aufgaben:
+            koro.close()
+        super().tearDown()
+
+    def alt(self, momente, liste=None, name="alt"):
+        """Ein früherer Entwurf, in dem diese Momente schon liefen."""
+        pfad = self.tmp / f"{name}.json"
+        pfad.write_text(json.dumps(liste or {"segmente": [{"moment": m} for m in sorted(momente)]}), encoding="utf-8")
+        return self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, erstellt) VALUES "
+                                "(?, 'short', ?, '{}', 'gesendet', ?)", (name, str(pfad), iso(jetzt()))).lastrowid
+
+    def langweilig(self, eid):
+        """❌ → 🥱 im einfachen Modus; gibt den Satz zurück und lässt die neue Fassung ohne Rendern laufen."""
+        for daten in (f"d:{eid}:-1", f"g:{eid}:langweilig"):
+            asyncio.run(lernbot.bei_klick(SimpleNamespace(callback_query=FakeQuery(daten)), self.context))
+        satz = self.bot.texte[-1]
+        with mock.patch.object(lernbot.entwurf, "entwurf"), mock.patch.object(lernbot.kritik, "bewerte"), \
+                mock.patch.object(lernbot, "sende_entwuerfe", new=mock.AsyncMock(return_value=0)):
+            return satz, asyncio.run(self.aufgaben.pop())
+
+    def liste(self, eid):
+        return regeln.liste_aus(self.con.execute("SELECT * FROM entwuerfe WHERE id = ?", (eid,)).fetchone())
+
+    def test_neue_fassung_anders_geschnitten_mit_neuen_szenen(self):
+        with mock.patch.object(lernbot.entwurf, "entwurf"), mock.patch.object(lernbot.kritik, "bewerte"):
+            eid1 = lernbot.baue_entwurf(self.konfig, "short", {"a1", "a2"})
+        self.con.execute("UPDATE entwuerfe SET status = 'gesendet' WHERE id = ?", (eid1,))
+        v1 = self.liste(eid1)
+        m1 = [m for m, _ in regeln._momente(v1)]
+        self.assertIn("datei:1", m1)                                        # alte 🥱-Sperre wirkt nicht mehr
+        self.assertFalse({"datei:2", "datei:5"} <= set(m1))                 # dieselbe Szene nie zweimal
+        gut, schwach = regeln.langweilig_teilung(v1)
+        satz, eid2 = self.langweilig(eid1)
+        self.assertIn("2 schwächeren tausche ich gegen neue", satz)
+        self.assertNotIn("nie wieder", satz)
+        v2 = self.liste(eid2)
+        m2 = {m for m, _ in regeln._momente(v2)}
+        self.assertTrue(set(gut) <= m2, (gut, m2))                          # die stärkere Hälfte bleibt
+        self.assertFalse(set(schwach) & m2)                                 # die schwächere fehlt in dieser Fassung
+        ersatz = m2 - set(gut)
+        self.assertTrue(ersatz and ersatz <= {"datei:6", "datei:7", "datei:8", "datei:10"}, ersatz)
+        if "datei:10" in ersatz:                                            # erst der Abend, dann frühere Abende
+            self.assertTrue({"datei:6", "datei:7", "datei:8"} <= m2)
+        self.assertFalse({"datei:2", "datei:5"} <= m2)
+        p1, p2 = v1["parameter"], v2["parameter"]
+        self.assertNotEqual(stile.STILE[p2["stil"]]["reihenfolge"], stile.STILE[p1["stil"]]["reihenfolge"])
+        self.assertNotEqual(p2["geschmack"]["tempo"], p1["geschmack"].get("tempo"))
+        self.assertGreater(abs(p2["seg_min_faktor"] / p1["seg_min_faktor"] - 1), 0.14)   # spürbar anderes Tempo
+        self.assertNotEqual(v2["musik"]["track_id"], v1["musik"]["track_id"])
+        self.assertEqual([tuple(z) for z in self.con.execute("SELECT art, schluessel, grund FROM sperren")],
+                         [("moment", "datei:1", "langweilig")])             # keine neue Sperre
+
+    def test_kein_nachschub_kein_video(self):
+        self.alt({"datei:6", "datei:7", "datei:8", "datei:10"}, name="alt2")
+        v1 = {"format": "short", "dauer_s": 40, "stimmung": "episch", "musik": {"track_id": self.songs[0]},
+              "parameter": {"stil": "montage", "reihenfolge": "bogen", "seg_min_faktor": 0.6,
+                            "geschmack": {"aufbau": "montage", "tempo": "schnell", "zeitlupe": "viel"}},
+              "segmente": [{"moment": f"datei:{i}", "intensitaet": st, "match_id": m}
+                           for i, st, m in ((1, 10.0, "a1"), (2, 6.0, "a2"), (3, 3.0, "a1"), (4, 3.0, "a2"))]}
+        eid1 = self.alt(set(), v1, name="v1")
+        vorher = self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0]
+        _satz, eid2 = self.langweilig(eid1)
+        self.assertIsNone(eid2)
+        self.assertIn("keine neue Fassung", self.bot.texte[-1])
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], vorher)
+
+
+class Ersatz(unittest.TestCase):
+    def test_ersatz_auch_wenn_die_behaltenen_reichen(self):
+        """Prüfung 07.10.: Erreichen die behaltenen Szenen schon das Ziel, kommt trotzdem neuer Ersatz dazu – zu lang
+        wird es nicht: dann geht die schwächste behaltene Szene (sonst „keine neue Fassung“, obwohl Neues da ist)."""
+        from clip_pipeline import regie
+
+        k = lambda n, pk: regie.Kandidat(n, f"/x/{n}.mp4", 20.0, "episch", pk, pk, None, f"m{n}", (4.0, 12.0),  # noqa: E731
+                                         (5.0, 11.5), "Test")
+        pflicht = [k(f"gut{i}", 10.0 - i) for i in range(8)]
+        neu = [k("neu1", 2.0), k("neu2", 1.0)]
+        fmt, p = regie.FORMATE["short"], {**regie.PARAMETER, "ziel_dauer_s": 30.0, "max_je_match": 10}
+        gewaehlt, _, _ = regie.waehle(pflicht + neu, fmt, p, pflicht, ersatz_min=2)
+        namen = {x.schluessel for x in gewaehlt}
+        self.assertTrue({"neu1", "neu2"} <= namen)
+        self.assertLessEqual(len(gewaehlt), regie.momente_grenzen(fmt)[1])
+        self.assertIn("gut0", namen)                                       # die stärkste behaltene bleibt
+
+
+if __name__ == "__main__":
+    unittest.main()
