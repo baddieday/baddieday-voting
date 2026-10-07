@@ -7,8 +7,10 @@ momente (start_utc ist der Zeitpunkt von start_s). Zwei Momente zeigen dieselbe 
 mindestens 3 s oder um mindestens 40 % des kürzeren überlappen. Nicht transitiv: nur direkte Nachbarn, sonst entstünden
 Ketten über einen ganzen Abend.
 
-Ausnahmen: ohne start_utc zählt nur der gleiche Schlüssel. Zwei Clips desselben Matches sind nie dieselbe Szene – die
-Pipeline legt je Kill-Serie genau einen Clip an, nur der Puffer überlappt (bis 4,5 s, vorbewertung.anlauf_start).
+Ausnahmen: ohne start_utc zählt nur der gleiche Schlüssel. Zwei Clips sind nie dieselbe Szene – die Pipeline legt je
+Kill-Serie genau einen Clip an (nur der Puffer überlappt, bis 4,5 s, vorbewertung.anlauf_start), und zwei verschiedene
+Matches können sich nicht überlappen (CI 07.10.: Testclips mit gleicher Uhrzeit schrumpften sonst einen Short auf eine
+Szene). Doppelt sind also Aufnahmen ohne Clip (datei:…) gegenüber Clips oder einander.
 Fail-Momente (nur 🔥 Viral) bleiben draußen, damit Viral unverändert bleibt.
 """
 
@@ -44,8 +46,9 @@ def index(con: sqlite3.Connection) -> dict[str, set[str]]:
             b0, b1, b, b_match = fenster[j]
             if b0 >= a1:
                 break   # nach Beginn sortiert: alle weiteren beginnen noch später
-            if a_match and a_match == b_match and a.startswith("clip:") and b.startswith("clip:"):
-                continue
+            if a.startswith("clip:") and b.startswith("clip:"):
+                continue   # zwei Clips: je Kill-Serie einer, und verschiedene Matches überlappen nie (sonst ein
+                           # Uhrzeit-Fehler) – doppelt sind Aufnahmen ohne Clip (datei:…, Nvidia/SteelSeries)
             ueberlapp = min(a1, b1) - b0
             kuerzer = min(a1 - a0, b1 - b0)
             if ueberlapp >= UEBERLAPP_S or (kuerzer > 0 and ueberlapp >= UEBERLAPP_ANTEIL * kuerzer):
