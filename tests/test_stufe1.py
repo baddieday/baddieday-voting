@@ -110,6 +110,12 @@ class Abend(MitRegieMaterial):
         neu = self.abend("session_2026-10-06_23-00-00", ["a1"])
         self.assertIsNotNone(neu["entwurf"])                                               # 4 starke Szenen: Video
         self.assertIn("ich baue dein Video", self.meldung("abend:session_2026-10-06_23-00-00"))
+        # Rendern unterbrochen (Update, Neustart): der nächste Timer-Lauf baut das Video fertig, statt es zu vergessen
+        self.con.execute("UPDATE entwuerfe SET status = 'neu', datei = NULL WHERE id = ?", (neu["entwurf"],))
+        e = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
+        self.assertEqual(e["nachgeholt"], ["session_2026-10-06_23-00-00"])
+        self.assertEqual(self.con.execute("SELECT status FROM entwuerfe WHERE id = ?", (neu["entwurf"],)).fetchone()[0],
+                         "gerendert")
         neu = self.abend("session_2026-10-07_23-00-00", ["b1"])                            # nur Einzelkills
         self.assertIsNone(neu["entwurf"])
         text = self.meldung("kein:session_2026-10-07_23-00-00")
@@ -204,6 +210,7 @@ class LernBotEinfach(MitRegieMaterial):
 class ClipBotStill(MitSpeicher):
     def test_entscheidet_ohne_nachricht(self):
         self.konfig.daten["bot"]["clips_zeigen"] = False
+        self.konfig.daten["auto_freigabe"]["modus"] = "an"     # still nur, wenn er selbst entscheidet (sonst nie entschieden)
         cid = self.clip_anlegen(status="vorbewertet", file_id=None)
         bot = FakeBot()
         fake = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42}, bot=bot)

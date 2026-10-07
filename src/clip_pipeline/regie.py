@@ -199,7 +199,20 @@ class ZuWenigSzenen(RegieFehler):
 
     def __init__(self, stark: int, mindestens: int, gesamt: int):
         self.stark, self.mindestens, self.gesamt = stark, mindestens, gesamt
+        self.quelle: str | None = None   # „🎯 nur Match …“, wenn deine Clip-Auswahl (⚙️) das Material eingeengt hat
         super().__init__(f"nur {stark} starke Szene{'n' if stark != 1 else ''} (mindestens {mindestens})")
+
+    def kopf(self) -> str:
+        return (f"nur {self.stark} starke Szene{'n' if self.stark != 1 else ''} (Multikill, Clutch oder Endkampf), "
+                f"ein Video braucht {self.mindestens}")
+
+    def tipp(self) -> str:
+        """Was helfen würde – nur, wenn es wirklich hilft (sonst leer)."""
+        if self.quelle:
+            return f"Deine Clip-Auswahl ist eingeschränkt ({self.quelle}) – für alle Clips: ⚙️ → 🔧 → 🎯 Clips."
+        if self.gesamt >= self.mindestens:
+            return "Mit Einzelkills ginge es: ⚙️ → 🎯 Szenen → „auch Einzelkills“."
+        return ""
 
 
 def ist_stark(gruppe: int, victory: bool, clip_mk: dict | None, mk: dict) -> bool:

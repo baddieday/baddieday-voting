@@ -143,6 +143,7 @@ class LernBot(MitRegieMaterial):
         # 27.09. („Buttons laden lange“): answerCallbackQuery geht raus, bevor Bewertung und Caption gebaut werden
         from unittest import mock
 
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True   # Stufe 1: der alte Weg lebt unter /experte
         self.momente_anlegen(MOMENTE[:8])
         self.musik_anlegen(150, "episch")
         eid = lernbot.baue_entwurf(self.konfig, "short")
@@ -159,6 +160,7 @@ class LernBot(MitRegieMaterial):
     def test_entwurf_fail_baut_und_schickt_fail_video(self):
         # 05.10. (Fail-Format/🔥 Viral): /entwurf fail nimmt der Bot an, baut ein Fail-Video (Standbild, Hook) und
         # schickt es mit Viral-Zeile; „Nächster Entwurf“ führt wieder zu 🔥 Viral (der Bot wählt neu)
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True   # Stufe 1: der alte Weg lebt unter /experte
         self.context.args = ["fail"]
         asyncio.run(lernbot.cmd_entwurf(SimpleNamespace(effective_message=None), self.context))
         self.assertEqual(len(self.aufgaben), 1)
@@ -205,6 +207,7 @@ class LernBot(MitRegieMaterial):
         self.assertTrue(liste["hinweise"][0].startswith("🎯 nur Match"), liste["hinweise"])
 
     def test_entwurf_senden_und_bewerten(self):
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True   # Stufe 1: der alte Weg lebt unter /experte
         self.momente_anlegen(MOMENTE[:8])
         track = self.musik_anlegen(150, "episch")
         eid = lernbot.baue_entwurf(self.konfig, "short")
@@ -227,7 +230,8 @@ class LernBot(MitRegieMaterial):
         self.klick(f"g:{eid}:hektisch")  # abwählen
         q = self.klick(f"x:{eid}:")
         nach_fertig = [b.callback_data for reihe in q.bearbeitet[0]["reply_markup"].inline_keyboard for b in reihe]
-        self.assertEqual(nach_fertig, [f"pk:{eid}:", *[d for reihe in lernbot.knoepfe_kurzbefehle() for _, d in reihe]])
+        self.assertEqual(nach_fertig, [f"pk:{eid}:", *[d for reihe in lernbot.knoepfe_kurzbefehle(experte=True)
+                                                       for _, d in reihe]])
         self.assertIn("Musik passt nicht", q.bearbeitet[0]["caption"])
         zeile = self.con.execute("SELECT * FROM entwurf_bewertungen").fetchone()
         self.assertEqual((zeile["daumen"], json.loads(zeile["gruende"])), (-1, ["musik"]))
@@ -246,6 +250,7 @@ class LernBot(MitRegieMaterial):
         self.assertEqual(len(self.bot.videos), 1)
 
     def test_nach_bewertung_kommt_der_naechste(self):
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True   # Stufe 1: der alte Weg lebt unter /experte
         self.momente_anlegen(MOMENTE[:8])
         self.musik_anlegen(150, "episch")
         eid = lernbot.baue_entwurf(self.konfig, "short")

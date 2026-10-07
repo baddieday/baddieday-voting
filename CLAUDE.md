@@ -348,3 +348,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     KI-Cutter, Selbst-Aussortieren, Vorfilter, Abendstand (`einstellungen.EINFACH_FEST`). Fail-Videos nur über /experte.
   - Nach jedem Update „✅ Neue Version läuft“; 📋 Stand zeigt deine Regeln und den letzten Abend. Anleitung:
     `docs/SO-GEHTS.md`. Nächste Stufen: Spannung ohne Kill erkennen · viel mehr Musik · Lernen sichtbar zurück.
+  - Nach der Prüfung: Ein unterbrochenes Rendern (Update, Neustart) holt der nächste Timer-Lauf nach (bis 12 h),
+    die Effekt-Stufe geht vor dem alten ✨-Schalter, der Clip-Bot ist nur still, wenn die Auto-Freigabe auf „an“
+    steht (sonst bekäme kein Clip eine Entscheidung), Doppeltipps wenden eine Regel nur einmal an. Die n8n-Nachricht
+    „Match verarbeitet“ ist in `1-match-verarbeiten.json` deaktiviert (in n8n selbst einmal von Hand).

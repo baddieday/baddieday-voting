@@ -148,7 +148,7 @@ async def sende_outbox(app: Application) -> int:
     leise = aktionen.ruhezeit(konfig)  # nachts kommen Clips weiter sofort, aber ohne Ton (gilt auch ohne [lager])
     k = einstellungen.anwenden(con, konfig) if zeilen else konfig  # nur zum Lesen von [auto_freigabe]
     stand = _auto_stand(con, k) if zeilen else None
-    zeigen = bool(k.wert("bot.clips_zeigen", False))
+    zeigen = not _still(k)
     for z in zeilen:
         if not zeigen:   # Stufe 1 (07.10.): still – entscheiden wie immer, nur ohne Nachricht an dich
             _erwartung_festschreiben(con, konfig, z["id"])
@@ -194,6 +194,12 @@ async def sende_outbox(app: Application) -> int:
     return gesendet
 
 
+def _still(k) -> bool:
+    """Clip-Bot still (Stufe 1, 07.10.) – nur, wenn die Auto-Freigabe wirklich selbst entscheidet. Bei „probe“ oder
+    „aus“ entscheidest du; ohne Nachricht bekäme ein Clip nie eine Entscheidung (keine Battles, kein Highlight)."""
+    return not k.wert("bot.clips_zeigen", False) and auto_freigabe.werte(k)["modus"] == "an"
+
+
 async def automat_lauf(app: Application) -> int:
     """Auto-Freigabe außerhalb des Sendens (braucht keinen Speicher): Frist für offene Clips – die alte Nachricht
     bekommt die 🤖-Zeile und Knöpfe zum Umdrehen, dazu eine stille Meldung „⏰ … selbst entschieden“ – und die
@@ -204,7 +210,7 @@ async def automat_lauf(app: Application) -> int:
     if w["modus"] == "aus":
         return 0
     ergebnis = auto_freigabe.frist(con, k)
-    if not k.wert("bot.clips_zeigen", False):   # still (07.10.): Zusammenfassungen gelten als erledigt, nichts an dich
+    if _still(k):   # still (07.10.): Zusammenfassungen gelten als erledigt, nichts an dich
         for match_id in auto_freigabe.faellige_zusammenfassungen(con):
             if db.meldung(con, f"auto:{match_id}", auto_freigabe.zusammenfassung_text(con, match_id, k)):
                 con.execute("UPDATE meldungen SET gesendet = ? WHERE schluessel = ?", (iso(jetzt()), f"auto:{match_id}"))

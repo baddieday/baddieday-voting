@@ -163,12 +163,12 @@ def _setze_pfad(daten: dict, pfad: str, wert: Any) -> None:
 
 def anwenden(con: sqlite3.Connection, konfig: Konfig) -> Konfig:
     """Konfig mit den Bot-Werten darüber (eine Kopie – die geladene Konfig bleibt, wie sie ist, damit „↩️ Standard“
-    sofort wieder die Datei gelten lässt). Ohne Experten-Modus kommen die Werte aus EINFACH_FEST dazu, und Effekt-Stufe
-    „aus“ schaltet die Effekte ab (07.10.)."""
+    sofort wieder die Datei gelten lässt). Ohne Experten-Modus kommen die Werte aus EINFACH_FEST dazu, und die Effekt-Stufe
+    schaltet die Effekte an („aus“: ab) – sie geht vor dem alten Schalter (07.10.)."""
     werte = gespeichert(con)
     experte = bool(werte["lernbot.experte"] if "lernbot.experte" in werte else konfig.wert("lernbot.experte", False))
     stufe = werte.get("regie.effekt_stufe", konfig.wert("regie.effekt_stufe", None))
-    if not werte and experte and stufe != 0:
+    if not werte and experte and stufe is None:
         return konfig
     daten = copy.deepcopy(konfig.daten)
     for pfad, wert in werte.items():
@@ -176,8 +176,8 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig) -> Konfig:
     if not experte:
         for pfad, wert in EINFACH_FEST.items():
             _setze_pfad(daten, pfad, wert)
-    if stufe == 0:
-        _setze_pfad(daten, "regie.effekte.an", False)
+    if stufe is not None:   # die Stufe geht vor dem alten Schalter „✨ Effekte an/aus“ (sonst wirkte „wild“ nie)
+        _setze_pfad(daten, "regie.effekte.an", stufe != 0)
     return Konfig(daten=daten, quelle=konfig.quelle)
 
 

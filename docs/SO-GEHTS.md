@@ -29,3 +29,7 @@
 ## Ruhe im Chat
 Der Clip-Bot schickt keine einzelnen Szenen mehr. Er meldet sich nur bei Problemen (zum Beispiel Speicher voll) und
 mit dem Highlight-Video. Nach einem Update schreibt der Lern-Bot einmal „✅ Neue Version läuft“.
+
+Kommt pro Match noch „🎬 Match verarbeitet … Jetzt im Bot bewerten“? Diese Nachricht schickt n8n. Abschalten:
+in n8n den Ablauf „1 Match verarbeiten“ öffnen, den Kasten „Telegram Info“ anklicken, **D** drücken (deaktivieren),
+speichern. Die Datei `1-match-verarbeiten.json` im Repo hat das schon.

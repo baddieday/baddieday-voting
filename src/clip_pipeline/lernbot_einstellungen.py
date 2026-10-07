@@ -42,6 +42,9 @@ def menue_text(con: sqlite3.Connection, konfig: Konfig, meldung: str | None = No
     _, hinweis = einstellungen.quell_matches(con, einstellungen.anwenden(con, konfig))
     if hinweis:
         teile.append(f"Gerade: {hinweis}")
+    if alle and not einstellungen.experte(con, konfig):   # sonst wundert man sich, warum „an“ nichts tut (07.10.)
+        teile.append("ℹ️ Im einfachen Modus fest aus: KI-Cutter, Selbst-Aussortieren, Vorfilter, Abendstand – "
+                     "wirken erst im Experten-Modus.")
     return "\n".join(t for t in teile if t)
 
 

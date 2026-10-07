@@ -90,10 +90,12 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict
     if fmt == "short" and (ziel := ziel_regel(con, konfig)):
         p["ziel_dauer_s"] = max(ZIEL_GRENZEN[0], min(ZIEL_GRENZEN[1], ziel))
     s = stufe(con, konfig)
-    if s in STUFE_WERTE:
+    if s in STUFE_WERTE:   # „ruhig“ nie wilder als gelernt, „wild“ nie ruhiger – sonst wirkte der Tipp verkehrt herum
         hektik, staerke = STUFE_WERTE[s]
-        p["effekt_hektik"] = hektik
-        p["effekt_staerke"] = {st: staerke for st in STIMMUNGEN}
+        wahl = min if s < STANDARD_STUFE else max if s > STANDARD_STUFE else (lambda _gelernt, regel: regel)
+        gelernt = p.get("effekt_staerke") if isinstance(p.get("effekt_staerke"), dict) else {}
+        p["effekt_hektik"] = wahl(float(p.get("effekt_hektik", 1.0)), hektik)
+        p["effekt_staerke"] = {st: wahl(float(gelernt.get(st, 1.0)), staerke) for st in STIMMUNGEN}
     p["nur_starke"] = nur_starke(con, konfig)
     p["musik_rotation"] = MUSIK_ROTATION
     return p

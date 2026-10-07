@@ -32,7 +32,7 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
     konfig.pruefe_speicher()  # wirft SpeicherOffline -> Exit 3, kein Wecken
     ordner = konfig.wurzel / str(konfig.wert("sitzungen.ordner", "sitzungen"))
     fertig = {z["name"] for z in con.execute("SELECT name FROM sitzungen")}
-    ergebnis: dict = {"neu": [], "wartet": [], "fehler": []}
+    ergebnis: dict = {"neu": [], "wartet": [], "fehler": [], "nachgeholt": _nachholen(con, konfig)}
     for datei in sorted(ordner.glob("session_*.json")) if ordner.is_dir() else []:
         name = datei.stem
         if name in fertig or not SESSION_ID.fullmatch(name):
@@ -53,7 +53,7 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
                 ergebnis["wartet"].append({"sitzung": name, "offen": offen})
                 continue
             hinweis = f"{len(offen)} Match(es) nicht verarbeitet: {', '.join(offen[:5])}"
-        tag = f"{utc_zu_lokal(ende, konfig.wert('zeit.zeitzone', 'Europe/Berlin')):%d.%m.}"
+        tag = _tag(konfig, ende)
         db.lern_meldung(con, f"abend:{name}", f"🎮 Abend vom {tag} erkannt ({len(matches)} Match"
                         f"{'' if len(matches) == 1 else 'es'}) – ich baue dein Video. Das dauert meist 10–30 Minuten.")
         stimmung.analysiere(con, konfig, claude=claude, whisper=whisper)
@@ -75,26 +75,59 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
             entwurf.entwurf(con, k, entwurf_id)
         except regie.ZuWenigSzenen as z:   # lieber kein Video als eins mit Füllmaterial (Florian, 07.10.)
             hinweis = "; ".join(filter(None, [hinweis, str(z)]))
-            db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z))
+            db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z, len(offen)))
         except Exception as fehler:  # noqa: BLE001 – vermerken und dir sagen, statt alle 10 min still neu zu versuchen
-            if not isinstance(fehler, (regie.RegieFehler, MedienFehler)):
-                log.exception("Abend-Video %s", name)
             entwurf_id = None
             hinweis = "; ".join(filter(None, [hinweis, str(fehler)]))
-            db.lern_meldung(con, f"fehler:{name}", f"⚠️ Für deinen Abend vom {tag} kam kein Video zustande: "
-                                                   f"{str(fehler)[:200]}. Beim nächsten Abend versuche ich es wieder.")
+            _melde_fehler(con, name, tag, fehler)
         _merke(con, name, matches, ende, entwurf_id, hinweis)
         ergebnis["neu"].append({"sitzung": name, "matches": len(matches), "entwurf": entwurf_id, "hinweis": hinweis})
     return ergebnis
 
 
-def kein_video_text(tag: str, z: regie.ZuWenigSzenen) -> str:
-    """„🎮 Abend vom 06.10.: nur 2 starke Szenen (ein Video braucht 4) – heute kein Video. …“"""
-    text = (f"🎮 Abend vom {tag}: nur {z.stark} starke Szene{'n' if z.stark != 1 else ''} (Multikill, Clutch oder "
-            f"Endkampf), ein Video braucht {z.mindestens} – heute kein Video.")
-    if z.gesamt > z.stark:
-        text += " Mit Einzelkills ginge es: ⚙️ → 🎯 Szenen → „auch Einzelkills“."
-    return text
+def kein_video_text(tag: str, z: regie.ZuWenigSzenen, offen: int = 0) -> str:
+    """„🎮 Abend vom 06.10.: nur 2 starke Szenen (…), ein Video braucht 4 – heute kein Video.“ + Grund/Tipp."""
+    text = f"🎮 Abend vom {tag}: {z.kopf()} – heute kein Video."
+    if offen:
+        text += f" {offen} Match{'' if offen == 1 else 'es'} kam{'' if offen == 1 else 'en'} nie bei mir an."
+    return f"{text} {z.tipp()}".strip()
+
+
+def _tag(konfig: Konfig, ende) -> str:
+    return f"{utc_zu_lokal(ende, konfig.wert('zeit.zeitzone', 'Europe/Berlin')):%d.%m.}"
+
+
+def _melde_fehler(con: sqlite3.Connection, name: str, tag: str, fehler: Exception) -> None:
+    if not isinstance(fehler, (regie.RegieFehler, MedienFehler)):
+        log.error("Abend-Video %s", name, exc_info=fehler)
+    db.lern_meldung(con, f"fehler:{name}", f"⚠️ Für deinen Abend vom {tag} kam kein Video zustande: "
+                                           f"{str(fehler)[:200]}. Beim nächsten Abend versuche ich es wieder.")
+
+
+def _nachholen(con: sqlite3.Connection, konfig: Konfig) -> list[str]:
+    """Abend-Videos, deren Rendern abbrach (Update, Neustart, Strom): Die Sitzung kennt ihren Entwurf schon, der steht
+    aber noch auf „neu“ ohne Datei. entwurf.entwurf ist idempotent – einfach nochmal rendern, bis 12 h nach dem Abend.
+    Danach (oder bei einem echten Fehler) kommt die Fehlerzeile statt endloser Versuche alle 10 Minuten."""
+    offen = con.execute("""SELECT s.name, s.entwurf_id, s.ende_utc, s.verarbeitet, s.hinweis FROM sitzungen s
+                           JOIN entwuerfe e ON e.id = s.entwurf_id WHERE e.status = 'neu' AND e.datei IS NULL""").fetchall()
+    if not offen:
+        return []
+    k = einstellungen.anwenden(con, konfig)
+    grenze = jetzt() - timedelta(hours=12)
+    nachgeholt = []
+    for z in offen:
+        tag = _tag(konfig, aus_iso(z["ende_utc"]) if z["ende_utc"] else jetzt())
+        try:
+            if aus_iso(z["verarbeitet"]) < grenze:
+                raise MedienFehler("das Bauen wurde immer wieder unterbrochen")
+            log.info("Abend-Video %s: Rendern war unterbrochen – baue Entwurf #%s fertig", z["name"], z["entwurf_id"])
+            entwurf.entwurf(con, k, z["entwurf_id"])
+            nachgeholt.append(z["name"])
+        except Exception as fehler:  # noqa: BLE001 – wie beim ersten Versuch: vermerken und dir sagen
+            con.execute("UPDATE sitzungen SET entwurf_id = NULL, hinweis = ? WHERE name = ?",
+                        ("; ".join(filter(None, [z["hinweis"], str(fehler)])), z["name"]))
+            _melde_fehler(con, z["name"], tag, fehler)
+    return nachgeholt
 
 
 def _merke(con: sqlite3.Connection, name: str, matches: list[str], ende, entwurf_id: int | None,

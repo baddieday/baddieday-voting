@@ -470,7 +470,10 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None) 
                                    hinweise_vorab=[*filter(None, [quell_hinweis]), *nachgezogen["hinweise"]],
                                    gelernt=gelernt, variante=variante)
             except regie.RegieFehler as fehler:
-                if not nur_matches or isinstance(fehler, regie.ZuWenigSzenen):
+                if not nur_matches or not quell_hinweis:   # nach ❌ kommen die Matches aus dem Video: kein ⚙️-Hinweis
+                    raise
+                if isinstance(fehler, regie.ZuWenigSzenen):
+                    fehler.quelle = quell_hinweis
                     raise
                 raise regie.RegieFehler(f"{fehler} – {quell_hinweis}. In ⚙️ Einstellungen auf „alle Clips“ stellen.") \
                     from fehler
@@ -815,11 +818,7 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
         log.info("Entwurf #%s gesendet in %.0f s", eid, time.monotonic() - t)
         return eid
     except regie.ZuWenigSzenen as z:   # Stufe 1: lieber kein Video als eins mit Füllmaterial
-        text = (f"🎬 Kein Video: nur {z.stark} starke Szene{'n' if z.stark != 1 else ''} (Multikill, Clutch oder "
-                f"Endkampf), ein Video braucht {z.mindestens}.")
-        if z.gesamt > z.stark:
-            text += " Mit Einzelkills ginge es: ⚙️ → 🎯 Szenen → „auch Einzelkills“."
-        await app.bot.send_message(chat, text)
+        await app.bot.send_message(chat, f"🎬 Kein Video: {z.kopf()}. {z.tipp()}".strip())
         return None
     except Exception as e:  # dir kurz sagen, was los ist – Details ins Log
         log.exception("Entwurf fehlgeschlagen")
@@ -931,7 +930,7 @@ async def bei_klick(update, context) -> None:
         await query.answer("Entwurf unbekannt.")
         return
     experte = experte_an(con, context.bot_data["konfig"])
-    if not experte:
+    if not experte and aktion in ("d", "g") and extra != "mehr":   # „✅ fertig“ alter Nachrichten: wie bisher
         await _klick_einfach(query, context, zeile, aktion, eid, extra)
         return
     if aktion == "g" and extra == "mehr":   # 06.10.: alle neun Gründe statt der vier einfachen
@@ -1007,9 +1006,12 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
                 log.warning("Bildunterschrift #%s nicht aktualisiert: %s", eid, str(fehler)[:120])
 
     if aktion == "d" and extra == "1":
+        if context.bot_data.get("paket_arbeitet"):   # Knöpfe bleiben stehen – sonst käme nie ein Paket
+            await query.answer("⏳ Ich packe gerade ein anderes Paket – tippe gleich nochmal ✅.")
+            return
         await query.answer("👍 Super – dein Upload-Paket kommt gleich.")
         await caption(regie_lernen.bewerte(con, eid, daumen=1), None)
-        if lernbot_paket.paket_erlaubt(con, eid) is None and not context.bot_data.get("paket_arbeitet"):
+        if lernbot_paket.paket_erlaubt(con, eid) is None:
             context.bot_data["paket_arbeitet"] = True
             app.create_task(lernbot_paket.sende_paket(app, eid))
         return
@@ -1020,6 +1022,11 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
     if aktion != "g" or (extra != "neu" and extra not in regie_lernen.GRUENDE):
         await query.answer("Unbekannter Knopf.")
         return
+    erledigt = context.bot_data.setdefault("regel_erledigt", set())
+    if eid in erledigt:   # Doppeltipp, bevor die Knöpfe weg sind: die Regel nicht zweimal anwenden
+        await query.answer("✔️ Schon erledigt – die neue Fassung kommt.")
+        return
+    erledigt.add(eid)
     await query.answer("Verstanden – die neue Fassung kommt.")
     if extra == "neu":
         bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
