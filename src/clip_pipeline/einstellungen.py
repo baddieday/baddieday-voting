@@ -40,7 +40,8 @@ class Einstellung:
 KATALOG: tuple[Einstellung, ...] = (
     Einstellung(QUELLE, "🎯 Clips",
                 (("alle", "alle Clips"), ("abend", "neuester Spielabend"), (NEUESTES_MATCH, "neuestes Match")),
-                "alle", "Aus welchen Clips der Lern-Bot Entwürfe baut. Ein bestimmtes Match: 📅 Match wählen."),
+                "abend", "Aus welchen Clips „🎬 Neues Video“ baut – ab Werk der neueste Spielabend (bis 6 Uhr früh). "
+                "Ein bestimmtes Match: 📅 Match wählen."),
     Einstellung("lernbot.auto_schwelle", "🤖 Vorfilter",
                 ((0.0, "aus"), (0.3, "locker"), (0.5, "mittel"), (0.7, "streng")),
                 0.0, "Entwürfe mit niedriger Erwartung sortiert der Bot still aus und baut den nächsten."),
@@ -101,8 +102,8 @@ KATALOG: tuple[Einstellung, ...] = (
     Einstellung("geschmack.mut", "🧪 Ausprobieren", ((0.15, "vorsichtig"), (0.33, "ausgewogen"), (0.5, "mutig")),
                 0.5, "Wie oft der Bot bei einem Video bewusst etwas Neues ausprobiert (Aufbau, Tempo, Zeitlupe)."),
 )
-# Die vier Einstellungen im einfachen Menü (07.10.); alle anderen hinter „🔧 Alle Einstellungen“
-EINFACH = ("regie.short_ziel_s", "regie.szenen", "regie.effekt_stufe", "musik.genres_bevorzugt")
+# Die Einstellungen im einfachen Menü (07.10.); alle anderen hinter „🔧 Alle Einstellungen“
+EINFACH = (QUELLE, "regie.short_ziel_s", "regie.szenen", "regie.effekt_stufe", "musik.genres_bevorzugt")
 # Einfacher Modus (07.10.): was ihn ausmacht – ohne Experten-Modus gelten diese Werte, egal was in Datei oder Bot steht.
 # KI-Cutter und Selbst-Aussortieren machten Entwürfe langsam und unvorhersehbar, der Abendstand war eine Nachricht zu
 # viel. Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌; die KI urteilt erst nach dem Senden mit.
@@ -239,7 +240,7 @@ def match_zeile(z: sqlite3.Row, konfig: Konfig | None) -> str:
 
 def quell_matches(con: sqlite3.Connection, konfig: Konfig) -> tuple[set[str] | None, str | None]:
     """(Match-IDs für regie.erstelle(nur_matches=…) oder None = alle, Hinweis für den Entwurf)."""
-    quelle = str(konfig.wert(QUELLE, "alle") or "alle")
+    quelle = str(konfig.wert(QUELLE, "abend") or "abend")   # 07.10.: ab Werk die neueste Session, nicht alle 14 Tage
     if quelle == "alle":
         return None, None
     alle = con.execute(

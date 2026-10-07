@@ -1,8 +1,8 @@
 # So geht's (Stand 07.10.2026)
 
 ## Was von selbst passiert
-1. Du zockst. Wenn dein PC meldet, dass der Abend vorbei ist, schreibt der Lern-Bot:
-   „🎮 Abend vom … erkannt – ich baue dein Video.“
+1. Du zockst. Kommt 45 Minuten lang kein neues Match dazu, gilt der Abend als vorbei (am PC musst du nichts
+   einstellen), und der Lern-Bot schreibt: „🎮 Abend vom … erkannt – ich baue dein Video.“
 2. Etwas später kommt das Video. Es besteht nur aus **starken Szenen** dieses Abends: Multikills, Clutches,
    Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann.
 3. Gab es zu wenig starke Szenen (ein Video braucht 4), kommt **kein Video**. Die Statuszeile sagt dann, warum.
@@ -32,7 +32,7 @@ Bei jedem zweiten Video probiert er bewusst etwas Neues (ändern: ⚙️ → �
 immer vor.** Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert hat.
 
 ## Knöpfe
-- **🎬 Neues Video** – jederzeit von Hand.
+- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend (ändern: ⚙️ → 🎯 Clips).
 - **📋 Stand** – deine Regeln und was beim letzten Abend passiert ist.
 - **⚙️ Einstellungen** – Short-Länge, Szenen (nur starke oder auch Einzelkills), Effekte, Musik.
 - **/experte** – alle alten Knöpfe und Details ein- oder ausschalten.

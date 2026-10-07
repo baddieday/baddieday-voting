@@ -43,6 +43,25 @@ class Sitzung(MitRegieMaterial):
         self.assertTrue(Path(entwurf["datei"]).is_file())  # gerendert -> der Lern-Bot schickt ihn
         self.assertEqual(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["neu"], [])  # einmal
 
+    def test_abend_ende_ohne_datei_vom_pc(self):
+        """07.10. („immer noch die Clips von vor 14 Tagen, nicht die neueste Session“): ohne Datei vom PC erkennt der
+        Mini das Abend-Ende selbst – 45 min kein neues Match; solange gespielt wird, wartet er."""
+        self.momente_anlegen(MOMENTE)
+        self.musik_anlegen(150, "episch")
+        for m, vor_min in (("m1", 120), ("m2", 70)):
+            self.con.execute("INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, status, erstellt, geaendert) "
+                             "VALUES (?, ?, ?, ?, 'verarbeitet', 'x', 'x')",
+                             (m, f"replays/{m}.replay", iso(jetzt() - timedelta(minutes=vor_min + 20)),
+                              iso(jetzt() - timedelta(minutes=vor_min))))
+        self.assertIsNone(sitzung.auto_abend(self.con, self.konfig, ["m2"]))      # schon in einer Datei vom PC
+        self.con.execute("UPDATE matches SET ende_utc = ? WHERE id = 'm2'", (iso(jetzt() - timedelta(minutes=10)),))
+        self.assertIsNone(sitzung.auto_abend(self.con, self.konfig))               # vor 10 min: wird noch gespielt
+        self.con.execute("UPDATE matches SET ende_utc = ? WHERE id = 'm2'", (iso(jetzt() - timedelta(minutes=70)),))
+        e = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
+        self.assertEqual(e["neu"][0]["sitzung"], "abend_m1")
+        self.assertEqual(e["neu"][0]["matches"], 2)
+        self.assertEqual(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["neu"], [])  # einmal
+
     def test_speicher_schlaeft_kein_wecken(self):
         (self.konfig.wurzel / ".clip-speicher").unlink()
         self.konfig.daten["speicher"].update(host="pve-big", wol_mac="aa:bb:cc:dd:ee:ff")

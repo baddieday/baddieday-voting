@@ -281,6 +281,8 @@ tod_standbild = 0.6        # 0,64 s Standbild am Tod
 ordner = "sitzungen"
 # So lange auf n8n warten, bis alle Matches des Abends verarbeitet sind
 warten_h = 2
+# Abend-Ende selbst erkennen (07.10.): so viele Minuten kein neues Match = Abend vorbei (0 = nur die Datei vom PC)
+ruhe_min = 45
 format = "short"
 
 [bot]
@@ -297,6 +299,8 @@ mut = 0.5
 # Experten-Modus (06.10.): aus = ein Knopf, 👍/👎, vier Einstellungen; an = alle Knöpfe, Befehle und Details.
 # Umschalten im Bot: /experte oder ⚙️ → 🔧 Alle Einstellungen
 experte = false
+# Aus welchen Clips „🎬 Neues Video“ baut (07.10.): abend = neuester Spielabend · alle · match:neuestes
+quelle = "abend"
 # Abends einmal ein Satz zum Stand (Ortszeit)
 abendstand = true
 abend_uhrzeit = "21:00"

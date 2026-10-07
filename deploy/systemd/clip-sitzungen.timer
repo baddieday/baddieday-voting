@@ -1,5 +1,5 @@
-# Alle 10 Minuten nach neuen "Session vorbei"-Dateien sehen (nur wenn pve-big ohnehin läuft).
-# Aktivieren: sudo systemctl enable --now clip-sitzungen.timer
+# Alle 10 Minuten: Abend vorbei? (Datei vom Gaming-PC oder 45 min kein neues Match) – dann das Abend-Video bauen.
+# Arbeitet nur im Puffer auf dem Mini, weckt pve-big nie. alles-aktualisieren.sh richtet ihn ein und schaltet ihn an.
 [Unit]
 Description=Clip-Pipeline: Session vorbei alle 10 Minuten prüfen
 
