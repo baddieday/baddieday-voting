@@ -20,6 +20,17 @@
 | 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus) |
 | 🔁 Einfach neu | Andere Fassung, gleiche Regeln |
 
+## Was der Bot selbst lernt
+Bei jedem Video stellt er drei Dinge selbst ein und merkt sich, was ankommt:
+- **Aufbau:** schnelle Montage, erzählt, Steigerung oder Kino
+- **Tempo:** schnelle oder ruhige Schnitte
+- **Zeitlupe:** viel oder wenig
+
+Er lernt aus deinen ✅/❌ und aus der Note einer KI, die sich jedes Video nach dem Senden anschaut (zählt ein Drittel
+so viel wie du). Dein Grund unter ❌ zählt mit: „🎵 Musik“ oder „⏱️ Zu kurz“ werden nicht dem Aufbau angelastet.
+Bei jedem zweiten Video probiert er bewusst etwas Neues (ändern: ⚙️ → 🔧 → 🧪 Ausprobieren). **Deine Regeln gehen
+immer vor.** Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert hat.
+
 ## Knöpfe
 - **🎬 Neues Video** – jederzeit von Hand.
 - **📋 Stand** – deine Regeln und was beim letzten Abend passiert ist.
