@@ -333,3 +333,18 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Bisherige wieder ein (`[lernbot].experte`). Clip-Bot, Lern-Systeme und n8n-Vertrag unverändert. Regel für mich:
   neue Stellschrauben kommen nur noch hinter „🔧 Alle Einstellungen“, und ich erkläre dir Änderungen ohne
   Fachbegriffe.
+- 2026-10-07 (Stufe 1 des Umbaus, Florian: „macht keinen Spaß mehr … immer die gleichen Clips, Spannungskurve, Musik …
+  nichts dagegen tun können“; Antworten: Bot macht alles · gute Szenen = Multikills, Clutches, Spannung · viel mehr
+  Musik · zuerst einfach & zuverlässig · ❌ → kurz fragen, dann neu · zu wenig Szenen → lieber kein Video):
+  - **Ein Ablauf:** Abend vorbei → Statuszeile „🎮 Abend erkannt“ → Video nur aus starken Szenen des Abends (die
+    Zeile verschwindet) oder „kein Video, weil …“ (die Zeile wird umgeschrieben). Unter dem Video nur ✅ Hochladen
+    (Upload-Paket) und ❌ Nicht gut.
+  - **❌ → ein Tipp = feste Regel** (`regeln.py`, kein Lernen, keine KI dazwischen) und sofort eine neue Fassung aus
+    denselben Matches: ⏱️/⏳ Ziel ±10 s (`regie.short_ziel_s`), 🥱 schwächere Hälfte der Szenen für immer gesperrt,
+    🎵 Song für immer gesperrt (Tabelle `sperren`), 😵 Effekte eine Stufe ruhiger (`regie.effekt_stufe`), 🔁 neu.
+  - **Nur starke Szenen** (`regie.szenen = "stark"`): Multikill, Victory, Clutch, Kill im Endkampf; unter 4 → kein
+    Video. Songs: keiner kommt vor 8 Videos wieder. Aufbau: Montage → Story → Steigerung → Kino der Reihe nach.
+  - **Ruhe:** Clip-Bot still (`[bot].clips_zeigen = false`, nur Warnungen/Highlights); im einfachen Modus fest aus:
+    KI-Cutter, Selbst-Aussortieren, Vorfilter, Abendstand (`einstellungen.EINFACH_FEST`). Fail-Videos nur über /experte.
+  - Nach jedem Update „✅ Neue Version läuft“; 📋 Stand zeigt deine Regeln und den letzten Abend. Anleitung:
+    `docs/SO-GEHTS.md`. Nächste Stufen: Spannung ohne Kill erkennen · viel mehr Musik · Lernen sichtbar zurück.

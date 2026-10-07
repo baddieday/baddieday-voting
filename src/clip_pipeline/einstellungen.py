@@ -80,16 +80,32 @@ KATALOG: tuple[Einstellung, ...] = (
     Einstellung("viral.ki", "🔥 KI-Einschätzung", ((True, "an"), (False, "aus")),
                 True, "Claude schätzt je Moment viral/humor/spannung ein (zählt gegen dein Abo, höchstens 40 am Tag)."),
     # 06.10. (Florian: „wie kann ich die Videos wieder länger werden lassen?“) – hinten angehängt (s:o:<i> bleiben)
-    Einstellung("regie.short_mindestens_s", "⏱️ Short-Länge",
+    Einstellung("regie.short_mindestens_s", "⏱️ Short-Mindestlänge",
                 ((0.0, "automatisch (lernt)"), (45.0, "mindestens 45 s"), (55.0, "mindestens 55 s"),
                  (65.0, "mindestens 65 s"), (75.0, "75 s")),
                 0.0, "Untergrenze fürs Ziel der Shorts: Lernen, KI-Cutter und Publikum dürfen nur darüber gehen."),
     # 06.10. (Florian: „das wird alles zu kompliziert“) – aus: ein Knopf, 👍/👎, vier Einstellungen; an: alles wie bisher
     Einstellung("lernbot.experte", "🔧 Experten-Modus", ((False, "aus"), (True, "an")),
                 False, "An: alle Knöpfe, Befehle, Gründe und Details. Aus: ein Knopf, 👍/👎, vier Einstellungen."),
+    # Stufe 1 (07.10., regeln.py): deine Regeln – ⏱️/⏳/😵 unter ❌ stellen sie um, hier siehst und änderst du sie
+    Einstellung("regie.short_ziel_s", "⏱️ Short-Länge",
+                ((0.0, "automatisch"), *((float(s), f"{s} s") for s in range(30, 80, 5))),
+                0.0, "So lang werden deine Shorts. „⏱️ Zu kurz“ und „⏳ Zu lang“ unter ❌ verschieben das um 10 s."),
+    Einstellung("regie.szenen", "🎯 Szenen",
+                (("stark", "nur starke (Multikill, Clutch, Endkampf)"), ("alle", "auch Einzelkills")),
+                "stark", "Nur starke Szenen: lieber kein Video als eins mit Füllmaterial."),
+    Einstellung("regie.effekt_stufe", "✨ Effekte", ((0, "aus"), (1, "ruhig"), (2, "normal"), (3, "wild")),
+                2, "Wie viele Effekte (Zoom, Blitz, Zeitlupe) ins Video kommen. „😵 Zu hektisch“ stellt eine Stufe ruhiger."),
+    Einstellung("bot.clips_zeigen", "📨 Clip-Bot", ((False, "still (nur Warnungen)"), (True, "jede Szene schicken")),
+                False, "Still: der Clip-Bot entscheidet jede Szene selbst und meldet sich nur bei Problemen."),
 )
-# Die vier Einstellungen im einfachen Menü (06.10.); alle anderen hinter „🔧 Alle Einstellungen“
-EINFACH = (QUELLE, "regie.short_mindestens_s", "regie.effekte.an", "musik.genres_bevorzugt")
+# Die vier Einstellungen im einfachen Menü (07.10.); alle anderen hinter „🔧 Alle Einstellungen“
+EINFACH = ("regie.short_ziel_s", "regie.szenen", "regie.effekt_stufe", "musik.genres_bevorzugt")
+# Einfacher Modus (07.10.): was ihn ausmacht – ohne Experten-Modus gelten diese Werte, egal was in Datei oder Bot steht.
+# KI-Cutter und Selbst-Aussortieren machten Entwürfe langsam und unvorhersehbar, der Abendstand war eine Nachricht zu
+# viel; der Stil wechselt der Reihe nach statt per Lotterie.
+EINFACH_FEST = {"regie.kritik.ki": False, "regie.kritik.schwelle": 0.0, "lernbot.auto_schwelle": 0.0,
+                "lernbot.abendstand": False, "regie.stil_rotation": True}
 NACH_SCHLUESSEL = {e.schluessel: e for e in KATALOG}
 
 
@@ -129,26 +145,39 @@ def zuruecksetzen(con: sqlite3.Connection, schluessel: str) -> None:
 def experte(con: sqlite3.Connection, konfig: Konfig) -> bool:
     """Experten-Modus an? (⚙️ oder [lernbot].experte; Standard aus, 06.10.)"""
     try:
-        return bool(anwenden(con, konfig).wert("lernbot.experte", False))
-    except Exception:  # noqa: BLE001 – ohne Tabelle (alte DB, Tests ohne Regie-Schema): einfach
-        return bool(konfig.wert("lernbot.experte", False))
+        werte = gespeichert(con)
+    except Exception:  # noqa: BLE001 – ohne Tabelle (alte DB, Tests ohne Regie-Schema): Datei bzw. einfach
+        werte = {}
+    return bool(werte["lernbot.experte"] if "lernbot.experte" in werte else konfig.wert("lernbot.experte", False))
+
+
+def _setze_pfad(daten: dict, pfad: str, wert: Any) -> None:
+    knoten = daten
+    *oben, name = pfad.split(".")
+    for teil in oben:
+        if not isinstance(knoten.get(teil), dict):
+            knoten[teil] = {}
+        knoten = knoten[teil]
+    knoten[name] = copy.deepcopy(wert)
 
 
 def anwenden(con: sqlite3.Connection, konfig: Konfig) -> Konfig:
     """Konfig mit den Bot-Werten darüber (eine Kopie – die geladene Konfig bleibt, wie sie ist, damit „↩️ Standard“
-    sofort wieder die Datei gelten lässt)."""
+    sofort wieder die Datei gelten lässt). Ohne Experten-Modus kommen die Werte aus EINFACH_FEST dazu, und Effekt-Stufe
+    „aus“ schaltet die Effekte ab (07.10.)."""
     werte = gespeichert(con)
-    if not werte:
+    experte = bool(werte["lernbot.experte"] if "lernbot.experte" in werte else konfig.wert("lernbot.experte", False))
+    stufe = werte.get("regie.effekt_stufe", konfig.wert("regie.effekt_stufe", None))
+    if not werte and experte and stufe != 0:
         return konfig
     daten = copy.deepcopy(konfig.daten)
     for pfad, wert in werte.items():
-        knoten = daten
-        *oben, name = pfad.split(".")
-        for teil in oben:
-            if not isinstance(knoten.get(teil), dict):
-                knoten[teil] = {}
-            knoten = knoten[teil]
-        knoten[name] = copy.deepcopy(wert)
+        _setze_pfad(daten, pfad, wert)
+    if not experte:
+        for pfad, wert in EINFACH_FEST.items():
+            _setze_pfad(daten, pfad, wert)
+    if stufe == 0:
+        _setze_pfad(daten, "regie.effekte.an", False)
     return Konfig(daten=daten, quelle=konfig.quelle)
 
 

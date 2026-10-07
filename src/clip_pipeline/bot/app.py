@@ -148,7 +148,13 @@ async def sende_outbox(app: Application) -> int:
     leise = aktionen.ruhezeit(konfig)  # nachts kommen Clips weiter sofort, aber ohne Ton (gilt auch ohne [lager])
     k = einstellungen.anwenden(con, konfig) if zeilen else konfig  # nur zum Lesen von [auto_freigabe]
     stand = _auto_stand(con, k) if zeilen else None
+    zeigen = bool(k.wert("bot.clips_zeigen", False))
     for z in zeilen:
+        if not zeigen:   # Stufe 1 (07.10.): still – entscheiden wie immer, nur ohne Nachricht an dich
+            _erwartung_festschreiben(con, konfig, z["id"])
+            aktionen.als_gesendet(con, z["id"], None, None, _vorschlag(con, k, z, stand))
+            gesendet += 1
+            continue
         pfad = konfig.absolut(z["vorschau_pfad"]) if z["vorschau_pfad"] else None
         if pfad is None or not pfad.is_file():
             log.warning("Vorschau für Clip #%s fehlt: %s", z["id"], pfad)
@@ -198,6 +204,11 @@ async def automat_lauf(app: Application) -> int:
     if w["modus"] == "aus":
         return 0
     ergebnis = auto_freigabe.frist(con, k)
+    if not k.wert("bot.clips_zeigen", False):   # still (07.10.): Zusammenfassungen gelten als erledigt, nichts an dich
+        for match_id in auto_freigabe.faellige_zusammenfassungen(con):
+            if db.meldung(con, f"auto:{match_id}", auto_freigabe.zusammenfassung_text(con, match_id, k)):
+                con.execute("UPDATE meldungen SET gesendet = ? WHERE schluessel = ?", (iso(jetzt()), f"auto:{match_id}"))
+        return len(ergebnis)
     if ergebnis:  # zuerst die Meldung: die Entscheidungen stehen schon fest, auch wenn Telegram gleich streikt
         db.meldung(con, f"frist:{iso(jetzt())}", auto_freigabe.frist_text(ergebnis, w["frist_h"]))
     for e in ergebnis:
