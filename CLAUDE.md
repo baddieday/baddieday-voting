@@ -378,3 +378,16 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   erkennt der Mini das Abend-Ende selbst (`sitzung.auto_abend`: 45 min kein neues Match, nur der letzte Block der
   letzten 18 h, nie ältere Abende). (3) `alles-aktualisieren.sh` richtete `clip-sitzungen.timer` nie ein – jetzt
   installiert und schaltet es ihn ein.
+- 2026-10-07 (Florian: „ich tippe ❌ → 🥱 und sehe das gleiche Video mit anderen Schnitten“; 🥱 = der Schnitt
+  langweilt, die Szenen sind ok): **🥱 sperrt nichts mehr** – ersetzt bei 🥱 den Stufe-1-Punkt „schwächere Hälfte für
+  immer gesperrt“ (alte Zeilen bleiben in `sperren`, gelten aber nicht; 🎵-Sperren wirken weiter).
+  - Die neue Fassung ist **anders geschnitten**: Aufbau mit anderer Reihenfolge, Tempo umgedreht (mindestens 15 %
+    spürbar), anderer Song (`regeln.neue_fassung`, `geschmack.waehle(anders=…)`). Fester Stil aus ⚙️ und deine Regeln
+    gehen vor.
+  - **Szenen:** die stärkere Hälfte bleibt, die schwächere fehlt nur in dieser Fassung. Ersatz nur aus nie gesehenen
+    Szenen: erst vom Abend (auch Einzelkills), dann starke früherer Abende; sonst kein Video mit klarem Satz
+    (`regie.fassung_kandidaten`, `KeineNeuenSzenen`).
+  - **Dieselbe Szene** unter mehreren Schlüsseln (Clip, Nvidia, SteelSeries): Fenster überlappen ≥ 3 s oder ≥ 40 %
+    (`szenen.py`). Je Video nur einmal, Abwechslung und Cooldown je Szene – in allen Videos.
+  - **Lernen:** 🥱 zählt nicht mehr gegen die Szenen (Moment-Formel und Moment-Bonus), nur gegen Aufbau/Tempo/Zeitlupe.
+    Annahmen Z1–Z9: `docs/ENTSCHEIDUNGEN.md`, „🥱 = Schnitt“.

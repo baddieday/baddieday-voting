@@ -12,8 +12,9 @@ Paare entstehen aus vier Quellen (Spec §8.3, Entwürfe seit 06.10.), jede mit e
                                                                              (Gewicht 1,0 – echte Zuschauer)
   - Entwürfe (06.10., Florian: „gefühlt bewerte ich genau den gleichen Mist wie früher“): dein 👍/👎 im Lern-Bot.
     Vorher lernte daraus nur der Bonus genau dieser Momente – die Formel, die neue Momente auswählt, nie. Je Moment
-    wird die Summe deiner Urteile gebildet (👍 +1, „🥱 Clips langweilig“ −1, 👎 ohne Grund −0,5, 👎 nur mit
-    Schnitt-Gründen 0); Momente mit Plus > Momente mit Minus.        ([lernen].gewicht_entwurf, 0,5 – indirekt)
+    wird die Summe deiner Urteile gebildet (👍 +1, 👎 ohne Grund −0,5, 👎 nur mit Schnitt-Gründen 0 – dazu zählt seit
+    07.10. auch 🥱, ein Urteil über den Schnitt); Momente mit Plus > Momente mit Minus.
+                                                                     ([lernen].gewicht_entwurf, 0,5 – indirekt)
 
 Lernidee in Alltagssprache: Jedes Paar ist eine kleine Prüfungsfrage „welcher von beiden ist besser?“. Die
 Gewichte werden so lange ein bisschen verschoben, bis die Formel möglichst viele Fragen richtig beantwortet.
@@ -67,9 +68,9 @@ NEUE_MERKMALE = frozenset(merkmal_modul.REPLAY_MERKMALE + merkmal_modul.MIC_MERK
 # (die fehlen bei Datei-Momenten – „Datei gegen Clip“ ist kein Unterschied in der Länge)
 UNBEKANNT_WENN_FEHLT = NEUE_MERKMALE | {"laenge", "lautstaerke"}
 QUELLEN = ("battle", "freigabe", "entwurf", "publikum")
-# Entwurf-Paare (06.10.): so wirkt eine Bewertung je Moment. Nur Inhalt – Schnitt-Gründe (zu lang, Musik …) sagen
-# nichts über den Moment; Fail-Momente haben ihre eigene Formel (fail.fail_score) und bleiben draußen
-ENTWURF_STIMME = {"gut": 1.0, "langweilig": -1.0, "ohne_grund": -0.5}
+# Entwurf-Paare (06.10.): so wirkt eine Bewertung je Moment. Nur Inhalt – Schnitt-Gründe (zu lang, Musik, seit 07.10.
+# auch 🥱 langweilig) sagen nichts über den Moment; Fail-Momente haben ihre eigene Formel (fail.fail_score)
+ENTWURF_STIMME = {"gut": 1.0, "ohne_grund": -0.5}
 # B2/L-A: die jüngsten so viel Prozent eines Abschnitts sind Holdout – nie trainiert, nur für die ehrliche
 # Out-of-Sample-Quote in /gewichte (siehe _holdout, _holdout_trefferquote)
 HOLDOUT_ANTEIL = 0.2
@@ -269,7 +270,7 @@ def entwurf_paare(con: sqlite3.Connection, kill_tabelle: list[float], maximal: i
 
     Je Moment die Summe deiner Urteile über alle Entwürfe, in denen er war (ENTWURF_STIMME); Hook-Segmente zählen
     nicht extra. Plus-Momente > Minus-Momente, die deutlichsten zuerst, reihum (_round_robin) bis maximal Paare.
-    Beispiel: Entwurf A (clip:1, clip:2) 👍, Entwurf B (clip:3) 👎 „langweilig“ → (clip:1 > clip:3), (clip:2 > clip:3).
+    Beispiel: Entwurf A (clip:1, clip:2) 👍, Entwurf B (clip:3) 👎 ohne Grund → (clip:1 > clip:3), (clip:2 > clip:3).
     Fehlende Schnittliste oder Moment: still übersprungen. Ohne Regie-Tabellen (alte DB): ([], 0)."""
     try:
         zeilen = con.execute("""SELECT b.daumen, b.gruende, e.schnittliste FROM entwurf_bewertungen b
@@ -280,8 +281,7 @@ def entwurf_paare(con: sqlite3.Connection, kill_tabelle: list[float], maximal: i
     n = 0
     for z in zeilen:
         gruende = set(json.loads(z["gruende"] or "[]"))
-        stimme = (ENTWURF_STIMME["gut"] if z["daumen"] > 0 else ENTWURF_STIMME["langweilig"] if "langweilig" in gruende
-                  else ENTWURF_STIMME["ohne_grund"] if not gruende else 0.0)
+        stimme = ENTWURF_STIMME["gut"] if z["daumen"] > 0 else ENTWURF_STIMME["ohne_grund"] if not gruende else 0.0
         if not stimme:
             continue
         try:
