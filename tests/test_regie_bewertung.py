@@ -157,7 +157,8 @@ class Goldtest(MitMomenten):
         vorne = self.clip_anlegen(max_gruppe=3, merkmale={**CLIP_NULL, "kill_punkte": 6.0})
         wipe = self.clip_anlegen(max_gruppe=3, merkmale=CLIP_NULL)
         self.moment("clip:sieg", {"max_gruppe": 0, "kill_sekunden": [6.0, 8.0, 10.0]}, clip_id=sieg)
-        # ein Kill der Serie liegt vor der Datei: clips.max_gruppe (3) zählt, nicht momente (2)
+        # ein Kill der Serie liegt vor der Datei: Kandidat trägt clips.max_gruppe (3), der Titel zählt seit 07.10.
+        # aber nur die zwei sichtbaren Kills (wie der Zähler)
         self.moment("clip:vorne", {"max_gruppe": 2, "kill_sekunden": [6.0, 8.0]}, clip_id=vorne)
         self.moment("clip:wipe", WIPE, clip_id=wipe, dauer=40.0)
         self.moment("datei:double", {"max_gruppe": 2, "kill_sekunden": [6.0, 8.0]})
@@ -169,7 +170,7 @@ class Goldtest(MitMomenten):
         self.assertEqual(titel(plane([seg(1, "clip:sieg", 0.0, 14.0, 0.0)], [k["clip:sieg"]])),
                          [("VICTORY ROYALE", 10.4)])
         self.assertEqual(titel(plane([seg(1, "clip:vorne", 0.0, 20.0, 0.0)], [k["clip:vorne"]])),
-                         [("TRIPLE KILL", 8.1)])
+                         [("DOUBLE KILL", 8.1)])
         self.assertEqual(titel(plane([seg(1, "datei:double", 0.0, 20.0, 0.0)], [k["datei:double"]])),
                          [("DOUBLE KILL", 8.1)])
         # Serie (Team-Wipe mit Umhauen): Teile, Muss-Zonen und Serie wie ohne Datenbank
