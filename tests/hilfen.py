@@ -39,6 +39,10 @@ class MitSpeicher(unittest.TestCase):
         self.konfig.daten["regie"]["stil"] = "klassik"
         # Effekt-Klänge in den Test-Ordner: der Standard /var/lib/clip-pipeline/sfx ist auf CI nicht beschreibbar
         self.konfig.daten["regie"].setdefault("effekte", {})["sfx_ordner"] = str(self.tmp / "sfx")
+        # Stufe 1 (07.10.): die Tests prüfen weiter den alten Weg (alle Szenen, Clip-Bot schickt jede Szene); die neuen
+        # Standards („nur starke Szenen“, „Clip-Bot still“) prüfen eigene Tests ausdrücklich
+        self.konfig.daten["regie"]["szenen"] = "alle"
+        self.konfig.daten.setdefault("bot", {})["clips_zeigen"] = True
         # Auto-Freigabe im Clip-Bot (30.09.): aus, damit alte Tests unverändert bleiben – neue Tests schalten sie an
         self.konfig.daten.setdefault("auto_freigabe", {})["modus"] = "aus"
         for name in ("eingang", "replays", "sessions", "highlights", "musik", "archiv", "papierkorb"):

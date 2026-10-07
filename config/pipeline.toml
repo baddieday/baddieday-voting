@@ -133,8 +133,15 @@ ordner = "/var/lib/clip-pipeline/regie"
 vaapi = true
 # Lernen aus 👍/👎 ohne Grund erst ab so vielen Bewertungen (Gründe wirken sofort)
 lernen_ab = 3
-# Untergrenze fürs Ziel der Shorts in s (06.10., auch in ⚙️ „Short-Länge“); 0 = nur gelernt (45–75 s)
+# Untergrenze fürs Ziel der Shorts in s (06.10., auch in ⚙️ „Short-Mindestlänge“); 0 = nur gelernt (45–75 s)
 short_mindestens_s = 0.0
+# Stufe 1 (07.10., regeln.py) – deine Regeln, im Bot unter ⚙️ bzw. per ❌ umgestellt:
+# feste Länge der Shorts in s (0 = automatisch); „⏱️ Zu kurz“/„⏳ Zu lang“ unter ❌ verschieben sie um 10 s
+short_ziel_s = 0.0
+# "stark" = nur Multikills, Clutches, Kills im Endkampf, Victory – lieber kein Video als Füllmaterial; "alle" = auch Einzelkills
+szenen = "stark"
+# Effekt-Stufe 0 aus · 1 ruhig · 2 normal · 3 wild – hier bewusst nicht gesetzt: ohne Wert gilt das Gelernte,
+# „😵 Zu hektisch“ unter ❌ setzt sie (effekt_stufe = 2)
 # pve-big höchstens so lange für den Final-Render wach halten
 final_halten_min = 60
 # Schnittstil (30.09., stile.py): "auto" = der Bot wählt selbst nach den Noten seines Cutter-Kritikers;
@@ -275,6 +282,11 @@ ordner = "sitzungen"
 # So lange auf n8n warten, bis alle Matches des Abends verarbeitet sind
 warten_h = 2
 format = "short"
+
+[bot]
+# Clip-Bot (07.10.): false = still – jede Szene wird wie bisher (Auto-Freigabe) entschieden, aber nicht mehr geschickt;
+# es kommen nur Warnungen (Speicher, Kills ohne Aufnahme) und Highlight-Videos. true = jede Szene als Video wie früher.
+clips_zeigen = false
 
 [lernbot]
 # Experten-Modus (06.10.): aus = ein Knopf, 👍/👎, vier Einstellungen; an = alle Knöpfe, Befehle und Details.

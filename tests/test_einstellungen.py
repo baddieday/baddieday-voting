@@ -35,7 +35,7 @@ class Einstellungen(MitRegieMaterial):
         einstellungen.setze(self.con, "lernbot.quelle", "match:m1")
         self.assertEqual(self.auswahl()[0], {"m1"})
         # Bot-Wert geht vor der Datei, die geladene Konfig bleibt unverändert; ↩️ Standard lässt die Datei gelten
-        self.konfig.daten.setdefault("lernbot", {})["auto_schwelle"] = 0.2
+        self.konfig.daten.setdefault("lernbot", {}).update(auto_schwelle=0.2, experte=True)
         einstellungen.setze(self.con, "lernbot.auto_schwelle", 0.7)
         einstellungen.setze(self.con, "regie.effekte.an", False)
         k = einstellungen.anwenden(self.con, self.konfig)
@@ -43,6 +43,11 @@ class Einstellungen(MitRegieMaterial):
         self.assertEqual(self.konfig.wert("lernbot.auto_schwelle"), 0.2)
         einstellungen.zuruecksetzen(self.con, "lernbot.auto_schwelle")
         self.assertEqual(einstellungen.anwenden(self.con, self.konfig).wert("lernbot.auto_schwelle"), 0.2)
+        # einfacher Modus (07.10.): Vorfilter, KI-Cutter und Abendstand sind fest aus, der Stil wechselt der Reihe nach
+        self.konfig.daten["lernbot"]["experte"] = False
+        k = einstellungen.anwenden(self.con, self.konfig)
+        self.assertEqual((k.wert("lernbot.auto_schwelle"), k.wert("regie.kritik.ki"), k.wert("lernbot.abendstand"),
+                          k.wert("regie.stil_rotation")), (0.0, False, False, True))
 
     def test_unsinn_wird_abgelehnt_oder_uebergangen(self):
         with self.assertRaises(ValueError):
@@ -58,7 +63,7 @@ class Einstellungen(MitRegieMaterial):
 
     def test_menue_klickweg(self):
         klick = lambda d: lernbot_einstellungen.verarbeite_klick(self.con, self.konfig, d)  # noqa: E731
-        text, knoepfe, _ = klick("s:m")
+        text, knoepfe, _ = klick("s:a")                                    # Clips steht unter „🔧 Alle Einstellungen“
         self.assertIn("🎯 Clips: alle Clips", text)
         _, knoepfe, _ = klick("s:o:0")
         self.assertIn("📅 Match wählen", [t for reihe in knoepfe for t, _d in reihe])
