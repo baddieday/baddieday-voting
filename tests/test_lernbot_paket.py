@@ -77,6 +77,7 @@ class MitLernPaket(MitSpeicher):
         self.konfig.daten["musik"]["ordner"] = str(self.tmp / "musik-bibliothek")
         self.konfig.daten.setdefault("regie", {})["ordner"] = str(self.tmp / "regie")
         self.konfig.daten.setdefault("lernbot", {})["naechster_nach_bewertung"] = False
+        self.konfig.daten["lernbot"]["experte"] = True   # 📦-Knopf, Post-Nummern und /link gibt es nur im Experten-Modus
         self.konfig.daten["sperre"]["warten_s"] = 5
         self.bot = PaketBot()
         self.aufgaben = []
@@ -294,6 +295,11 @@ class Paket(MitLernPaket):
         self.assertIn("später", self.bot.nachrichten[-1]["text"])
         self.assertIn("📦", self.bot.nachrichten[-1]["text"])
         self.assertFalse(self.app.bot_data["paket_arbeitet"])
+        self.konfig.daten["lernbot"]["experte"] = False   # einfacher Modus: kein 📦-Knopf – der Text nennt ✅ (07.10.)
+        with sperre(self.konfig.datenbank.with_suffix(".lock")), self.assertLogs("lern-bot", "WARNING"):
+            asyncio.run(lernbot_paket.sende_paket(self.app, eid))
+        self.assertIn("✅ Hochladen", self.bot.nachrichten[-1]["text"])
+        self.assertNotIn("📦", self.bot.nachrichten[-1]["text"])
 
     def test_fehlende_moment_datei_wird_gemeldet(self):
         eid = self.entwurf_anlegen()

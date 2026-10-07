@@ -90,7 +90,7 @@ class LernBot(MitRegieMaterial):
         self.assertIn(f"g:{eid}:hektisch", knoepfe)                     # die sechs Regel-Gründe (Stufe 1)
         text = lernbot.stand_kurz(self.con, self.konfig)
         self.assertTrue(text.startswith("📋 Stand\n📏 Deine Regeln: Länge automatisch"))
-        self.assertIn("👍/👎 von dir: 1 (0 👍 · 1 👎)", text)
+        self.assertIn("✅/❌ von dir: 1 (0 ✅ · 1 ❌)", text)
         self.assertIn("⏱️ Shorts gerade 45 s", text)
         self.assertLessEqual(len(text.splitlines()), 10)
         antworten = []
@@ -444,9 +444,11 @@ class EntwurfText(unittest.TestCase):
                  "effekte": {"an": True, "look": "neutral"}, "gelernt": {"entwurf": 41, "aenderungen": []},
                  "hinweise": ["a", "b", "c"]}
         kurz = lernbot.entwurf_text({"id": 7}, liste, erwartung=0.8, kritik_text="🧐 Cutter 61", kurz=True)
-        for weg in ("🔮", "🧐", "🎬 Stil", "✨ Look", "🧠 Publikum", "🔁", "im Cooldown", "ohne Datei", "⚠️ c"):
+        for weg in ("🔮", "🧐", "🎬 Stil", "✨ Look", "🧠", "🔁", "im Cooldown", "ohne Datei", "⚠️ c", "Entwurf", "Bogen",
+                    "Momente"):
             self.assertNotIn(weg, kurz)
-        self.assertIn("🆕 1 neue · 1 schon gezeigt", kurz)
+        self.assertIn("🎬 <b>Video #7</b> · 47 s · 2 Szenen", kurz)                    # 07.10.: Video, Szenen
+        self.assertIn("🆕 1 neue Szene · 1 schon gezeigt", kurz)
         self.assertIn("⚠️ b", kurz)
         voll = lernbot.entwurf_text({"id": 7}, liste, erwartung=0.8, kritik_text="🧐 Cutter 61")
         self.assertIn("🔮", voll)                                               # Experten-Modus wie bisher

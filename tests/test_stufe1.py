@@ -122,7 +122,7 @@ class Abend(MitRegieMaterial):
         neu = self.abend("session_2026-10-07_23-00-00", ["b1"])                            # nur Einzelkills
         self.assertIsNone(neu["entwurf"])
         text = self.meldung("kein:session_2026-10-07_23-00-00")
-        self.assertIn("nur 0 starke Szenen", text)
+        self.assertIn("keine starke Szene", text)
         self.assertIn("kein Video", text)
 
 
@@ -205,9 +205,37 @@ class LernBotEinfach(MitRegieMaterial):
         self.assertEqual(asyncio.run(lernbot.sende_wenn_frei(self.app)), 1)
 
     def test_hochladen_gibt_das_paket(self):
-        self.klick(f"d:{self.eid}:1")
+        q = self.klick(f"d:{self.eid}:1")
         self.assertEqual([k.__name__ for k in self.aufgaben], ["sende_paket"])
         self.assertEqual(self.con.execute("SELECT daumen FROM entwurf_bewertungen").fetchone()[0], 1)
+        knoepfe = [b.callback_data for reihe in q.bearbeitet[0]["reply_markup"].inline_keyboard for b in reihe]
+        self.assertEqual(knoepfe, [f"d:{self.eid}:1"])          # ✅ bleibt: ging das Paket schief, nochmal tippen
+
+    def test_grund_waehrend_der_bot_baut_wartet(self):
+        """07.10.: baut der Bot gerade, gilt der Grund noch nicht – vorher hieß es „ich baue dir jetzt eine neue
+        Fassung“, gleich danach „ich baue gerade schon“, und die Fassung kam nie."""
+        self.klick(f"d:{self.eid}:-1")
+        self.app.bot_data["arbeitet"] = True
+        q = self.klick(f"g:{self.eid}:kurz")
+        self.assertIn("tipp gleich nochmal", q.antworten[-1])
+        self.assertIsNone(regeln.ziel_regel(self.con, self.konfig))                         # keine Regel
+        self.assertEqual((self.aufgaben, self.bot.texte), ([], []))
+        self.app.bot_data["arbeitet"] = False
+        self.klick(f"g:{self.eid}:kurz")                                                   # nochmal: wirkt jetzt
+        self.assertEqual(regeln.ziel_regel(self.con, self.konfig), 55.0)
+        self.assertEqual([k.__name__ for k in self.aufgaben], ["neuer_entwurf"])
+
+    def test_nicht_gut_am_highlight_video_ohne_short_regel(self):
+        """07.10.: ❌ am Highlight-Video (Zusammenschnitt) – vorher „Shorts sind ab jetzt 75 s lang (vorher 180 s)“,
+        auch bei „⏳ Zu lang“, und dann wurde ein Short gebaut."""
+        self.con.execute("UPDATE entwuerfe SET format = 'zusammenschnitt' WHERE id = ?", (self.eid,))
+        q = self.klick(f"d:{self.eid}:-1")
+        self.assertEqual(q.antworten, ["Verstanden – dieses Video lasse ich weg."])
+        self.assertIsNone(q.bearbeitet[0]["reply_markup"])                                  # keine Gründe
+        self.klick(f"g:{self.eid}:lang")                                                    # alter Knopf: genauso
+        self.assertIsNone(regeln.ziel_regel(self.con, self.konfig))
+        self.assertEqual((self.aufgaben, self.bot.texte), ([], []))                         # kein neuer Short
+        self.assertEqual(self.con.execute("SELECT daumen FROM entwurf_bewertungen").fetchone()[0], -1)
 
     def test_statuszeile_wird_zu_kein_video(self):
         from clip_pipeline import db

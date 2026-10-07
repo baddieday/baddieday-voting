@@ -180,8 +180,8 @@ def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict) -
         einstellungen.setze(con, ZIEL_SCHLUESSEL, float(neu))
         if neu == alt:
             return (f"⏱️ Länger als {ZIEL_GRENZEN[1]} s geht bei Shorts nicht – das Ziel bleibt {neu} s." if grund == "kurz"
-                    else f"⏱️ Kürzer als {ZIEL_GRENZEN[0]} s geht nicht – das Ziel bleibt {neu} s.")
-        text = f"⏱️ Verstanden: Shorts sind ab jetzt {neu} s lang (vorher {alt} s)."
+                    else f"⏳ Kürzer als {ZIEL_GRENZEN[0]} s geht nicht – das Ziel bleibt {neu} s.")
+        text = f"{'⏱️' if grund == 'kurz' else '⏳'} Verstanden: Shorts sind ab jetzt {neu} s lang (vorher {alt} s)."
         dauer = float(liste.get("dauer_s") or 0)
         if grund == "kurz" and dauer and dauer < alt - 5:
             text += f" Dieses Video hatte nur {dauer:.0f} s – mehr starke Szenen gab es nicht."

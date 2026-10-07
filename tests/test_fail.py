@@ -1,7 +1,7 @@
 """Fail-Momente (fail.py, 05.10.): je eigenem Tod ein Moment aus dem Rohvideo im Puffer, Fakten und Fail-Score.
 
 Replay (anonymisiert): 10 Spieler, fünf fremde finale Eliminierungen, dann mein Triple Kill (101/104/108 s), ich werde
-bei 118 s umgehauen und bei 120 s erledigt – danach ist nur noch einer übrig: Platz 2.
+bei 118 s umgehauen und bei 120 s erledigt – Fortnite zeigt Platz 2 (Replay ich.platzierung).
 """
 
 import json
@@ -30,7 +30,7 @@ TOD = [{"t_ms": 118_000, "eliminator": "P9", "eliminiert": "ICH", "knock": True,
 
 def roh(eliminierungen, start=None) -> dict:
     return {"replay_start": iso(start or jetzt().replace(microsecond=0) - timedelta(hours=1)),
-            "replay_start_kind": "Utc", "laenge_ms": 600_000, "spieler_gesamt": 10, "ich": {"epic_id": "ICH"},
+            "replay_start_kind": "Utc", "laenge_ms": 600_000, "spieler_gesamt": 10, "ich": {"epic_id": "ICH", "platzierung": 2},
             "eliminierungen": eliminierungen}
 
 
@@ -50,6 +50,21 @@ class Fakten(MitPuffer):
         self.assertEqual(mk["fail_score"], 8.5)
         self.assertEqual(mk["fail_titel"], "PLATZ 2")
         self.assertEqual(mk["fail_gruende"], ["Platz 2", "3 Kills davor"])
+
+    def test_platz_wie_fortnite_auch_fuer_alte_momente(self):
+        # Squad: 30 Spieler übrig, Fortnite zeigt aber Platz 4 – die alte Rechnung (übrige + 1) gab „PLATZ 31“
+        self.con.execute("INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, platzierung, erstellt, geaendert)"
+                         " VALUES (?, 'r', 'x', 'x', 4, 'x', 'x')", (SITZUNG,))
+        alt = {"fail": True, "platz": 31, "verbleibend": 30, "kills_vorher_30s": 0}
+        for sek in (100, 300):                             # 100 s: Tod vor dem Reboot, 300 s: der letzte Tod
+            self.con.execute("INSERT INTO momente (schluessel, match_id, datei, start_s, ende_s, stimmung, sicherheit,"
+                             " quelle, merkmale, erstellt, geaendert)"
+                             " VALUES (?, ?, '/x.mp4', 0, 15, 'frustriert', 1, 'regel', ?, 'x', 'x')",
+                             (f"fail:{SITZUNG}:{sek}", SITZUNG, json.dumps(alt)))
+        plaetze = fail.plaetze(self.con)
+        self.assertEqual(plaetze, {f"fail:{SITZUNG}:100": None, f"fail:{SITZUNG}:300": 4})
+        self.assertEqual(fail.mit_platz(alt, f"fail:{SITZUNG}:300", plaetze)["fail_titel"], "PLATZ 4")
+        self.assertIsNone(fail.mit_platz(alt, f"fail:{SITZUNG}:100", plaetze)["fail_titel"])
 
     def test_victory_ohne_tod_kein_fail(self):
         self.assertEqual(fail.tode(match(FREMDE + TRIPLE), self.konfig), [])

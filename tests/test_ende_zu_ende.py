@@ -109,7 +109,7 @@ class OhneVideo(MitSpeicher):
         verarbeitung.render(self.con, self.konfig, SID)  # nochmal -> keine zweite Meldung
         meldungen = self.con.execute("SELECT text FROM meldungen").fetchall()
         self.assertEqual(len(meldungen), 1)
-        self.assertIn("2 Kill(s) ohne Aufnahme", meldungen[0]["text"])
+        self.assertIn("2 Kills ohne Aufnahme", meldungen[0]["text"])
 
 
 class Anlauf(MitSpeicher):

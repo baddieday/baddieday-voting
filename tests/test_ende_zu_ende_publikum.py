@@ -131,7 +131,8 @@ class EndeZuEndePublikum(MitSpeicher):
         k["telegram"].update(leise_von="23:00", leise_bis="08:00")
         k["zeit"]["zeitzone"] = "Europe/Berlin"
         k["lernbot"].update(screenshot_claude=True, screenshot_timeout_s=120,
-                            screenshot_prompt="templates/screenshot-prompt.txt")
+                            screenshot_prompt="templates/screenshot-prompt.txt",
+                            experte=True)   # Post-Nummern und Score-Liste gibt es nur unter /experte (07.10.)
         k["decide"]["programm"] = KEIN_CLAUDE  # Sicherheitsnetz: ein vergessener Fake findet kein echtes claude
         k.setdefault("regie", {})["ordner"] = str(self.tmp / "regie")
         # Getrennter Betrieb wie auf dem Mini (E19): Puffer mit Marke; das Lager (pve-big) ist gesetzt, existiert

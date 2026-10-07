@@ -5,13 +5,14 @@
    einstellen), und der Lern-Bot schreibt: „🎮 Abend vom … erkannt – ich baue dein Video.“
 2. Etwas später kommt das Video. Es besteht nur aus **starken Szenen** dieses Abends: Multikills, Clutches,
    Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann.
-3. Gab es zu wenig starke Szenen (ein Video braucht 4), kommt **kein Video**. Die Statuszeile sagt dann, warum.
+3. Gab es zu wenig starke Szenen (ein Video braucht 4 und mindestens 30 Sekunden), kommt **kein Video**. Die
+   Statuszeile sagt dann, warum.
 
 ## Was du tust
 - **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen.
 - **❌ Nicht gut** – tipp auf einen Grund. Der Bot sagt dir sofort, was er ändert, und baut eine neue Fassung:
 
-| Grund | Was sich ändert (für immer, bis du es selbst änderst – außer bei 🥱) |
+| Grund | Was sich ändert (für immer, bis du es selbst änderst – außer bei 🥱 und 🔁) |
 |---|---|
 | ⏱️ Zu kurz | Shorts werden 10 Sekunden länger (höchstens 75 s) |
 | ⏳ Zu lang | Shorts werden 10 Sekunden kürzer (mindestens 30 s) |
@@ -19,6 +20,9 @@
 | 🎵 Musik | Dieser Song kommt nie wieder |
 | 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus) |
 | 🔁 Einfach neu | Andere Fassung, gleiche Regeln |
+
+Baut der Bot gerade noch ein Video, tipp den Grund kurz danach nochmal. Beim Highlight-Video heißt ❌ nur:
+dieses Video lässt er weg – deine Short-Regeln ändert es nicht.
 
 ## Was der Bot selbst lernt
 Bei jedem Video stellt er drei Dinge selbst ein und merkt sich, was ankommt:
