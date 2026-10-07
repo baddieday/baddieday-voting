@@ -288,6 +288,11 @@ format = "short"
 # es kommen nur Warnungen (Speicher, Kills ohne Aufnahme) und Highlight-Videos. true = jede Szene als Video wie früher.
 clips_zeigen = false
 
+[geschmack]
+# Lernen im einfachen Modus (07.10., geschmack.py): Aufbau, Tempo und Zeitlupe aus deinen ✅/❌ und der KI-Note.
+# mut = wie oft ein Video bewusst etwas Neues probiert: 0.15 vorsichtig · 0.33 ausgewogen · 0.5 mutig
+mut = 0.5
+
 [lernbot]
 # Experten-Modus (06.10.): aus = ein Knopf, 👍/👎, vier Einstellungen; an = alle Knöpfe, Befehle und Details.
 # Umschalten im Bot: /experte oder ⚙️ → 🔧 Alle Einstellungen

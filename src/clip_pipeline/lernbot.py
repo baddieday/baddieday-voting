@@ -28,8 +28,8 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from . import (autonom, big, db, einstellungen, entwurf, erwartung, kriterien, kritik, lernen, massstab, musik,
-               regeln, regie, regie_lernen, stile, stimmung, viral)
+from . import (autonom, big, db, einstellungen, entwurf, erwartung, geschmack, kriterien, kritik, lernen, massstab,
+               musik, regeln, regie, regie_lernen, stile, stimmung, viral)
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import iso, jetzt, utc_zu_lokal
@@ -316,6 +316,8 @@ def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
         teile.append("🎯 Welche Momente du magst: " + ("gelernt und aktiv" if e.aktiv else e.grund))
     except Exception:  # noqa: BLE001 – der Stand darf nie an einer Lern-Zahl scheitern
         log.exception("Stand: Moment-Formel")
+    if zeile := geschmack.stand_zeile(con):   # Aufbau, Tempo, Zeitlupe (Stufe 2)
+        teile.append(zeile)
     stand = autonom.ueberblick(con)
     teile.append(f"📊 Publikum: {stand['ausgewertet']} Videos ausgewertet"
                  + (f" · Vertrauen {round(100 * stand['confidence'])} %" if stand.get("version") else " – noch kein Einfluss"))
@@ -712,11 +714,41 @@ async def _schleife(app) -> None:
             except Exception:
                 log.exception("Fehler in %s", aufgabe.__name__)
         try:
-            if einstellungen.anwenden(app.bot_data["con"], konfig).wert("lernbot.abendstand", True):
+            k = einstellungen.anwenden(app.bot_data["con"], konfig)
+            if k.wert("lernbot.abendstand", True):
                 abendstand(app.bot_data["con"], konfig)
+            if k.wert("regie.geschmack", False):   # einfacher Modus (Stufe 2): Wochenbericht und KI-Urteil
+                geschmack.wochenbericht(app.bot_data["con"], k)
+                if not app.bot_data.get("ki_arbeitet"):   # eigene Aufgabe: Meldungen und Videos warten nicht auf die KI
+                    app.bot_data["ki_aufgabe"] = asyncio.get_running_loop().create_task(ki_nachtrag(app, konfig))
         except Exception:
-            log.exception("Abendstand")
+            log.exception("Abendstand/Wochenbericht/KI-Urteil")
         await asyncio.sleep(float(konfig.wert("lernbot.intervall_s", 30)))
+
+
+async def ki_nachtrag(app, konfig: Konfig) -> float | None:
+    """Höchstens ein KI-Urteil je Runde für einen schon gesendeten Short – nie, während der Bot gerade baut. Jeder
+    Entwurf wird je Bot-Lauf nur einmal versucht (Claude-Fehler, Tageslimit: kein Dauerversuch alle 30 s)."""
+    versucht = app.bot_data.setdefault("ki_versucht", set())
+    if app.bot_data.get("arbeitet") or app.bot_data.get("ki_arbeitet"):
+        return None
+    eid = geschmack.offen_fuer_ki(app.bot_data["con"], versucht)
+    if eid is None:
+        return None
+    from .sperre import Gesperrt
+
+    versucht.add(eid)
+    app.bot_data["ki_arbeitet"] = True
+    try:
+        return await asyncio.to_thread(geschmack.ki_nachtragen, konfig, eid)
+    except Gesperrt:            # die Pipeline rechnet gerade – nächste Runde nochmal
+        versucht.discard(eid)
+        return None
+    except Exception:           # noqa: BLE001 – das KI-Urteil ist Nebensache, der Bot läuft weiter
+        log.exception("KI-Urteil Entwurf #%s", eid)
+        return None
+    finally:
+        app.bot_data["ki_arbeitet"] = False
 
 
 # --- Handler ---------------------------------------------------------------------------

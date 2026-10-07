@@ -41,8 +41,8 @@ STILE: dict[str, dict] = {
                 "faktoren": {}, "beats": None},
 }
 GRENZEN = {"seg_min_faktor": (0.5, 2.0), "effekt_hektik": (0.3, 1.3), "musik_pegel": (0.0, 1.0)}
-# Einfacher Modus (07.10., Florian: „immer die gleiche Spannungskurve“): vier verschiedene Aufbauten der Reihe nach –
-# Klassik (der alte Aufbau) bleibt nur fest wählbar
+# Einfacher Modus (07.10., Florian: „immer die gleiche Spannungskurve“): die vier Aufbauten, aus denen geschmack.py
+# lernt – Klassik (der alte Aufbau) bleibt nur fest wählbar
 ROTATION = ("montage", "story", "steigerung", "kino")
 FORMATE = ("short",)   # der Rahmen-Zoom gilt nur im Hochformat; der Zusammenschnitt bleibt vorerst wie er ist
 
@@ -99,9 +99,6 @@ def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> str:
     if fest in STILE:
         return fest
     n = con.execute("SELECT COUNT(*) FROM entwuerfe WHERE format = ?", (fmt,)).fetchone()[0]
-    if konfig.wert("regie.stil_rotation", False):   # einfacher Modus (07.10.): der Reihe nach, garantiert abwechselnd
-        reihe = ROTATION
-        return reihe[n % len(reihe)]
     zufall = random.Random(f"{fmt}:{n}")
     werte = statistik(con, fmt, konfig)
     # Beta(1 + Summe der Scores, 1 + Summe der Fehlpunkte): gute Noten ziehen, wenig Erfahrung streut stark
@@ -118,7 +115,11 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict
     """p (gelernte Regie-Parameter) mit dem gewählten Stil: Faktoren relativ, Rahmen, Reihenfolge, Hook, Name."""
     if fmt not in FORMATE:
         return p
-    name = waehle(con, konfig, fmt)
+    return mit_stil(p, waehle(con, konfig, fmt))
+
+
+def mit_stil(p: dict, name: str) -> dict:
+    """p mit dem Stil name (Kopie) – auch für geschmack.anwenden, das den Stil selbst wählt."""
     stil = STILE[name]
     p = dict(p)
     for schluessel, faktor in stil["faktoren"].items():

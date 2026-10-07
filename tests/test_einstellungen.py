@@ -43,11 +43,11 @@ class Einstellungen(MitRegieMaterial):
         self.assertEqual(self.konfig.wert("lernbot.auto_schwelle"), 0.2)
         einstellungen.zuruecksetzen(self.con, "lernbot.auto_schwelle")
         self.assertEqual(einstellungen.anwenden(self.con, self.konfig).wert("lernbot.auto_schwelle"), 0.2)
-        # einfacher Modus (07.10.): Vorfilter, KI-Cutter und Abendstand sind fest aus, der Stil wechselt der Reihe nach
+        # einfacher Modus (07.10.): Vorfilter, KI-Cutter beim Bauen und Abendstand fest aus, Aufbau lernt geschmack.py
         self.konfig.daten["lernbot"]["experte"] = False
         k = einstellungen.anwenden(self.con, self.konfig)
         self.assertEqual((k.wert("lernbot.auto_schwelle"), k.wert("regie.kritik.ki"), k.wert("lernbot.abendstand"),
-                          k.wert("regie.stil_rotation")), (0.0, False, False, True))
+                          k.wert("regie.geschmack")), (0.0, False, False, True))
 
     def test_unsinn_wird_abgelehnt_oder_uebergangen(self):
         with self.assertRaises(ValueError):

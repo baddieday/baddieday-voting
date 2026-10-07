@@ -98,14 +98,16 @@ KATALOG: tuple[Einstellung, ...] = (
                 2, "Wie viele Effekte (Zoom, Blitz, Zeitlupe) ins Video kommen. „😵 Zu hektisch“ stellt eine Stufe ruhiger."),
     Einstellung("bot.clips_zeigen", "📨 Clip-Bot", ((False, "still (nur Warnungen)"), (True, "jede Szene schicken")),
                 False, "Still: der Clip-Bot entscheidet jede Szene selbst und meldet sich nur bei Problemen."),
+    Einstellung("geschmack.mut", "🧪 Ausprobieren", ((0.15, "vorsichtig"), (0.33, "ausgewogen"), (0.5, "mutig")),
+                0.5, "Wie oft der Bot bei einem Video bewusst etwas Neues ausprobiert (Aufbau, Tempo, Zeitlupe)."),
 )
 # Die vier Einstellungen im einfachen Menü (07.10.); alle anderen hinter „🔧 Alle Einstellungen“
 EINFACH = ("regie.short_ziel_s", "regie.szenen", "regie.effekt_stufe", "musik.genres_bevorzugt")
 # Einfacher Modus (07.10.): was ihn ausmacht – ohne Experten-Modus gelten diese Werte, egal was in Datei oder Bot steht.
 # KI-Cutter und Selbst-Aussortieren machten Entwürfe langsam und unvorhersehbar, der Abendstand war eine Nachricht zu
-# viel; der Stil wechselt der Reihe nach statt per Lotterie.
+# viel. Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌; die KI urteilt erst nach dem Senden mit.
 EINFACH_FEST = {"regie.kritik.ki": False, "regie.kritik.schwelle": 0.0, "lernbot.auto_schwelle": 0.0,
-                "lernbot.abendstand": False, "regie.stil_rotation": True}
+                "lernbot.abendstand": False, "regie.geschmack": True}
 NACH_SCHLUESSEL = {e.schluessel: e for e in KATALOG}
 
 

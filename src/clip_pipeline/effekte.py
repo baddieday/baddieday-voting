@@ -609,6 +609,8 @@ def plane_tempo(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_
     _lupe_setzen/_raffer_setzen passen nur die Quelle an. Rückgabe {"lupen": n, "raffer": n} (dazu "standbilder": n,
     wenn am Tod eines Fail-Moments ein Standbild gesetzt wurde)."""
     e, _ = einstellungen(konfig)
+    if "max_lupen" in p:   # geschmack.py (07.10.): „viel“ oder „wenig Zeitlupe“ je Video
+        e = {**e, "max_lupen": max(0, min(20, int(p["max_lupen"])))}
     prof, schwelle = e["profile"], e["schwelle"]
     kette_s = float(konfig.wert("vorbewertung.multikill_fenster_s", 10.0))
     momente = {k.schluessel: k for k in reihe}
