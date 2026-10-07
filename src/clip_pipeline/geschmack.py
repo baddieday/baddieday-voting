@@ -78,7 +78,8 @@ def beobachtungen(con: sqlite3.Connection, fmt: str = "short", seit: str | None 
         """SELECT e.id, e.parameter, e.erstellt, b.daumen, b.gruende, k.ki_score FROM entwuerfe e
              LEFT JOIN entwurf_bewertungen b ON b.entwurf_id = e.id
              LEFT JOIN kritiken k ON k.entwurf_id = e.id
-            WHERE e.format = ? AND e.erstellt >= ? ORDER BY e.id""", (fmt, seit or "")).fetchall()
+            WHERE e.format = ? AND e.erstellt >= ? AND (e.variante IS NULL OR e.variante <> 'fail')
+            ORDER BY e.id""", (fmt, seit or "")).fetchall()   # ein Fail-Video baut sich selbst auf (viral.py)
     ergebnis = []
     for z in zeilen:
         wahl = _wahl_aus(z["parameter"])
@@ -155,6 +156,28 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict
     return p
 
 
+# Welche Parameter zu welcher Schraube gehören – ändert sie danach jemand (Publikums-Modell), zählt die Schraube nicht
+GEHOERT = {"aufbau": ("stil", "reihenfolge", "rahmen_zoom", "hook_staerkster", "beats_pro_schnitt", "effekt_hektik",
+                      "musik_pegel"),
+           "tempo": ("seg_min_faktor",), "zeitlupe": ("max_lupen",)}
+
+
+def nur_wirksame(vorher: dict, nachher: dict, konfig: Konfig) -> dict:
+    """Die Wahl ohne die Schrauben, deren Werte nach geschmack.anwenden noch geändert wurden (oder die nicht wirken:
+    Zeitlupe bei ausgeschalteten Effekten) – sonst lobte ein ✅ ein Tempo, das gar nicht im Video ist."""
+    wahl = dict(vorher.get("geschmack") or {})
+    weg = [k for k, namen in GEHOERT.items() if k in wahl and any(vorher.get(n) != nachher.get(n) for n in namen)]
+    if not konfig.wert("regie.effekte.an", True) and "zeitlupe" in wahl:
+        weg.append("zeitlupe")
+    for k in weg:
+        wahl.pop(k, None)
+    if wahl.get("experiment") in weg:
+        wahl["experiment"] = None
+    if weg:
+        wahl["uebersteuert"] = sorted(set(weg))
+    return wahl
+
+
 # --- KI-Urteil im Hintergrund ------------------------------------------------------------------------------------
 
 def offen_fuer_ki(con: sqlite3.Connection, ohne: set[int] | frozenset = frozenset()) -> int | None:
@@ -181,7 +204,8 @@ def ki_nachtragen(konfig: Konfig, entwurf_id: int) -> float | None:
         daten.setdefault("regie", {}).setdefault("kritik", {})["ki"] = True   # einfacher Modus: KI nur hier, nach dem Senden
         k = Konfig(daten=daten, quelle=k.quelle)
         with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=5.0):   # belegt: Gesperrt, der Bot probiert später
-            return kritik.bewerte(con, k, entwurf_id).get("ki_score")
+            kritik.bewerte(con, k, entwurf_id, ki=False, lernen=False)       # Messung (ffmpeg) unter der Sperre
+        return kritik.bewerte(con, k, entwurf_id).get("ki_score")          # Claude ohne Sperre: neue Fassung wartet nicht
     finally:
         con.close()
 

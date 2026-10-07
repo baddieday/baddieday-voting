@@ -364,3 +364,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - KI-Urteil erst nach dem Senden (Lern-Bot-Schleife, eigener Thread, Pipeline-Sperre, je Entwurf ein Versuch pro
     Bot-Lauf, Tageslimit wie bisher) – das Video kommt nicht später; beim Bauen bleibt die KI im einfachen Modus aus.
   - Wochenbericht sonntags ab 18 Uhr (Lern-Meldung `woche:<JJJJ-Www>`, ohne Videos keiner); 📋 Stand zeigt eine Zeile.
+  - Nach der Prüfung: Von der KI zählt im einfachen Modus nur die Note (ihre Gründe lehren das Regie-Lernen nicht mehr
+    mit); übersteuert das Publikums-Modell eine Schraube, bekommt sie für dieses Video weder Lob noch Tadel; Zeitlupe
+    zählt nicht bei Effekten aus; Fail-Videos zählen nicht für den Aufbau; die Sperre gilt nur fürs Messen, nicht
+    für den Claude-Aufruf.

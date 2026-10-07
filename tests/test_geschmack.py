@@ -22,12 +22,12 @@ class Geschmack(MitSpeicher):
         self.con.close()
         super().tearDown()
 
-    def entwurf(self, wahl, daumen=None, gruende=(), ki=None, experiment=None):
+    def entwurf(self, wahl, daumen=None, gruende=(), ki=None, experiment=None, erstellt=None):
         self.n += 1
         p = {"stil": wahl.get("aufbau"), "geschmack": {**wahl, "experiment": experiment}}
         eid = self.con.execute("""INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, datei, erstellt)
                                   VALUES (?, 'short', '/x.json', ?, 'gesendet', '/x.mp4', ?)""",
-                               (f"e{self.n}", json.dumps(p), iso(jetzt()))).lastrowid
+                               (f"e{self.n}", json.dumps(p), iso(erstellt or jetzt()))).lastrowid
         if daumen is not None:
             self.con.execute("INSERT INTO entwurf_bewertungen VALUES (?, ?, ?, ?, ?)",
                              (eid, daumen, json.dumps(list(gruende)), iso(jetzt()), iso(jetzt())))
@@ -70,15 +70,21 @@ class Geschmack(MitSpeicher):
         self.assertIn(p["geschmack"]["aufbau"], geschmack.KNOEPFE["aufbau"])
         self.assertEqual(p["stil"], p["geschmack"]["aufbau"])
         self.assertEqual(p["max_lupen"], geschmack.ZEITLUPEN[p["geschmack"]["zeitlupe"]])
+        # übersteuert das Publikums-Modell danach eine Schraube, bekommt sie weder Lob noch Tadel
+        vorher = {"geschmack": {"aufbau": "kino", "tempo": "ruhig", "zeitlupe": "viel", "experiment": "tempo"},
+                  "seg_min_faktor": 1.25, "max_lupen": 8}
+        wahl = geschmack.nur_wirksame(vorher, {**vorher, "seg_min_faktor": 1.4}, self.konfig)
+        self.assertEqual((wahl.get("tempo"), wahl["experiment"], wahl["aufbau"]), (None, None, "kino"))
         einstellungen.setze(self.con, "regie.stil", "kino")                     # ⚙️ fester Stil geht vor
         p, _ = regie_lernen.aktuelle(self.con, einstellungen.anwenden(self.con, self.konfig), "short")
         self.assertEqual(p["stil"], "kino")
 
     def test_wochenbericht_sonntags_einmal(self):
-        self.entwurf({"aufbau": "story", "tempo": "ruhig", "zeitlupe": "viel"}, daumen=1)
         heute = datetime.now(timezone.utc)
-        sonntag = heute + timedelta(days=7 - heute.isoweekday())               # der nächste Sonntag (nach jetzt)
+        sonntag = heute + timedelta(days=7 - heute.isoweekday())               # der nächste Sonntag
         abend = sonntag.replace(hour=17, minute=30)                             # 18:30/19:30 in Berlin
+        self.entwurf({"aufbau": "story", "tempo": "ruhig", "zeitlupe": "viel"}, daumen=1,
+                     erstellt=abend - timedelta(hours=1))
         self.assertTrue(geschmack.wochenbericht(self.con, self.konfig, abend))
         self.assertFalse(geschmack.wochenbericht(self.con, self.konfig, abend))  # je Woche einmal
         self.assertFalse(geschmack.wochenbericht(self.con, self.konfig, sonntag.replace(hour=8)))   # vormittags nie
