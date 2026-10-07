@@ -368,3 +368,6 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     mit); übersteuert das Publikums-Modell eine Schraube, bekommt sie für dieses Video weder Lob noch Tadel; Zeitlupe
     zählt nicht bei Effekten aus; Fail-Videos zählen nicht für den Aufbau; die Sperre gilt nur fürs Messen, nicht
     für den Claude-Aufruf.
+- 2026-10-07 (Florian: „warum sendet er jetzt immer 2 Videos?“ – zwei verschiedene auf einmal): Die Lern-Bot-Schleife
+  schickte gerenderte Entwürfe alle 30 s los, auch während `neuer_entwurf` eine Fassung noch prüfte; fiel sie durch,
+  kam die nächste Fassung hinterher. Jetzt schickt die Schleife nichts, solange der Bot baut (`sende_wenn_frei`).

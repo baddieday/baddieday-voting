@@ -190,6 +190,17 @@ class LernBotEinfach(MitRegieMaterial):
         zeile = self.con.execute("SELECT daumen, gruende FROM entwurf_bewertungen").fetchone()
         self.assertEqual((zeile["daumen"], json.loads(zeile["gruende"])), (-1, ["kurz"]))  # bleibt Lern-Material
 
+    def test_schleife_schickt_nichts_waehrend_der_bot_baut(self):
+        # 07.10. („warum sendet er immer 2 Videos?“): eine Fassung, die gerade geprüft wird, geht nicht vorab raus
+        video = self.tmp / "v.mp4"
+        video.write_bytes(b"x")
+        self.con.execute("UPDATE entwuerfe SET status = 'gerendert', datei = ? WHERE id = ?", (str(video), self.eid))
+        self.app.bot_data["arbeitet"] = True
+        self.assertEqual(asyncio.run(lernbot.sende_wenn_frei(self.app)), 0)
+        self.assertEqual(self.bot.videos, [])
+        self.app.bot_data["arbeitet"] = False
+        self.assertEqual(asyncio.run(lernbot.sende_wenn_frei(self.app)), 1)
+
     def test_hochladen_gibt_das_paket(self):
         self.klick(f"d:{self.eid}:1")
         self.assertEqual([k.__name__ for k in self.aufgaben], ["sende_paket"])

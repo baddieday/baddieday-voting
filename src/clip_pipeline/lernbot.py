@@ -581,6 +581,16 @@ def _liste(zeile: sqlite3.Row) -> dict:
     return json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
 
 
+async def sende_wenn_frei(app) -> int:
+    """Für die Schleife: nichts schicken, solange der Bot gerade baut (07.10., Florian: „warum sendet er immer 2
+    Videos?“). Vorher schickte die Schleife eine frisch gerenderte Fassung schon los, während neuer_entwurf sie noch
+    prüfte – fiel sie durch, kam die zweite Fassung hinterher: zwei verschiedene Videos. neuer_entwurf schickt am Ende
+    selbst (auch ein Abend-Video, das in der Zwischenzeit fertig wurde)."""
+    if app.bot_data.get("arbeitet"):
+        return 0
+    return await sende_entwuerfe(app)
+
+
 async def sende_entwuerfe(app) -> int:
     # Handler (/entwurf) und Schleife können gleichzeitig senden wollen -> nacheinander, sonst doppelt
     schloss = app.bot_data.setdefault("sende_schloss", asyncio.Lock())
@@ -708,7 +718,7 @@ async def _schleife(app) -> None:
     while True:
         blick_auf_leerlauf(app)
         # lernbot_zahlen.aufraeumen: wartende Screenshots nach 10 min verwerfen (Lernschleife, Spec §7.1)
-        for aufgabe in (sende_meldungen, sende_entwuerfe, lernbot_zahlen.aufraeumen):
+        for aufgabe in (sende_meldungen, sende_wenn_frei, lernbot_zahlen.aufraeumen):
             try:
                 await aufgabe(app)
             except Exception:
