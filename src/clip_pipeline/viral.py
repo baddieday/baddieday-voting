@@ -305,8 +305,9 @@ def mischen(con: sqlite3.Connection, konfig: Konfig, alle: list, variante: str, 
         k.ki = ki.get(k.schluessel) or regel(k.merkmale, k.stimmung, k.max_gruppe, k.victory)
         bonus = round(gewicht * (k.ki["viral"] - 50) / 10, 2) if k.ki["quelle"] == "ki" else 0.0
         k.punkte, k.intensitaet = round(k.punkte + bonus, 2), round(k.intensitaet + bonus, 2)
-        if k.fail and k.ki.get("titel"):
-            k.titel = k.ki["titel"]
+        if k.fail and k.ki.get("titel"):  # erneut prüfen: KI-Titel bis 07.10. kannten noch den falschen Platz
+            k.titel = pruefe_titel(k.ki["titel"], fakten(k.merkmale, None, k.stimmung, k.max_gruppe, k.victory)) \
+                or k.titel
     if variante != "twist":
         return alle, [], hinweise
     twists = sorted((k for k in alle if _ist_twist(k, k.ki)), key=lambda k: (-twist_wert(k), k.schluessel))

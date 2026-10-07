@@ -521,6 +521,7 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
              FROM momente m LEFT JOIN clips c ON c.id = m.clip_id
             ORDER BY m.id"""
     ).fetchall()
+    plaetze = fail_modul.plaetze(con) if fails != "ohne" else {}   # Platz wie Fortnite (07.10.)
     ergebnis = []
     for z in zeilen:
         if hart_verworfen(z["clip_status"], z["clip_quelle"]) or z["schluessel"] in dauerhaft:
@@ -531,6 +532,8 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
         ist_fail = fail_modul.ist_fail(z["schluessel"], mk)
         if (fails == "ohne" and ist_fail) or (fails == "nur" and not ist_fail):
             continue
+        if ist_fail:
+            mk = fail_modul.mit_platz(mk, z["schluessel"], plaetze, konfig)
         datei = z["datei"]
         if not Path(datei).is_file():
             ersatz = _ersatz_datei(konfig, z["clip_pfad"], mk)

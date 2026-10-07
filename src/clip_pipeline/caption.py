@@ -183,7 +183,11 @@ def _fails(con: sqlite3.Connection, momente: set[str]) -> list[dict]:
     namen = sorted(m for m in momente if m.startswith("fail:"))
     if not namen:
         return []
-    zeilen = con.execute(f"SELECT merkmale FROM momente WHERE schluessel IN ({','.join('?' for _ in namen)})", namen)
+    from . import fail  # fail importiert über verarbeitung dieses Modul
+
+    zeilen = con.execute(f"SELECT schluessel, merkmale FROM momente WHERE schluessel IN "
+                         f"({','.join('?' for _ in namen)})", namen)
+    plaetze = fail.plaetze(con)
     ergebnis = []
     for z in zeilen:
         try:
@@ -191,7 +195,7 @@ def _fails(con: sqlite3.Connection, momente: set[str]) -> list[dict]:
         except json.JSONDecodeError:
             continue
         if isinstance(mk, dict):
-            ergebnis.append(mk)
+            ergebnis.append(fail.mit_platz(mk, z["schluessel"], plaetze))
     return sorted(ergebnis, key=lambda mk: -float(mk.get("fail_score") or 0))
 
 
