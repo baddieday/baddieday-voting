@@ -111,11 +111,17 @@ class Ketten(unittest.TestCase):
         self.assertEqual(titel(ein_moment({"kill_sekunden": [2.0, 3.0, 15.0, 16.0, 17.0]})),
                          [("DOUBLE KILL", 3.1), ("TRIPLE KILL", 17.1)])
 
-    def test_titel_nach_seriengroesse_des_moments(self):
-        # Ein Kill der Serie liegt vor der Datei: die längste Kette heißt wie die Serie (max_gruppe, wie Bot/Elo) …
-        self.assertEqual(titel(ein_moment({"kill_sekunden": [6.0, 8.0]}, max_gruppe=3)), [("TRIPLE KILL", 8.1)])
-        # … aber ein einzelner sichtbarer Kill wird nie zum Multikill
+    def test_titel_und_zaehler_zaehlen_was_man_sieht(self):
+        # Ein Kill der Serie liegt vor der Datei: zwei im Bild = DOUBLE (bis 07.10. TRIPLE laut Clip, Zähler aber 2)
+        liste = ein_moment({"kill_sekunden": [6.0, 8.0]}, max_gruppe=3)
+        self.assertEqual(titel(liste), [("DOUBLE KILL", 8.1)])
+        self.assertEqual([e["zahl"] for _, e in ereignisse(liste, "zaehler")], [1, 2])
         self.assertEqual(titel(ein_moment({"kill_sekunden": [8.0]}, max_gruppe=3)), [])
+        # Mein Umhauen liegt vor dem Segment, der Kill ist im Bild: der Kill zählt (vorher fehlte er)
+        segs = [seg(1, "m", 5.0, 20.0, 0.0)]
+        liste = plane(segs, [moment("m", {"kill_sekunden": [7.0, 9.0], "aktion_sekunden": [2.0, 8.5]})])
+        self.assertEqual([(e["t_s"], e["zahl"]) for _, e in ereignisse(liste, "zaehler")], [(7.0, 1), (8.5, 2)])
+        self.assertEqual(titel(liste), [("DOUBLE KILL", 8.6)])
 
     def test_team_wipe_anker_ist_das_umhauen(self):
         mk = {"kill_sekunden": [12.74, 12.81, 12.91], "aktion_sekunden": [2.0, 5.78, 12.91]}
@@ -169,7 +175,7 @@ class Plan(unittest.TestCase):
         self.assertEqual(liste["segmente"][1]["kill_s"], [5.55])
         punches = [(nr, e["t_s"]) for nr, e in ereignisse(liste, "punch")]
         self.assertEqual(punches, [(1, 3.0), (2, 5.55)])
-        self.assertEqual([e["zahl"] for _, e in ereignisse(liste, "zaehler")], [1, 2])   # läuft über das Video
+        self.assertEqual([e["zahl"] for _, e in ereignisse(liste, "zaehler")], [1, 1])   # je Szene ab 1
         # Kein Zoom-Start in einer Blende
         fenster = effekte.uebergangs_fenster(liste)
         self.assertEqual(fenster, [("fade", 9.6, 10.4, 1.0)])
@@ -330,7 +336,7 @@ class Plan(unittest.TestCase):
         effekte.plane(segs, [moment("a", {"kill_sekunden": [4.0]}), moment("e", {"kill_sekunden": [6.0]})],
                       dict(regie.PARAMETER), fx_konfig(), "short", 30, [], stimmung="episch")
         self.assertNotIn("effekte", segs[0])
-        self.assertEqual([e["zahl"] for _, e in ereignisse(liste, "zaehler")], [1, 2])
+        self.assertEqual([e["zahl"] for _, e in ereignisse(liste, "zaehler")], [1, 1])
 
 
 class Uebergaenge(unittest.TestCase):

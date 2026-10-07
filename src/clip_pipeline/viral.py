@@ -89,14 +89,19 @@ def _zahl(x) -> bool:
 
 def pruefe_titel(text: str | None, fakten: dict) -> str | None:
     """KI-Titel säubern und prüfen: Großbuchstaben, nur Zeichen, die die Schrift kann (kein Emoji), ≤ 30 Zeichen,
-    jede Zahl muss in den Fakten stehen. None = verworfen. Beispiel: ("Platz 2 😭", {"platz": 2}) → "PLATZ 2"."""
+    jede Zahl gehört zu ihrem Wort (PLATZ n, n KILLS) und ist genau ihr Fakt. None = verworfen. Beispiel: ("Platz 2 😭", {"platz": 2}) → "PLATZ 2"."""
     if not text:
         return None
     sauber = re.sub(r"\s+", " ", TITEL_ZEICHEN.sub("", str(text).upper().replace("...", "…"))).strip(" ,.-–")
     if not sauber or len(sauber) > TITEL_MAX:
         return None
-    erlaubt = {str(int(v)) for v in _flach(fakten) if _zahl(v) and float(v) == int(v)}
-    if not set(re.findall(r"\d+", sauber)) <= erlaubt:
+    gebunden = 0
+    for muster, werte in ZAHL_WORT:
+        for treffer in re.finditer(muster, sauber):
+            if int(treffer.group(1)) not in {int(v) for v in werte(fakten) if _zahl(v)}:
+                return None
+            gebunden += 1
+    if len(re.findall(r"\d+", sauber)) != gebunden:   # eine Zahl ohne ihr Wort („5 SEKUNDEN“): erfunden
         return None
     return sauber if all(passt(fakten) for muster, passt in WORT_PRUEFUNG if re.search(muster, sauber)) else None
 
@@ -104,6 +109,13 @@ def pruefe_titel(text: str | None, fakten: dict) -> str | None:
 def _serie(f: dict) -> int:
     return max(int(f.get("kills_serie") or 0), int(f.get("kills_vorher_30s") or 0))
 
+
+# Jede Zahl im KI-Titel gehört zu ihrem Wort und muss genau ihr Fakt sein (07.10.: vorher reichte irgendeine Zahl aus
+# den Fakten – „PLATZ 5“ ging durch, weil 5 der Fail-Score war)
+ZAHL_WORT = (
+    (r"(?:PLATZ|TOP|#)\s*(\d+)", lambda f: [f.get("platz")]),
+    (r"(\d+)\s*(?:KILLS?|ELIMS?)\b", lambda f: [f.get("kills_vorher_30s"), f.get("kills_serie")]),
+)
 
 # Wortaussagen im KI-Titel brauchen ihren Fakt (nichts erfinden): sonst gilt der Regel-Titel
 WORT_PRUEFUNG = (
@@ -114,14 +126,6 @@ WORT_PRUEFUNG = (
     (r"\bTRIPLE\b", lambda f: _serie(f) >= 3),
     (r"\bQUAD", lambda f: _serie(f) >= 4),
 )
-
-
-def _flach(d) -> list:
-    if isinstance(d, dict):
-        return [x for v in d.values() for x in _flach(v)]
-    if isinstance(d, (list, tuple)):
-        return [x for v in d for x in _flach(v)]
-    return [d]
 
 
 def fakten(mk: dict, clip_mk: dict | None, stimmung: str | None, max_gruppe: int = 0, victory: bool = False) -> dict:

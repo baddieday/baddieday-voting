@@ -22,10 +22,12 @@ plane() in dieser Reihenfolge:
    2. Ketten       über alle Kills des Moments; Ereignisse nur an sichtbaren Ankern
    3. Finisher     die letzte Aktion einer Kette: Stil aus STILE (11 Stile, nur mit Stärke im Profil) + Bass-Hit;
                    die anderen Kills: Stil aus NEBEN_STILE × mini_faktor + Tick
-   4. Titel        einmal je Kette ab titel_ab_kette Kills, am Ende der Kette (DOUBLE … PENTA, ab 6 MULTI KILL);
+   4. Titel        einmal je Kette ab titel_ab_kette sichtbaren Kills, am letzten davon (DOUBLE … PENTA, ab 6 MULTI KILL –
+                   gezählt wird, was man sieht, wie beim Zähler);
                    VICTORY ROYALE ersetzt überlappende Titel. 16:9: nur in der Blende nach dem Moment (nach seinem
                    letzten Teil – Jump-Cuts liegen innerhalb der Serie)
-   5. Zähler       „KILLS n“ je sichtbarem Kill, laufende Summe im Video (nur Short). Short: Titel und Zähler enden
+   5. Zähler       „KILLS n“ je sichtbarem Kill, gezählt je Szene (nur Short; bis 07.10. lief die Summe über das
+                   ganze Video und mehrere Matches – Florian: „die Kill-Zahlen stimmen nicht“). Short: Titel und Zähler enden
                    spätestens am Anfang einer Zoom-Blende (xfade zoomin vergrößert das ganze Bild, das Spielbild
                    wüchse unter den Text)
    6. Tod          Wackeln (Stärke tod_punch) + Blitz + Einschlag (nur frustriert hat dafür Stärke); ein Fail-Moment
@@ -738,19 +740,22 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
     for moment, idx in je_moment.items():
         k = momente.get(moment)
         mk = k.merkmale if k is not None else {}
-        paare = kills_mit_anker(mk)
+        # Anker = mein Umhauen; liegt es vor der Aufnahme oder im Schnitt, der Kill selbst, wenn man den sieht
+        paare = [(kill, a if wo(idx, a) is not None or wo(idx, kill) is None else kill)
+                 for kill, a in kills_mit_anker(mk)]
         # 1. sichtbar
         for i in idx:
             if sichtbar := sorted({round(a, 3) for _, a in paare if wo([i], a) is not None}):
                 segmente[i]["kill_s"] = sichtbar[:MAX_KILL_S]
         # 2./3. Ketten, Finisher
         alle = _ketten(paare, kette_s)
-        laengste = max(range(len(alle)), key=lambda j: (len(alle[j]), j)) if alle else -1
-        for j, kette in enumerate(alle):
+        for kette in alle:
+            kette = [(kill, a) for kill, a in kette if wo(idx, a) is not None]   # nur, was man sieht
+            if not kette:
+                continue
             fin = max(range(len(kette)), key=lambda n: (kette[n][1], kette[n][0], n))  # letzte Aktion der Kette
             for n, (_, a) in enumerate(kette):
-                if (i := wo(idx, a)) is None:
-                    continue
+                i = wo(idx, a)
                 pr, t = prof[segmente[i]["stimmung"]], auf_zeitleiste(segmente[i], a)
                 if n == fin:  # Stil-Rotation: kein Kill sieht aus wie der vorige
                     stil_setzen(plan, finisher.naechster(pr) or ("punch",), i, t, None, RANG_FINISHER)
@@ -759,13 +764,10 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
                     stil_setzen(plan, neben.naechster(pr) or ("punch",), i, t, float(pr["mini_faktor"]), RANG_PUNCH)
                     dazu(plan, "sfx", i, t, stark(i, pr["tick"], "tick"), klang="tick")
                 gezaehlt.append((t, i))
-            # 4. Titel: einmal je Kette, an ihrem Ende. Die längste Kette des Moments heißt wie seine Serie
-            # (max_gruppe, wie Bot und Elo zählen; ein Kill der Serie kann vor der Datei liegen) – ein einzelner
-            # sichtbarer Kill wird aber nie zum Multikill
-            anzahl = len(kette)
-            if j == laengste and anzahl >= 2 and k is not None:
-                anzahl = max(anzahl, int(k.max_gruppe or 0))
-            if (i := wo(idx, kette[fin][1])) is not None and anzahl >= prof[segmente[i]["stimmung"]]["titel_ab_kette"]:
+            # 4. Titel: einmal je Kette, am letzten sichtbaren Kill, mit der Zahl der sichtbaren Kills (bis 07.10. die
+            # Serie laut Clip – „TRIPLE KILL“, obwohl nur zwei Kills im Bild waren)
+            anzahl, i = len(kette), wo(idx, kette[fin][1])
+            if anzahl >= prof[segmente[i]["stimmung"]]["titel_ab_kette"]:
                 t = auf_zeitleiste(segmente[i], kette[fin][1]) + TITEL_VERSATZ_S
                 dazu(titel, "titel", i, t, stark(i, prof[segmente[i]["stimmung"]]["titel"], "titel"),
                      text=titel_text(anzahl), rang=anzahl)
@@ -892,18 +894,20 @@ def _titel_setzen(titel: list[_Plan], victory: list[_Plan], segmente: list[dict]
 
 def _zaehler(gezaehlt: list[tuple[float, int]], segmente: list[dict], prof: dict, stark, gleich: float,
              gross: list[tuple[float, float]]) -> list[_Plan]:
-    """„KILLS n“ je sichtbarem Kill in Zeitleisten-Reihenfolge; gleichzeitige Kills zählen zusammen. Endet vor einer
-    Zoom-Blende (_bis_blende)."""
+    """„KILLS n“ je sichtbarem Kill in Zeitleisten-Reihenfolge, je Szene ab 1; gleichzeitige Kills zählen zusammen.
+    Endet vor einer Zoom-Blende (_bis_blende)."""
     gruppen: list[list[tuple[float, int]]] = []
     for t, i in sorted(gezaehlt):
         if gruppen and t - gruppen[-1][0][0] < gleich:
             gruppen[-1].append((t, i))
         else:
             gruppen.append([(t, i)])
-    ergebnis, summe = [], 0
+    ergebnis, summe, szene = [], 0, None
     for n, gruppe in enumerate(gruppen):
-        summe += len(gruppe)
         t, i = gruppe[0]
+        if segmente[i]["moment"] != szene:   # je Szene von vorn (Teile nach einem Jump-Cut zählen weiter)
+            summe, szene = 0, segmente[i]["moment"]
+        summe += len(gruppe)
         bis = gruppen[n + 1][0][0] if n + 1 < len(gruppen) else t + ZAEHLER_MAX_S
         wert = stark(i, prof[segmente[i]["stimmung"]]["zaehler"], "zaehler")
         dauer = _bis_blende(t, min(ZAEHLER_MAX_S, bis - t), gross)

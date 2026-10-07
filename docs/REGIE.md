@@ -255,7 +255,7 @@ doppelten“):
 | Zeitleiste bei Tempo | bleibt (Beats!): die Zeitlupe kürzt die Quelle hinten um den Zuschlag, der Zeitraffer verlängert sie – nie in Muss-Zone, Fenster oder Griff; passt es nicht, schrumpft das Fenster (Lupe ≥ 0,3 s, Raffer ≥ 1,5 s) oder fällt weg |
 | Kill-Titel | **einmal je Serie am Ende**: DOUBLE / TRIPLE / QUAD / PENTA KILL, ab 6 MULTI KILL – nie DOUBLE und TRIPLE nacheinander. Die längste Serie heißt wie `max_gruppe` des Moments |
 | VICTORY ROYALE | ab letztem Kill + 0,4 s bis Segmentende (mindestens 1 s), ersetzt einen überlappenden Kill-Titel |
-| Zähler „KILLS n“ | nur Short, bei jedem sichtbaren Kill, zählt über das ganze Video |
+| Zähler „KILLS n“ | nur Short, bei jedem sichtbaren Kill, je Szene ab 1 (seit 07.10.; vorher über das ganze Video) |
 | Tod (frustriert) | Wackeln (Stärke `tod_punch`) + Blitz + dumpfer Einschlag, kein Titel |
 | Jubel (lustig) | Meme-Zoom + Pop auf der ersten Jubel-Spitze |
 | Riser | endet auf dem ersten Kill des Höhepunkts |
@@ -414,7 +414,7 @@ professioneller Schnitt mit einem Hauch Humor.“ Deshalb kein starres Fail-Rege
 - **Fail-Momente** (`fail.py`, Material): Je eigenem Tod im Replay entsteht ein Moment aus dem Rohvideo mit der besten
   Abdeckung im Puffer, 12 s vor bis 3 s nach dem Tod (`[fail]`). Schlüssel `fail:<match>:<sekunde>`, Datei in
   `sessions/<ID>/momente/`, Stimmung frustriert (lacht das Mikro, lustig). In den Merkmalen stehen nur Fakten:
-  `platz` (= verbleibend + 1), `kills_vorher_30s`, `killer_bot`, `selbst` (Sturm/Sturz), `knock_erlitten`,
+  `platz` (wie Fortnite: Replay-Platz, nur beim letzten Tod ohne Sieg), `kills_vorher_30s`, `killer_bot`, `selbst` (Sturm/Sturz), `knock_erlitten`,
   `waffe_gegner`. Victory = kein Tod = kein Fail.
   - Automatisch im Mic-Schritt nach render (clip-mikro); von Hand `pipeline fail --session ID` oder
     `pipeline fail --nachziehen [--tage 14]`. Unter der Pipeline-Sperre; weckt nie, überschreibt und löscht nichts.
