@@ -352,3 +352,19 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     die Effekt-Stufe geht vor dem alten ✨-Schalter, der Clip-Bot ist nur still, wenn die Auto-Freigabe auf „an“
     steht (sonst bekäme kein Clip eine Entscheidung), Doppeltipps wenden eine Regel nur einmal an. Die n8n-Nachricht
     „Match verarbeitet“ ist in `1-match-verarbeiten.json` deaktiviert (in n8n selbst einmal von Hand).
+- 2026-10-07 (Stufe 2 des Umbaus „Lernen zurück“, Florian: lernen aus ✅/❌ und KI-Urteil · mutig ausprobieren ·
+  einmal pro Woche sehen; Reihenfolge danach: Spannung ohne Kill = Endkampf, langes Feuergefecht, knapp überlebt ·
+  Musik = Techno/Hardstyle und Phonk; hochgeladen wird auf TikTok und YouTube Shorts):
+  - `geschmack.py` stellt im einfachen Modus drei Schrauben selbst ein: Aufbau (Montage/Story/Steigerung/Kino),
+    Tempo (Segmente ×0,8/×1,25), Zeitlupe (max_lupen 8/2). Thompson-Sampling je Schraube; Lehrer: dein ✅/❌
+    (Gewicht 1, der Grund grenzt ein – ⏱️/⏳/🎵 treffen keine Schraube, 😵/🎆/💥 nur Tempo/Zeitlupe) und die KI-Note
+    (0,34). Alte Bewertungen zählen sofort für den Aufbau. Ersetzt die feste Aufbau-Reihenfolge aus Stufe 1.
+  - Mutig (`geschmack.mut` 0,5, ⚙️ → 🔧 → 🧪): jedes zweite Video stellt eine Schraube auf ihre am wenigsten
+    erprobte Einstellung; nie dreimal derselbe Aufbau. Deine Regeln (`regeln.anwenden`) kommen danach.
+  - KI-Urteil erst nach dem Senden (Lern-Bot-Schleife, eigener Thread, Pipeline-Sperre, je Entwurf ein Versuch pro
+    Bot-Lauf, Tageslimit wie bisher) – das Video kommt nicht später; beim Bauen bleibt die KI im einfachen Modus aus.
+  - Wochenbericht sonntags ab 18 Uhr (Lern-Meldung `woche:<JJJJ-Www>`, ohne Videos keiner); 📋 Stand zeigt eine Zeile.
+  - Nach der Prüfung: Von der KI zählt im einfachen Modus nur die Note (ihre Gründe lehren das Regie-Lernen nicht mehr
+    mit); übersteuert das Publikums-Modell eine Schraube, bekommt sie für dieses Video weder Lob noch Tadel; Zeitlupe
+    zählt nicht bei Effekten aus; Fail-Videos zählen nicht für den Aufbau; die Sperre gilt nur fürs Messen, nicht
+    für den Claude-Aufruf.

@@ -148,13 +148,19 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None) ->
     Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzte vorher auch die Shorts. Was du inhaltlich magst
     (Momente, Stimmungen, Musik), gilt für beide. fmt None: alle Bewertungen wie bisher."""
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
-    p, ziel = _falte(bewertungen(con), konfig, energien, fmt)
+    einfach = bool(konfig.wert("regie.geschmack", False))
+    # Einfacher Modus (Stufe 2): die KI-Gründe lehren hier nicht mit – von der KI zählt nur ihre Note in geschmack.py
+    p, ziel = _falte(bewertungen(con, mit_ki=not einfach), konfig, energien, fmt)
     if fmt is not None:
-        from . import autonom, stile
+        from . import autonom, geschmack, stile
 
-        # Schnittstil (30.09.) zuerst: relativ auf das Gelernte; das Publikumsmodell darf danach nachsteuern
-        p = stile.anwenden(con, konfig, fmt, p)
+        # Schnittstil (30.09.) zuerst: relativ auf das Gelernte; das Publikumsmodell darf danach nachsteuern.
+        # Einfacher Modus (07.10.): Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌ und der KI-Note
+        p = (geschmack.anwenden if einfach else stile.anwenden)(con, konfig, fmt, p)
+        vorher = dict(p)
         p, ziel = autonom.plan_parameter(con, konfig, fmt, p, ziel)
+        if "geschmack" in p:   # was das Publikums-Modell übersteuert hat, bekommt weder Lob noch Tadel
+            p["geschmack"] = geschmack.nur_wirksame(vorher, p, konfig)
         grenzen = format_regeln(konfig, fmt)[0]
         # ⚙️ Short-Länge (06.10.): deine Untergrenze – nichts Gelerntes darf darunter
         mindestens = float(konfig.wert("regie.short_mindestens_s", 0.0) or 0.0) if fmt == "short" else 0.0
