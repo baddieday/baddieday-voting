@@ -19,10 +19,9 @@ class EntwurfLehrtFormel(MitRegieMaterial):
         self.gut = regie.erstelle(self.con, self.konfig, "short")
         self.schlecht = regie.erstelle(self.con, self.konfig, "short")
         regie_lernen.bewerte(self.con, self.gut["entwurf"], daumen=1)
-        regie_lernen.bewerte(self.con, self.schlecht["entwurf"], daumen=-1)
-        regie_lernen.bewerte(self.con, self.schlecht["entwurf"], grund="langweilig")
+        regie_lernen.bewerte(self.con, self.schlecht["entwurf"], daumen=-1)      # 👎 ohne Grund: die Szenen
 
-    def test_gemocht_gegen_langweilig_und_warum(self):
+    def test_gemocht_gegen_nicht_gemocht_und_warum(self):
         paare, n = lernen.entwurf_paare(self.con, KILLS, 300)
         self.assertEqual(n, 2)
         self.assertTrue(paare)
@@ -34,6 +33,8 @@ class EntwurfLehrtFormel(MitRegieMaterial):
         self.assertIn("Momente aus", text)
         self.assertIn("2 deiner Entwurf-Bewertungen", text)
         self.assertIn("📉 Wenig Material: 10 Momente zur Wahl", text)          # 10 < 3 Shorts × 10 Momente
+        regie_lernen.bewerte(self.con, self.schlecht["entwurf"], grund="langweilig")   # 🥱 = Schnitt (07.10.)
+        self.assertEqual(lernen.entwurf_paare(self.con, KILLS, 300), ([], 1))   # … sagt nichts über die Szenen
 
     def test_fehlende_schnittliste_wird_uebersprungen(self):
         os.remove(self.schlecht["datei"])

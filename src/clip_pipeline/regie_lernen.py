@@ -13,7 +13,8 @@ begrenzten Schritt:
   Stimmung getroffen  die Hauptstimmung bekommt Bonus (+0,5), und die Musik-Ziele dieser Stimmung rücken
                       20 % in Richtung des benutzten Titels (so lernt der Regisseur, welche Musik passt)
   👍 / 👎 allein      Hauptstimmung ±0,25 – erst ab `mindestens` Bewertungen
-  Clips langweilig    jeder Moment dieses Entwurfs −1
+  Schnitt langweilig  (07.10.) nichts an den Momenten – ein Urteil über den Schnitt; Aufbau/Tempo/Zeitlupe lernt
+                      daraus geschmack.py (bis 07.10. hieß er „Clips langweilig“ und kostete jeden Moment −1)
   je Moment           👍: +0,5 für jeden Moment im Entwurf; 👎 ohne Grund: −0,5 (bei 👎 mit Grund lag es an
                       Musik/Tempo/Länge/Schnitt, nicht an den Clips); begrenzt auf ±3
   zu viele Effekte    Effekt-Stärke der Hauptstimmung ×0,85 (0,1 … 1,5); zusammen mit "mehr Action": nichts
@@ -41,15 +42,16 @@ GRUENDE = {
     "getroffen": "🎯 Stimmung getroffen",
     "lang": "⏳ zu lang",
     "abgeschnitten": "✂️ abgeschnitten",
-    "langweilig": "🥱 Clips langweilig",
+    "langweilig": "🥱 Schnitt langweilig",   # 07.10.: der Schnitt, nicht die Szenen (Schlüssel bleibt)
     "effekte_viel": "🎆 zu viele Effekte",
     "action": "💥 mehr Action",
     "kurz": "⏱️ zu kurz",       # 27.09.: Gegenstück zu „zu lang“ – vorher konnte dauer_faktor nur fallen
 }
 
 
-# Gründe, die den Inhalt betreffen (gelten für beide Formate); alle anderen sind Schnitt-Gründe je Format
-INHALT_GRUENDE = {"musik", "getroffen", "langweilig"}
+# Gründe, die den Inhalt betreffen (gelten für beide Formate); alle anderen sind Schnitt-Gründe je Format.
+# 🥱 seit 07.10. ein Schnitt-Grund (Florian: „der Schnitt ist langweilig, die Szenen sind ok“)
+INHALT_GRUENDE = {"musik", "getroffen"}
 
 
 def _grenze(wert: float, unten: float, oben: float) -> float:
@@ -141,12 +143,15 @@ def vorgaben(konfig: Konfig) -> tuple[dict, dict, list[str]]:
     return p, ziel, hinweise
 
 
-def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None) -> tuple[dict, dict]:
+def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None, anders: dict | None = None
+             ) -> tuple[dict, dict]:
     """(Regie-Parameter, Musik-Ziele je Stimmung): deine Vorgaben, dann alle bisherigen Bewertungen.
 
     fmt (27.09.): Schnitt-Werte (Dauer, Segmente, Übergänge, Anlauf, Effekte) lernen nur aus Bewertungen dieses
     Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzte vorher auch die Shorts. Was du inhaltlich magst
-    (Momente, Stimmungen, Musik), gilt für beide. fmt None: alle Bewertungen wie bisher."""
+    (Momente, Stimmungen, Musik), gilt für beide. fmt None: alle Bewertungen wie bisher.
+    anders (07.10., regeln.neue_fassung nach 🥱, nur einfacher Modus): Aufbau und Tempo anders als das abgelehnte
+    Video (geschmack.waehle) – das Tempo geht für diese eine Fassung auch vor dem Publikums-Modell."""
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
     einfach = bool(konfig.wert("regie.geschmack", False))
     # Einfacher Modus (Stufe 2): die KI-Gründe lehren hier nicht mit – von der KI zählt nur ihre Note in geschmack.py
@@ -156,9 +161,11 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None) ->
 
         # Schnittstil (30.09.) zuerst: relativ auf das Gelernte; das Publikumsmodell darf danach nachsteuern.
         # Einfacher Modus (07.10.): Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌ und der KI-Note
-        p = (geschmack.anwenden if einfach else stile.anwenden)(con, konfig, fmt, p)
+        p = geschmack.anwenden(con, konfig, fmt, p, anders=anders) if einfach else stile.anwenden(con, konfig, fmt, p)
         vorher = dict(p)
         p, ziel = autonom.plan_parameter(con, konfig, fmt, p, ziel)
+        if anders and einfach:   # 🥱: sonst drehte das Publikums-Modell das andere Tempo (seg_min_faktor) zurück
+            p["seg_min_faktor"] = vorher["seg_min_faktor"]
         if "geschmack" in p:   # was das Publikums-Modell übersteuert hat, bekommt weder Lob noch Tadel
             p["geschmack"] = geschmack.nur_wirksame(vorher, p, konfig)
         grenzen = format_regeln(konfig, fmt)[0]
@@ -213,8 +220,8 @@ def _falte(zeilen: list, konfig: Konfig, energien: list[float], fmt: str | None)
             gruende = {g for g in gruende if GEGENSTUECKE.get(g) not in deine}
         liste = _liste(b)
         haupt = liste.get("stimmung")
-        # je Moment: was du magst, kommt öfter; was dich langweilt, seltener
-        schritt = -1.0 if "langweilig" in gruende else 0.5 if b["daumen"] > 0 else -0.5 if not gruende else 0.0
+        # je Moment: was du magst, kommt öfter; 👎 ohne Grund seltener. 🥱 trifft seit 07.10. den Schnitt, nicht die Szenen
+        schritt = 0.5 if b["daumen"] > 0 else -0.5 if not gruende else 0.0
         for m in {s.get("moment") for s in liste.get("segmente", []) if isinstance(s, dict)} - {None}:
             if schritt:
                 p["moment_bonus"][m] = _grenze(p["moment_bonus"].get(m, 0.0) + schritt * w, -3.0, 3.0)

@@ -155,6 +155,8 @@ CREATE TABLE IF NOT EXISTS moment_einschaetzungen (
 
 -- Deine Sperren (Stufe 1, 07.10., regeln.py): 🥱 langweilig sperrt die schwächeren Szenen eines Videos, 🎵 Musik den
 -- Song – für immer, bis du sie selbst wieder freigibst. Kein Lernen, keine KI kann sie überstimmen.
+-- Sperren (Stufe 1, 07.10.): 🎵 sperrt einen Song (art track). Zeilen mit grund 'langweilig' (art moment) stammen
+-- vom alten 🥱 – sie bleiben, gelten aber nicht mehr (🥱 ist seit 07.10. ein Urteil über den Schnitt).
 CREATE TABLE IF NOT EXISTS sperren (
     art        TEXT NOT NULL CHECK (art IN ('moment', 'track')),
     schluessel TEXT NOT NULL,               -- momente.schluessel bzw. tracks.id als Text

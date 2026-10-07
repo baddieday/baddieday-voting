@@ -15,7 +15,9 @@ Alte Bewertungen zählen sofort für den Aufbau (der Stil steht schon in den Par
 
 Wahl: Thompson-Sampling je Schraube; „mutig“ (geschmack.mut, Standard 0,5): bei jedem zweiten Video wird eine Schraube
 bewusst auf ihre am wenigsten erprobte Einstellung gestellt (Experiment). Derselbe Aufbau nie dreimal hintereinander.
-Deine Regeln (regeln.anwenden) kommen danach – sie gehen immer vor.
+Nach ❌ → 🥱 (07.10., „das gleiche Video mit anderen Schnitten“): die neue Fassung bekommt einen Aufbau mit ANDERER
+Reihenfolge (Montage und Kino haben beide den Bogen) und das andere Tempo, das sich wirklich spürbar unterscheidet
+(_anders). Ein fester Stil aus ⚙️ geht vor. Deine Regeln (regeln.anwenden) kommen danach – sie gehen immer vor.
 
 Die KI schaut sich jedes gesendete Video danach im Hintergrund an (ki_nachtragen, Lern-Bot-Schleife) – das Video
 kommt dadurch nicht später. Sonntags ab 18 Uhr fasst wochen_text die Woche zusammen (Lern-Meldung woche:<JJJJ-Www>).
@@ -48,6 +50,7 @@ KI_GEWICHT = 0.34                                  # wie regie_lernen.KI_STAERKE
 NICHT_GESCHMACK = {"kurz", "lang", "musik"}        # dafür gibt es feste Regeln – die Schrauben sind unschuldig
 EFFEKT_GRUENDE = {"hektisch", "effekte_viel", "action"}
 MUT_STANDARD = 0.5
+SPUERBAR = 0.15                                    # 🥱: so viel muss sich die Segmentlänge in Richtung des Tempos ändern
 
 
 def _wahl_aus(parameter_json: str | None) -> dict:
@@ -114,17 +117,41 @@ def statistik(con: sqlite3.Connection, fmt: str = "short") -> dict[str, dict[str
     return stat
 
 
-def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str = "short") -> dict:
+def _anders(anders: dict, aufbauten: list[str], basis_seg: float) -> tuple[str, str]:
+    """(Aufbau, Tempo) für die Fassung nach 🥱: Tempo umgedreht (ohne gespeichertes Tempo nach dem wirksamen
+    Segmentfaktor), Aufbau der erste in aufbauten, mit dem sich die wirksame Segmentlänge um mindestens SPUERBAR in
+    Richtung des neuen Tempos ändert – sonst der mit der größten Änderung. Ohne diesen Wächter würde aus
+    „Montage + ruhig“ (0,94) ein „Story + schnell“ (1,12): ruhiger statt schneller."""
+    alt_seg = float(anders.get("seg_min_faktor") or basis_seg or 1.0)
+    alt = anders.get("tempo")
+    tempo = ("ruhig" if alt == "schnell" else "schnell") if alt in TEMPO else ("ruhig" if alt_seg < basis_seg else "schnell")
+    richtung = 1.0 if tempo == "ruhig" else -1.0
+    unten, oben = stile.GRENZEN["seg_min_faktor"]
+
+    def aenderung(o: str) -> float:
+        stil = max(unten, min(oben, basis_seg * stile.STILE[o]["faktoren"].get("seg_min_faktor", 1.0)))
+        return richtung * (max(unten, min(oben, stil * TEMPO[tempo])) / alt_seg - 1.0)
+
+    return next((o for o in aufbauten if aenderung(o) >= SPUERBAR - 1e-9), max(aufbauten, key=aenderung)), tempo
+
+
+def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str = "short", anders: dict | None = None,
+           basis_seg: float = 1.0) -> dict:
     """Die drei Schrauben für den nächsten Entwurf (plus "experiment": welche bewusst neu probiert wird, sonst None).
-    Deterministisch je Entwurf (Zufall aus Format und Anzahl der Entwürfe)."""
+    Deterministisch je Entwurf (Zufall aus Format und Anzahl der Entwürfe).
+    anders (🥱, regeln.neue_fassung): Aufbau mit anderer Reihenfolge und anderes Tempo als das abgelehnte Video
+    (_anders, basis_seg = gelernter Segmentfaktor vor Stil und Tempo); die Zeitlupe bleibt frei."""
     n = con.execute("SELECT COUNT(*) FROM entwuerfe WHERE format = ?", (fmt,)).fetchone()[0]
     zufall = random.Random(f"geschmack:{fmt}:{n}")
     stat = statistik(con, fmt)
     wahl: dict = {}
+    reihe_aufbau: list[str] = []
     for knopf, optionen in KNOEPFE.items():
         zuege = sorted(((zufall.betavariate(1 + stat[knopf][o]["s"], 1 + stat[knopf][o]["n"] - stat[knopf][o]["s"]), o)
                         for o in optionen), reverse=True)
         wahl[knopf] = zuege[0][1]
+        if knopf == "aufbau":
+            reihe_aufbau = [o for _, o in zuege]
     experiment = None
     if zufall.random() < float(konfig.wert("geschmack.mut", MUT_STANDARD)):
         knopf = zufall.choice(sorted(KNOEPFE))
@@ -136,6 +163,12 @@ def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str = "short") -> dict:
         wahl["aufbau"] = max((o for o in KNOEPFE["aufbau"] if o != wahl["aufbau"]),
                              key=lambda o: (stat["aufbau"][o]["s"] + 1) / (stat["aufbau"][o]["n"] + 2))
     fest = str(konfig.wert("regie.stil", "auto") or "auto")
+    if anders:                                                           # 🥱: sichtbar anders geschnitten
+        aufbauten = ([fest] if fest in stile.STILE else
+                     [o for o in reihe_aufbau if stile.STILE[o]["reihenfolge"] != anders.get("reihenfolge")] or reihe_aufbau)
+        wahl["aufbau"], wahl["tempo"] = _anders(anders, aufbauten, basis_seg)
+        wahl["anders_als"] = anders.get("anders_als")
+        experiment = None if experiment in ("aufbau", "tempo") else experiment
     if fest in stile.STILE:                                              # ⚙️ fester Stil geht vor
         wahl["aufbau"] = fest
         experiment = None if experiment == "aufbau" else experiment
@@ -143,11 +176,12 @@ def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str = "short") -> dict:
     return wahl
 
 
-def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict:
-    """Gelernte Parameter mit den drei Schrauben (Kopie): Aufbau als Stil, Tempo relativ, Zeitlupe als Obergrenze."""
+def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict, anders: dict | None = None) -> dict:
+    """Gelernte Parameter mit den drei Schrauben (Kopie): Aufbau als Stil, Tempo relativ, Zeitlupe als Obergrenze.
+    anders: siehe waehle (🥱)."""
     if fmt not in stile.FORMATE:
         return p
-    wahl = waehle(con, konfig, fmt)
+    wahl = waehle(con, konfig, fmt, anders=anders, basis_seg=float(p.get("seg_min_faktor", 1.0)))
     p = stile.mit_stil(p, wahl["aufbau"])
     unten, oben = stile.GRENZEN["seg_min_faktor"]
     p["seg_min_faktor"] = round(max(unten, min(oben, float(p.get("seg_min_faktor", 1.0)) * TEMPO[wahl["tempo"]])), 3)

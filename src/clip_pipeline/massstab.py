@@ -11,7 +11,8 @@ Lehrer (Paare):
                Entwürfe zählen mit (sonst wäre die Auswahl zensiert). Darf tonmix und beat_sync nicht verschieben –
                die KI hört nichts (Maske aus kriterien.KRITERIEN[k]["ki_maske"]).
   - du         👍 gegen 👎 im gleichen Format, ≤ 7 Tage (regie_lernen.bewertungen(mit_ki=False)); ein 👎 nur mit
-               Inhalts-Gründen (Musik, getroffen, langweilig) sagt nichts über den Schnitt und bildet kein Paar.
+               Inhalts-Gründen (Musik, getroffen) sagt nichts über den Schnitt und bildet kein Paar (🥱 langweilig
+               zählt seit 07.10. als Urteil über den Schnitt).
   - Publikum   audience_ergebnisse.score über posts.entwurf_id, Crossposts confidence-gewichtet zusammengefasst,
                |Δy| ≥ 0,2, ≤ 30 Tage; Gewicht 2·√(c_a·c_b)·autonom.zeitgewicht(Alter).
 

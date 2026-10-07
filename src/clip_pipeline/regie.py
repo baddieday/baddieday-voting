@@ -19,6 +19,10 @@ Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der K
                  Momente war in keinem Entwurf des Fensters. Beides nur bei abwechslung > 0 (0 = wie früher).
                  Verworfene Clips nie; höchstens n Momente aus demselben Match. Fehlt die Moment-Datei, nimmt
                  der Regisseur den Bot-Clip (gleicher Inhalt, ohne Nachschnitt) statt den Moment still wegzulassen.
+                 Dieselbe Spielszene unter mehreren Schlüsseln (szenen.py, 07.10.) kommt je Video nur einmal, und
+                 Abwechslung/Cooldown gelten je Szene. Nach ❌ → 🥱 (p["fassung"], fassung_kandidaten): die stärkere
+                 Hälfte des abgelehnten Videos bleibt, die schwächere wird nur in dieser Fassung durch ungesehene
+                 Szenen ersetzt (erst der Abend, dann starke früherer Abende), sonst KeineNeuenSzenen.
   2. Bogen       Einstieg = zweitstärkster Moment (Hook), dann steigend, bei ~60 % eine Atempause
                  (lustig/chill), der stärkste zum Schluss. Keine gleiche Stimmung / kein gleiches Match
                  zweimal hintereinander, wenn es sich vermeiden lässt.
@@ -50,7 +54,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import effekte, entwurf, lernen, material, schema
+from . import effekte, entwurf, lernen, material, schema, szenen
 from .db import BEWERTET, hart_verworfen
 from .konfig import Konfig
 from .merkmale import fuer_moment, stimmen_gebraucht
@@ -157,7 +161,7 @@ PARAMETER = {
     "musik_pegel": 0.35,
     "stimmung_bonus": {},         # Stimmung -> Zusatzpunkte ("Stimmung getroffen" + 👍)
     "track_malus": {},            # Track-ID -> Abzug ("Musik passt nicht")
-    "moment_bonus": {},           # Moment -> Zusatzpunkte (👍 +, 👎 ohne Grund −, "Clips langweilig" −−)
+    "moment_bonus": {},           # Moment -> Zusatzpunkte (👍 +, 👎 ohne Grund −; 🥱 trifft den Schnitt, nicht sie)
     "abwechslung": 0.7,           # Anteil der Punkte, den ein Moment aus dem letzten Entwurf verliert (je älter: halb)
     # 27.09.: Der anteilige Abzug hält die Rotation in der Spitze (18 von 120 Momenten in 20 Shorts). Dazu deshalb
     # Cooldown (Moment aus einem der letzten n Entwürfe: gesperrt, nur Reserve) und Frische-Quote (Anteil der
@@ -214,6 +218,34 @@ class ZuWenigSzenen(RegieFehler):
             return "Mit Einzelkills ginge es: ⚙️ → 🎯 Szenen → „auch Einzelkills“."
         return ""
 
+    def satz(self) -> str:
+        """Die Zeile für dich im Lern-Bot."""
+        return f"🎬 Kein Video: {self.kopf()}. {self.tipp()}".strip()
+
+
+class KeineNeuenSzenen(ZuWenigSzenen):
+    """🥱 (07.10., Florian: „die guten Szenen behalten, der Rest wird durch neue ersetzt“): für die neue Fassung gibt es
+    nicht genug neue Szenen – weder im Abend noch starke ungesehene früherer Abende. Lieber kein Video als dasselbe."""
+
+    def __init__(self, ersatz: int, mindestens: int):
+        super().__init__(ersatz, mindestens, ersatz)
+        self.args = (f"nur {ersatz} neue Szene{'n' if ersatz != 1 else ''} als Ersatz",)
+
+    def kopf(self) -> str:
+        return f"nur {self.stark} neue Szene{'n' if self.stark != 1 else ''} als Ersatz"
+
+    def tipp(self) -> str:
+        return ""
+
+    def satz(self) -> str:
+        if self.stark:
+            anfang = (f"Ich habe nur {self.stark} neue Szene{'n' if self.stark != 1 else ''} als Ersatz – für ein ganzes "
+                      "Video reicht das nicht")
+        else:
+            anfang = "Neue Szenen als Ersatz habe ich nicht"
+        return (f"🎬 Diesmal keine neue Fassung: {anfang}. Alles andere von diesem Abend und die starken Szenen "
+                "früherer Abende hast du schon gesehen. Nach deiner nächsten Runde geht es wieder.")
+
 
 def ist_stark(gruppe: int, victory: bool, clip_mk: dict | None, mk: dict) -> bool:
     """Starke Szene (Stufe 1, 07.10.): Multikill (≥ 2 in Serie), Victory Royale, Clutch oder ein Kill im Endkampf.
@@ -257,6 +289,7 @@ class Kandidat:
     fail: bool = False             # Fail-Moment (fail.py): Kern um den Tod, nur im Format 🔥 Viral
     ki: dict | None = None         # Einschätzung viral/humor/spannung (viral.py; quelle ki oder regel)
     titel: str | None = None       # Titel im Rand (nur aus Fakten geprüft) – bei Fails statt eines Kill-Titels
+    nachschub: bool = False        # 🥱-Fassung: starke ungesehene Szene eines früheren Abends – erst nach dem Abend
 
     def __post_init__(self) -> None:
         if not self.teile:  # alte Momente: genau ein Teil = Kern (wie bisher)
@@ -437,7 +470,8 @@ def kandidaten(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None
 
 def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[str]] | None = None, *,
                            gewichte: dict[str, float], kill_tabelle: list[float], konfig: Konfig | None = None,
-                           nur_matches: set[str] | None = None, fails: str = "ohne"
+                           nur_matches: set[str] | None = None, fails: str = "ohne",
+                           szenen_idx: dict[str, set[str]] | None = None
                            ) -> tuple[list[Kandidat], dict[str, int]]:
     """Alle Momente mit Stimmung als Kandidaten: Stärke, Punkte für die Auswahl, Kern und Teile für den Schnitt.
 
@@ -464,6 +498,8 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     (kill_punkte 1, bot_opfer −2, spitzen 0,25), Status gesendet, Elo 1500 → intensitaet 1.5, punkte 1.5.
     fails (05.10.): "ohne" (Standard – normale Shorts/Zusammenschnitte sehen keine Fail-Momente), "mit" oder "nur"
     (🔥 Viral). Ein Fail-Moment hat als Stärke seinen Fail-Score (fail.fail_score mit den aktuellen [fail.gewichte]).
+    szenen_idx (07.10., szenen.index): Abwechslung und Cooldown je Szene – lief dieselbe Szene unter einem anderen
+    Schlüssel (Nvidia/SteelSeries neben dem Clip), gilt sie auch hier als gezeigt.
     """
     from . import fail as fail_modul  # hier: fail importiert über nachschnitt/stimmung viel, regie soll schlank laden
 
@@ -473,8 +509,9 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     cooldown = int(p.get("cooldown_entwuerfe", 0)) if anteil_ab > 0 else 0
     historisch = max(0.0, min(1.0, float((p.get("autonom") or {}).get("historischer_anteil", 1.0))))
     bericht = {"ohne_datei": 0, "ersetzt": 0, "gesperrt": 0}
-    try:  # deine Sperren (🥱 langweilig, Stufe 1): diese Szenen kommen nie wieder
-        dauerhaft = {z[0] for z in con.execute("SELECT schluessel FROM sperren WHERE art = 'moment'")}
+    try:  # Moment-Sperren; die alten 🥱-Zeilen (bis 07.10.) bleiben in der Tabelle, gelten aber nicht mehr
+        dauerhaft = {z[0] for z in con.execute("SELECT schluessel FROM sperren WHERE art = 'moment' "
+                                               "AND COALESCE(grund, '') <> 'langweilig'")}
     except sqlite3.OperationalError:
         dauerhaft = set()
     zeilen = con.execute(
@@ -487,7 +524,7 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
     ergebnis = []
     for z in zeilen:
         if hart_verworfen(z["clip_status"], z["clip_quelle"]) or z["schluessel"] in dauerhaft:
-            continue  # nur dein 🗑️ bzw. 🥱 schließt aus – automatisch aussortierte bleiben Material (30.09.)
+            continue  # nur dein 🗑️ (bzw. eine Sperre) schließt aus – automatisch aussortierte bleiben Material
         if nur_matches is not None and z["match_id"] not in nur_matches:
             continue  # Spielabend: fremde Matches zählen auch in der Bilanz nicht mit
         mk = json.loads(z["merkmale"])
@@ -523,13 +560,14 @@ def kandidaten_mit_bericht(con: sqlite3.Connection, p: dict, frueher: list[list[
         if z["elo"] is not None:
             punkte += historisch * (float(z["elo"]) - 1500.0) / 100.0
         punkte += float(p.get("moment_bonus", {}).get(z["schluessel"], 0.0))
-        anteil, gezeigt = schon.get(z["schluessel"], (0.0, 0))
+        szene = {z["schluessel"], *(szenen_idx or {}).get(z["schluessel"], ())}
+        anteil, gezeigt = max(schon.get(s, (0.0, 0)) for s in szene)
         abzug = round(anteil * max(punkte, 1.0), 2)  # auch schwache Momente (< 1 Punkt) verlieren etwas
         kern, muss, grund = _kern(mk, dauer, p)
         kern, muss, teile, teile_muss, serie = _teile(mk, dauer, kern, muss, p)
         if len(teile) > 1:
             grund += f", {len(teile)} Teile (Jump-Cut)"
-        gesperrt = cooldown > 0 and alter.get(z["schluessel"], cooldown) < cooldown
+        gesperrt = cooldown > 0 and min(alter.get(s, cooldown) for s in szene) < cooldown
         bericht["gesperrt"] += int(gesperrt)
         ergebnis.append(Kandidat(z["schluessel"], datei, dauer, z["stimmung"], intensitaet,
                                  round(punkte - abzug, 2), z["clip_id"], z["match_id"], kern, muss, grund, mk,
@@ -590,14 +628,16 @@ def frische_soll(n: int, p: dict) -> int:
     return math.ceil(quote * n - 1e-9) if quote > 0 and n > 0 else 0
 
 
-def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict, pflicht: list[Kandidat] | None = None
-           ) -> tuple[list[Kandidat], float, list[str]]:
+def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict, pflicht: list[Kandidat] | None = None,
+           ersatz_min: int = 0) -> tuple[list[Kandidat], float, list[str]]:
     """Beste Momente, bis die Ziel-Dauer erreicht ist. Ziel richtet sich nach dem Material.
 
     Cooldown: gesperrte Momente (frei_von_cooldown) bleiben Reserve. Frische-Quote (p["frische_quote"], nur bei
     abwechslung > 0): mindestens dieser Anteil der gewählten Momente war in keinem Entwurf des Fensters (gezeigt 0);
     fehlt etwas, tauscht der schwächste „alte“ gegen den stärksten frischen Moment, der die Match-Grenze einhält.
-    pflicht (🔥 Viral, Twist): diese Momente sind immer dabei (auch im Cooldown) und werden nie getauscht."""
+    pflicht (🔥 Viral, Twist): diese Momente sind immer dabei (auch im Cooldown) und werden nie getauscht.
+    ersatz_min (🥱-Fassung): so viele Momente außerhalb der Pflicht kommen auf jeden Fall dazu, soweit vorhanden – auch
+    wenn die Pflicht allein schon das Ziel erreicht; wird es dadurch zu lang, geht die schwächste Pflicht-Szene."""
     hinweise = []
     pflicht = list(pflicht or [])
     seg_min = fmt["seg_min_s"] * p["seg_min_faktor"]
@@ -616,7 +656,9 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict, pflicht: list[Kandid
     for k in pflicht:
         if k.match_id:
             je_match[k.match_id] = je_match.get(k.match_id, 0) + 1
-    nach_punkten = sorted((k for k in auswahl if not any(k is x for x in pflicht)), key=lambda k: (-k.punkte, k.schluessel))
+    # 🥱-Fassung: Szenen früherer Abende (nachschub) erst, wenn der Abend nicht reicht
+    nach_punkten = sorted((k for k in auswahl if not any(k is x for x in pflicht)),
+                          key=lambda k: (k.nachschub, -k.punkte, k.schluessel))
     for k in nach_punkten:
         if (summe >= ziel and len(gewaehlt) >= min_m) or len(gewaehlt) >= max_m:
             break
@@ -626,6 +668,17 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict, pflicht: list[Kandid
         summe += laenge(k)
         if k.match_id:
             je_match[k.match_id] = je_match.get(k.match_id, 0) + 1
+    if pflicht and ersatz_min:   # 🥱 (Prüfung 07.10.): sonst „keine neue Fassung“, obwohl Neues da wäre
+        neu = [k for k in gewaehlt if not any(k is x for x in pflicht)]
+        for k in [k for k in nach_punkten if k not in gewaehlt][:max(0, ersatz_min - len(neu))]:
+            gewaehlt.append(k)
+            summe += laenge(k)
+        behalten = [k for k in gewaehlt if any(k is x for x in pflicht)]
+        while len(behalten) > 1 and (len(gewaehlt) > max_m or summe > fmt["max_s"]):
+            raus = min(behalten, key=lambda k: (k.punkte, k.schluessel))
+            behalten.remove(raus)
+            gewaehlt.remove(raus)
+            summe -= laenge(raus)
     soll = frische_soll(len(gewaehlt), p)
     if soll > 0:
         frische = [k for k in nach_punkten if k.gezeigt == 0 and k not in gewaehlt]
@@ -709,6 +762,8 @@ def waehle_musik(con: sqlite3.Connection, stimmung: str, gesamt_s: float, p: dic
     except sqlite3.OperationalError:
         gesperrt = set()
     tracks = [t for t in tracks if str(t["id"]) not in gesperrt]
+    abgelehnt = (p.get("fassung") or {}).get("track_id")   # 🥱 (07.10.): nicht der Song des abgelehnten Videos
+    tracks = [t for t in tracks if t["id"] != abgelehnt] or tracks
     rotation = min(int(p.get("musik_rotation", 0) or 0), len(tracks) - 1)
     if rotation > 0:  # Stufe 1: vorher gewann ein passender Song bis zu 13-mal hintereinander (Abzug nur 0,15 je Einsatz)
         zuletzt = {z[0] for z in con.execute(
@@ -975,6 +1030,48 @@ def pruefe_liste(liste: dict, *, max_lupen: int = MAX_LUPEN, max_raffer: int = M
 
 # --- Hauptfunktion -----------------------------------------------------------------------
 
+def fassung_kandidaten(alle: list[Kandidat], fassung: dict, idx: dict[str, set[str]], gezeigt: set[str],
+                       fmt: dict) -> tuple[list[Kandidat], list[Kandidat]]:
+    """🥱-Fassung (07.10., Florian: „die guten Szenen behalten, der Rest wird durch neue ersetzt“): (Kandidaten, Pflicht).
+
+    Pflicht = die stärkere Hälfte des abgelehnten Videos (fassung["behalten"], je Szene). Die schwächere Hälfte
+    (fassung["ohne"]) fehlt nur in dieser Fassung – keine Sperre. Ersatz nur aus Szenen, die du noch nie gesehen hast
+    (gezeigt: alle Entwürfe, je Szene): (a) aus den Matches des Abends (fassung["abend"]), auch Einzelkills;
+    (b) starke Szenen früherer Abende (Kandidat.nachschub – Auswahl und Nachlegen nehmen sie erst nach dem Abend,
+    das Kürzen wirft sie zuerst). Datei-Momente ohne Match bleiben wie im Abend-Weg draußen.
+    Fehler: KeineNeuenSzenen, wenn es keinen Ersatz gibt oder zusammen weniger Szenen als ein Video braucht."""
+    behalten = szenen.erweitert(fassung.get("behalten") or [], idx)
+    raus = szenen.erweitert(fassung.get("ohne") or [], idx) - behalten
+    gezeigt = szenen.erweitert(gezeigt, idx)
+    # Eine zweite Aufnahme ohne Match (Nvidia/SteelSeries) im Video zeigt eine Szene aus dem Match ihres Clips
+    ohne_match = {k.schluessel for k in alle if not k.match_id}
+    im_video = szenen.erweitert([s for s in (*(fassung.get("behalten") or []), *(fassung.get("ohne") or []))
+                                 if s in ohne_match], idx)
+    abend = set(fassung.get("abend") or []) | {k.match_id for k in alle if k.match_id and k.schluessel in im_video}
+    # Ohne Match kommt nur eine behaltene Szene in Frage – schon VOR eine_je_szene: sonst verdrängte eine lautere
+    # Nvidia-Aufnahme ihren Clip, fiele danach selbst weg, und die Szene fehlte als Ersatz ganz
+    alle = szenen.eine_je_szene([k for k in alle if k.schluessel not in raus and (k.match_id or k.schluessel in behalten)],
+                                idx, fassung.get("behalten") or [])
+    auswahl, pflicht = [], []
+    for k in alle:
+        if k.fail:
+            continue
+        if k.schluessel in behalten:
+            k.gesperrt = False            # Pflicht – sonst hebe der Cooldown die Reserve unnötig auf
+            pflicht.append(k)
+        elif k.schluessel in gezeigt or not k.match_id:
+            continue
+        elif k.match_id not in abend:
+            if not k.stark:
+                continue
+            k.nachschub = True
+        auswahl.append(k)
+    ersatz, mindestens = len(auswahl) - len(pflicht), momente_grenzen(fmt)[0]
+    if not ersatz or len(auswahl) < mindestens:
+        raise KeineNeuenSzenen(ersatz, mindestens)
+    return auswahl, pflicht
+
+
 def ordner(konfig: Konfig) -> Path:
     return Path(str(konfig.wert("regie.ordner", "/var/lib/clip-pipeline/regie")))
 
@@ -1014,12 +1111,22 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         if merkmal in gewichte and isinstance(delta, (int, float)):
             gewichte[merkmal] += max(-1.0, min(1.0, float(delta)))
     kill_tabelle = [float(x) for x in konfig.wert("vorbewertung.kill_punkte")]
+    # 🥱 (07.10.): neue Fassung des abgelehnten Videos – Szenen aus dem Abend UND früheren Abenden (fassung_kandidaten)
+    fassung = p.get("fassung") if viral is None and isinstance(p.get("fassung"), dict) else None
+    idx = szenen.index(con)   # dieselbe Spielszene unter mehreren Schlüsseln (Clip, Nvidia, SteelSeries)
     alle, bericht = kandidaten_mit_bericht(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle, konfig=konfig,
-                                           nur_matches=nur_matches, fails=viral.FAILS[variante] if viral else "ohne")
+                                           nur_matches=None if fassung else nur_matches,
+                                           fails=viral.FAILS[variante] if viral else "ohne", szenen_idx=idx)
     if bericht["ohne_datei"]:
         hinweise.append(f"{bericht['ohne_datei']} Momente ohne Datei übersprungen"
                         + (f" ({bericht['ersetzt']} weitere: Bot-Clip statt Moment-Datei)" if bericht["ersetzt"] else ""))
-    if p.get("nur_starke") and viral is None:   # Stufe 1: lieber kein Video als eins mit Füllmaterial
+    pflicht: list[Kandidat] = []
+    if fassung is not None:
+        alle, pflicht = fassung_kandidaten(alle, fassung, idx, szenen.jemals_gezeigt(con), fmt)
+        p["max_je_match"] = max(int(p["max_je_match"]), momente_grenzen(fmt)[1])   # oft nur ein Match am Abend
+    else:
+        alle = szenen.eine_je_szene(alle, idx)   # nie dieselbe Szene zweimal (vor dem Zählen der starken)
+    if p.get("nur_starke") and viral is None and fassung is None:   # Stufe 1: lieber kein Video als Füllmaterial
         stark = [k for k in alle if k.stark]
         if len(stark) < momente_grenzen(fmt)[0]:
             raise ZuWenigSzenen(len(stark), momente_grenzen(fmt)[0], len(alle))
@@ -1028,7 +1135,6 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         raise RegieFehler(("Keine Fail-Momente – erst `pipeline fail --nachziehen`" if variante == "fail" else
                            "Keine Momente mit Stimmung" + (" in diesen Matches" if nur_matches else "")
                            + " – erst `pipeline stimmung`"))
-    pflicht: list[Kandidat] = []
     if viral is not None:  # Einschätzung (KI oder Regel) an jeden Kandidaten, Twist-Momente als Pflicht
         alle, pflicht, viral_hinweise = viral.mischen(con, konfig, alle, variante, p, fmt)
         hinweise += viral_hinweise
@@ -1042,7 +1148,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             raise RegieFehler(f"Alle {len(zu_lang)} Momente sind Serien, die für einen Short zu lang sind "
                               f"(> {fmt['serie_max_s']:.0f} s am Stück) – Zusammenschnitt nehmen")
     # Pflicht-Momente nur, wenn es welche gibt (alte Aufrufer und Tests ersetzen waehle mit drei Argumenten)
-    gewaehlt, ziel_s, wahl_hinweise = waehle(alle, fmt, p, pflicht) if pflicht else waehle(alle, fmt, p)
+    if fassung is not None:   # 🥱: mindestens so viele neue Szenen, wie schwächere getauscht werden
+        gewaehlt, ziel_s, wahl_hinweise = waehle(alle, fmt, p, pflicht,
+                                                 ersatz_min=max(1, len(fassung.get("ohne") or [])))
+    else:
+        gewaehlt, ziel_s, wahl_hinweise = waehle(alle, fmt, p, pflicht) if pflicht else waehle(alle, fmt, p)
     hinweise += wahl_hinweise
     if zu_lang:
         hinweise.append(f"{len(zu_lang)} Serie(n) zu lang für Short (> {fmt['serie_max_s']:.0f} s am Stück)")
@@ -1110,7 +1220,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                 frische = [k for k in rest if k.gezeigt == 0]
                 if frische and sum(1 for k in gewaehlt if k.gezeigt == 0) < frische_soll(len(gewaehlt) + 1, p):
                     rest = frische
-                naechster_ = max(rest, key=lambda k: (k.punkte, k.schluessel))
+                naechster_ = max(rest, key=lambda k: (not k.nachschub, k.punkte, k.schluessel))
                 neue_reihe = ordne([*gewaehlt, naechster_])
                 neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
                 if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
@@ -1134,10 +1244,13 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         # Frische-Quote (Review 27.09.): frische Momente sind meist die punktschwächsten – das Kürzen warf sie
         # als Erste wieder raus. Solange die Quote sonst fiele, wird unter den alten gestrichen.
         zur_wahl = [k for k in reihe[:-1] if not any(k is x for x in pflicht)] or reihe[:-1]  # Twist bleibt
+        if fassung is not None and sum(1 for k in reihe if not any(k is x for x in pflicht)) <= 1:
+            # 🥱: den letzten Ersatz schützen – lieber die schwächste behaltene Szene streichen
+            zur_wahl = [k for k in reihe[:-1] if any(k is x for x in pflicht)] or zur_wahl
         alte = [k for k in zur_wahl if k.gezeigt > 0]
         if alte and sum(1 for k in reihe if k.gezeigt == 0) <= frische_soll(len(reihe) - 1, p):
             zur_wahl = alte
-        raus = min(zur_wahl, key=lambda k: (k.punkte, k.intensitaet, k.schluessel))
+        raus = min(zur_wahl, key=lambda k: (not k.nachschub, k.punkte, k.intensitaet, k.schluessel))
         reihe.remove(raus)
         gewaehlt.remove(raus)
         passt_nicht.append(raus)
@@ -1149,6 +1262,10 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     for s in segmente:
         s["bewertet"] = schon_bewertet.get(s["moment"], 0)
     gesamt = segmente[-1]["zeit_ende"] if segmente else 0.0
+    if fassung is not None:   # 🥱: zu wenig Neues für ein ganzes Video – lieber kein Video als dasselbe
+        ersatz = sum(1 for k in reihe if not any(k is x for x in pflicht))
+        if not ersatz or gesamt < fmt["min_s"] - 1e-6 or len(reihe) < momente_grenzen(fmt)[0]:
+            raise KeineNeuenSzenen(ersatz, momente_grenzen(fmt)[0])
     pruefe_dauer(fmt_name, gesamt)
     if gesamt < fmt["min_s"] - 1e-6 or gesamt > fmt["max_s"] + 1e-6:
         raise RegieFehler(f"Dauer {gesamt:.1f} s außerhalb des konfigurierten Bereichs "
