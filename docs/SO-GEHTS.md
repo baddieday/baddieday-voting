@@ -7,8 +7,9 @@
    Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann. Scheitert das Fertigmachen des Videos,
    versucht er es 10 Minuten später selbst noch einmal (etwas langsamer, dafür sicherer); klappt auch das nicht, sagt
    es dir die Statuszeile.
-3. Gab es zu wenig starke Szenen (ein Video braucht 4 und mindestens 30 Sekunden), kommt **kein Video**. Die
-   Statuszeile sagt dann, warum.
+3. Sind die starken Szenen zusammen zu kurz, zeigt der Bot von jeder etwas mehr – ein paar Sekunden mehr davor und
+   danach. Reicht auch das nicht (ein Video braucht 4 starke Szenen und mindestens 30 Sekunden), kommt **kein Video**.
+   Die Statuszeile sagt dann, warum.
 
 ## Was du tust
 - **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen. **Füg den Text beim

@@ -5,7 +5,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from clip_pipeline import lernen, regie, regie_lernen
+from clip_pipeline import einstellungen, lernen, regeln, regie, regie_lernen
 from clip_pipeline.konfig import Konfig
 
 from tests.hilfen import HAT_FFMPEG
@@ -311,8 +311,56 @@ class Abwechslung(MitRegieMaterial):
         return {k.schluessel: k.punkte for k in alle}
 
 
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class MehrAnlauf(MitRegieMaterial):
+    """Stufe 4 (08.10.): Zu kurz? Erst mehr Anlauf aus denselben starken Szenen – nur im einfachen Modus."""
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["regie"]["szenen"] = "stark"
+        self.musik_anlegen(150, "episch")
+
+    def abend(self, kills: list[float]) -> None:
+        """4 Doppel-Kills (stark) und ein Einzelkill, der nie Füllmaterial wird – alle aus dem Match a1."""
+        self.momente_anlegen([(s, 2, kills, "a1") for s in ("episch", "spannend") * 2]
+                             + [("spannend", 1, kills[:1], "a1")])
+
+    def short(self, experte: bool = False) -> dict:
+        self.konfig.daten["lernbot"]["experte"] = experte
+        k = einstellungen.anwenden(self.con, self.konfig)
+        p = regeln.anwenden(self.con, k, "short", regie_lernen.aktuelle(self.con, k, "short")[0])
+        return regie.erstelle(self.con, k, "short", parameter=p, nur_matches={"a1"})
+
+    def test_kurze_starke_szenen_mit_mehr_anlauf(self):
+        self.abend([8.0, 9.5])        # wie aufgeben/s2: 8 s Vorlauf wie die echten Clips, Kills 1,5 s auseinander
+        with self.assertRaises(regie.ZuKurz) as fehler:                   # /experte: wie bisher (2,5 / 1,5 s → 22 s)
+            self.short(experte=True)
+        self.assertLess(fehler.exception.sekunden, 30.0)
+        liste = lies(self.short())
+        self.assertGreaterEqual(liste["dauer_s"], 30.0)
+        self.assertEqual({s["moment"] for s in liste["segmente"]}, {"datei:1", "datei:2", "datei:3", "datei:4"})
+        self.assertEqual((liste["parameter"]["puffer_vor_s"], liste["parameter"]["puffer_nach_s"]), (4.0, 3.0))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 1)   # nur der zweite Plan
+
+    def test_auch_mit_mehr_anlauf_zu_kurz(self):
+        self.DAUER = 8.0              # kaum Vorlauf in der Datei: auch mit 4 / 3 s keine 30 s
+        self.abend([3.0, 4.0])
+        with self.assertRaises(regie.ZuKurz) as fehler:
+            self.short()
+        self.assertLess(fehler.exception.sekunden, 30.0)
+        self.assertNotIn("⚙️", fehler.exception.satz(experte=False))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 0)   # kein Video
+
+
 class Auswahl(unittest.TestCase):
     """waehle(): Cooldown und Frische-Quote (27.09.) – ohne Datenbank und ffmpeg."""
+
+    def test_mehr_anlauf_nur_wenn_zu_kurz(self):
+        p = dict(regie.PARAMETER)                                                    # gelernt: 2,5 / 1,5 s
+        self.assertEqual(regie.mehr_anlauf(p, 32.0, 45.0, 30.0), {"puffer_vor_s": 4.0, "puffer_nach_s": 3.0})
+        self.assertIsNone(regie.mehr_anlauf(p, 36.0, 45.0, 30.0))                    # reicht: kein zweiter Plan
+        # Das Gelernte liegt schon darüber: ein zweiter Plan änderte nichts (und plant nie ein drittes Mal)
+        self.assertIsNone(regie.mehr_anlauf({**p, "puffer_vor_s": 5.0, "puffer_nach_s": 3.0}, 22.0, 45.0, 30.0))
 
     @staticmethod
     def k(name, punkte, *, gezeigt=0, gesperrt=False, match="m1", kern=(4.0, 12.0)):

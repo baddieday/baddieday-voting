@@ -32,6 +32,9 @@ Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der K
                  (merkmale.aktion_sekunden = mein Umhauen) beginnt der Moment vor der ersten Aktion; eine Serie
                  (≥ 2 Kills) bleibt ein Stück bis serie_max_s, Pausen > luecke_max_s zwischen zwei Aktionen
                  werden per Jump-Cut übersprungen (Teile desselben Moments, harter Schnitt).
+                 Zu kurz (Stufe 4, 08.10., einfacher Modus): Bleibt ein Short unter 30 s oder mehr als 10 s unter dem
+                 Ziel, plant der Bot einmal neu mit mehr Anlauf und Ausklang (mindestens 4 / 3 s) aus denselben
+                 Szenen (mehr_anlauf); reicht auch das nicht, kommt ZuKurz – nie Füllmaterial.
   5. Übergänge   je Stimmung des folgenden Moments; die Mitte des Übergangs liegt genau auf dem Beat.
                  Mit Effekten (Regisseur 2.0): Rotation aus effekte.PROFIL, in einen epischen/spannenden Höhepunkt
                  ein harter Schnitt auf den Drop.
@@ -176,6 +179,11 @@ PARAMETER = {
     "effekt_hektik": 1.0,         # dämpft Beat-Akzente und Glitch-Übergänge ("zu hektisch" ×0,9)
 }
 ABWECHSLUNG_FENSTER = 12          # so viele letzte Entwürfe zählen für die Abwechslung
+# Stufe 4 (08.10., Florian: „autonom … besser und schneller als mit der Hand“): Bleibt ein Short unter 30 s oder mehr
+# als MEHR_ANLAUF_AB_S unter dem Ziel, plant der Bot einmal neu – mit mindestens so viel Anlauf und Ausklang aus
+# denselben Szenen (innerhalb der gelernten Grenzen 1–6 / 0,5–4 s; die Clips haben 8 s Vorlauf), statt „kein Video“.
+MEHR_ANLAUF = {"puffer_vor_s": 4.0, "puffer_nach_s": 3.0}
+MEHR_ANLAUF_AB_S = 10.0
 # Jump-Cut: so lange bleibt das Bild nach der Aktion vor der Lücke, so früh vor der nächsten geht es weiter.
 # Wirksame Lücke mindestens NACH + VOR + 0,5 s – so überlappen sich die Teile nie, auch wenn Gelerntes sie verkleinert.
 SPRUNG_NACH_S = 1.5
@@ -1108,6 +1116,18 @@ def fassung_kandidaten(alle: list[Kandidat], fassung: dict, idx: dict[str, set[s
     return auswahl, pflicht
 
 
+def mehr_anlauf(p: dict, gesamt: float, ziel_s: float, unten: float) -> dict | None:
+    """Stufe 4 (08.10.): Anlauf und Ausklang für den zweiten Plan eines zu kurzen Shorts – je max(gelernt, MEHR_ANLAUF).
+    None: Der Plan reicht (mindestens `unten` und höchstens MEHR_ANLAUF_AB_S unter dem Ziel), oder mehr Anlauf ändert
+    nichts, weil das Gelernte schon darüber liegt – so plant der zweite Plan nie ein drittes Mal.
+    Beispiel: 32 s bei Ziel 45 s, gelernt 2,5 / 1,5 s → {"puffer_vor_s": 4.0, "puffer_nach_s": 3.0}."""
+    if gesamt >= unten - 1e-6 and gesamt >= ziel_s - MEHR_ANLAUF_AB_S - 1e-6:
+        return None
+    alt = {k: float(p.get(k, PARAMETER[k])) for k in MEHR_ANLAUF}
+    neu = {k: max(alt[k], wert) for k, wert in MEHR_ANLAUF.items()}
+    return neu if neu != alt else None
+
+
 def ordner(konfig: Konfig) -> Path:
     return Path(str(konfig.wert("regie.ordner", "/var/lib/clip-pipeline/regie")))
 
@@ -1295,15 +1315,29 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         gekuerzt = True
     if gekuerzt:
         reihe, segmente = nachlegen(reihe, segmente)
+    gesamt = segmente[-1]["zeit_ende"] if segmente else 0.0
+    unten = max(float(fmt["min_s"]), DAUER_GRENZEN["short"][0])
+    # Stufe 4 (08.10.): Zu kurz? Erst einmal mit mehr Anlauf aus denselben Szenen neu planen – kein Füllmaterial.
+    # Nur im einfachen Modus (regie.geschmack aus einstellungen.EINFACH_FEST, wie regie_lernen.aktuelle); /experte
+    # wie bisher. Bis dahin ist nichts gespeichert: der zweite Plan schreibt seine Schnittliste selbst.
+    if fmt_name == "short" and viral is None and konfig.wert("regie.geschmack", False) \
+            and (anlauf := mehr_anlauf(p, gesamt, ziel_s, unten)) is not None:
+        log.info("Short %.1f s bei Ziel %.0f s – plane neu mit mehr Anlauf (%.1f s davor, %.1f s danach)",
+                 gesamt, ziel_s, anlauf["puffer_vor_s"], anlauf["puffer_nach_s"])
+        try:
+            return erstelle(con, konfig, fmt_name, parameter={**(parameter or {}), **anlauf}, name=name, ziel=ziel,
+                            nur_matches=nur_matches, hinweise_vorab=hinweise_vorab, gelernt=gelernt)
+        except RegieFehler as fehler:
+            if isinstance(fehler, ZuWenigSzenen) and gesamt < unten - 1e-6:
+                raise   # auch mit mehr Anlauf zu kurz: kein Video wie bisher (ZuKurz, bei 🥱 KeineNeuenSzenen)
+            log.warning("Mehr Anlauf: %s – es bleibt beim ersten Plan (%.1f s)", fehler, gesamt)
     schon_bewertet = bewertet_je_moment(con)   # 27.09.: je Segment, wie oft der Moment schon bewertet wurde
     for s in segmente:
         s["bewertet"] = schon_bewertet.get(s["moment"], 0)
-    gesamt = segmente[-1]["zeit_ende"] if segmente else 0.0
     if fassung is not None:   # 🥱: zu wenig Neues für ein ganzes Video – lieber kein Video als dasselbe
         ersatz = sum(1 for k in reihe if not any(k is x for x in pflicht))
         if not ersatz or gesamt < fmt["min_s"] - 1e-6 or len(reihe) < momente_grenzen(fmt)[0]:
             raise KeineNeuenSzenen(ersatz, momente_grenzen(fmt)[0])
-    unten = max(float(fmt["min_s"]), DAUER_GRENZEN["short"][0])
     if fmt_name == "short" and viral is None and gesamt < unten - 1e-6:   # 07.10.: klare Zeile statt Fachtext
         raise ZuKurz(gesamt, unten, len(alle), szenen_gesamt, bool(p.get("nur_starke")))
     pruefe_dauer(fmt_name, gesamt)

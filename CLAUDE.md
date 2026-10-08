@@ -451,3 +451,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Posts keine Noten mehr). Erste Caption-Zeile im einfachen Modus mit Songtitel, am Post gespeichert (zwei ✅ eines
     Abends bekamen vorher nie Zahlen). Nach dem Paket: „füg den Text oben unverändert ein“. KI-Note im 📋 mit echtem
     Grund; n8n „Highlight-Video fertig“ aus; Kopfzeile bleibt nach dem Tipp. N38–N47.
+  - **Stufe 4: Zu kurz? Erst mehr Anlauf** (`regie.mehr_anlauf`): Bleibt ein Short im einfachen Modus unter 30 s oder
+    mehr als 10 s unter dem Ziel, plant der Bot einmal neu – Anlauf/Ausklang mindestens 4/3 s statt gelernt 2,5/1,5 s,
+    dieselben Szenen, kein Füllmaterial (vorher „kein Video, die starken Szenen ergeben nur 22 s“ bzw. 32 s bei Ziel
+    45 s; jetzt 34 bzw. 44 s). Reicht es nicht, „kein Video“ wie bisher; gilt auch für 🥱; /experte unverändert. N48–N50.
