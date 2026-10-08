@@ -573,3 +573,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     es dort nicht. Ein hängender Lauf gibt die Sperre nach 2 h frei. Das Update tut nur etwas, wenn es Freunde gibt:
     ihre Datenbanken vorher sichern (als sie selbst, kein Link), Vorlagen hinlegen – nie einschalten –, laufende
     Freundes-Bots neu. Eingeschaltet wird nur über `benutzer-anlegen.sh` (nächster Schritt). M43–M49.
+  - Schritt 6 (Speicher für Freunde): `deploy/pve-mini/freunde-volume.sh` legt einmal ein Volume für alle Freunde an
+    (Standard 100 GB, im CT `/var/lib/clip-benutzer`, nicht auf der CT-Platte, nicht im Puffer) – CT ca. 1 min aus.
+    Die Pool-Grenze rechnet deinen Puffer voll mit und nennt sonst die Größe, die passt. Das Rückweg-Skript hängt nur
+    aus; ein neuer Lauf hängt dasselbe Volume wieder ein. Samba je Freund entfällt (Briefkasten ab Stufe 2). M50–M54.

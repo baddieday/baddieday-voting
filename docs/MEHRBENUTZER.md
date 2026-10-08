@@ -1,10 +1,10 @@
 # Mehrbenutzer – eine Instanz je Freund (Entscheidung M1, 08.10.2026)
 
 Ziel Stufe 1: Ein Freund bekommt auf dem Mini seine eigene, vollständig getrennte Pipeline. Zwei Benutzer arbeiten
-unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M49: `docs/ENTSCHEIDUNGEN.md`,
-„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 5 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
-Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox), der Rest (Volume, Anlegen,
-Einladung) ist Plan.
+unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M54: `docs/ENTSCHEIDUNGEN.md`,
+„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 6 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
+Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox, Speicher für Freunde), der Rest
+(Anlegen, Einladung) ist Plan.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -126,6 +126,32 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
   Richtungen, der eigene Ordner bleibt schreibbar); das Update mit Attrappen (gesichert, nicht eingeschaltet, Bot neu,
   ohne Freunde keine Änderung, Link statt Datenbank wird nicht kopiert).
 
+## Einmal für alle Freunde: Speicher (umgesetzt, Schritt 6)
+Ein eigenes Volume für alle Freunde im Thin-Pool des Mini, im CT unter `/var/lib/clip-benutzer` (Standard 100 GB) –
+nicht auf der CT-Platte (dort liegt deine Datenbank) und nicht in deinem Puffer. Läuft es voll, trifft das nur die
+Freunde. Einmal vor dem ersten Freund; bis dahin merkt die Pipeline nichts davon.
+
+Auf pve-mini (Host) als root, **nicht während eines Spielabends** (der CT ist ca. 1 min aus):
+```bash
+curl -fsSL https://raw.githubusercontent.com/baddieday/baddieday-voting/main/deploy/pve-mini/freunde-volume.sh -o /root/freunde-volume.sh
+bash /root/freunde-volume.sh --probe     # zeigt nur, ändert nichts
+bash /root/freunde-volume.sh             # fragt vor jeder Änderung (j = ja); andere Größe: --groesse 60
+```
+- **Bricht ab, ohne etwas zu ändern,** wenn der Pool mit ganz vollem Freunde-Volume **und** ganz vollem Puffer über
+  90 % käme (dann sagt es, welche Größe passt), wenn gerade ein Pipeline-Schritt läuft, `mp2` anders belegt ist oder
+  in `/var/lib/clip-benutzer` auf der CT-Platte schon etwas liegt (das Volume würde es verdecken).
+- **Sonst:** CT-Konfig sichern (`/root/freunde-volume/`), Rückweg-Skript schreiben, CT aus, Volume als `mp2` anlegen
+  (nicht im vzdump-Backup, wie der Puffer), CT an. Im CT gehört die Wurzel dann root mit Rechten 0711: Jeder Freund
+  kommt nur in seinen eigenen Ordner und sieht die anderen nicht. Ein zweiter Lauf überspringt Fertiges.
+- **Prüfen:** `pct config 102 | grep clip-benutzer` · `pct exec 102 -- ls -ld /var/lib/clip-benutzer` (zeigt
+  `drwx--x--x … root root`).
+- **Rückweg:** `bash /root/freunde-volume/zurueck.sh` (auch mit `--probe`) hängt das Volume nur aus – gelöscht wird
+  nichts, es bleibt als `unusedN` in der CT-Konfig. Solange Dienste von Freunden laufen, weigert es sich. Ein neuer
+  Lauf von `freunde-volume.sh` hängt genau dieses Volume wieder ein, statt ein leeres neues anzulegen.
+- **Größer machen** (nur wachsen, nichts geht verloren): `pct resize 102 mp2 150G` – vorher `lvs pve/data` ansehen.
+- Geprüft (`tests/test_deploy_benutzer.py`, Attrappen wie beim Puffer): Probe ändert nichts, Pool-Grenze mit vollem
+  Puffer, zweiter Lauf ohne Änderung, Rückweg hängt nur aus und sperrt bei laufenden Freunden, Wiedereinhängen.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -149,7 +175,8 @@ weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
 
 ## Stufen
 1. **Sichere Benutzertrennung** (dieser Plan): gemeinsame Sperre, Instanz-Modus, Freund-Pipeline ohne n8n,
-   Isolationstests, Dienst-Vorlagen mit Sandbox, Freunde-Volume, Anlegen und Prüfen mit einem Befehl, Einladungslink.
+   Isolationstests, Dienst-Vorlagen mit Sandbox, Freunde-Volume (ohne Samba je Freund, M12), Anlegen und Prüfen mit
+   einem Befehl, Einladungslink.
 2. **Freunde liefern selbst:** Briefkasten auf dem vServer + kleines Programm für den PC, Lager je Freund mit
    Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot.
 3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.

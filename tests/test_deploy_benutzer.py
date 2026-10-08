@@ -1,6 +1,6 @@
-"""Mehrbenutzer, Stufe 1, Schritt 5: Dienst-Vorlagen je Freund mit Sandbox, und das Update kennt Freunde.
+"""Mehrbenutzer, Stufe 1, Schritt 5 und 6: Dienst-Vorlagen je Freund mit Sandbox, das Update kennt Freunde, Speicher.
 
-Drei Ebenen:
+Vier Teile:
 - Vorlagen (deploy/benutzer): derselbe Sandbox-Block in jeder Vorlage, eigener Benutzer, eigener Ordner, Florians
   Bereiche verdeckt, kein Schreibpfad außerhalb des eigenen Ordners; systemd kennt jeden Schlüssel.
 - Kernel-Nachbau (nur als root mit Mount-Namensräumen, sonst übersprungen): die Mounts des Sandbox-Blocks in einem
@@ -8,6 +8,8 @@ Drei Ebenen:
   und flock über O_RDONLY wartet auf Florian und umgekehrt. Nichts davon berührt das echte System.
 - Update (INNEN-Teil von alles-aktualisieren.sh mit Attrappen wie tests/test_deploy_publikum.py): Freundes-Datenbank
   vorher gesichert, Vorlagen auf der Platte, nie eingeschaltet, laufende Freundes-Bots neu; ohne Freunde keine Änderung.
+- Freunde-Volume (deploy/pve-mini/freunde-volume.sh, Schritt 6) mit Attrappen wie tests/test_deploy_puffer.py: Probe
+  ändert nichts, Pool-Grenze mit vollem Puffer, zweiter Lauf überspringt Fertiges, der Rückweg hängt nur aus.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import re
 import shlex
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -27,7 +30,8 @@ from pathlib import Path
 
 from clip_pipeline import cli, konfig, sperre
 
-from tests.test_deploy_puffer import DEPLOY, KONFIG, PROJEKT, lies_unit
+from tests.test_deploy_puffer import (CT_ZUSTAND, DEPLOY, KONFIG, PROJEKT, STUBS, MitStubs, assertReihenfolge,
+                                      lies_unit)
 
 BENUTZER = DEPLOY / "benutzer"
 UPDATE = DEPLOY / "pve-mini" / "alles-aktualisieren.sh"
@@ -544,6 +548,254 @@ class Skript(unittest.TestCase):
         self.assertNotIn("'", innen)   # INNEN steht in '…' – ein Hochkomma beendete den Text mitten im Skript
         self.assertNotRegex(innen, r"enable[^\n]*clip-freund")
         self.assertNotRegex(innen, r"\brm\b")
+
+
+# --- Freunde-Volume (pve-mini, Schritt 6) -----------------------------------------------------------------------------
+
+VOLUME = DEPLOY / "pve-mini" / "freunde-volume.sh"
+# CT 102 wie auf dem Mini: Puffer als mp1. mp2 auf /var/lib/clip-benutzer nur im Snapshot -> zählt nicht
+CT_KONF = """arch: amd64
+hostname: clips
+onboot: 1
+rootfs: local-lvm:vm-102-disk-0,size=16G
+unprivileged: 1
+lxc.mount.entry: /mnt/big srv/big none rbind,rslave,create=dir 0 0
+mp1: local-lvm:vm-102-disk-1,mp=/srv/puffer,backup=0,mountoptions=noatime;discard,size=96G
+[vorher]
+mp2: local-lvm:vm-102-disk-7,mp=/var/lib/clip-benutzer
+snaptime: 1
+"""
+# Attrappen: jeder Aufruf landet in $STUB/aufrufe (MitStubs). pct ändert die CT-Konfig wie Proxmox (nur den aktiven
+# Abschnitt; --delete lässt das Volume als unusedN stehen, SPEICHER:GB legt vm-102-disk-2 an). Was im CT laufen soll
+# (sh -c …), läuft in der Scheinwurzel $WURZEL: Die Pfad-Argumente zeigen dorthin, findmnt/stat/chown/chmod sind
+# Attrappen – „eingehängt“ ist, was im aktiven Abschnitt auf /var/lib/clip-benutzer zeigt, solange der CT läuft.
+AKTIV = "aktiv() { awk '/^\\[/ {exit} {print}' \"$KONF\"; }\n"
+VOLUME_STUBS = {
+    "pct": "set -o pipefail\n" + CT_ZUSTAND + AKTIV + r'''case "$1" in
+  status) echo "status: $(ct)" ;;
+  shutdown) echo stopped > "$STUB/ct" ;;
+  start) echo running > "$STUB/ct"
+         ! aktiv | grep -q "mp=/var/lib/clip-benutzer" || mkdir -p "$WURZEL/var/lib/clip-benutzer" ;;
+  set) shift 2
+    if [ "$1" = --delete ]; then
+      vol="$(aktiv | awk -v k="$2:" '$1 == k {split($2, t, ","); print t[1]; exit}')"
+      sed -i "1,/^\[/ {/^$2: /d}" "$KONF"; sed -i "1i unused0: $vol" "$KONF"
+    else
+      vol="${2%%,*}"; rest="${2#*,}"
+      case "$vol" in *:vm-*) ;; *) rest="$rest,size=${vol#*:}G"; vol="${vol%%:*}:vm-102-disk-2" ;; esac
+      sed -i "1,/^\[/ {/^unused[0-9]*: $vol\$/d}" "$KONF"; sed -i "1i ${1#--}: $vol,$rest" "$KONF"
+    fi ;;
+  exec) shift 3; case "$1" in
+    sh) skript="$3"; shift 4; args=(); for a in "$@"; do args+=("$WURZEL$a"); done
+        sh -c "$skript" sh "${args[@]}" | sed 's/$/\r/' ;;
+    runuser) exit "${SPERRE_BELEGT:-0}" ;;
+    systemctl) printf '%s' "${FREUNDE_DIENSTE:-}" ;;
+  esac ;;
+esac''',
+    "lvs": 'case "${*: -1}" in pve/data) echo "${LVS:-  400.00  30.00  2.00}" ;; *) echo "${LVS_PUFFER:-  96.00  50.00}" ;; '
+           'esac',
+    "pvesm": '[ "$1" = path ] && echo "/dev/pve/${2#*:}"',
+    "tune2fs": STUBS["tune2fs"],
+    "findmnt": CT_ZUSTAND + AKTIV + '[ "$(ct)" = running ] && aktiv | grep -q "mp=/var/lib/clip-benutzer"',
+    # %d: das Volume ist ein eigener Speicher (DEV_ZIEL=1: derselbe wie / und Puffer); "%U %a": Rechte aus der Wurzel
+    "stat": r'''case "$2" in
+  %d) case "$3" in */var/lib/clip-benutzer) echo "${DEV_ZIEL:-2}" ;; *) echo 1 ;; esac ;;
+  *) echo "${BESITZER:-root} $(PATH=/usr/bin:/bin stat -c %a "$3")" ;;
+esac''',
+    "chown": "",
+    "chmod": r'''case "${*: -1}" in "$TESTORDNER"/*) PATH=/usr/bin:/bin exec chmod "$@" ;; esac
+echo "chmod außerhalb der Testordner: $*" >&2; exit 99''',
+    "systemctl": "",
+    # Löschen darf nie vorkommen – auch nicht aus Versehen über eine Attrappe
+    "rm": "exit 1", "lvremove": "exit 1", "wipefs": "exit 1", "mkfs.ext4": "exit 1",
+}
+# Aufrufe, die etwas ändern (Probe, „nein“ und Abbrüche: keiner davon)
+VOLUME_AENDERUNGEN = ("pct set", "pct shutdown", "pct start", "tune2fs -m", "chown", "chmod", "rm ", "lvremove",
+                      "wipefs", "mkfs")
+NIE_LOESCHEN = re.compile(r"\b(rm|rmdir|lvremove|lvreduce|wipefs|mkfs|shred)\b|pct\s+destroy|pvesm\s+free|--purge")
+
+
+def pruefe_volume_skript(test: unittest.TestCase, pfad: Path) -> None:
+    """bash -n, shellcheck, und nichts darin löscht: kein rm/lvremove/wipefs/…, --delete nur für den Einhängepunkt."""
+    text = pfad.read_text(encoding="utf-8")
+    test.assertTrue(text.startswith("#!/usr/bin/env bash\n"), pfad.name)
+    test.assertIn("\nset -euo pipefail\n", text, pfad.name)
+    test.assertIsNone(NIE_LOESCHEN.search(text), pfad.name)
+    test.assertEqual(set(re.findall(r"--delete\s+(\S+)", text)) - {'"$MP"'}, set(), pfad.name)  # nie „unusedN“
+    r = subprocess.run(["bash", "-n", str(pfad)], capture_output=True, text=True)
+    test.assertEqual(r.returncode, 0, f"{pfad.name}: {r.stderr}")
+    if shutil.which("shellcheck"):
+        r = subprocess.run(["shellcheck", "-S", "warning", str(pfad)], capture_output=True, text=True,
+                           env={**os.environ, "LC_ALL": "C.UTF-8"})
+        test.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+class FreundeVolume(MitStubs):
+    SKRIPT = VOLUME
+
+    def setUp(self):
+        super().setUp()
+        for name, inhalt in VOLUME_STUBS.items():
+            datei = self.stub / name
+            datei.write_text(f'#!/bin/bash\necho "{name} $*" >> "$STUB/aufrufe"\n{inhalt}\n', encoding="utf-8")
+            datei.chmod(0o755)
+        self.konf = self.t / "102.conf"
+        self.konf.write_text(CT_KONF, encoding="utf-8")
+        self.wurzel = self.t / "wurzel"                       # die Sicht im CT
+        (self.wurzel / "srv/puffer").mkdir(parents=True)
+        self.ziel = self.wurzel / "var/lib/clip-benutzer"     # heute ein leerer Ordner auf der CT-Platte
+        self.ziel.mkdir(parents=True)
+        self.ziel.chmod(0o755)
+        self.ablage = self.t / "ablage"                       # /root/freunde-volume
+        self.umgebung.update(KONF=str(self.konf), WURZEL=str(self.wurzel), ABLAGE=str(self.ablage),
+                             TESTORDNER=str(self.t))
+
+    def zurueck(self, *argumente: str, eingabe: str = "", **umgebung: str) -> subprocess.CompletedProcess:
+        env = {**os.environ, **self.umgebung, **umgebung}
+        return subprocess.run(["bash", str(self.ablage / "zurueck.sh"), *argumente], input=eingabe,
+                              capture_output=True, text=True, env=env, timeout=60)
+
+    def aenderungen(self) -> list[str]:
+        return [z for z in self.aufrufe().splitlines() if z.startswith(VOLUME_AENDERUNGEN)]
+
+    def neu(self):
+        """Aufrufliste leeren – für den nächsten Lauf."""
+        (self.stub / "aufrufe").unlink(missing_ok=True)
+
+    def aktiv(self) -> str:
+        return self.konf.read_text(encoding="utf-8").split("[vorher]")[0]
+
+    def test_skript(self):
+        pruefe_volume_skript(self, VOLUME)
+        self.assertTrue(os.access(VOLUME, os.X_OK))
+
+    def test_probe_zeigt_alles_und_aendert_nichts(self):
+        r = self.lauf("--probe")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        assertReihenfolge(self, r.stdout, [
+            "Im CT: /var/lib/clip-benutzer – leerer Ordner auf der CT-Platte",
+            "Puffer /srv/puffer: 96.00 GB, belegt 50.00 % – kann noch 48.0 GB wachsen",
+            "Mit ganz vollem Freunde-Volume (100 GB) und ganz vollem Puffer: 67.0 % (Grenze 90 %)",   # 30 + 148/4
+            "nicht während eines Spielabends", "$ pct shutdown 102 --timeout 180",
+            "$ pct set 102 --mp2 'local-lvm:100,mp=/var/lib/clip-benutzer,backup=0,mountoptions=noatime;discard'",
+            "$ tune2fs -m 0 '<Gerät des neuen Volumes>'", "$ pct start 102", "chmod 711",
+            "Probe fertig – nichts verändert"])
+        self.assertEqual(self.aenderungen(), [])
+        self.assertIn("lvs --noheadings --nosuffix --units g -o lv_size,data_percent /dev/pve/vm-102-disk-1",
+                      self.aufrufe())
+        self.assertEqual(self.konf.read_text(encoding="utf-8"), CT_KONF)
+        self.assertFalse(self.ablage.exists())                 # keine Sicherung, kein Rückweg-Skript
+        self.assertEqual(stat.S_IMODE(self.ziel.stat().st_mode), 0o755)
+
+    def test_anlegen_wiederholen_rueckweg_wieder_einhaengen(self):
+        # Normaler Weg: CT kurz aus, Volume anlegen, Reserve aus, solange er aus ist (ext4-MMP), Wurzel root 0711
+        r = self.lauf(eingabe="j\nj\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        volume = "mp2: local-lvm:vm-102-disk-2,mp=/var/lib/clip-benutzer,backup=0,mountoptions=noatime;discard,size=100G"
+        assertReihenfolge(self, self.aufrufe(), [
+            "pct exec 102 -- runuser -u pipeline -- flock -n /var/lib/clip-pipeline/pipeline.lock true",
+            "pct shutdown 102 --timeout 180", "pct set 102 --mp2 local-lvm:100,mp=/var/lib/clip-benutzer",
+            "tune2fs -m 0 /dev/pve/vm-102-disk-2", "pct start 102", "chown root:root", "chmod 711"])
+        self.assertIn(volume, self.aktiv())
+        self.assertEqual(stat.S_IMODE(self.ziel.stat().st_mode), 0o711)
+        self.assertEqual((self.ablage / "volume").read_text(encoding="utf-8"), "local-lvm:vm-102-disk-2\n")
+        self.assertEqual((self.ablage / "original/102.conf").read_text(encoding="utf-8"), CT_KONF)   # Stand vorher
+        rueckweg = self.ablage / "zurueck.sh"
+        self.assertEqual(stat.S_IMODE(rueckweg.stat().st_mode), 0o700)
+        pruefe_volume_skript(self, rueckweg)
+        self.assertIn("Rückweg:    bash", r.stdout)
+
+        # Zweiter Lauf: alles fertig – keine Frage, keine Änderung, die Pool-Grenze zählt nicht mehr
+        self.neu()
+        r = self.lauf(LVS="  200.00  89.00  2.00")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for satz in ("schon eingehängt: mp2 = local-lvm:vm-102-disk-2", "eingehängt, eigener Speicher, root, 0711",
+                     "schon da – übersprungen", "schon richtig – übersprungen", "zurueck.sh (schon da)"):
+            self.assertIn(satz, r.stdout)
+        self.assertEqual(self.aenderungen(), [])
+        self.assertNotIn("? ", r.stdout)
+
+        # Rückweg: hängt nur aus – Proxmox behält das Volume als unusedN, gelöscht wird nichts
+        self.neu()
+        r = self.zurueck("--probe")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("$ pct set 102 --delete mp2", r.stdout)
+        self.assertEqual(self.aenderungen(), [])
+        r = self.zurueck(eingabe="j\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.aenderungen(), ["pct shutdown 102 --timeout 180", "pct set 102 --delete mp2",
+                                              "pct start 102"])
+        self.assertIn("unused0: local-lvm:vm-102-disk-2", self.aktiv())
+        self.assertNotIn("clip-benutzer", self.aktiv())
+        self.assertIn("Die Daten der Freunde bleiben im Volume local-lvm:vm-102-disk-2", r.stdout)
+
+        # Nochmal einrichten: dasselbe Volume wieder einhängen – kein neues, keine Pool-Rechnung, kein tune2fs
+        self.neu()
+        r = self.lauf(eingabe="j\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Früher angelegtes Freunde-Volume gefunden: local-lvm:vm-102-disk-2", r.stdout)
+        self.assertEqual(self.aenderungen(), [
+            "pct shutdown 102 --timeout 180",
+            "pct set 102 --mp2 local-lvm:vm-102-disk-2,mp=/var/lib/clip-benutzer,backup=0,mountoptions=noatime;discard",
+            "pct start 102"])
+        self.assertNotIn("lvs", self.aufrufe())
+        self.assertIn("schon richtig – übersprungen", r.stdout)
+        self.assertNotIn("unused", self.aktiv())
+
+    def test_pool_zu_knapp_mit_vollem_puffer(self):
+        # Wichtigster Fehlerfall: 60 % + (100 GB + 48 GB, die dem Puffer noch fehlen) / 400 GB = 97 % – ohne den Puffer
+        # wären es 85 % und das Volume käme durch, bis beide voll sind und alle Gäste auf pve-mini stehen
+        r = self.lauf(eingabe="j\nj\n", LVS="  400.00  60.00  2.00")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("ganz vollem Puffer: 97.0 % (Grenze 90 %)", r.stdout)
+        self.assertIn("Zu knapp", r.stdout)
+        self.assertIn(f"So viel passt:  bash {VOLUME} --groesse 72", r.stdout)   # (90 - 60) * 4 - 48
+        self.assertEqual(self.aenderungen(), [])
+        self.assertFalse(self.ablage.exists())
+        r = self.lauf("--probe", "--groesse", "72", LVS="  400.00  60.00  2.00")   # genau 90 %: geht
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("$ pct set 102 --mp2 'local-lvm:72,mp=/var/lib/clip-benutzer", r.stdout)
+        self.assertEqual(self.aenderungen(), [])
+
+    def test_ziel_auf_der_ct_platte_nicht_leer(self):
+        # Das Volume würde den Inhalt verdecken – nichts anlegen, nichts herunterfahren
+        (self.ziel / "max").mkdir()
+        r = self.lauf(eingabe="j\nj\n")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("das Volume würde den Inhalt verdecken", r.stdout)
+        self.assertEqual(self.aenderungen(), [])
+        self.assertEqual(self.konf.read_text(encoding="utf-8"), CT_KONF)
+
+    def test_sperre_belegt_oder_nein(self):
+        for eingabe, umgebung, satz in (("j\n", {"SPERRE_BELEGT": "1"}, "Pipeline-Schritt"),
+                                        ("n\n", {}, "Abgebrochen – nichts verändert.")):
+            with self.subTest(satz):
+                r = self.lauf(eingabe=eingabe, **umgebung)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn(satz, r.stdout)
+                self.assertEqual(self.aenderungen(), [])
+                self.assertEqual(self.konf.read_text(encoding="utf-8"), CT_KONF)
+                self.assertFalse(self.ablage.exists())
+
+    def test_rueckweg_nicht_solange_freunde_laufen(self):
+        self.assertEqual(self.lauf(eingabe="j\nj\n").returncode, 0)
+        self.neu()
+        laufend = ("clip-freund-bot@max.service loaded active running Lern-Bot von max\n"
+                   "clip-freund-scan@max.timer loaded active waiting Ein Match von max\n")
+        r = self.zurueck(eingabe="j\n", FREUNDE_DIENSTE=laufend)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("laufen noch Dienste von Freunden", r.stdout)
+        self.assertIn("systemctl disable --now clip-freund-bot@max.service clip-freund-scan@max.timer", r.stdout)
+        self.assertEqual(self.aenderungen(), [])
+        self.assertIn("mp=/var/lib/clip-benutzer", self.aktiv())
+
+    def test_falscher_aufruf(self):
+        for argumente, umgebung in ((["--prob"], {}), (["--groesse"], {}), (["--groesse", "viel"], {}),
+                                    ([], {"MP": "mp0"})):
+            with self.subTest(argumente=argumente, umgebung=umgebung):
+                r = self.lauf(*argumente, **umgebung)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertEqual(self.aufrufe(), "")
 
 
 if __name__ == "__main__":
