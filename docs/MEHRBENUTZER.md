@@ -1,9 +1,9 @@
 # Mehrbenutzer – eine Instanz je Freund (Entscheidung M1, 08.10.2026)
 
 Ziel Stufe 1: Ein Freund bekommt auf dem Mini seine eigene, vollständig getrennte Pipeline. Zwei Benutzer arbeiten
-unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M37: `docs/ENTSCHEIDUNGEN.md`,
-„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 3 von 4 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
-Freund-Pipeline ohne n8n), der Rest ist Plan.
+unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M40: `docs/ENTSCHEIDUNGEN.md`,
+„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 4 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
+Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft), der Rest (Dienste, Volume, Anlegen, Einladung) ist Plan.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -89,6 +89,19 @@ nur, was dem Freund gehört (`konfig.lade_instanz`). Vorlagen: `config/instanz.b
 - **Abend-Video** (`sitzungen`, Timer alle 10 min): Geht Whisper nicht (z. B. Modell lässt sich nicht laden), werden die
   Szenen ohne Sprache gemessen, und das Video kommt trotzdem – mit Hinweis im Ergebnis; das hilft auch Florian (vorher
   brach jeder Lauf ab). Auf ein Match mit Status `fehler` wartet der Abend nicht – bei Florian wird keins `fehler`.
+
+## Trennung geprüft (umgesetzt, Schritt 4)
+- **Generalprobe** (`tests/test_isolation.py`): Florian, max und eva spielten dasselbe Squad-Match – gleiche
+  Session-ID, aber jeder mit eigener Aufnahme und eigener Epic-ID. Jeder rechnet in einem eigenen Prozess wie später im
+  Dienst (`scan --verarbeiten`, danach `stimmung`), mit echtem ffmpeg. Nach jedem Lauf ist der Fingerabdruck (SHA-256)
+  aller Dateien der beiden anderen und der Installation gleich; Clips, Momente und Session-Ordner entstehen nur beim
+  Läufer. Jede Datenbank hat nur ihr Match mit ihren Kills, keins wird als „schon fertig“ übersprungen. Jeder Lauf nahm
+  die gemeinsame Sperre; solange sie belegt ist, rechnet keiner (Exit 4).
+- **n8n** (`tests/test_n8n_einstieg.py`): Die Befehle aus den n8n-Workflows kommen durch `deploy/n8n-lauf.sh`;
+  `--konfig`, ein vorangestelltes `CLIP_INSTANZ=`, `scan`, ein Zusatzwort, eine ungültige Session-ID oder ein
+  angehängter Shell-Befehl werden mit „Aufruf nicht erlaubt“ (Exit 2) abgewiesen, ohne dass die Pipeline startet.
+- Nicht im Test: Lesen über Benutzergrenzen (alle Läufe als derselbe Benutzer) – das sichern eigene Benutzer und
+  Sandbox (PR 5/7), geprüft vor Ort.
 
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |

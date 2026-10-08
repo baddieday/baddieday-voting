@@ -559,3 +559,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Bot, die neueren kommen dran, nichts gelöscht (`pipeline process <ID>` holt es nach). Ohne die Schalter wie bisher.
     Abend-Video: Geht Whisper nicht, misst es die Szenen ohne Sprache, und das Video kommt trotzdem (hilft auch dir –
     vorher brach jeder Lauf ab); auf ein aufgegebenes Match wartet der Abend nicht. M33–M37.
+  - Schritt 4 (Trennung geprüft, nur Tests): Generalprobe mit dir, max und eva im selben Squad-Match – jeder in
+    einem eigenen Prozess mit echtem ffmpeg. Keiner ändert eine Datei der anderen (Fingerabdruck), jede Datenbank
+    hat nur ihr Match, alle nehmen die eine Sperre. Dazu der erste Test für den n8n-Einstieg (`deploy/n8n-lauf.sh`,
+    unverändert): nur die Vertragsbefehle kommen durch. M38–M40.
