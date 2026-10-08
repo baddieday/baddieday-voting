@@ -134,7 +134,9 @@ Posts ohne Video-Nummer (im einfachen Modus immer – das Paket legt den Post an
 passt, wenn es bis 72 h vor oder nach dem Post erstellt wurde (`[publikum].zuordnung_stunden`), die Länge auf ±2 s
 stimmt und seine Beschreibung nicht mit einer anderen ersten Zeile beginnt als die Caption des Pakets. Zugeordnet wird
 nur, wenn Video und Post nur zueinander passen; bei mehreren entscheidet die erste Zeile („Fortnite-Highlights: Triple
-Kill · 5 Momente“). Ohne passende erste Zeile wartet der Abruf, bis das Fenster zu ist. Sonst bleibt der Post offen –
+Kill · 5 Momente · 🎵 On & On“ – im einfachen Modus mit dem Song, damit zwei Videos eines Abends verschieden sind; das
+Paket speichert sie am Post, `posts.merkmale.caption_zeile`). Ohne passende erste Zeile wartet der Abruf, bis das Fenster
+zu ist. Sonst bleibt der Post offen –
 lieber keine Zahlen als falsche. Bei der Zuordnung wird `gepostet_utc` die Upload-Zeit (Tag 7 zählt ab dem Upload). In
 der JSON-Zeile steht `"zugeordnet": n`; `/link` ist nur noch für Ausnahmen.
 Bleiben die Zahlen gleich (Flop), speichert der Abruf trotzdem eine Messung am Tag (ab 20 h nach der letzten), bis der

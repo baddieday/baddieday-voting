@@ -656,10 +656,8 @@ async def _sende_entwuerfe(app) -> int:
         experte = experte_an(con, konfig)
         text = entwurf_text(z, _liste(z), erwartung=wert, kritik_text=kritik.kritik_zeile(con, z["id"]), kurz=not experte)
         abend = _abend_zu(con, z["id"])
-        if abend is not None:   # das Abend-Video (Stufe 1): wofür es ist, steht ganz oben
-            text = (f"🎮 <b>Dein Abend vom {_tag(abend['ende_utc'], konfig)}</b>\n" + text)[:1000]
-        elif not experte and highlight.zu_entwurf(con, z["id"]) is not None:   # Stufe 3: kommt nur noch hier
-            text = ("🏆 <b>Dein 2-Wochen-Video</b>\n" + text)[:1000]
+        if kopf := _kopf(con, konfig, z["id"], experte):   # wofür das Video ist, steht ganz oben
+            text = (kopf + text)[:1000]
         with pfad.open("rb") as datei:
             nachricht = await app.bot.send_video(
                 chat_id=chat, video=datei, caption=text, parse_mode="HTML",
@@ -674,6 +672,17 @@ async def _sende_entwuerfe(app) -> int:
             await _loesche_status(app, con, f"abend:{abend['name']}")
         gesendet += 1
     return gesendet
+
+
+def _kopf(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, experte: bool) -> str:
+    """Kopfzeile über dem Video: „🎮 Dein Abend vom …“ (Abend-Video, Stufe 1) oder im einfachen Modus „🏆 Dein
+    2-Wochen-Video“ (Stufe 3) – sonst ''. Steht beim Senden und bleibt nach deinem ✅/❌ (Befund 08.10.: vorher war sie
+    nach dem Tipp weg, und beim 2-Wochen-Video stand nirgends mehr, was es ist)."""
+    if (abend := _abend_zu(con, entwurf_id)) is not None:
+        return f"🎮 <b>Dein Abend vom {_tag(abend['ende_utc'], konfig)}</b>\n"
+    if not experte and highlight.zu_entwurf(con, entwurf_id) is not None:
+        return "🏆 <b>Dein 2-Wochen-Video</b>\n"
+    return ""
 
 
 def _abend_zu(con: sqlite3.Connection, entwurf_id: int) -> sqlite3.Row | None:
@@ -1323,7 +1332,10 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
 
     async def caption(bewertung, knoepfe) -> None:
         try:
-            await query.edit_message_caption(caption=entwurf_text(zeile, liste, bewertung, kurz=True), parse_mode="HTML",
+            text = entwurf_text(zeile, liste, bewertung, kurz=True)
+            if kopf := _kopf(con, konfig, eid, False):   # die Kopfzeile bleibt nach dem Tipp stehen
+                text = (kopf + text)[:1000]
+            await query.edit_message_caption(caption=text, parse_mode="HTML",
                                              reply_markup=_markup(knoepfe) if knoepfe else None)
         except Exception as fehler:  # „message is not modified“ beim Doppelklick ist normal
             if "not modified" not in str(fehler):

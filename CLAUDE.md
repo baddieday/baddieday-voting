@@ -444,3 +444,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     verbunden – einmal /tiktok | n ✅-Videos nach 3 Tagen noch ohne Zahlen)“ (`geschmack.lehrer_zeile`, ohne Netz:
     `kritiken`, `posts`, `.env` und Token-Datei wie `publikum_adapter._token`); sie ersetzt „🧠 Gelernt aus …“ und „📊
     Publikum: …“. Dieselbe Zeile im Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat. N33–N37.
+  - **Prüfung Stufe 2/3 (drei Prüfer, nachgestellt):** Voller Puffer: Der Abgleich läuft ohne DB-Sicherung weiter und
+    gibt frei (vorher brach er jeden Tag daran ab). Löschen nur strenger: auch 14 Tage vor der jüngsten Aufnahme (Uhr
+    des Mini kann springen); fehlt eine Lager-Kopie, wird sie beim nächsten Abgleich neu kopiert statt täglich gewarnt;
+    ein Kopierfehler hält die Freigabe weiter an, die Meldung sagt es. Abruf: Posts ohne Score zuerst (sonst ab ~100
+    Posts keine Noten mehr). Erste Caption-Zeile im einfachen Modus mit Songtitel, am Post gespeichert (zwei ✅ eines
+    Abends bekamen vorher nie Zahlen). Nach dem Paket: „füg den Text oben unverändert ein“. KI-Note im 📋 mit echtem
+    Grund; n8n „Highlight-Video fertig“ aus; Kopfzeile bleibt nach dem Tipp. N38–N47.

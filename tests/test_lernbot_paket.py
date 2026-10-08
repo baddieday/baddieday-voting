@@ -312,8 +312,14 @@ class Paket(MitLernPaket):
         (p,) = self.posts()
         self.assertEqual((p["plattform"], p["entwurf_id"], p["url"], p["video_id"], p["gepostet_utc"]),
                          ("tiktok", eid, None, None, iso(T0 + timedelta(minutes=5))))   # Zeitpunkt des ersten Pakets
-        self.assertEqual(self.bot.nachrichten[-1]["text"], "Lad es hoch – die Zahlen hole ich mir danach selbst.")
+        self.assertEqual(self.bot.nachrichten[-1]["text"], lernbot_paket.ZAHLEN_SELBST)
+        self.assertIn("füg den Text oben unverändert ein", lernbot_paket.ZAHLEN_SELBST)
         self.assertFalse(any(n.get("reply_markup") for n in self.bot.nachrichten))   # keine Checkliste, kein Häkchen
+        # N44: Die erste Zeile endet mit dem Song (zwei Videos eines Abends unterscheiden sich so) und steht am Post
+        text = next(n["text"] for n in self.bot.nachrichten if n["text"].startswith("<pre>"))
+        erste = text.removeprefix("<pre>").splitlines()[0]
+        self.assertEqual(erste, "Fortnite-Highlights: Triple Kill · 2 Momente · 🎵 Titel")
+        self.assertEqual(json.loads(p["merkmale"])["caption_zeile"], erste)
 
     def test_zweites_paket_rendert_nicht_neu(self):
         eid = self.entwurf_anlegen()

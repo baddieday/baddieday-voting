@@ -11,8 +11,10 @@
    Statuszeile sagt dann, warum.
 
 ## Was du tust
-- **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen. Danach hakst du nichts ab
-  und schickst keinen Link: Die Zuschauerzahlen von TikTok holt sich der Bot selbst (dafür einmal /tiktok verbinden).
+- **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen. **Füg den Text beim
+  Hochladen unverändert ein** (Eigenes gern dahinter): An seiner ersten Zeile erkennt der Bot dein Video. Danach hakst
+  du nichts ab und schickst keinen Link: Die Zuschauerzahlen von TikTok holt sich der Bot selbst (dafür einmal /tiktok
+  verbinden). Mit eigenem Text statt seinem bekommt dieses Video keine Zahlen.
 - **❌ Nicht gut** – tipp auf einen Grund. Der Bot sagt dir sofort, was er ändert, und baut eine neue Fassung:
 
 | Grund | Was sich ändert (für immer, bis du es selbst änderst – außer bei 🥱 und 🔁) |
@@ -69,6 +71,8 @@ bei Problemen – zum Beispiel Speicher voll, Kills ohne Aufnahme oder eine Übe
 einem kurzen Lebenszeichen. Dass eine Übertragung glatt lief, sagt er nicht mehr. Unter /experte ist alles wie früher.
 Nach einem Update schreibt der Lern-Bot einmal „✅ Neue Version läuft“.
 
-Kommt pro Match noch „🎬 Match verarbeitet … Jetzt im Bot bewerten“? Diese Nachricht schickt n8n. Abschalten:
-in n8n den Ablauf „1 Match verarbeiten“ öffnen, den Kasten „Telegram Info“ anklicken, **D** drücken (deaktivieren),
-speichern. Die Datei `1-match-verarbeiten.json` im Repo hat das schon.
+Kommt pro Match noch „🎬 Match verarbeitet … Jetzt im Bot bewerten“ oder alle 2 Wochen „🏆 Highlight-Video fertig …
+Freigabe im Bot.“ im Clip-Bot? Diese Nachrichten schickt n8n – das 2-Wochen-Video selbst kommt im Lern-Bot. Abschalten:
+in n8n den Ablauf „1 Match verarbeiten“ bzw. „2 Highlight-Video“ öffnen, den Kasten „Telegram Info“ anklicken, **D**
+drücken (deaktivieren), speichern. Die Dateien `1-match-verarbeiten.json` und `2-highlight-video.json` im Repo haben
+das schon.

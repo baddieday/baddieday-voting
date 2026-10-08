@@ -475,7 +475,8 @@ class LernBotEinfach(MitRegieMaterial):
         self.con.execute("UPDATE entwuerfe SET status = 'gerendert', datei = ? WHERE id = ?", (str(video), self.eid))
         self.assertEqual(asyncio.run(lernbot.sende_entwuerfe(self.app)), 1)
         self.assertTrue(self.bot.videos[0]["caption"].startswith("🏆 <b>Dein 2-Wochen-Video</b>\n🎬 <b>Video #"))
-        self.klick(f"d:{self.eid}:1")
+        q = self.klick(f"d:{self.eid}:1")
+        self.assertTrue(q.bearbeitet[0]["caption"].startswith("🏆 <b>Dein 2-Wochen-Video</b>\n"))   # bleibt stehen
         h = self.con.execute("SELECT status, hochgeladen FROM highlights").fetchone()
         self.assertEqual(h["status"], "freigegeben")
         self.assertIsNotNone(h["hochgeladen"])

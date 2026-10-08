@@ -141,7 +141,7 @@ class Morgenpruefung(MitPuffer):
         text = self.text(f"puffer:platz:{self.tag()}")
         self.assertIn("15.0 GB frei", text)
         self.assertIn("Warnung unter 20 GB", text)
-        self.assertIn("gibt der tägliche Abgleich selbst frei", text)  # Stufe B5 (ab Werk an)
+        self.assertIn("löscht der tägliche Abgleich selbst vom Mini, sobald alles im Lager ist", text)  # B5, ab Werk
         self.konfig.daten["puffer"]["freigeben"] = False
         self.assertIn("automatisch gelöscht wird nichts",
                       puffer.status(self.con, self.konfig, self.zeit)["befunde"]["platz"])

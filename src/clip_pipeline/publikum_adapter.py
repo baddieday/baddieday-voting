@@ -276,13 +276,18 @@ def _erste_zeile(text) -> str:
 
 
 def _caption_zeile(con, konfig, post) -> str:
-    """Erste Zeile der Caption, die das Upload-Paket zu diesem Post mitgab – dieselbe Rechnung wie
-    lernbot_paket.baue_paket (caption.entwurf_caption aus der Schnittliste), vereinheitlicht wie _erste_zeile. Nur
-    Entwürfe: Die Beschreibung eines Clips kann von der KI stammen und ließe sich nicht nachbauen. Fehlt etwas
+    """Erste Zeile der Caption, die das Upload-Paket zu diesem Post mitgab, vereinheitlicht wie _erste_zeile. N44:
+    Seit dem 08.10. speichert das Paket sie am Post (posts.merkmale.caption_zeile, im einfachen Modus mit Songtitel) –
+    dann gilt genau sie, auch wenn sich danach Code, Vorlage oder Daten ändern. Ältere Posts und Häkchen unter
+    /experte: dieselbe Rechnung wie lernbot_paket.baue_paket ohne Song (caption.entwurf_caption aus der Schnittliste).
+    Nur Entwürfe: Die Beschreibung eines Clips kann von der KI stammen und ließe sich nicht nachbauen. Fehlt etwas
     (Entwurf, Schnittliste, Vorlage): '' – dann gibt es keinen Beleg, nie einen Abbruch des Abrufs."""
     if post["art"] != "entwurf" or post["entwurf_id"] is None:
         return ""
     try:
+        gespeichert = json.loads(post["merkmale"] or "{}").get("caption_zeile")
+        if isinstance(gespeichert, str) and gespeichert.strip():
+            return _erste_zeile(gespeichert)
         zeile = con.execute("SELECT schnittliste FROM entwuerfe WHERE id = ?", (post["entwurf_id"],)).fetchone()
         liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
         return _erste_zeile(caption.entwurf_caption(con, liste, konfig))
@@ -384,10 +389,15 @@ def abrufen(con, konfig, zeit: datetime | None = None) -> dict:
         return ergebnis
     seit = iso(zeit - timedelta(days=float(konfig.wert("publikum.api_max_tage", 180))))
     vor = iso(zeit - timedelta(hours=float(konfig.wert("publikum.api_intervall_stunden", 6))))
+    # N43: Posts ohne Score zuerst, die jüngsten vorn – sie brauchen ihre tägliche Messung bis zum Score an Tag 7.
+    # Danach die bewerteten, die am längsten nicht gemessene zuerst. Vorher belegten ab etwa 100 Posts bewertete mit
+    # festen Zahlen (speichern nie neu) und nie hochgeladene (nie gemessen) die Plätze, und neue bekamen keinen Score.
     posts = con.execute("""SELECT p.* FROM posts p WHERE p.gepostet_utc>=? AND NOT EXISTS
                            (SELECT 1 FROM publikum_messungen m WHERE m.post_id=p.id AND m.quelle='api'
                             AND m.gemessen_utc>?)
-                           ORDER BY COALESCE((SELECT MAX(m.gemessen_utc) FROM publikum_messungen m
+                           ORDER BY (p.bewertet_utc IS NOT NULL),
+                                    CASE WHEN p.bewertet_utc IS NULL THEN p.gepostet_utc END DESC,
+                                    COALESCE((SELECT MAX(m.gemessen_utc) FROM publikum_messungen m
                                               WHERE m.post_id=p.id AND m.quelle='api'),''),
                                     p.gepostet_utc DESC,p.id DESC LIMIT ?""",
                         (seit, vor, int(konfig.wert("publikum.api_max_posts", 100)))).fetchall()

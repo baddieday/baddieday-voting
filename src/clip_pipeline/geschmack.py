@@ -317,16 +317,33 @@ KI_SPAETESTENS_H = 6          # so lange darf ihre Note dauern (Bot baut gerade,
 OHNE_ZAHLEN_TAGE = (3, 14)    # Post eines ✅-Videos, 3 bis 14 Tage alt, ohne jede Messung = „ohne Zahlen“
 
 
+# Gründe aus claude_aufruf, bei denen claude gar nicht lief oder sofort abbrach – dann fehlt meist die Anmeldung
+KI_ANMELDUNG = ("nicht gefunden", "nicht nutzbar", "Exit", "programm fehlt")
+
+
 def ki_stand(con: sqlite3.Connection, bis=None) -> str:
-    """„läuft“: eine KI-Note in den letzten 3 Tagen · „fehlt – Claude-Anmeldung nötig“: Videos der letzten 3 Tage,
-    älter als 6 h, keins mit Note · „kommt mit dem nächsten Video“: kein Video, an dem es sich zeigen könnte."""
+    """„läuft“: eine KI-Note in den letzten 3 Tagen · „hakt gerade …“: der letzte Versuch scheiterte an etwas, das von
+    selbst vorbeigeht (Antwort passte nicht, Abo-Limit, Tageslimit – N46) · „fehlt – Claude-Anmeldung nötig“: claude
+    lief gar nicht, oder Videos der letzten 3 Tage sind älter als 6 h und keins hat eine Note · „kommt mit dem
+    nächsten Video“: kein Video, an dem es sich zeigen könnte. Der Grund steht in kritiken.details.hinweis."""
     bis = bis or jetzt()
     seit = iso(bis - timedelta(days=KI_FRISCH_TAGE))
     if con.execute("SELECT 1 FROM kritiken WHERE ki_score IS NOT NULL AND erstellt >= ? LIMIT 1", (seit,)).fetchone():
         return "läuft"
-    if con.execute("""SELECT 1 FROM entwuerfe WHERE format = 'short' AND status IN ('gesendet', 'bewertet')
-                       AND datei IS NOT NULL AND erstellt >= ? AND erstellt <= ? LIMIT 1""",
-                   (seit, iso(bis - timedelta(hours=KI_SPAETESTENS_H)))).fetchone():
+    hinweis = ""
+    for z in con.execute("SELECT details FROM kritiken WHERE erstellt >= ? ORDER BY erstellt DESC LIMIT 20", (seit,)):
+        try:
+            hinweis = str(json.loads(z["details"] or "{}").get("hinweis") or "")
+        except (ValueError, AttributeError):
+            continue
+        if hinweis.startswith("KI-Cutter:"):
+            break
+        hinweis = ""
+    if hinweis and not any(s in hinweis for s in KI_ANMELDUNG):
+        return "hakt gerade, beim nächsten Video neuer Versuch"
+    if hinweis or con.execute("""SELECT 1 FROM entwuerfe WHERE format = 'short' AND status IN ('gesendet', 'bewertet')
+                                  AND datei IS NOT NULL AND erstellt >= ? AND erstellt <= ? LIMIT 1""",
+                              (seit, iso(bis - timedelta(hours=KI_SPAETESTENS_H)))).fetchone():
         return "fehlt – Claude-Anmeldung nötig"
     return "kommt mit dem nächsten Video"
 
@@ -352,7 +369,8 @@ def lehrer_zeile(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str:
     if not publikum_adapter.tiktok_verbunden(konfig):
         teile.append("TikTok nicht verbunden – einmal /tiktok")
     elif fehlen := ohne_zahlen(con, bis):
-        teile.append(f"{fehlen} ✅-Video{'s' if fehlen != 1 else ''} nach 3 Tagen noch ohne Zahlen")
+        teile.append(f"{fehlen} ✅-Video{'s' if fehlen != 1 else ''} nach 3 Tagen noch ohne Zahlen – nicht "
+                     "hochgeladen oder den Text dabei geändert?")   # N45: der wahrscheinliche Grund
     zuschauer = ", ".join(teile) or "noch kein Video ausgewertet"
     return f"🧠 Lernt aus: deinen ✅/❌ · KI-Note ({ki_stand(con, bis)}) · Zuschauern ({zuschauer})"
 

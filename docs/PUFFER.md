@@ -585,24 +585,33 @@ einzige Löschweg im Puffer (`lager.gib_frei`, `[puffer].freigeben = true` ab We
 
 **Wann:** nur am Ende eines Abgleichs, der pve-big gebraucht hat und ohne einen einzigen Fehler durchlief (kein
 Abbruch, keine Datei, die nicht ins Lager kam). Tage ohne neue Aufnahmen wecken pve-big nicht – dann wird auch nichts
-freigegeben (es kommt ja nichts dazu).
+freigegeben (es kommt ja nichts dazu). Kam eine Datei nicht ins Lager, sagt die Abschlussmeldung „Alte Rohvideos lösche
+ich erst wieder vom Mini, wenn alles im Lager ist.“ Ist der Puffer so voll, dass nicht einmal die tägliche Sicherung
+der Datenbank hineinpasst, läuft der Abgleich ohne sie weiter (eine ⚠️-Zeile sagt es) – sonst könnte er den vollen
+Puffer nie mehr leeren.
 
 **Was:** nur ein Video (`.mp4`, `.mkv`, `.mov`) in `eingang/`, das
-1. als Aufnahme (Dateizeit) **und** seit seiner Bestätigung im Lager älter als `[puffer].rohdaten_tage` (14) ist,
+1. als Aufnahme (Dateizeit) **und** seit seiner Bestätigung im Lager älter als `[puffer].rohdaten_tage` (14) ist –
+   und auch 14 Tage älter als die jüngste Aufnahme im Lager (deren Zeit kommt vom PC: springt die Uhr des Mini vor,
+   bleibt die Aufnahme von gestern trotzdem),
 2. in der Tabelle `lager` bestätigt steht (SHA-256 im Lager zurückgelesen),
 3. im Puffer noch genau so groß und alt ist wie bei der Bestätigung,
 4. dessen Kopie im Lager in diesem Lauf da und gleich groß ist und
 5. dessen Kopie beim erneuten Zurücklesen dieselbe SHA-256 hat – danach ist sie die einzige Kopie.
 
-Jeder Ordner auf dem Weg muss ein echter Ordner des Puffers sein (kein Link, kein anderes Dateisystem); gelöscht wird
-genau im geprüften Ordner. **Nie:** etwas im Lager, Ordner, Bilder, Replays, Clips, Momente, Sessions, Exporte,
+Jeder Ordner auf dem Weg muss ein echter Ordner des Puffers sein (kein Link, kein anderes Dateisystem; einen
+Bind-Mount desselben Dateisystems erkennt die Prüfung nicht – den gibt es im Aufbau nicht); gelöscht wird genau im
+geprüften Ordner. **Nie:** etwas im Lager, Ordner, Bilder, Replays, Clips, Momente, Sessions, Exporte,
 Highlights, Musik, Archiv, DB-Sicherungen oder die Datenbank (die Zeilen in `lager` und `aufnahmen` bleiben).
 
 **Probe zuerst:** Der erste Abgleich, bei dem es etwas freizugeben gibt, zählt nur und schreibt eine Zeile in die
-Abschlussmeldung („🧹 Puffer – Probe: 23 alte Rohvideos (41,2 GB) könnte ich freigeben …“). Ab dem nächsten Abgleich
-wird gelöscht; je Lauf eine Zeile („🧹 Puffer: 23 alte Rohvideos freigegeben (41,2 GB), Kopien liegen im Lager.“), jede
-Datei steht im Protokoll (`ereignisse`, Art `puffer_frei`, mit Kopie im Lager und Prüfsumme). Fehlt eine Kopie im Lager
-oder ist sie nicht mehr gleich, bleibt das Video liegen, und die Meldung sagt es („⚠️ Puffer: … bleiben liegen“).
+Abschlussmeldung („🧹 Puffer – Probe: 23 alte Rohvideos (41,2 GB) könnte ich vom Mini löschen …“). Ab dem nächsten
+Abgleich wird gelöscht; je Lauf eine Zeile („🧹 Puffer: 23 alte Rohvideos vom Mini gelöscht (41,2 GB), die Kopien
+liegen sicher im Lager.“), jede Datei steht im Protokoll (`ereignisse`, Art `puffer_frei`, mit Kopie im Lager und
+Prüfsumme). Bricht die Probe ab, zählt der nächste Abgleich neu. Fehlt eine Kopie im Lager oder ist sie nicht mehr
+gleich, bleibt das Video im Puffer, die Meldung sagt es („⚠️ Puffer: … bleiben auf dem Mini“), und seine Bestätigung
+wird zurückgenommen (`lager.groesse = -1`): Der nächste Abgleich legt es neu ins Lager – fehlt die Kopie, entsteht sie
+neu, ist sie anders, kommt die Fassung aus dem Puffer als `name~<Zeit>` daneben. Im Lager wird nichts überschrieben.
 
 **Gaming-PC:** Er kopiert Freigegebenes nicht noch einmal. `Uebertragung.ps1` merkt sich jede übertragene Datei
 (Pfad, Größe, Zeit) in `%LOCALAPPDATA%\ClipPipeline\uebertragen.tsv` und lässt Dateien älter als `MaxAlterTage`

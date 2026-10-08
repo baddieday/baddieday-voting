@@ -79,8 +79,10 @@ UPLOAD_FORMATE = ("short", "zusammenschnitt")
 LINK_NUMMER = re.compile(r"[eE]?([0-9]+)")
 LINK_AUFRUF = "Aufruf: /link 41 https://www.tiktok.com/@…/video/… (41 = Nummer des Entwurfs, auch e41)"
 FEHLER_MAX = 300   # so viel Fehlertext geht an dich – genug für den Grund; ffmpeg-Ausgaben wären sonst seitenlang
-# Stufe 3 (08.10.): statt der Checkliste im einfachen Modus – nur, wenn der Post schon angelegt ist (posts_anlegen)
-ZAHLEN_SELBST = "Lad es hoch – die Zahlen hole ich mir danach selbst."
+# Stufe 3 (08.10.): statt der Checkliste im einfachen Modus – nur, wenn der Post schon angelegt ist (posts_anlegen).
+# N45: Der Abruf erkennt das Video an der ersten Zeile des Textes – das musst du wissen, sonst kommen nie Zahlen.
+ZAHLEN_SELBST = ("Lad es hoch und füg den Text oben unverändert ein (Eigenes gern dahinter) – dann finde ich dein "
+                 "Video und hole mir die Zahlen selbst.")
 
 Knoepfe = list[list[tuple[str, str]]]
 
@@ -174,11 +176,14 @@ def volle_qualitaet(h: sqlite3.Row) -> str:
 
 
 def haken_setzen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, plattform: str,
-                 zeit: datetime | None = None) -> tuple[str, int | None]:
+                 zeit: datetime | None = None, caption_zeile: str | None = None) -> tuple[str, int | None]:
     """Häkchen: legt den Post an (ohne Link), in einer Transaktion (db.transaktion). Rückgabe (Antworttext,
     post_id oder None), z. B. („TikTok ✅ – Post #17. Link später mit /link 41 …“, 17). Doppelklick → derselbe
     Post, Text „schon erledigt (Post #17)“. paket_erlaubt verneint → (Grund, None). Plattform außerhalb
     [publikum].plattformen → Hinweis, kein Post.
+
+    caption_zeile (N44): erste Zeile der verschickten Caption – steht dann in posts.merkmale, und der tägliche Abruf
+    vergleicht mit genau ihr (publikum_adapter._caption_zeile), statt sie später nachzurechnen.
 
     zeit (Standard: jetzt) wird gepostet_utc – aber nur beim ersten Häkchen. Liest die Schnittliste des Entwurfs
     (publikum.entwurf_post_daten, auf dem Mini): fehlt sie, fliegt FileNotFoundError, ist sie kaputt ValueError
@@ -189,6 +194,8 @@ def haken_setzen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, platt
     if grund := paket_erlaubt(con, entwurf_id):
         return grund, None
     daten = publikum.entwurf_post_daten(con, konfig, entwurf_id)
+    if caption_zeile:
+        daten["merkmale"]["caption_zeile"] = caption_zeile
     with db.transaktion(con):
         post_id, neu = publikum.post_anlegen(con, art="entwurf", ziel_id=entwurf_id, plattform=plattform, daten=daten,
                                              zeit=zeit or jetzt())
@@ -197,22 +204,24 @@ def haken_setzen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, platt
     return f"{_name(plattform)} ✅ – Post #{post_id}. Link später mit /link {entwurf_id} …", post_id
 
 
-def posts_anlegen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> bool:
+def posts_anlegen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, caption_text: str = "") -> bool:
     """Stufe 3 (08.10.): Im einfachen Modus hakst du nach dem Hochladen nichts mehr ab – sende_paket legt den Post
     selbst an, sobald das Paket bei dir ist. Nicht schon beim ✅: Scheitert das Paket, gibt es nichts hochzuladen; den
     Post legt dann der nächste Versuch der Merkliste an. Je Plattform aus [publikum].plattformen haken_setzen –
     idempotent, ein zweites ✅ bleibt derselbe Post mit dem ersten Zeitpunkt. Ohne Link und Video-Nummer: Welches Video
     es ist, findet der tägliche Abruf (publikum_adapter). Nur Shorts – Querformat geht auf YouTube, das noch nicht
     gemessen wird. Ein Fehler kostet nie das schon gesendete Paket (sonst schickte der nächste Versuch es doppelt),
-    er steht nur im Log. Rückgabe: True, wenn es jetzt zu jeder dieser Plattformen einen Post gibt."""
+    er steht nur im Log. caption_text: die verschickte Caption – ihre erste Zeile kommt an den Post (N44).
+    Rückgabe: True, wenn es jetzt zu jeder dieser Plattformen einen Post gibt."""
     zeile = con.execute("SELECT format FROM entwuerfe WHERE id = ?", (entwurf_id,)).fetchone()
+    erste = next((z.strip() for z in caption_text.splitlines() if z.strip()), None)
     if zeile is None or zeile["format"] != "short":
         return False
     plattformen = publikum.post_plattformen(konfig)
     fehlt = []
     for plattform in plattformen:
         try:
-            if haken_setzen(con, konfig, entwurf_id, plattform)[1] is None:
+            if haken_setzen(con, konfig, entwurf_id, plattform, caption_zeile=erste)[1] is None:
                 fehlt.append(plattform)
         except Exception as fehler:  # noqa: BLE001 – Schnittliste weg, Datenbank belegt …: das Paket ist schon da
             log.warning("Video #%s: kein %s-Post angelegt (%s: %s)", entwurf_id, plattform, type(fehler).__name__,
@@ -259,10 +268,10 @@ def link_speichern(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, url
     return f"🔗 Post #{post_id} ({_name(plattform)}) {was} – für Screenshots: Bildunterschrift #{post_id}", post_id
 
 
-def baue_paket(konfig: Konfig, entwurf_id: int) -> dict:
+def baue_paket(konfig: Konfig, entwurf_id: int, song_in_zeile: bool = False) -> dict:
     """Läuft im Thread: eigene DB-Verbindung (db.verbinde), Sperre holen, Upload-Fassung rendern
     (entwurf.upload_fassung, idempotent; das 2-Wochen-Video aus seiner fertigen Datei, highlight.upload_fassung) und
-    Caption bauen (caption.entwurf_caption(con, liste, konfig)).
+    Caption bauen (caption.entwurf_caption(con, liste, konfig); song_in_zeile: Songtitel ans Ende der ersten Zeile, N44).
     Rückgabe {"datei": Pfad, "caption": Text, "dateiname": "clip-battle_e41.mp4"}.
     MedienFehler/KonfigFehler/sperre.Gesperrt gehen an den Aufrufer (sende_paket sagt es dir im Bot). Weckt nie.
 
@@ -274,7 +283,7 @@ def baue_paket(konfig: Konfig, entwurf_id: int) -> dict:
         if zeile is None:
             raise MedienFehler(f"Entwurf {entwurf_id} unbekannt")
         liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
-        text = caption.entwurf_caption(con, liste, konfig)
+        text = caption.entwurf_caption(con, liste, konfig, song_in_zeile=song_in_zeile)
         # Rendern ist ein rechenintensiver Schritt: dieselbe Sperre wie Pipeline und Entwürfe (nur einer gleichzeitig)
         with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))):
             # 2-Wochen-Video (08.10.): aus der fertigen Datei – seine ältesten Szenen gibt der Puffer schon frei
@@ -298,7 +307,7 @@ def dauerhaft(fehler: BaseException) -> bool:
 async def sende_paket(app, entwurf_id: int, auftrag: dict | None = None) -> str:
     """Paket bauen (Thread) und schicken: Datei per send_document, Caption als <pre> (zum Kopieren), Checkliste
     mit Knöpfen – die nur unter /experte; im einfachen Modus legt der Bot danach den Post selbst an (posts_anlegen,
-    Stufe 3) und schreibt „Lad es hoch – die Zahlen hole ich mir danach selbst.“. Fehler: dir kurz den Grund
+    Stufe 3) und schreibt ZAHLEN_SELBST („Lad es hoch und füg den Text oben unverändert ein …“). Fehler: dir kurz den Grund
     („⚠️ Upload-Paket: Moment-Datei fehlt …“, ohne Pfade mit Token o. ä.), Details ins Log.
     bot_data["paket_arbeitet"] wird immer zurückgesetzt.
 
@@ -326,7 +335,8 @@ async def sende_paket(app, entwurf_id: int, auftrag: dict | None = None) -> str:
                                        f"📦 Baue das Upload-Paket für Entwurf #{entwurf_id} (1080×1920) … "
                                        "Rendert gerade ein Entwurf, warte ich auf ihn.")
         try:
-            paket = await asyncio.to_thread(baue_paket, konfig, entwurf_id)
+            # N44: im einfachen Modus der Songtitel in der ersten Zeile – so findet der Abruf das Video eindeutig
+            paket = await asyncio.to_thread(baue_paket, konfig, entwurf_id, einfach and zwei_wochen is None)
         except Gesperrt:
             log.warning("Upload-Paket Entwurf #%s: Pipeline-Sperre belegt", entwurf_id)
             if auftrag is None:
@@ -354,8 +364,8 @@ async def sende_paket(app, entwurf_id: int, auftrag: dict | None = None) -> str:
             await app.bot.send_message(chat, volle_qualitaet(zwei_wochen))
             return "gesendet"
         if einfach:   # Stufe 3 (08.10.): keine Checkliste mehr – den Post legt der Bot jetzt, mit dem Paket, selbst an
-            await app.bot.send_message(chat, ZAHLEN_SELBST if posts_anlegen(con, konfig, entwurf_id) else
-                                       "Lad es hoch.")
+            await app.bot.send_message(chat, ZAHLEN_SELBST if posts_anlegen(con, konfig, entwurf_id, paket["caption"])
+                                       else "Lad es hoch.")
             return "gesendet"
         stand = checkliste_stand(con, konfig, entwurf_id)
         knoepfe = knoepfe_checkliste(entwurf_id, stand)

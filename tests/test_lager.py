@@ -479,8 +479,12 @@ class Freigabe(MitAbgleich):
         self.assertEqual((e["freigabe"]["probe"], e["freigabe"]["dateien"]), (True, 2))
         self.assertTrue(alt_a.exists() and alt_b.exists())
         text = self.meldungen()[-1]["text"]
-        self.assertIn("🧹 Puffer – Probe: 2 alte Rohvideos (0,0 GB) könnte ich freigeben", text)
-        self.assertIn("Gelöscht habe ich noch nichts", text)
+        self.assertIn("🧹 Puffer – Probe: 2 alte Rohvideos (0,0 GB) könnte ich vom Mini löschen", text)
+        self.assertIn("Gelöscht habe ich noch nichts – ab dem nächsten Abgleich lösche ich sie.", text)
+        # abgebrochene Probe: Sie zählt beim nächsten Abgleich neu – kein Versprechen, nur die ⚠️-Zeile
+        self.assertEqual(lager._freigabe_zeilen({"probe": True, "dateien": 2, "gb": 1.0, "abbruch": "ESTALE"}),
+                         ["⚠️ Puffer: Nicht alles ließ sich vom Mini löschen – es bleibt liegen, beim nächsten "
+                          "Abgleich versuche ich es wieder."])
         self.assertIsNone(self.routine()[-1])         # die Probe kommt auch bei stillem Clip-Bot (N11)
 
         e = self.abgleich("eingang/nvidia/neu2.mp4")  # ab dem nächsten Lauf wird freigegeben
@@ -492,7 +496,7 @@ class Freigabe(MitAbgleich):
         self.assertEqual((self.lager / "eingang/steelseries/b.mp4").read_bytes(), b"b" * 3000)
         arten = [z[0] for z in self.con.execute("SELECT art FROM ereignisse WHERE art LIKE 'puffer%' ORDER BY id")]
         self.assertEqual(arten, [lager.FREI_PROBE, lager.FREI_ART, lager.FREI_ART])
-        self.assertIn("🧹 Puffer: 2 alte Rohvideos freigegeben (0,0 GB), Kopien liegen im Lager.",
+        self.assertIn("🧹 Puffer: 2 alte Rohvideos vom Mini gelöscht (0,0 GB), die Kopien liegen sicher im Lager.",
                       self.meldungen()[-1]["text"])
         self.assertEqual(self.routine()[-1], 1)       # glatte Freigabe: steht im Protokoll, keine Nachricht nötig
 
@@ -517,9 +521,20 @@ class Freigabe(MitAbgleich):
         self.assertEqual(self.geloescht(), 0)
         text = self.meldungen()[-1]["text"]
         self.assertTrue(text.startswith("✅"), text)  # der Abgleich selbst war in Ordnung
-        self.assertIn("⚠️ Puffer: 3 alte Rohvideos bleiben liegen – die Kopie im Lager fehlt oder ist nicht mehr gleich",
-                      text)
+        self.assertIn("⚠️ Puffer: 3 alte Rohvideos bleiben auf dem Mini – die Kopie im Lager fehlt oder ist nicht "
+                      "mehr gleich", text)
+        self.assertIn("beim nächsten Abgleich neu ins Lager", text)
         self.assertIsNone(self.routine()[-1])         # kommt auch bei stillem Clip-Bot
+        # N40: Bestätigung zurückgenommen – der nächste Abgleich legt sie neu ins Lager, im Lager wird nichts
+        # überschrieben (anders/kurz kommen als name~<Zeit> daneben), im Puffer bleibt alles bis 14 Tage danach
+        e = self.abgleich("eingang/steelseries/neu2.mp4")
+        self.assertEqual((e["versioniert"], e["freigabe"]["dateien"], e["freigabe"]["bleibt"]), (2, 0, 0))
+        self.assertTrue(all(p.exists() for p in dateien))
+        self.assertEqual((self.lager / "eingang/nvidia/fehlt.mp4").read_bytes(), b"fehlt" * 500)
+        self.assertEqual((self.lager / "eingang/nvidia/kurz.mp4").read_bytes(), b"kurz" * 400)
+        self.assertEqual((self.lager / "eingang/nvidia/anders.mp4").read_bytes(), b"ANDERS" * 500)
+        self.assertEqual(len(list((self.lager / "eingang/nvidia").glob("anders~*.mp4"))), 1)
+        self.assertNotIn("bleiben auf dem Mini", self.meldungen()[-1]["text"])
 
     def test_nicht_nach_einem_lauf_mit_fehlern_und_nie_durch_einen_link(self):
         alt = self.datei(self.puffer, "eingang/nvidia/a.mp4", b"a" * 2000, alter_s=20 * TAG)
@@ -532,6 +547,8 @@ class Freigabe(MitAbgleich):
         self.assertEqual(code, 1, e)
         self.assertNotIn("freigabe", e)
         self.assertTrue(alt.exists())
+        self.assertIn("Alte Rohvideos lösche ich erst wieder vom Mini, wenn alles im Lager ist.",
+                      self.meldungen()[-1]["text"])
         # eingang/nvidia ist jetzt ein Link nach außerhalb des Puffers: nie verfolgt, dort wird nichts gelöscht
         woanders = self.tmp / "woanders"
         (self.puffer / "eingang/nvidia").rename(woanders)
@@ -540,6 +557,35 @@ class Freigabe(MitAbgleich):
         self.assertEqual((e["freigabe"]["dateien"], e["freigabe"]["bleibt"]), (0, 0))
         self.assertTrue((woanders / "a.mp4").exists())
         self.assertEqual(self.geloescht(), 0)
+
+    def test_puffer_voll_sicherung_scheitert_abgleich_gibt_trotzdem_frei(self):
+        # N38: Im vollen Puffer scheitert die DB-Sicherung – vorher brach daran jeder Abgleich ab (nichts kopiert,
+        # nichts freigegeben, der Puffer blieb voll). Jetzt läuft er ohne Sicherung weiter und sagt es.
+        alt = self.datei(self.puffer, "eingang/nvidia/a.mp4", b"a" * 2000, alter_s=20 * TAG)
+        self.gesichert_vor(15)
+        db.protokoll(self.con, lager.FREI_PROBE, "Probe schon gelaufen")
+        self.datei(self.puffer, "eingang/steelseries/neu.mp4", b"neu")
+        with mock.patch.object(lager, "sichere_datenbank",
+                               side_effect=sqlite3.OperationalError("database or disk is full")):
+            code, e = self.lauf("lager", "abgleich")
+        self.assertEqual((code, e["kopiert"], e["freigabe"]["dateien"]), (0, 1, 1), e)
+        self.assertFalse(alt.exists())
+        self.assertIn("database or disk is full", e["sicherung_fehler"])
+        self.assertIn("Die tägliche Sicherung der Datenbank ging heute nicht", self.meldungen()[-1]["text"])
+        self.assertIsNone(self.routine()[-1])  # kommt auch bei stillem Clip-Bot
+
+    def test_uhr_des_mini_springt_vor_junge_aufnahmen_bleiben(self):
+        # N39: Alt ist nur, was auch 14 Tage vor der jüngsten Aufnahme liegt (Dateizeit vom PC) – springt die Uhr
+        # des Mini 30 Tage vor, bleibt die Aufnahme von vorgestern im Puffer
+        alt = self.datei(self.puffer, "eingang/nvidia/a.mp4", b"a" * 2000, alter_s=20 * TAG)
+        jung = self.datei(self.puffer, "eingang/nvidia/j.mp4", b"j" * 2000, alter_s=2 * TAG)
+        self.gesichert_vor(15)
+        db.protokoll(self.con, lager.FREI_PROBE, "Probe schon gelaufen")
+        with mock.patch.object(lager, "jetzt", return_value=jetzt() + timedelta(days=30)):
+            e = self.abgleich("eingang/steelseries/neu.mp4")
+        self.assertEqual(e["freigabe"]["dateien"], 1)
+        self.assertFalse(alt.exists())
+        self.assertTrue(jung.exists())
 
 
 class Verwechslung(MitAbgleich):

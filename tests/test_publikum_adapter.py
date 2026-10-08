@@ -94,6 +94,35 @@ class PublikumAdapter(unittest.TestCase):
         self.assertEqual((erst["gespeichert"], dann["gespeichert"], dann["unveraendert"]), (1, 0, 1))
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM publikum_messungen").fetchone()[0], 1)
 
+    def test_junge_posts_zuerst_wenn_der_abruf_voll_ist(self):
+        """N43: Ab [publikum].api_max_posts Posts im Fenster nahmen bewertete Posts mit festen Zahlen (speichern nie neu)
+        und nie hochgeladene (nie gemessen) den jungen die Plätze – die bekamen keine Messung bis Tag 7 und keinen
+        Score. Jetzt kommen Posts ohne Score zuerst, die jüngsten vorn."""
+        self.konfig.daten["publikum"]["api_max_posts"] = 2
+        alt, _ = publikum.post_anlegen(self.con, art="entwurf", ziel_id=8, plattform="tiktok",
+                                       daten={"dauer_s": 45, "format": "short", "rezept": {}, "merkmale": {}},
+                                       zeit=self.zeit - timedelta(days=40))
+        publikum.link_nachtragen(self.con, alt, "https://www.tiktok.com/@test/video/111")
+        messung = "INSERT INTO publikum_messungen (post_id, gemessen_utc, quelle, views, erstellt) VALUES (?, ?, 'api', 5, ?)"
+        self.con.execute(messung, (alt, iso(self.zeit - timedelta(days=30)), iso(self.zeit - timedelta(days=30))))
+        self.con.execute("UPDATE posts SET score = 0.1, bewertet_utc = ? WHERE id = ?",
+                         (iso(self.zeit - timedelta(days=33)), alt))
+        publikum.post_anlegen(self.con, art="entwurf", ziel_id=9, plattform="tiktok", zeit=self.zeit - timedelta(days=20),
+                              daten={"dauer_s": 45, "format": "short", "rezept": {}, "merkmale": {}})  # nie hochgeladen
+        gestern = iso(self.zeit - timedelta(days=1))
+        self.con.execute(messung, (self.pid, gestern, gestern))                                 # der junge, gestern gemessen
+
+        def api(url, token, daten=None, **kw):
+            if "/video/list/" in url:
+                return {"data": {"videos": [], "has_more": False}, "error": {"code": "ok"}}
+            return {"data": {"videos": [{"id": daten["filters"]["video_ids"][0], "view_count": 9, "like_count": 1,
+                                         "comment_count": 0, "share_count": 0}]}, "error": {"code": "ok"}}
+
+        with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=api):
+            result = adapter.abrufen(self.con, self.konfig, self.zeit)
+        self.assertEqual((result["gespeichert"], result["ohne_id"]), (1, 1))
+        self.assertEqual(publikum.letzte_messung(self.con, self.pid)["gemessen_utc"], iso(self.zeit))
+
     def test_ohne_link_ordnet_selbst_zu(self):
         # 30.09.: Kurzlink (vm.tiktok.com) oder gar kein Link → Zuordnung über die eigene Videoliste (Zeit + Länge).
         # 08.10.: Ohne passende erste Zeile (hier: Video ohne Beschreibung) erst, wenn das 72-h-Fenster zu ist – bis
@@ -131,17 +160,22 @@ class PublikumAdapter(unittest.TestCase):
             result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=8))
         self.assertEqual(result["ohne_id"], 1)                                  # Liste gesperrt: kein Absturz
 
-    def entwurf_post(self, nr: int, momente: int, zeit: datetime) -> tuple[int, str]:
+    def entwurf_post(self, nr: int, momente: int, zeit: datetime, song: str | None = None) -> tuple[int, str]:
         """Echter Short-Entwurf mit `momente` Szenen und sein TikTok-Post, wie ihn das Paket anlegt (ohne Link).
+        Mit song wie im einfachen Modus seit N44: Song in der ersten Zeile, die am Post gespeichert wird; ohne wie
+        ältere Posts (die Zeile wird nachgerechnet).
         Rückgabe (post_id, Beschreibung, wie TikTok sie liefert: die Caption des Pakets, höchstens 150 Zeichen)."""
-        liste = {"dauer_s": 55.4, "musik": None, "segmente": [{"moment": f"datei:{nr}-{i}"} for i in range(momente)]}
+        musik = {"titel": song, "quelle": f"Song: NCS - {song}"} if song else None
+        liste = {"dauer_s": 55.4, "musik": musik, "segmente": [{"moment": f"datei:{nr}-{i}"} for i in range(momente)]}
         pfad = Path(self.tmp.name) / f"e{nr}.json"
         pfad.write_text(json.dumps(liste), encoding="utf-8")
         self.con.execute("INSERT INTO entwuerfe (id, name, format, schnittliste, parameter, erstellt)"
                          " VALUES (?, ?, 'short', ?, '{}', ?)", (nr, f"e{nr}", str(pfad), iso(zeit)))
+        text = caption.entwurf_caption(self.con, liste, self.konfig, song_in_zeile=bool(song))
+        merkmale = {"caption_zeile": text.splitlines()[0]} if song else {}
         pid, _ = publikum.post_anlegen(self.con, art="entwurf", ziel_id=nr, plattform="tiktok", zeit=zeit,
-                                       daten={"dauer_s": 55.4, "format": "short", "rezept": {}, "merkmale": {}})
-        return pid, caption.entwurf_caption(self.con, liste, self.konfig)[:150]
+                                       daten={"dauer_s": 55.4, "format": "short", "rezept": {}, "merkmale": merkmale})
+        return pid, text[:150]
 
     def zuordnen(self, videos: list, zeit: datetime) -> dict:
         liste = {"data": {"videos": videos, "has_more": False}, "error": {"code": "ok"}}
@@ -167,6 +201,21 @@ class PublikumAdapter(unittest.TestCase):
         fremd = {"id": "778", "create_time": int((abend + timedelta(hours=30)).timestamp()), "duration": 55,
                  "video_description": "Mein Setup 2026\n#gaming"}
         self.assertEqual(self.zuordnen([video, fremd], abend + timedelta(days=5)), {})
+
+    def test_zwei_videos_eines_abends_unterscheidet_der_song(self):
+        """N44 (Befund Florian-1): Abend-Video und 🎬-Video desselben Abends – gleiche 6 Szenen, fast gleich lang.
+        Vorher hatten beide dieselbe erste Zeile, und keins bekam je Zahlen, auch wenn nur eins hochgeladen wurde. Jetzt
+        endet sie mit dem Song, und das Paket speichert sie am Post: Ändert ein Update danach die Caption-Rechnung,
+        gilt weiter die verschickte Zeile (Befund Korrekt-3)."""
+        abend = datetime(2026, 9, 25, 20, tzinfo=UTC)
+        a, text_a = self.entwurf_post(41, 6, abend, song="On & On")
+        b, text_b = self.entwurf_post(42, 6, abend + timedelta(minutes=2), song="Blank")
+        self.assertEqual(text_b.splitlines()[0], "Fortnite-Highlights: 6 Momente · 🎵 Blank")
+        upload = abend + timedelta(hours=16)
+        video = {"id": "777", "create_time": int(upload.timestamp()), "duration": 55, "video_description": text_b}
+        with patch.object(caption, "entwurf_caption", return_value="Fortnite-Highlights: neu formuliert"):
+            self.assertEqual(self.zuordnen([video], upload + timedelta(hours=1)), {b: "777"})
+        self.assertIsNone(publikum.post(self.con, a)["video_id"])
 
     def test_gleiche_erste_zeile_bleibt_offen(self):
         """Wichtigster Fehlerfall: zwei gleich lange Posts mit gleicher erster Zeile – ob erst eins der Videos da ist

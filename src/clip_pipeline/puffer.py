@@ -107,8 +107,9 @@ def _platz(konfig: Konfig) -> Befund:
         return stand, None
     if konfig.wert("puffer.freigeben", False) is True:  # Stufe B5: alte Rohvideos gehen nur nach dem Abgleich raus
         weiter = ("Nächster Schritt: pipeline lager status (ist alles im Lager?). Rohvideos über "
-                  f"{konfig.wert('puffer.rohdaten_tage', 14)} Tage gibt der tägliche Abgleich selbst frei, sobald er "
-                  "das Lager erreicht – reicht das nicht, den Puffer vergrößern (docs/PUFFER.md)")
+                  f"{konfig.wert('puffer.rohdaten_tage', 14)} Tage löscht der tägliche Abgleich selbst vom Mini, "
+                  "sobald alles im Lager ist (Kopie geprüft) – reicht das nicht, den Puffer vergrößern "
+                  "(docs/PUFFER.md)")
     else:
         weiter = ("Nächster Schritt: pipeline lager status (ist alles im Lager?), dann Platz schaffen oder den Puffer "
                   "vergrößern (docs/PUFFER.md) – automatisch gelöscht wird nichts ([puffer].freigeben = false)")
