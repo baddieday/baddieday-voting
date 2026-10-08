@@ -3,9 +3,12 @@ Weg über den Server“): Was du öfter umstellst, stellst du im Lern-Bot unter 
 der Tabelle `einstellungen` und gehen vor den Dateien: Bot → config/lokal.toml → config/pipeline.toml. „↩️ Standard“
 löscht die Zeile, dann gilt wieder die Datei. Nur Schlüssel aus KATALOG werden angenommen und angewendet.
 
-Clip-Auswahl (`lernbot.quelle`): alle Clips (Standard) · nur der neueste Spielabend · nur das neueste Match · ein
+Clip-Auswahl (`lernbot.quelle`): alle Clips · nur der neueste Spielabend (Standard) · nur das neueste Match · ein
 bestimmtes Match. Sie wird bei jedem Entwurf neu aufgelöst – „neuester Spielabend“ folgt also von selbst dem nächsten
 Abend. Ein Spielabend endet um [zeit].tageswechsel_stunde (06:00), wie überall in der Pipeline (zeit.spielabend).
+
+Seit 08.10. gibt es das Menü nur im Experten-Modus; im einfachen Modus entscheidet der Bot (EINFACH_FEST) und
+/einstellungen zeigt nur, was gerade gilt.
 
 Warum Telegram und keine eigene Webseite: Der Bot ist schon da, schon auf dich allein beschränkt und erreicht das
 Handy überall – ohne neuen Dienst, ohne offenen Port, ohne Anmeldung (Architekturprinzip 7: Polling, kein Webhook).
@@ -87,8 +90,8 @@ KATALOG: tuple[Einstellung, ...] = (
                 0.0, "Untergrenze fürs Ziel der Shorts: Lernen, KI-Cutter und Publikum dürfen nur darüber gehen."),
     # 06.10. (Florian: „das wird alles zu kompliziert“) – aus: ein Knopf, 👍/👎, vier Einstellungen; an: alles wie bisher
     Einstellung("lernbot.experte", "🔧 Experten-Modus", ((False, "aus"), (True, "an")),
-                False, "An: alle Knöpfe, Befehle, Gründe und Details. Aus: einfache Ansicht mit 🎬 Neues Video, ✅/❌ "
-                "und den wichtigsten Einstellungen."),
+                False, "An: alle Knöpfe, Befehle, Gründe, Details und dieses Menü. Aus: einfache Ansicht mit "
+                "🎬 Neues Video und ✅/❌ – alles andere entscheidet der Bot."),
     # Stufe 1 (07.10., regeln.py): deine Regeln – ⏱️/⏳/😵 unter ❌ stellen sie um, hier siehst und änderst du sie
     Einstellung("regie.short_ziel_s", "⏱️ Short-Länge",
                 ((0.0, "automatisch"), *((float(s), f"{s} s") for s in range(30, 80, 5))),
@@ -103,13 +106,17 @@ KATALOG: tuple[Einstellung, ...] = (
     Einstellung("geschmack.mut", "🧪 Ausprobieren", ((0.15, "vorsichtig"), (0.33, "ausgewogen"), (0.5, "mutig")),
                 0.5, "Wie oft der Bot bei einem Video bewusst etwas Neues ausprobiert (Aufbau, Tempo, Zeitlupe)."),
 )
-# Die Einstellungen im einfachen Menü (07.10.); alle anderen hinter „🔧 Alle Einstellungen“
+# Die Einstellungen im einfachen Menü (07.10.) – seit 08.10. nur noch im Experten-Modus als Menü (lernbot_einstellungen)
 EINFACH = (QUELLE, "regie.short_ziel_s", "regie.szenen", "regie.effekt_stufe", "musik.genres_bevorzugt")
 # Einfacher Modus (07.10.): was ihn ausmacht – ohne Experten-Modus gelten diese Werte, egal was in Datei oder Bot steht.
 # KI-Cutter und Selbst-Aussortieren machten Entwürfe langsam und unvorhersehbar, der Abendstand war eine Nachricht zu
 # viel. Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌; die KI urteilt erst nach dem Senden mit.
+# 08.10. (Florian: „wenn ich alles per Hand einstellen muss … es soll autonom sein“): auch Clip-Auswahl, Stil und
+# Szenen entscheidet der Bot – alte ⚙️-Zeilen vom 29.09.–07.10. (z. B. ein fester Stil, der das Aufbau-Lernen
+# einfror) bleiben in der Tabelle und gelten unter /experte weiter, bremsen den einfachen Modus aber nicht mehr.
 EINFACH_FEST = {"regie.kritik.ki": False, "regie.kritik.schwelle": 0.0, "lernbot.auto_schwelle": 0.0,
-                "lernbot.abendstand": False, "regie.geschmack": True}
+                "lernbot.abendstand": False, "regie.geschmack": True,
+                QUELLE: "abend", "regie.stil": "auto", "regie.szenen": "stark"}
 NACH_SCHLUESSEL = {e.schluessel: e for e in KATALOG}
 
 
@@ -153,6 +160,14 @@ def experte(con: sqlite3.Connection, konfig: Konfig) -> bool:
     except Exception:  # noqa: BLE001 – ohne Tabelle (alte DB, Tests ohne Regie-Schema): Datei bzw. einfach
         werte = {}
     return bool(werte["lernbot.experte"] if "lernbot.experte" in werte else konfig.wert("lernbot.experte", False))
+
+
+def fest(con: sqlite3.Connection, konfig: Konfig, schluessel: str) -> tuple[bool, Any]:
+    """(True, Wert), wenn der einfache Modus diesen Schlüssel festlegt (EINFACH_FEST) – sonst (False, None). Für
+    Leser, die die Tabelle direkt lesen (regeln._gesetzt): sonst gewönne dort eine alte ⚙️-Zeile (08.10.)."""
+    if schluessel in EINFACH_FEST and not experte(con, konfig):
+        return True, EINFACH_FEST[schluessel]
+    return False, None
 
 
 def _setze_pfad(daten: dict, pfad: str, wert: Any) -> None:

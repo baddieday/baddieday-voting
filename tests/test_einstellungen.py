@@ -3,7 +3,7 @@
 import json
 import unittest
 
-from clip_pipeline import einstellungen, lernbot_einstellungen, regie_lernen
+from clip_pipeline import einstellungen, geschmack, lernbot_einstellungen, regie_lernen
 from clip_pipeline.zeit import iso, jetzt
 from tests.regie_hilfen import MitRegieMaterial
 
@@ -24,8 +24,13 @@ class Einstellungen(MitRegieMaterial):
     def auswahl(self):
         return einstellungen.quell_matches(self.con, einstellungen.anwenden(self.con, self.konfig))
 
+    def experte(self):
+        """08.10.: ⚙️ von Hand gibt es nur noch im Experten-Modus – im einfachen entscheidet der Bot."""
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True
+
     def test_clip_auswahl_und_vorrang_vor_der_datei(self):
-        self.assertEqual(self.auswahl(), (None, None))                                  # Standard: alle Clips
+        self.experte()
+        self.assertEqual(self.auswahl(), (None, None))                                  # Datei der Tests: alle Clips
         einstellungen.setze(self.con, "lernbot.quelle", "abend")
         ids, hinweis = self.auswahl()
         self.assertEqual(ids, {"m2", "m3"})                                              # 01:30 gehört zum Vorabend
@@ -35,7 +40,7 @@ class Einstellungen(MitRegieMaterial):
         einstellungen.setze(self.con, "lernbot.quelle", "match:m1")
         self.assertEqual(self.auswahl()[0], {"m1"})
         # Bot-Wert geht vor der Datei, die geladene Konfig bleibt unverändert; ↩️ Standard lässt die Datei gelten
-        self.konfig.daten.setdefault("lernbot", {}).update(auto_schwelle=0.2, experte=True)
+        self.konfig.daten.setdefault("lernbot", {}).update(auto_schwelle=0.2)
         einstellungen.setze(self.con, "lernbot.auto_schwelle", 0.7)
         einstellungen.setze(self.con, "regie.effekte.an", False)
         k = einstellungen.anwenden(self.con, self.konfig)
@@ -50,6 +55,7 @@ class Einstellungen(MitRegieMaterial):
                           k.wert("regie.geschmack")), (0.0, False, False, True))
 
     def test_unsinn_wird_abgelehnt_oder_uebergangen(self):
+        self.experte()
         with self.assertRaises(ValueError):
             einstellungen.setze(self.con, "lernbot.quelle", "quatsch")
         with self.assertRaises(ValueError):
@@ -62,15 +68,15 @@ class Einstellungen(MitRegieMaterial):
         self.assertIn("nicht gefunden – alle Clips", hinweis)
 
     def test_menue_klickweg(self):
+        self.experte()                                                     # das Menü lebt unter /experte (08.10.)
         klick = lambda d: lernbot_einstellungen.verarbeite_klick(self.con, self.konfig, d)  # noqa: E731
-        text, knoepfe, _ = klick("s:a")                                    # Clips steht unter „🔧 Alle Einstellungen“
-        self.assertIn("🎯 Clips: alle Clips", text)
+        text, knoepfe, _ = klick("s:a")
+        self.assertIn("🎯 Clips: alle Clips 🗂", text)
         _, knoepfe, _ = klick("s:o:0")
         self.assertIn("📅 Match wählen", [t for reihe in knoepfe for t, _d in reihe])
         text, _, antwort = klick("s:w:0:1")
         self.assertEqual(antwort, "Gespeichert")
-        self.assertIn("🎯 Clips: neuester Spielabend\n", text)       # einfaches Menü: ohne 📱/🗂 (07.10.)
-        self.assertNotIn("📱", text)
+        self.assertIn("🎯 Clips: neuester Spielabend 📱\n", text)
         self.assertIn("Gerade: 🎯 nur Spielabend 28.09.", text)
         _, knoepfe, _ = klick("s:l")
         self.assertEqual([d for reihe in knoepfe for _t, d in reihe][:3], ["s:x:m3", "s:x:m2", "s:x:m1"])
@@ -84,21 +90,40 @@ class Einstellungen(MitRegieMaterial):
                 klick(falsch)
 
 
-    def test_einfaches_menue_und_alle(self):
-        """06.10.: einfach = vier Einstellungen + „🔧 Alle Einstellungen“; s:a bzw. Experten-Modus zeigt alle."""
-        klick = lambda d: lernbot_einstellungen.verarbeite_klick(self.con, self.konfig, d)  # noqa: E731
-        text, knoepfe, _ = klick("s:m")
-        self.assertEqual(len(knoepfe), len(einstellungen.EINFACH) + 1)
-        self.assertEqual(knoepfe[-1], [("🔧 Alle Einstellungen", "s:a")])
-        self.assertNotIn("Auto-Freigabe", text)
-        text, knoepfe, _ = klick("s:a")
-        self.assertEqual(len(knoepfe), len(einstellungen.KATALOG))
-        self.assertIn("🤖 Auto-Freigabe", text)
-        i = next(n for n, e in enumerate(einstellungen.KATALOG) if e.schluessel == "lernbot.experte")
-        _, _, antwort = klick(f"s:w:{i}:1")                                   # Experten-Modus an
-        self.assertEqual((antwort, einstellungen.experte(self.con, self.konfig)), ("Gespeichert", True))
-        _, knoepfe, _ = klick("s:m")
-        self.assertEqual(len(knoepfe), len(einstellungen.KATALOG))             # jetzt zeigt auch s:m alles
+    def test_einfacher_modus_uebergeht_alte_zeilen(self):
+        """08.10. (Florian: „wenn ich alles per Hand einstellen muss … es soll autonom sein“): alte ⚙️-Zeilen vom
+        29.09.–07.10. bremsen den einfachen Modus nicht mehr – Clips vom Abend, Stil lernt der Bot, nur starke Szenen,
+        alter Schalter „Effekte aus“ = Stufe „aus“. Kein Menü, alte Menü-Knöpfe ändern nichts; nichts wird gelöscht."""
+        from clip_pipeline import regeln
+
+        alt = {"lernbot.quelle": "match:m1", "regie.stil": "klassik", "regie.szenen": "alle", "regie.effekte.an": False}
+        for schluessel, wert in alt.items():
+            einstellungen.setze(self.con, schluessel, wert)
+        k = einstellungen.anwenden(self.con, self.konfig)
+        self.assertEqual((k.wert("lernbot.quelle"), k.wert("regie.stil"), k.wert("regie.szenen")),
+                         ("abend", "auto", "stark"))
+        self.assertEqual(self.auswahl()[0], {"m2", "m3"})                               # der neueste Abend
+        p, _ = regie_lernen.aktuelle(self.con, k, "short")
+        self.assertIn(p["stil"], geschmack.KNOEPFE["aufbau"])                         # lernt (Klassik gehört nicht dazu)
+        self.assertEqual((regeln.nur_starke(self.con, k), regeln.stufe(self.con, k)), (True, 0))
+        self.assertIn("Effekte aus · nur starke Szenen", regeln.regeln_zeile(self.con, k))  # wie im 📋 Stand
+        text = lernbot_einstellungen.menue_text(self.con, self.konfig)
+        self.assertIn("🎯 Clips: dein neuester Spielabend, 28.09. (2 Matches)", text)
+        self.assertIn("/experte", text)
+        self.assertIn("/experte im Lern-Bot", lernbot_einstellungen.menue_text(self.con, self.konfig, clip_bot=True))
+        self.assertEqual(lernbot_einstellungen.menue_knoepfe(self.con, self.konfig), [])  # keine Wert-Knöpfe
+        self.assertEqual(lernbot_einstellungen.verarbeite_klick(self.con, self.konfig, "s:w:0:0")[1:],
+                         ([], "Das entscheide ich jetzt selbst."))                       # alter Knopf: ändert nichts
+        self.assertEqual({z["schluessel"]: json.loads(z["wert"]) for z in self.con.execute(
+            "SELECT schluessel, wert FROM einstellungen")}, alt)                         # Zeilen bleiben stehen
+
+        # /experte: dieselben Zeilen wirken wie bisher, das Menü ist vollständig
+        einstellungen.setze(self.con, "lernbot.experte", True)
+        k = einstellungen.anwenden(self.con, self.konfig)
+        self.assertEqual(self.auswahl()[0], {"m1"})
+        self.assertEqual(regie_lernen.aktuelle(self.con, k, "short")[0]["stil"], "klassik")
+        self.assertFalse(regeln.nur_starke(self.con, k))
+        self.assertEqual(len(lernbot_einstellungen.menue_knoepfe(self.con, self.konfig)), len(einstellungen.KATALOG))
 
     def test_auto_freigabe_im_katalog(self):
         # 30.09.: die vier Werte der Auto-Freigabe – die Datei-Werte (pipeline.toml) passen zum Typ der Optionen,

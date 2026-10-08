@@ -69,6 +69,9 @@ MIGRATIONEN += [("entwuerfe", "variante", "TEXT")]
 # Stufe 1 (07.10.): Telegram-Nachricht je Lern-Meldung – die Statuszeile „🎮 Abend erkannt“ wird später durch das
 # Video ersetzt (gelöscht) bzw. zu „kein Video, weil …“ umgeschrieben, statt eine zweite Nachricht zu schicken
 MIGRATIONEN += [("lern_meldungen", "tg_nachricht_id", "INTEGER")]
+# Merkliste (08.10., Florian tippt nie etwas zweimal): was nach deinem Tipp noch kommt – neue Fassung nach einem Grund,
+# Upload-Paket nach ✅ – als JSON mit Versuchen und Erledigt-Vermerk (lernbot.folge_merken); NULL = nichts
+MIGRATIONEN += [("entwurf_bewertungen", "folge", "TEXT")]
 
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:

@@ -392,6 +392,16 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - **Lernen:** 🥱 zählt nicht mehr gegen die Szenen (Moment-Formel und Moment-Bonus), nur gegen Aufbau/Tempo/Zeitlupe.
     Annahmen Z1–Z9: `docs/ENTSCHEIDUNGEN.md`, „🥱 = Schnitt“.
   - **Texte** (Florian: „fehlerhafte Texte“, vereinfachen): ❌ am Highlight-Video lässt es nur weg (keine Short-Regel,
-    kein Short); baut der Bot gerade, wirkt ein Grund nicht („tipp gleich nochmal“); zu kurze starke Szenen ergeben eine klare
+    kein Short); ~~baut der Bot gerade, wirkt ein Grund nicht („tipp gleich nochmal“)~~ – seit 08.10. Merkliste; zu kurze starke Szenen ergeben eine klare
     „kein Video“-Zeile; „Abend vom“ = Spielabend (06:00); ✅ bleibt stehen; Waffen-Nummern nur ins Log,
     Publikums-Scores nur unter /experte; im einfachen Modus „Video“/„Szenen“ statt „Entwurf“/„Momente“.
+- 2026-10-08 (Florian: „Wenn ich alles per Hand einstellen kann/muss, brauchen wir über das Ziel nicht weiter zu reden –
+  autonom und besser und schneller als mit der Hand zu schneiden“): **Nichts mehr von Hand.** Plan in 5 Stufen und
+  Annahmen N1–N8: `docs/ENTSCHEIDUNGEN.md`, „Nichts mehr von Hand“.
+  - **Stufe 1 (umgesetzt):** einfacher Modus ohne ⚙️ und ohne „stell um“/„tipp nochmal“; fest: neuester Abend, Stil
+    automatisch, nur starke Szenen (`einstellungen.EINFACH_FEST`, `einstellungen.fest`). 🥱 hebt gesenkte Effekte
+    wieder. Merkliste `entwurf_bewertungen.folge`: jeder Tipp wird gespeichert und erledigt, sobald der Bot frei ist.
+    Eine Render-Panne beim Abend-Video holt der Timer einmal auf der CPU nach.
+  - **Florians Antworten:** Der Puffer darf Rohvideos nach 14 Tagen löschen, wenn ihre Kopie im Lager bestätigt ist
+    (ersetzt für den Puffer „Nie löschen“ vom 25.09., Stufe 2). Keine Auto-Updates. Dünne Abende mit nie gesehenen
+    starken Szenen auffüllen (Stufe 4).
