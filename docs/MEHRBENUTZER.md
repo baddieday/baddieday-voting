@@ -1,10 +1,10 @@
 # Mehrbenutzer – eine Instanz je Freund (Entscheidung M1, 08.10.2026)
 
 Ziel Stufe 1: Ein Freund bekommt auf dem Mini seine eigene, vollständig getrennte Pipeline. Zwei Benutzer arbeiten
-unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M54: `docs/ENTSCHEIDUNGEN.md`,
-„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 6 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
-Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox, Speicher für Freunde), der Rest
-(Anlegen, Einladung) ist Plan.
+unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M68: `docs/ENTSCHEIDUNGEN.md`,
+„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 7 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
+Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox, Speicher für Freunde, Freund
+anlegen und prüfen mit einem Befehl), der Einladungslink ist Plan. Seite für Freunde: `docs/FREUNDE.md`.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -19,7 +19,8 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
   - `clip-freund-bot@` – sein Lern-Bot
   - `clip-freund-scan@` + Timer – alle 5 min `scan --verarbeiten --max 1 --versuche 3`
   - `clip-freund-abend@` + Timer – alle 10 min `sitzungen` (Abend-Video; KI nur mit eigenem Claude-Zugang)
-  - `clip-freund-einrichten@`, `clip-freund-pruefen@` – einmalig (kommen mit dem Anlege-Skript)
+  - `clip-freund-einrichten@`, `clip-freund-pruefen@` – einmalig, gestartet von `benutzer-anlegen.sh` und
+    `benutzer-pruefen.sh` (Schritt 7)
 - **Gemeinsam:** nur Florians Sperrdatei `/var/lib/clip-pipeline/pipeline.lock`, dazu Prozessor, Grafikchip und Netz.
 
 ## Ordner (I = `/var/lib/clip-benutzer/<name>`)
@@ -104,7 +105,7 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
   `--konfig`, ein vorangestelltes `CLIP_INSTANZ=`, `scan`, ein Zusatzwort, eine ungültige Session-ID oder ein
   angehängter Shell-Befehl werden mit „Aufruf nicht erlaubt“ (Exit 2) abgewiesen, ohne dass die Pipeline startet.
 - Nicht im Test: Lesen über Benutzergrenzen (alle Läufe als derselbe Benutzer) – das sichern eigene Benutzer und
-  Sandbox (Schritt 5, nachgebaut im Kernel), geprüft vor Ort (PR 7).
+  Sandbox (Schritt 5, nachgebaut im Kernel), geprüft vor Ort mit `benutzer-pruefen.sh` (Schritt 7).
 
 ## Dienste je Freund (umgesetzt, Schritt 5)
 - **Vorlagen** in `deploy/benutzer/`: `clip-freund-bot@` (sein Lern-Bot), `clip-freund-scan@` + Timer (alle 5 min ein
@@ -116,7 +117,7 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
   `/opt/clip-pipeline/config`; eingebunden werden nur I (schreibbar), die Sperrdatei und `pipeline.toml` (nur lesen).
   `/opt/clip-pipeline/.env` und `/opt/clip-regie` sind gesperrt. Halber Vorrang beim Prozessor, höchstens 3 GB.
   Fehlt die Sperrdatei, startet der Dienst gar nicht.
-- **Eingeschaltet** wird nur über `benutzer-anlegen.sh <name>` (nächster Schritt) – nie vom Update, nie von Hand.
+- **Eingeschaltet** wird nur über `benutzer-anlegen.sh <name>` (Schritt 7) – nie vom Update, nie von Hand.
 - **Update** (`alles-aktualisieren.sh`), nur wenn es einen Freund gibt (Ordner mit Marke und Benutzer `clip-<name>`):
   vor dem Umstellen jede Freundes-Datenbank als `clip-<name>` nach `I/db/vor-update-<Zeit>.db` (nie gelöscht, nur echte
   Dateien, kein Link), danach die Vorlagen wie die übrigen Dienste (von Hand geänderte bleiben) und die laufenden
@@ -151,6 +152,54 @@ bash /root/freunde-volume.sh             # fragt vor jeder Änderung (j = ja); a
 - **Größer machen** (nur wachsen, nichts geht verloren): `pct resize 102 mp2 150G` – vorher `lvs pve/data` ansehen.
 - Geprüft (`tests/test_deploy_benutzer.py`, Attrappen wie beim Puffer): Probe ändert nichts, Pool-Grenze mit vollem
   Puffer, zweiter Lauf ohne Änderung, Rückweg hängt nur aus und sperrt bei laufenden Freunden, Wiedereinhängen.
+
+## Neuen Freund anlegen (umgesetzt, Schritt 7)
+Einmal vorher: das Freunde-Volume (oben). Je Freund rund 5 min (die meiste Zeit lädt das Whisper-Modell):
+1. Bei @BotFather mit `/newbot` einen eigenen Bot für ihn anlegen (z. B. „Max Clips“), Token bereithalten.
+2. Er schickt dir seine Epic-Konto-ID (epicgames.com → Konto, 32 Zeichen) und seine Telegram-Zahl (@userinfobot) –
+   die Zahl ersetzt später der Einladungslink.
+3. Im CT als root, erst ansehen, dann echt (fragt einmal „j“, dann die drei Werte unsichtbar):
+   ```bash
+   bash /opt/clip-pipeline/deploy/benutzer/benutzer-anlegen.sh max --probe
+   bash /opt/clip-pipeline/deploy/benutzer/benutzer-anlegen.sh max
+   ```
+4. Am Ende stehen „Alles getrennt“ und der Link zu seinem Bot – schick ihm den Link und `docs/FREUNDE.md`.
+
+Was das Skript tut – passt etwas nicht, bricht es vor der ersten Änderung ab; ein zweiter Lauf überspringt Fertiges:
+- prüft den Namen (keine Namen deiner Dienste), das Freunde-Volume (eigener Speicher, root, 0711) und deine Sperre (=
+  die in den Vorlagen) und baut seine `instanz.toml` aus deiner wirksamen Konfig: nur Sperre, Rechnerwerte, Waffen;
+- fragt Bot-Token, Epic-Konto-ID und Telegram-Zahl verdeckt ab (einen Token, den du oder ein Freund schon nutzt, lehnt
+  es ab) und schreibt sie nur in seine `.env` (root:clip-<name>, 0640) – nie auf den Bildschirm, nie ins Log;
+- legt Benutzer `clip-<name>` ohne Anmeldung an, seine Ordner, macht deine Sperrdatei für alle lesbar (nur
+  `chmod 644`) und legt fehlende Dienst-Vorlagen hin;
+- richtet in seiner Sandbox ein (Datenbank, Whisper-Modell, Musik seiner Genres) und prüft dort die Trennung – erst
+  danach schaltet es seine Dienste ein, nur für ihn (ohne Telegram-Zahl bleibt nur sein Bot aus);
+- prüft zum Schluss alles und bietet an, deine eigenen Rechte zu schärfen (j/N, nur `chmod`: dein Ordner nur noch
+  passierbar; Datenbank, claude, Schlüssel, `.env` und `lokal.toml` nur für dich; Rückweg unter `/root/benutzer-rechte/`).
+  Deine Dienste laufen als pipeline und merken davon nichts.
+
+Danach (alle im CT als root, `…` = `/opt/clip-pipeline/deploy/benutzer`):
+- **Prüfen**, ändert nichts: `bash …/benutzer-pruefen.sh max` – Rechte, dieselbe Sperrdatei (in seiner Sandbox Gerät
+  und Inode wie bei dir), alle Bot-Tokens verschieden (nur als Prüfsumme verglichen), nichts von dir oder den anderen in
+  seiner Sandbox, dazu sein Bot-Link. Exit 1 bei einem Befund.
+- **Ein Match nachholen** (Status `fehler`): `bash …/benutzer-befehl.sh max process <ID>` – ein pipeline-Befehl als er,
+  in derselben Sandbox wie seine Dienste.
+- **Ausschalten**, Daten bleiben: `bash …/benutzer-stilllegen.sh max` – wieder an mit `benutzer-anlegen.sh max`.
+- **KI für ihn** (freiwillig): sein eigenes Claude-Abo – Token aus `claude setup-token` als `CLAUDE_CODE_OAUTH_TOKEN` in
+  seine `.env`, dazu claude global installiert (von dir, z. B. per npm). `benutzer-pruefen.sh` sagt, was fehlt.
+
+**Abnahme Stufe 1 vor Ort:** Test-Freund mit eigenem Test-Bot anlegen und eine Kopie eines deiner Abende *als er* in
+seinen Puffer legen – bei dir wird nichts verschoben oder gelöscht (deine Dateien im Puffer sind für alle lesbar):
+```bash
+runuser -u clip-test -- cp -n --preserve=timestamps /srv/puffer/replays/<Abend>_*.replay /var/lib/clip-benutzer/test/daten/replays/
+runuser -u clip-test -- cp -n --preserve=timestamps <Aufnahmen des Abends> /var/lib/clip-benutzer/test/daten/eingang/
+```
+Erwartet: Sein Abend-Video kommt nur in seinem Bot, `benutzer-pruefen.sh test` ist grün, dein nächster n8n-Lauf und dein
+Abend-Video laufen wie immer. Wartezeiten vorher und nachher: `journalctl -u clip-lernbot | grep "Sperre gewartet"`.
+- Geprüft (`tests/test_benutzer.py`, `tests/test_deploy_benutzer.py`): `benutzer pruefen` im nachgestellten Namensraum
+  (sauber → ok; Florians Puffer, eine beschreibbare `.env` oder ein anderer Freund → Exit 1 mit dem Pfad), `einrichten`
+  lädt beim zweiten Lauf nichts; die Skripte in einer Scheinwurzel: Probe ändert nichts, zweiter Lauf ohne Änderung,
+  derselbe Token in zwei `.env` ist ein Befund, Stilllegen schaltet nur aus, der Einzelbefehl nur mit Sandbox.
 
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |

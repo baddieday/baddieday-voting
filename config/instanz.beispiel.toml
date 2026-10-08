@@ -1,6 +1,6 @@
 # Vorlage: Konfig der Instanz eines Freundes (Mehrbenutzer M1) – liegt als /var/lib/clip-benutzer/<name>/instanz.toml.
 # Gehört root (root:clip-<name>, 0640): Der Freund kann sie lesen, aber nicht ändern.
-# Später schreibt sie benutzer-anlegen.sh.
+# deploy/benutzer/benutzer-anlegen.sh schreibt sie aus Florians wirksamer Konfig (nur Sperre, Rechnerwerte, Waffen).
 #
 # Startwissen ist config/pipeline.toml aus dem Repo (nie Florians lokal.toml). Hier stehen nur Abweichungen, und nur in
 # diesen Abschnitten: [sperre], [schnitt], [zeit], [merkmale.waffen], [instanz]. Alles andere – Pfade, Datenbank, Lager,

@@ -577,3 +577,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     (Standard 100 GB, im CT `/var/lib/clip-benutzer`, nicht auf der CT-Platte, nicht im Puffer) – CT ca. 1 min aus.
     Die Pool-Grenze rechnet deinen Puffer voll mit und nennt sonst die Größe, die passt. Das Rückweg-Skript hängt nur
     aus; ein neuer Lauf hängt dasselbe Volume wieder ein. Samba je Freund entfällt (Briefkasten ab Stufe 2). M50–M54.
+  - Schritt 7 (Freund anlegen): `deploy/benutzer/benutzer-anlegen.sh <name>` (erst `--probe`) – ein Befehl, wiederholbar,
+    löscht nie. Zugänge verdeckt, nur in seiner `.env`; ein Bot-Token, den du schon nutzt, wird abgelehnt. Seine Dienste
+    gehen erst an, wenn die Prüfung in seiner Sandbox grün ist. Danach `benutzer-pruefen.sh` (alles getrennt, Bot-Link),
+    `benutzer-stilllegen.sh` (aus, Daten bleiben), `benutzer-befehl.sh` (ein Befehl in seiner Sandbox). Deine eigenen
+    Rechte schärft es nur auf dein „j“ (nur chmod, Rückweg-Skript). Für Freunde: `docs/FREUNDE.md`. M55–M68.

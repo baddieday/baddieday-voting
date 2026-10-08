@@ -2,7 +2,8 @@
 
   prepare|analyze|decide|render --session ID     highlight --id ID --tage 14
   (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe],
-   fail --session ID | --nachziehen [--tage 14], scan --verarbeiten [--max N] [--versuche N] für Freunde ohne n8n)
+   fail --session ID | --nachziehen [--tage 14], scan --verarbeiten [--max N] [--versuche N] für Freunde ohne n8n,
+   benutzer pruefen|einrichten nur in der Instanz eines Freundes)
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -680,6 +681,29 @@ def _cmd_lernstand(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_benutzer(args, konfig, con) -> int:
+    """Mehrbenutzer (Schritt 7): die Instanz eines Freundes prüfen (nur nachsehen) bzw. einrichten (Datenbank, Whisper,
+    Musik, danach prüfen) – nur mit CLIP_INSTANZ, gestartet von clip-freund-pruefen@/-einrichten@ in seiner Sandbox.
+    JSON: ok, name, befunde ({pfad, grund}), hinweise, sperre ({pfad, dev, ino}), bei einrichten auch eingerichtet.
+    Exit 0 ok · 1 Befund · 2 nicht in einer Instanz. Ohne Datenbank-Verbindung von main (ohne_db): pruefen legt nichts
+    an, einrichten öffnet seine Datenbank selbst."""
+    from . import benutzer
+
+    if konfig.instanz is None:
+        hinweis = ("pipeline benutzer läuft nur in der Instanz eines Freundes (CLIP_INSTANZ) – über "
+                   "deploy/benutzer/benutzer-anlegen.sh bzw. benutzer-pruefen.sh")
+        log.error("%s", hinweis)
+        _json({"fehler": "konfig", "hinweis": hinweis})
+        return 2
+    ergebnis = benutzer.einrichten(konfig) if args.aktion == "einrichten" else benutzer.pruefen(konfig)
+    for b in ergebnis["befunde"]:
+        log.error("Befund: %s – %s", b["pfad"], b["grund"])
+    for hinweis in ergebnis["hinweise"]:
+        log.info("Hinweis: %s", hinweis)
+    _json(ergebnis)
+    return 0 if ergebnis["ok"] else 1
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -980,6 +1004,12 @@ def baue_parser() -> argparse.ArgumentParser:
     s = unter.add_parser("bot", help="Telegram-Bot starten (läuft dauerhaft)")
     s.set_defaults(fn=_cmd_bot, sperren=False)
 
+    # Mehrbenutzer (Schritt 7): nur in der Instanz eines Freundes – die Vorlagen clip-freund-pruefen@/-einrichten@
+    s = unter.add_parser("benutzer", help="Instanz eines Freundes (nur mit CLIP_INSTANZ): pruefen (Trennung, nur "
+                                          "nachsehen) | einrichten (Datenbank, Whisper, Musik, danach pruefen)")
+    s.add_argument("aktion", choices=["pruefen", "einrichten"])
+    s.set_defaults(fn=_cmd_benutzer, sperren=False, ohne_db=True)   # einrichten nimmt die Sperre selbst (nur Musik)
+
     # Lernschleife „Publikum“ (Spec §12). Unterbefehle wie bei `lager`; `holen` (TikTok-API) kommt in Stufe 4.
     s = unter.add_parser("publikum", help="Lernschleife Publikum: bewerten (Scores ab [publikum].alter_tage, "
                                                "Standard 7 – Timer clip-publikum)")
@@ -1030,7 +1060,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if (code := _vorab_ablehnen(args, konfig)) is not None:
         return code
-    con = db.verbinde(konfig.datenbank)
+    # ohne_db (benutzer pruefen/einrichten): keine Verbindung vorab – sonst legte schon das Nachsehen eine Datenbank an
+    con = None if getattr(args, "ohne_db", False) else db.verbinde(konfig.datenbank)
     try:
         if args.sperren:
             warten = float(konfig.wert("sperre.warten_s", 7200))
@@ -1067,6 +1098,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     finally:
         try:
-            con.close()
+            if con is not None:
+                con.close()
         except Exception:
             pass

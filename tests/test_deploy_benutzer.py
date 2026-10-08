@@ -1,6 +1,7 @@
-"""Mehrbenutzer, Stufe 1, Schritt 5 und 6: Dienst-Vorlagen je Freund mit Sandbox, das Update kennt Freunde, Speicher.
+"""Mehrbenutzer, Stufe 1, Schritt 5–7: Dienst-Vorlagen je Freund mit Sandbox, das Update kennt Freunde, Speicher,
+Freund anlegen und prüfen.
 
-Vier Teile:
+Fünf Teile:
 - Vorlagen (deploy/benutzer): derselbe Sandbox-Block in jeder Vorlage, eigener Benutzer, eigener Ordner, Florians
   Bereiche verdeckt, kein Schreibpfad außerhalb des eigenen Ordners; systemd kennt jeden Schlüssel.
 - Kernel-Nachbau (nur als root mit Mount-Namensräumen, sonst übersprungen): die Mounts des Sandbox-Blocks in einem
@@ -10,10 +11,15 @@ Vier Teile:
   vorher gesichert, Vorlagen auf der Platte, nie eingeschaltet, laufende Freundes-Bots neu; ohne Freunde keine Änderung.
 - Freunde-Volume (deploy/pve-mini/freunde-volume.sh, Schritt 6) mit Attrappen wie tests/test_deploy_puffer.py: Probe
   ändert nichts, Pool-Grenze mit vollem Puffer, zweiter Lauf überspringt Fertiges, der Rückweg hängt nur aus.
+- Freund anlegen (deploy/benutzer/benutzer-*.sh, Schritt 7) in einer Scheinwurzel mit Attrappen (useradd, getent, chown,
+  runuser, systemctl, journalctl, stat; Telegram ist ein Server auf 127.0.0.1): Probe legt nichts an und ändert keinen
+  Modus, ein zweiter Lauf überspringt Fertiges, derselbe Bot-Token in zwei .env ist ein Befund, Stilllegen schaltet
+  nur aus, ein Einzelbefehl läuft nur mit der Sandbox der Vorlage. Zugänge erscheinen nie in Ausgabe oder Aufrufen.
 """
 
 from __future__ import annotations
 
+import http.server
 import json
 import os
 import re
@@ -24,6 +30,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import tomllib
 import unittest
 from pathlib import Path
@@ -143,6 +150,17 @@ class Vorlagen(unittest.TestCase):
             self.assertEqual(s["ExecStart"][0], PIPELINE, name)
             befehle[name] = parser.parse_args(s["ExecStart"][1:])   # jeden Schalter gibt es wirklich
         self.assertIs(befehle["clip-freund-bot"].fn, cli._cmd_lernbot)
+        # Schritt 7: einmalig gestartet (systemctl start), nie eingeschaltet, nur in der Instanz (ohne_db: nachsehen
+        # legt nichts an)
+        for name, aktion in (("clip-freund-pruefen", "pruefen"), ("clip-freund-einrichten", "einrichten")):
+            s = lies_unit(DIENSTE[name])
+            with self.subTest(name):
+                self.assertEqual((befehle[name].fn, befehle[name].aktion), (cli._cmd_benutzer, aktion))
+                self.assertFalse(befehle[name].sperren)
+                self.assertTrue(befehle[name].ohne_db)
+                self.assertEqual(s["Type"], ["oneshot"])
+                self.assertNotIn("WantedBy", s)
+                self.assertIn("TimeoutStartSec", s)
         scan = befehle["clip-freund-scan"]
         self.assertEqual((scan.fn, scan.verarbeiten, scan.max, scan.versuche), (cli._cmd_scan, True, 1, 3))
         abend = befehle["clip-freund-abend"]
@@ -796,6 +814,355 @@ class FreundeVolume(MitStubs):
                 r = self.lauf(*argumente, **umgebung)
                 self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
                 self.assertEqual(self.aufrufe(), "")
+
+
+# --- Freund anlegen und prüfen (Schritt 7) ----------------------------------------------------------------------------
+
+ANLEGEN, PRUEFEN, STILLLEGEN, BEFEHL = (BENUTZER / f"benutzer-{n}.sh"
+                                        for n in ("anlegen", "pruefen", "stilllegen", "befehl"))
+# Zugänge in echter Form (Bot-Token 123…:AA…, Epic-Konto-ID 32 Zeichen) – reine Test-Werte
+MAX_TOKEN = "700000001:AAmaxTESTtokenNURfuerTESTSabcdefgh12"
+FLORIAN_LERN = "700000009:AAflorianLERNbotTESTtokenNURtestsXY"
+FLORIAN_CLIP = "700000008:AAflorianCLIPbotTESTtokenNURtestsXY"
+EPIC = "0123456789ABCDEF0123456789abcdef"
+TG_ZAHL = "222333444"
+GEHEIM = (MAX_TOKEN, FLORIAN_LERN, FLORIAN_CLIP, EPIC, EPIC.lower(), TG_ZAHL)
+NIE_LOESCHEN_FREUND = re.compile(r"\b(rm|rmdir|userdel|groupdel|deluser|delgroup|shred|unlink|lvremove|wipefs|mkfs)\b"
+                                 r"|--purge|--delete")
+# Attrappen: jeder Aufruf landet in $STUB/aufrufe. useradd/getent arbeiten auf $STUB/passwd und $STUB/group; chown merkt
+# sich den Besitzer, stat gibt ihn zurück (Rechte echt); %d: das Freunde-Volume ist ein eigener Speicher (DEV_BENUTZER=1:
+# derselbe wie /). systemctl merkt sich Eingeschaltetes, journalctl gibt $STUB/journal aus (Log + JSON aus der Sandbox).
+FREUND_STUBS = {
+    "id": '[ "$1" = -u ] && echo 0',
+    "getent": '[ -f "$STUB/$1" ] || exit 2\ngrep -m1 "^$2:" "$STUB/$1" || exit 2',
+    "useradd": 'name="${*: -1}"; n=$(( 64600 + $(wc -l < "$STUB/passwd") ))\n'
+               'echo "$name:x:$n:$n::/nonexistent:/usr/sbin/nologin" >> "$STUB/passwd"\n'
+               'echo "$name:x:$n:" >> "$STUB/group"',
+    "runuser": 'while [ $# -gt 0 ]; do case "$1" in -u) shift 2;; --) shift; break;; *) break;; esac; done\nexec "$@"',
+    "chown": 'b="$1"; shift\nfor p in "$@"; do case "$p" in "$TESTORDNER"/*) echo "$p $b" >> "$STUB/besitzer" ;;\n'
+             '  *) echo "chown außerhalb der Testordner: $p" >&2; exit 99 ;; esac; done',
+    "chmod": 'case "${*: -1}" in "$TESTORDNER"/*) PATH=/usr/bin:/bin exec chmod "$@" ;; esac\n'
+             'echo "chmod außerhalb der Testordner: $*" >&2; exit 99',
+    "stat": r'''if [ "$1" = -c ]; then case "$2" in
+  %d) if [ "$3" = "$BENUTZER_DIR" ]; then echo "${DEV_BENUTZER:-2}"; else echo 1; fi; exit 0 ;;
+  "%U:%G %a") [ -e "$3" ] || exit 1
+    b="$(awk -v p="$3" '$1 == p {b = $2} END {print b}' "$STUB/besitzer" 2>/dev/null)"
+    echo "${b:-root:root} $(PATH=/usr/bin:/bin stat -c %a "$3")"; exit 0 ;;
+esac; fi
+PATH=/usr/bin:/bin exec stat "$@"''',
+    "systemctl": r'''case "$1" in
+  is-enabled) shift; [ "$1" = -q ] && shift; grep -qx "$1" "$STUB/an" 2>/dev/null ;;
+  is-active) shift; [ "$1" = -q ] && shift; cat "$STUB/an" "$STUB/aktiv" 2>/dev/null | grep -qx "$1" ;;
+  enable) shift; for u in "$@"; do case "$u" in -*) ;; *) echo "$u" >> "$STUB/an" ;; esac; done ;;
+  disable) shift; for u in "$@"; do case "$u" in -*) ;; *) grep -vx "$u" "$STUB/an" > "$STUB/an.neu" || true
+    cat "$STUB/an.neu" > "$STUB/an" ;; esac; done ;;
+  start) case "$2" in clip-freund-einrichten@*) exit "${EINRICHTEN_RC:-0}" ;; clip-freund-pruefen@*) exit "${PRUEFEN_RC:-0}" ;; esac ;;
+  show) echo lauf-1 ;;
+  cat) [ -f "$UNITS/$2" ] ;;
+esac''',
+    "journalctl": '[ "$1" = --sync ] || cat "$STUB/journal" 2>/dev/null\ntrue',
+    "systemd-run": 'printf "%s\\n" "$@" > "$STUB/systemd-run.argumente"\nexit "${RUN_RC:-0}"',
+    # Löschen darf nie vorkommen – auch nicht aus Versehen
+    "rm": "exit 1", "userdel": "exit 1", "groupdel": "exit 1",
+}
+
+
+class _Telegram(http.server.BaseHTTPRequestHandler):
+    """getMe wie bei Telegram – nur für den Bot von max."""
+
+    def do_GET(self):
+        if self.path == f"/bot{MAX_TOKEN}/getMe":
+            code, antwort = 200, {"ok": True, "result": {"username": "max_clips_bot"}}
+        else:
+            code, antwort = 404, {"ok": False}
+        daten = json.dumps(antwort).encode()
+        self.send_response(code)
+        self.send_header("Content-Length", str(len(daten)))
+        self.end_headers()
+        self.wfile.write(daten)
+
+    def log_message(self, *_):
+        pass
+
+
+def pruefe_freund_skript(test: unittest.TestCase, pfad: Path) -> None:
+    text = pfad.read_text(encoding="utf-8")
+    test.assertTrue(text.startswith("#!/usr/bin/env bash\n"), pfad.name)
+    test.assertIn("\nset -euo pipefail\n", text, pfad.name)
+    test.assertTrue(os.access(pfad, os.X_OK), f"{pfad.name} nicht ausführbar")
+    test.assertIsNone(NIE_LOESCHEN_FREUND.search(text), pfad.name)
+    r = subprocess.run(["bash", "-n", str(pfad)], capture_output=True, text=True)
+    test.assertEqual(r.returncode, 0, f"{pfad.name}: {r.stderr}")
+    if shutil.which("shellcheck"):
+        r = subprocess.run(["shellcheck", "-S", "warning", str(pfad)], capture_output=True, text=True,
+                           env={**os.environ, "LC_ALL": "C.UTF-8"})
+        test.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+class FreundAnlegen(unittest.TestCase):
+    """Die vier Skripte in einer Scheinwurzel: Florians Ordner (Sperre 0600, Datenbank 0644, claude), seine Pipeline in
+    /opt (python ist eine Attrappe für seine wirksame Konfig), das Freunde-Volume (root, 0711), leere Unit-Ordner. Die
+    Skripte laufen aus einer Kopie von deploy/benutzer, deren Vorlagen die Sperrdatei der Scheinwurzel einbinden."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.t = t = Path(os.path.realpath(self._tmp.name))
+        self.stub = t / "stub"
+        self.stub.mkdir()
+        stubs = {**FREUND_STUBS, "python3": f'exec {shlex.quote(shutil.which("python3"))} "$@"'}
+        for name, inhalt in stubs.items():
+            datei = self.stub / name
+            datei.write_text(f'#!/bin/bash\necho "{name} $*" >> "$STUB/aufrufe"\n{inhalt}\n', encoding="utf-8")
+            datei.chmod(0o755)
+        (self.stub / "passwd").write_text("pipeline:x:1000:1000::/home/pipeline:/bin/bash\n", encoding="utf-8")
+        (self.stub / "group").write_text("pipeline:x:1000:\nrender:x:104:\n", encoding="utf-8")
+
+        def anlegen(pfad: Path, modus: int, inhalt: str | None = None) -> Path:
+            pfad.parent.mkdir(parents=True, exist_ok=True)
+            if inhalt is None:
+                pfad.mkdir()
+            else:
+                pfad.write_text(inhalt, encoding="utf-8")
+            pfad.chmod(modus)
+            return pfad
+
+        self.florian = anlegen(t / "var/lib/clip-pipeline", 0o755)
+        self.sperre = anlegen(self.florian / "pipeline.lock", 0o600, "")
+        anlegen(self.florian / "pipeline.db", 0o644, "florian")
+        anlegen(self.florian / "claude", 0o755)
+        self.prod = t / "opt/clip-pipeline"
+        anlegen(self.prod / ".venv/bin/pipeline", 0o755, "#!/bin/sh\nexit 0\n")
+        self.toml = f'# Test\n\n[sperre]\ndatei = "{self.sperre}"\nwarten_s = 900\n\n[schnitt]\nencoder = "h264_vaapi"\n'
+        # Florians wirksame Konfig – die Attrappe läuft mit env -i, deshalb ist alles fest eingetragen
+        anlegen(self.prod / ".venv/bin/python", 0o755, f"""#!/bin/bash
+case "$*" in
+  *instanz_toml*) cat <<'TOML'
+{self.toml}TOML
+  ;;
+  *sperre.pfad*) echo {shlex.quote(str(self.sperre))} ;;
+  *) exit 1 ;;
+esac
+""")
+        anlegen(self.prod / ".env", 0o644, f"TELEGRAM_BOT_TOKEN={FLORIAN_CLIP}\nLEARN_BOT_TOKEN={FLORIAN_LERN}\n")
+        anlegen(self.prod / "config/lokal.toml", 0o644, '[speicher]\nhost = "192.0.2.51"\n')
+        shutil.copytree(DEPLOY / "systemd", self.prod / "deploy/systemd")
+        self.units = t / "etc/systemd/system"
+        self.units.mkdir(parents=True)
+        self.benutzer = anlegen(t / "var/lib/clip-benutzer", 0o711)
+        (t / "srv/puffer").mkdir(parents=True)
+        self.hier = t / "deploy/benutzer"
+        shutil.copytree(BENUTZER, self.hier)
+        for vorlage in self.hier.glob("clip-freund-*@.service"):
+            vorlage.write_text(vorlage.read_text(encoding="utf-8").replace("/var/lib/clip-pipeline/pipeline.lock",
+                                                                           str(self.sperre)), encoding="utf-8")
+        self.inst = self.benutzer / "max"
+        st = os.stat(self.sperre)
+        aus_sandbox = {"ok": True, "name": "max", "befunde": [], "hinweise": ["eigener Claude-Zugang: ja"],
+                       "sperre": {"pfad": str(self.sperre), "dev": st.st_dev, "ino": st.st_ino}}
+        (self.stub / "journal").write_text("2026-10-08 20:00:00,000 INFO Einrichten – datenbank: angelegt\n"
+                                           + json.dumps(aus_sandbox) + "\n", encoding="utf-8")
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Telegram)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        ohne_proxy = {k: v for k, v in os.environ.items() if "proxy" not in k.lower()}
+        self.env = {**ohne_proxy, "PATH": f"{self.stub}:{os.environ['PATH']}", "STUB": str(self.stub),
+                    "TESTORDNER": str(t), "BENUTZER_DIR": str(self.benutzer), "PROD": str(self.prod),
+                    "REGIE": str(t / "opt/clip-regie"), "UNITS": str(self.units), "PUFFER": str(t / "srv/puffer"),
+                    "FLORIAN_DIR": str(self.florian), "RECHTE_ABLAGE": str(t / "root/benutzer-rechte"),
+                    "TELEGRAM_API": f"http://127.0.0.1:{server.server_address[1]}"}
+
+    def lauf(self, skript: Path, *argumente: str, eingabe: str = "", **umgebung: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(self.hier / skript.name), *argumente], input=eingabe, capture_output=True,
+                              text=True, env={**self.env, **umgebung}, timeout=120)
+
+    def anlegen_max(self) -> subprocess.CompletedProcess:
+        r = self.lauf(ANLEGEN, "max", eingabe=f"j\n{MAX_TOKEN}\n{EPIC}\n{TG_ZAHL}\nj\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r
+
+    def aufrufe(self) -> str:
+        datei = self.stub / "aufrufe"
+        return datei.read_text(encoding="utf-8") if datei.exists() else ""
+
+    def neu(self) -> None:
+        (self.stub / "aufrufe").unlink(missing_ok=True)
+
+    def aenderungen(self) -> list[str]:
+        """Aufrufe, die etwas ändern (anlegen, Besitzer, Rechte, einschalten, starten, als Freund schreiben)."""
+        return [z for z in self.aufrufe().splitlines()
+                if z.startswith(("useradd", "chown", "chmod", "systemctl enable", "systemctl start", "systemctl disable",
+                                 "systemctl daemon-reload", "systemctl restart", "runuser -u clip-", "rm", "userdel"))
+                and not z.startswith("systemctl start clip-freund-pruefen@")]
+
+    def besitzer(self, pfad: Path) -> str:
+        zeilen = [z.split(" ", 1)[1] for z in (self.stub / "besitzer").read_text(encoding="utf-8").splitlines()
+                  if z.split(" ", 1)[0] == str(pfad)]
+        return zeilen[-1] if zeilen else "root:root"
+
+    def zustand(self) -> dict[str, tuple[int, bytes]]:
+        """Jeder Pfad außer den Attrappen: Rechte und Inhalt."""
+        return {str(p.relative_to(self.t)): (p.lstat().st_mode, p.read_bytes() if p.is_file() else b"")
+                for p in self.t.rglob("*") if not p.is_relative_to(self.stub)}
+
+    def assertNichtsVerraten(self, *texte: str) -> None:
+        for text in texte:
+            for wert in GEHEIM:
+                self.assertNotIn(wert, text)
+
+    def test_skripte(self):
+        for skript in (ANLEGEN, PRUEFEN, STILLLEGEN, BEFEHL):
+            with self.subTest(skript.name):
+                pruefe_freund_skript(self, skript)
+
+    def test_probe_legt_nichts_an_und_aendert_keinen_modus(self):
+        vorher = self.zustand()
+        r = self.lauf(ANLEGEN, "max", "--probe")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.zustand(), vorher)
+        assertReihenfolge(self, r.stdout, [
+            "würde den Bot-Token",
+            "$ useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin clip-max",
+            f"$ mkdir {self.inst}", f"$ chown root:clip-max {self.inst}", f"$ chmod 750 {self.inst}",
+            f"$ chown root:clip-max {self.inst}/.clip-benutzer", f"$ chown clip-max:clip-max {self.inst}/db",
+            f"datei = \"{self.sperre}\"",
+            f"$ chmod 644 {self.sperre}", "$ install -m 644", "$ systemctl daemon-reload",
+            "$ systemctl start clip-freund-einrichten@max.service", "$ systemctl enable --now clip-freund-scan@max.timer",
+            "Probe fertig – nichts verändert"])
+        self.assertEqual(self.aenderungen(), [])
+
+    def test_anlegen_und_zweiter_lauf_ueberspringt_fertiges(self):
+        r = self.anlegen_max()
+        aufrufe = self.aufrufe()
+        self.assertIn("useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "
+                      "clip-max", aufrufe)
+        for pfad, besitzer, modus in ((self.inst, "root:clip-max", 0o750),
+                                      *((self.inst / o, "clip-max:clip-max", 0o700)
+                                        for o in ("db", "daten", "regie", "musik", "material", "sfx", "cache")),
+                                      *((self.inst / d, "root:clip-max", 0o640)
+                                        for d in (".clip-benutzer", ".env", "instanz.toml"))):
+            with self.subTest(pfad.name):
+                self.assertEqual((self.besitzer(pfad), stat.S_IMODE(pfad.stat().st_mode)), (besitzer, modus))
+        zugaenge = dict(z.split("=", 1) for z in (self.inst / ".env").read_text(encoding="utf-8").splitlines()
+                        if "=" in z and not z.startswith("#"))
+        self.assertEqual(zugaenge, {"LEARN_BOT_TOKEN": MAX_TOKEN, "CLIP_EPIC_ID": EPIC.lower(),
+                                    "LEARN_BOT_ALLOWED_USER_ID": TG_ZAHL})
+        self.assertEqual((self.inst / "instanz.toml").read_text(encoding="utf-8"), self.toml)
+        self.assertEqual((self.inst / ".clip-benutzer").read_text(encoding="utf-8"), "max\n")
+        self.assertTrue((self.inst / "daten/.clip-puffer").is_file() and (self.inst / "daten/.clip-speicher").is_file())
+        self.assertTrue((self.inst / "daten/eingang").is_dir() and (self.inst / "daten/replays").is_dir())
+        self.assertIn(f"runuser -u clip-max -- mkdir {self.inst}/daten/eingang", aufrufe)   # als er selbst
+        self.assertFalse(os.path.lexists(self.inst / "kein-lager"))
+        self.assertEqual(sorted(p.name for p in self.units.iterdir()),
+                         sorted(p.name for p in self.hier.glob("clip-freund-*@.*")))
+        # erst in der Sandbox einrichten und prüfen, dann nur seine Dienste einschalten
+        assertReihenfolge(self, aufrufe, ["systemctl daemon-reload", "systemctl start clip-freund-einrichten@max.service",
+                                          "systemctl enable --now clip-freund-scan@max.timer",
+                                          "systemctl enable --now clip-freund-abend@max.timer",
+                                          "systemctl enable --now clip-freund-bot@max.service",
+                                          "systemctl start clip-freund-pruefen@max.service"])
+        self.assertEqual([z for z in aufrufe.splitlines() if "enable" in z and "@max" not in z], [])
+        self.assertIn("Bot von max: https://t.me/max_clips_bot", r.stdout)
+        self.assertIn("Alles getrennt", r.stdout)
+        self.assertNichtsVerraten(r.stdout, r.stderr, aufrufe)
+        # deine Rechte geschärft (j), Sperrdatei für alle lesbar, Rückweg liegt bereit
+        for pfad, modus in ((self.florian, 0o711), (self.florian / "pipeline.db", 0o600),
+                            (self.florian / "claude", 0o700), (self.prod / ".env", 0o600),
+                            (self.prod / "config/lokal.toml", 0o600), (self.sperre, 0o644)):
+            self.assertEqual(stat.S_IMODE(pfad.stat().st_mode), modus, pfad)
+        rueckweg = next((self.t / "root/benutzer-rechte").glob("zurueck-*.sh"))
+
+        # Zweiter Lauf: nichts gefragt außer dem j, keine einzige Änderung
+        self.neu()
+        env_vorher = (self.inst / ".env").read_bytes()
+        r = self.lauf(ANLEGEN, "max", eingabe="j\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("   $ ", r.stdout)
+        for satz in ("Benutzer clip-max: schon da", "Bot-Token: schon da", f"{self.inst}/.env: schon da",
+                     "clip-freund-bot@max.service: schon an", "schon geschärft – nichts zu tun"):
+            self.assertIn(satz, r.stdout)
+        # Einrichten läuft jedes Mal mit – es holt in der Sandbox nur Fehlendes nach (z. B. ein Whisper-Modell, das beim
+        # ersten Mal nicht kam) und prüft dabei die Trennung erneut
+        self.assertEqual(self.aenderungen(), ["systemctl start clip-freund-einrichten@max.service"])
+        self.assertEqual((self.inst / ".env").read_bytes(), env_vorher)
+
+        # Rückweg: deine Rechte wie vorher
+        r = subprocess.run(["bash", str(rueckweg)], capture_output=True, text=True, env=self.env, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for pfad, modus in ((self.florian, 0o755), (self.florian / "pipeline.db", 0o644),
+                            (self.prod / ".env", 0o644), (self.sperre, 0o644)):
+            self.assertEqual(stat.S_IMODE(pfad.stat().st_mode), modus, pfad)
+
+    def test_abbrueche_vor_jeder_aenderung(self):
+        vorher = self.zustand()
+        for name, eingabe, umgebung, code, satz in (
+                ("max", "j\n", {"DEV_BENUTZER": "1"}, 1, "erst das Freunde-Volume: freunde-volume.sh"),
+                ("bot", "j\n", {}, 2, "Den Namen bot nehme ich nicht"),
+                ("max", f"j\n{FLORIAN_LERN}\n", {}, 1, "diesen Bot-Token nutzt schon jemand")):
+            with self.subTest(satz):
+                self.neu()
+                r = self.lauf(ANLEGEN, name, eingabe=eingabe, **umgebung)
+                self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+                self.assertIn(satz, r.stdout)
+                self.assertEqual(self.zustand(), vorher)
+                self.assertNotIn("useradd", self.aufrufe())
+                self.assertNichtsVerraten(r.stdout, r.stderr, self.aufrufe())
+
+    def test_gleicher_token_in_zwei_env_ist_ein_befund(self):
+        self.anlegen_max()
+        eva = self.benutzer / "eva"
+        eva.mkdir()
+        (eva / ".clip-benutzer").write_text("eva\n", encoding="utf-8")
+        (eva / ".env").write_text(f"LEARN_BOT_TOKEN={MAX_TOKEN}\n", encoding="utf-8")   # aus Versehen kopiert
+        r = self.lauf(PRUEFEN, "max", "--vorab")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("der Bot-Token von max ist derselbe wie bei eva", r.stdout)
+        self.assertNichtsVerraten(r.stdout, r.stderr)
+        r = self.lauf(PRUEFEN, "max")   # die volle Prüfung ebenso – auch wenn die Sandbox sauber ist
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("in seiner Sandbox nichts von dir und den anderen Freunden sichtbar", r.stdout)
+
+    def test_stilllegen_schaltet_nur_aus(self):
+        self.anlegen_max()
+        vorher = {k: v for k, v in self.zustand().items() if k.startswith("var/lib/clip-benutzer")}
+        self.neu()
+        r = self.lauf(STILLLEGEN, "max", "--probe")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("systemctl disable", self.aufrufe())
+        r = self.lauf(STILLLEGEN, "max", eingabe="j\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("systemctl disable --now clip-freund-bot@max.service clip-freund-scan@max.timer "
+                      "clip-freund-abend@max.timer", self.aufrufe())
+        self.assertEqual({k: v for k, v in self.zustand().items() if k.startswith("var/lib/clip-benutzer")}, vorher)
+        self.assertIn("clip-max:", (self.stub / "passwd").read_text(encoding="utf-8"))
+        r = self.lauf(STILLLEGEN, "max")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("schon aus", r.stdout)
+
+    def test_befehl_nur_mit_der_sandbox_der_vorlage(self):
+        self.inst.mkdir()
+        (self.inst / ".clip-benutzer").write_text("max\n", encoding="utf-8")
+        with open(self.stub / "passwd", "a", encoding="utf-8") as passwd:
+            passwd.write("clip-max:x:64601:64601::/nonexistent:/usr/sbin/nologin\n")
+        vorlage = self.units / "clip-freund-bot@.service"
+        shutil.copy(BENUTZER / "clip-freund-bot@.service", vorlage)
+        r = self.lauf(BEFEHL, "max", "process", "2026-10-08_20-15-33", RUN_RC="3")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)   # Exit-Code wie bei pipeline selbst
+        argumente = (self.stub / "systemd-run.argumente").read_text(encoding="utf-8").splitlines()
+        trenner = argumente.index("--")
+        self.assertLessEqual({"--wait", "--pipe", "--collect"}, set(argumente[:trenner]))
+        self.assertEqual(argumente[trenner + 1:], [f"{self.prod}/.venv/bin/pipeline", "process", "2026-10-08_20-15-33"])
+        sandbox_zeilen = [z.replace("%i", "max") for z in sandbox(BENUTZER / "clip-freund-bot@.service").splitlines()
+                          if z and not z.startswith("#")]
+        self.assertEqual([argumente[i + 1] for i, a in enumerate(argumente[:trenner]) if a == "-p"], sandbox_zeilen)
+        # Ohne Sandbox-Block startet nichts
+        (self.stub / "systemd-run.argumente").unlink()
+        vorlage.write_text(BLOCK.sub("", vorlage.read_text(encoding="utf-8")), encoding="utf-8")
+        r = self.lauf(BEFEHL, "max", "status")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("ich starte nichts", r.stdout)
+        self.assertFalse((self.stub / "systemd-run.argumente").exists())
 
 
 if __name__ == "__main__":
