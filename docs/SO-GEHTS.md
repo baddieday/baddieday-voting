@@ -6,13 +6,14 @@
 2. Etwas später kommt das Video. Es besteht nur aus **starken Szenen** dieses Abends (reicht er nicht: Punkt 3):
    Multikills, Clutches, Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann. Scheitert das
    Fertigmachen des Videos, versucht er es 10 Minuten später selbst noch einmal (etwas langsamer, dafür sicherer);
-   klappt auch das nicht, sagt es dir die Statuszeile. **Jede Szene kommt nur in einem Video:** Was du einmal gesehen
-   hast, kommt in kein neues Video mehr – auch nicht die besten Szenen (nur das 2-Wochen-Video blickt zurück).
+   klappt auch das nicht, sagt es dir die Statuszeile. **Neue Szenen gehen immer vor.** Bekannte kommen nur ab und zu
+   wieder – die besseren öfter, aber nie eine aus deinen letzten 3 Videos und nie dieselbe Zusammenstellung. Unter dem
+   Video steht dann „♻️ 2 Szenen kennst du schon“.
 3. Sind die starken Szenen zusammen zu kurz, zeigt der Bot von jeder etwas mehr – ein paar Sekunden mehr davor und
    danach. Hat der Abend zu wenige (ein Video braucht 4 und mindestens 30 Sekunden), nimmt er starke Szenen der
-   letzten Tage dazu, die du noch nie gesehen hast – höchstens die Hälfte, der Anfang ist immer vom Abend. Im Video
-   steht dann „+2 Szenen von früheren Abenden“. Reicht auch das nicht, kommt **kein Video**, und die Statuszeile sagt,
-   warum.
+   letzten Tage dazu – zuerst welche, die du noch nie gesehen hast –, höchstens die Hälfte, der Anfang ist immer vom
+   Abend. Im Video steht dann „+2 Szenen von früheren Abenden“. Reicht auch das nicht, kommt **kein Video**, und die
+   Statuszeile sagt, warum.
 4. Kommt danach noch etwas von diesem Abend an – etwa weil der PC früh aus war, ein Match länger gebraucht hat oder du
    nach einer Pause weiterspielst –, baut der Bot das Video bis zu 24 Stunden später selbst nach (frühestens 45
    Minuten nach deinem letzten Match). Die Statuszeile wird dann zu „🎮 Nachtrag: Abend vom …“, und das Video kommt
@@ -32,12 +33,13 @@
 |---|---|
 | ⏱️ Zu kurz | Shorts werden ab jetzt rund 10 Sekunden länger als dieses Video (höchstens 75 s) – kürzer werden sie erst wieder mit ⏳. Noch länger nur, wenn es bei den Zuschauern besser ankommt |
 | ⏳ Zu lang | Shorts werden ab jetzt rund 10 Sekunden kürzer als dieses Video (mindestens 30 s) – länger werden sie erst wieder mit ⏱️. Noch kürzer nur, wenn es bei den Zuschauern besser ankommt |
-| 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen Szenen, die du noch nicht gesehen hast – erst vom selben Abend, dann starke von früheren Abenden (höchstens die Hälfte des Videos). Gibt es keine, kommt kein Video. Gesperrt wird nichts. Hast du die Effekte mit 😵 gesenkt, holt 🥱 sie eine Stufe zurück (höchstens bis normal) – das bleibt so. |
+| 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen andere – zuerst gegen Szenen, die du noch nicht gesehen hast (erst vom selben Abend, dann starke von früheren Abenden), sonst gegen starke, die nicht in deinen letzten 3 Videos waren. Nur wenn es gar keine gibt, kommt kein Video. Gesperrt wird nichts. Hast du die Effekte mit 😵 gesenkt, holt 🥱 sie eine Stufe zurück (höchstens bis normal) – das bleibt so. |
 | 🎵 Musik | Dieser Song kommt nie wieder – neue Songs holt der Bot selbst |
 | 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus); zurück geht es mit 🥱 |
 | 🔁 Einfach neu | Andere Fassung, gleiche Regeln |
 
-Die neue Fassung ersetzt das Video: Seine Szenen darf sie wieder nehmen – nach ⏱️ bleiben sie, und neue kommen dazu.
+Die neue Fassung ersetzt das Video: Seine Szenen darf sie wieder nehmen (das zählt nicht als Wiederholung) – nach ⏱️
+bleiben sie, und neue kommen dazu.
 
 Du tippst nie etwas zweimal: Dein ✅ und dein Grund gelten sofort, auch wenn der Bot gerade baut oder packt. Die
 neue Fassung bzw. das Upload-Paket merkt er sich und erledigt es, sobald er frei ist – auch nach einem Update oder
@@ -64,9 +66,10 @@ immer vor.** Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung: was gut ankomm
 Zuschauern ankommt („👀 …“), was er probiert hat.
 
 ## Knöpfe
-- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend, nur mit Szenen, die du noch nicht gesehen
-  hast (bis zur Hälfte auch starke früherer Abende). Kennst du die starken Szenen schon alle, kommt „Kein neues
-  Video“ – sobald du wieder spielst, kommt ein neues. Baut er gerade, kommt das laufende Video
+- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend, zuerst mit Szenen, die du noch nicht
+  kennst. Reicht der Abend nicht, mischt er aus den letzten Tagen: neue zuerst, dazu bekannte, die länger nicht dran
+  waren. „Kein neues Video“ kommt nur, wenn alles andere gerade erst in deinen letzten Videos lief – sobald du wieder
+  spielst, kommt ein neues. Baut er gerade, kommt das laufende Video
   (endet eine neue Fassung ohne Video, baut er danach deins); geht es schief, versucht er es nach 10 Minuten selbst
   noch einmal.
 - **📋 Stand** – deine Regeln, was beim letzten Abend passiert ist und woraus er gerade lernt („🧠 Lernt aus: deinen

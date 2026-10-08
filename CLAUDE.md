@@ -473,14 +473,22 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     zu „🎮 Nachtrag: Abend vom …“ und geht mit dem Video; reicht es wieder nicht, bleibt es still. Nachgestellt
     (Prüfer s5, s5b, PC früh aus): vorher für immer „kein Video“, jetzt je ein Video; nach einer Pause weitergespielt:
     vorher Video mitten im Spielen, jetzt danach. N60–N65.
-  - **Stufe 4: Jede Szene nur in einem Video** (Florian 08.10.: „keiner will die Szene 50 oder 100 mal sehen … auch
-    wenn es gute Bewertungen hat“; `szenen.verbraucht`, `regie.erstelle`): Im einfachen Modus kommt eine Szene, die in
-    einem Video war, das du gesehen hast (oder das gerade zu dir unterwegs ist), in kein neues Video mehr – egal wie gut
-    bewertet. Das ersetzt dort Abzug, Cooldown und Frische-Quote (der Cooldown holte sie zurück, sobald Frisches fehlte).
-    Reicht das Neue nicht: Nachschub und mehr Anlauf, sonst „🎬 Kein neues Video … Sobald du wieder spielst, kommt ein
-    neues.“ Eine neue Fassung nach ❌ ersetzt ihr Video und darf dessen Szenen (und die seiner Vorgänger) wieder nehmen
-    – nach ⏱️ bleiben sie, neue kommen dazu; bei 🥱 bleibt der Ersatz echt neu. 2-Wochen-Video, /experte, 🔥 Viral und
-    Lernen unverändert; gelöscht wird nichts. Ändert N55 (🎬 schnitt den Abend neu) und N58. N66–N70.
+  - **Stufe 4: Abwechslung mit Ermüdung** (Florian 08.10.: „Manche Szenen nerven einfach nur noch … auch wenn es gute
+    Bewertungen hat“, dann als Korrektur zu „jede Szene nur einmal“: „die Momente dürfen ruhig öfter und gemischter
+    genutzt werden aber nur weil ein Clip gut ist muss der nicht immer egal wo verwendet werden … bessere öfters zeigen
+    aber nicht permanent“; `szenen.verlauf`, `regie.erstelle`): Im einfachen Modus gehen neue Szenen immer vor. Eine
+    Szene aus deinen letzten 3 Videos kommt nie ins nächste (Fassungen eines Videos zählen als eines, nie aufgehoben –
+    lieber kürzer, Nachschub, mehr Anlauf oder kein Video). Bekannte starke dürfen wiederkommen, verlieren aber je
+    Einsatz der letzten 30 Tage die Hälfte ihrer Punkte; höchstens die Hälfte eines Videos bekannte (bis 4 Szenen
+    dürfen es mehr sein), ganz ohne Neues auch nur bekannte – nie mehr als 2, die schon zusammen in einem Video waren.
+    Reicht der Abend nicht, mischen 🎬 und neue Fassungen aus den letzten Tagen; das Abend-Video bleibt beim Abend
+    (vorn vom Abend, höchstens die Hälfte von früher – jetzt auch für bekannte). Eine neue Fassung nach ❌ behält die
+    Szenen ihres Videos (keine Wiederholung); 🥱 tauscht gegen neue, sonst gegen bekannte. Unter dem Video „♻️ 2
+    Szenen kennst du schon“. Werte intern in `[regie]` (`ermuedung_tage` …), kein ⚙️. Nachgestellt (4 Abende, dann
+    14× 🎬): die beste Szene in Video 1, 5, 9, 13, 17 (vorher nie wieder), die anderen 3–4-mal, nie zweimal in vier
+    Videos hintereinander; 🎬 nach dem Abend-Video vorher „Kein neues Video“, jetzt ein gemischtes. Ersetzt „Jede Szene
+    nur in einem Video“ (N66–N70); /experte, 2-Wochen-Video, 🔥 Viral und Lernen unverändert, gelöscht wird nichts.
+    N84–N91.
   - **Stufe 4: Musik füllt sich selbst auf** (Florian 07.10.: „Techno/Hardstyle und Phonk“, „viel mehr Musik“;
     `musik.nachschub`, `einstellungen.DEINE_GENRES`): Im einfachen Modus haben nur noch deine Genres Vorrang bei der
     Musikwahl – Techno, Hardstyle, Hardcore, Phonk, Brazilian Phonk (auch im 2-Wochen-Video; Rock nicht mehr, alte Titel

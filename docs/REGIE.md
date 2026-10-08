@@ -148,12 +148,17 @@ Simulation damit: **83 verschiedene** Momente in 20 Shorts statt 18 – und die 
 (je 5× in 20 Shorts). Der Entwurf zeigt die Bilanz („Auswahl aus 120 Momenten · 14 im Cooldown“), `/lernstand`
 die Regeln. Einstellbar in `[regie.vorgaben]`.
 
-**Einfacher Modus seit 08.10.: Jede Szene nur in einem Video** (Florian: „keiner will die Szene 50 oder 100 mal
-sehen … auch wenn es gute Bewertungen hat“). Was in einem Video war, das du gesehen hast oder das gleich zu dir kommt,
-ist kein Kandidat mehr (`szenen.verbraucht`, je Szene) – egal wie viele Punkte es hat. Das ersetzt dort Abzug, Cooldown
-und Frische-Quote: Der Cooldown holte gesehene Szenen sonst zurück, sobald das frische Material nicht reichte. Eine
-neue Fassung nach ❌ ersetzt ihr Video und darf dessen Szenen wieder nehmen (`parameter.ersetzt`). /experte,
-2-Wochen-Video und 🔥 Viral wie oben.
+**Einfacher Modus seit 08.10.: Abwechslung mit Ermüdung** (Florian: „die Momente dürfen ruhig öfter und gemischter
+genutzt werden aber nur weil ein Clip gut ist muss der nicht immer egal wo verwendet werden … bessere öfters zeigen
+aber nicht permanent“; ersetzt „jede Szene nur in einem Video“). Statt Abzug, Cooldown und Frische-Quote
+(`szenen.verlauf`, `parameter.ermuedung`): Neue Szenen gehen vor. Eine Szene aus den letzten 3 Videos (Fassungen eines
+Videos zählen als eines) ist kein Kandidat – nie aufgehoben; der Cooldown holte sie sonst zurück, sobald Frisches
+fehlte. Bekannte starke verlieren je Einsatz der letzten 30 Tage die Hälfte ihrer Punkte (Punkte × 0,5^Einsätze),
+höchstens die Hälfte bekannte (bis 4 Szenen dürfen es mehr sein), nie mehr als 2 Szenen, die schon
+zusammen in einem Video waren. Reicht der Abend nicht, baut 🎬 (und eine neue Fassung) gemischt aus den letzten 12
+Tagen (`parameter.mix`); das Abend-Video bleibt beim Abend. Eine neue Fassung nach ❌ darf die Szenen ihres Videos
+nehmen (`parameter.ersetzt`, keine Wiederholung). Werte intern in `[regie]` (`ermuedung_tage`, `ermuedung_faktor`,
+`sperre_videos`, `wiederholung_anteil`, `gleich_mit_video`). /experte, 2-Wochen-Video und 🔥 Viral wie oben.
 
 Fehlt die Datei eines Moments (z. B. eine gelöschte Kopie), nimmt der Regisseur seit 27.09. den Bot-Clip
 (gleicher Inhalt; nicht nach einem Nachschnitt) statt den Moment still wegzulassen – und zählt, was fehlt

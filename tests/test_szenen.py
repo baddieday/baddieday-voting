@@ -5,6 +5,7 @@ Hälfte und tauscht die schwächere gegen neue Szenen – erst vom Abend, dann s
 import asyncio
 import json
 import unittest
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest import mock
 
@@ -52,16 +53,40 @@ class Szene(MitSpeicher):
         self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx)], ["clip:1", "clip:2", "datei:3"])
         self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx, {"datei:1"})], ["datei:1", "datei:3"])
 
+    def video(self, momente, status="gesendet", *, verworfen=None, parameter="{}", erstellt="x") -> int:
+        """Ein Entwurf mit diesen Momenten (Schnittliste im Testordner)."""
+        pfad = self.tmp / f"v{self.con.execute('SELECT COUNT(*) FROM entwuerfe').fetchone()[0]}.json"
+        pfad.write_text(json.dumps({"segmente": [{"moment": m} for m in momente]}), encoding="utf-8")
+        return self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, erstellt, "
+                                "auto_verworfen) VALUES (?, 'short', ?, ?, ?, ?, ?)",
+                                (pfad.stem, str(pfad), parameter, status, erstellt, verworfen)).lastrowid
+
+    def test_verlauf_je_video(self):
+        """08.10. (Abwechslung mit Ermüdung): Fassungen eines Videos zählen als ein Video; gesperrt sind die Szenen der
+        letzten n Videos, Einsätze zählen nur Videos der letzten Tage, dieselbe Szene unter zwei Schlüsseln ist eine.
+        Für eine neue Fassung zählt das ersetzte Video nirgends – seine Szenen sind frei und keine Wiederholung."""
+        self.moment("clip:1", "2026-10-06T20:00:00Z", match="a1")
+        self.moment("datei:1", "2026-10-06T20:00:16Z")                  # dieselbe Szene wie clip:1
+        alt = self.video(["clip:1", "clip:2"], erstellt=iso(jetzt() - timedelta(days=40)))
+        v1 = self.video(["clip:3", "datei:1"], erstellt=iso(jetzt()))
+        v2 = self.video(["clip:4"])                                       # unlesbare Zeit: zählt als neu
+        f1 = self.video(["clip:3", "clip:5"], parameter=json.dumps({"ersetzt": [v1]}), erstellt=iso(jetzt()))
+        idx = szenen.index(self.con)
+        v = szenen.verlauf(self.con, idx, tage=30, sperre=2)              # v1 + f1 ist ein Video, dann v2
+        self.assertEqual(v.gesperrt, {"clip:1", "datei:1", "clip:3", "clip:4", "clip:5"})
+        self.assertEqual(v.einsaetze, {"clip:1": 1, "datei:1": 1, "clip:3": 1, "clip:4": 1, "clip:5": 1})
+        self.assertEqual(v.videos["clip:1"], {alt, v1})
+        self.assertTrue(v.wiederholung("clip:2") and not v.wiederholung("clip:9"))
+        fassung = szenen.verlauf(self.con, idx, ersetzt=[f1, v1], tage=30, sperre=2)   # neue Fassung von f1
+        self.assertEqual(fassung.gesperrt, {"clip:4", "clip:2"})          # clip:1 ist eigen, obwohl auch im alten
+        self.assertFalse(fassung.wiederholung("clip:1") or fassung.wiederholung("clip:5"))
+        self.assertEqual(fassung.einsaetze, {"clip:4": 1})
+
     def test_verbraucht_und_ersetzt_kette(self):
-        """08.10. (Jede Szene nur in einem Video): verbraucht sind die Szenen aus Videos, die du gesehen hast oder die
-        gleich kommen (fertig gerendert, ein Abend-Video, das der Timer nachrendert) – nicht aus still aussortierten oder
-        gescheiterten. Eine Fassung ersetzt ihr Video samt dessen Vorgängern."""
-        def video(momente, status, *, verworfen=None, parameter="{}"):
-            pfad = self.tmp / f"v{self.con.execute('SELECT COUNT(*) FROM entwuerfe').fetchone()[0]}.json"
-            pfad.write_text(json.dumps({"segmente": [{"moment": m} for m in momente]}), encoding="utf-8")
-            return self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, erstellt, "
-                                    "auto_verworfen) VALUES (?, 'short', ?, ?, ?, 'x', ?)",
-                                    (pfad.stem, str(pfad), parameter, status, verworfen)).lastrowid
+        """08.10.: verbraucht sind die Szenen aus Videos, die du gesehen hast oder die gleich kommen (fertig gerendert,
+        ein Abend-Video, das der Timer nachrendert) – nicht aus still aussortierten oder gescheiterten. Eine Fassung
+        ersetzt ihr Video samt dessen Vorgängern."""
+        video = self.video
 
         video(["clip:1"], "gesendet")
         video(["clip:2"], "gerendert")                          # gleich bei dir
@@ -151,7 +176,7 @@ class Langweilig(MitRegieMaterial):
         self.assertFalse({"datei:2", "datei:5"} <= set(m1))                 # dieselbe Szene nie zweimal
         gut, schwach = regeln.langweilig_teilung(v1)
         satz, eid2 = self.langweilig(eid1)
-        self.assertIn("2 schwächeren tausche ich gegen neue", satz)
+        self.assertIn("2 schwächeren tausche ich gegen andere – zuerst neue", satz)   # 08.10.: auch bekannte
         self.assertNotIn("nie wieder", satz)
         v2 = self.liste(eid2)
         self.assertEqual(v2["parameter"]["ersetzt"], [eid1])               # 08.10.: ersetzt v1, darf seine Szenen

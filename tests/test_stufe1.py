@@ -56,7 +56,8 @@ class Regeln(MitRegieMaterial):
         self.assertIn("mindestens 65 s lang (vorher 55 s)",                                     # wirkt jedes Mal
                       regeln.wende_an(self.con, self.k(), "kurz", self.video(55.0)))
         self.assertIn("höchstens 55 s lang (vorher 65 s)", regeln.wende_an(self.con, self.k(), "lang", self.video(65.0)))
-        self.assertIn("2 schwächeren tausche ich gegen neue", regeln.wende_an(self.con, self.k(), "langweilig", LISTE))
+        self.assertIn("2 schwächeren tausche ich gegen andere – zuerst neue",            # 08.10.: auch bekannte
+                      regeln.wende_an(self.con, self.k(), "langweilig", LISTE))
         self.assertEqual(regeln.gesperrt(self.con, "moment"), set())                  # 🥱 sperrt nichts (07.10.)
         self.assertEqual(regeln.langweilig_teilung(LISTE), (["a", "c"], ["b", "d"]))
         self.assertIn("„Song A“ spiele ich nie wieder", regeln.wende_an(self.con, self.k(), "musik", LISTE))

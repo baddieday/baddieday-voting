@@ -198,7 +198,7 @@ def neue_fassung(liste: dict, entwurf_id: int) -> dict:
     (geschmack.waehle): Reihenfolge, Tempo und Segmentfaktor, wie sie im Video WIRKSAM waren; Song (regie.waehle_musik)."""
     p = liste.get("parameter") or {}
     behalten, ohne = langweilig_teilung(liste)
-    return {"anders_als": entwurf_id, "abend": sorted((p.get("fassung") or {}).get("abend") or matches_aus(liste)),
+    return {"anders_als": entwurf_id, "abend": sorted((p.get("fassung") or {}).get("abend") or abend_aus(liste)),
             "behalten": behalten, "ohne": ohne,
             "reihenfolge": p.get("reihenfolge") or (stile.STILE.get(p.get("stil")) or {}).get("reihenfolge") or "bogen",
             "tempo": (p.get("geschmack") or {}).get("tempo"), "seg_min_faktor": p.get("seg_min_faktor"),
@@ -228,8 +228,10 @@ def mehr_effekte(con: sqlite3.Connection, konfig: Konfig) -> tuple[int, int] | N
 
 def _satz_langweilig(con: sqlite3.Connection, konfig: Konfig, liste: dict, mehr: tuple[int, int] | None = None) -> str:
     """„🥱 Verstanden: Ich schneide es neu – anderer Aufbau, anderes Tempo, anderer Song. Die 2 besten Szenen bleiben,
-    die 2 schwächeren tausche ich gegen neue.“ – nur, was die neue Fassung auch wirklich anders macht. mehr
-    (mehr_effekte): „… anderer Song und wieder etwas mehr Effekte: „ruhig“ statt „aus“.“"""
+    die 2 schwächeren tausche ich gegen andere – zuerst neue.“ – nur, was die neue Fassung auch wirklich anders macht.
+    mehr (mehr_effekte): „… anderer Song und wieder etwas mehr Effekte: „ruhig“ statt „aus“.“ 08.10. (Abwechslung mit
+    Ermüdung): „gegen andere“ statt „gegen neue“ – gibt es keine neuen, kommen bekannte starke, die länger nicht dran
+    waren (regie.fassung_kandidaten)."""
     fest = str(konfig.wert("regie.stil", "auto") or "auto") in stile.STILE
     teile = ["gleicher Aufbau (fest eingestellt), anderes Tempo" if fest else "anderer Aufbau, anderes Tempo"]
     if _songs_frei(con) >= 2:
@@ -241,10 +243,10 @@ def _satz_langweilig(con: sqlite3.Connection, konfig: Konfig, liste: dict, mehr:
     behalten, ohne = langweilig_teilung(liste)
     if ohne and behalten:
         text += (" Die beste Szene bleibt" if len(behalten) == 1 else f" Die {len(behalten)} besten Szenen bleiben")
-        text += (", die schwächere tausche ich gegen eine neue." if len(ohne) == 1
-                 else f", die {len(ohne)} schwächeren tausche ich gegen neue.")
+        text += (", die schwächere tausche ich gegen eine andere – am liebsten eine neue." if len(ohne) == 1
+                 else f", die {len(ohne)} schwächeren tausche ich gegen andere – zuerst neue.")
     elif ohne:
-        text += " Die Szene tausche ich gegen eine neue."
+        text += " Die Szene tausche ich gegen eine andere – am liebsten eine neue."
     return text
 
 
@@ -325,3 +327,11 @@ def matches_aus(liste: dict) -> set[str]:
     frueher = set((liste.get("auswahl") or {}).get("nachschub") or [])
     return {s["match_id"] for s in liste.get("segmente") or []
             if isinstance(s, dict) and s.get("match_id") and s.get("moment") not in frueher}
+
+
+def abend_aus(liste: dict) -> set[str]:
+    """Der Abend für die neue Fassung nach ❌: matches_aus – hat das Video keine Szene vom Abend (🎬 gemischt aus den
+    letzten Tagen, 08.10.), der Abend, aus dem es gebaut wurde (auswahl.abend). Sonst fände die Fassung keine Szenen
+    früherer Abende (die zählen relativ zum Abend). Nicht für sitzung._schon_video: ein gemischtes Video ohne Szene des
+    Abends ist nicht sein Video."""
+    return matches_aus(liste) or {m for m in (liste.get("auswahl") or {}).get("abend") or [] if isinstance(m, str)}

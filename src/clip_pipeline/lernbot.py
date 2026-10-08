@@ -45,8 +45,8 @@ ENTWURF_ZIELE = (*regie.FORMATE, *viral.KNOEPFE)   # was /entwurf und die Knöpf
 # ich alles per Hand einstellen muss …“): ohne ⚙️ – du tippst nur ✅ oder ❌ mit Grund, alles andere entscheidet der Bot.
 HILFE = """<b>So geht's</b>
 🎮 Nach dem Zocken kommt dein Video von selbst – aus den starken Szenen des Abends.
-🆕 Jede Szene kommt nur in einem Video – was du einmal gesehen hast, kommt nicht wieder.
-➕ Reicht ein Abend nicht, nehme ich starke Szenen früherer Abende dazu, die du noch nicht kennst – höchstens die Hälfte.
+➕ Reicht ein Abend nicht, nehme ich starke Szenen früherer Abende dazu – zuerst welche, die du noch nicht kennst.
+♻️ Neue Szenen gehen immer vor. Bekannte kommen nur ab und zu wieder – die besseren öfter, aber nie eine aus deinen letzten 3 Videos.
 ✅ <b>Hochladen</b> – du bekommst Video und Text zum Hochladen.
 ❌ <b>Nicht gut</b> – tipp auf den Grund, ich baue neu. Alles andere entscheide ich selbst.
 🔧 Alles von Hand: /experte"""
@@ -216,9 +216,8 @@ def gelernt_zeile(liste: dict) -> str | None:
 def hinweis_einfach(h: str) -> str | None:
     """Hinweise des Regisseurs ohne Fachbegriffe (einfacher Modus, 06.10.); None = im einfachen Modus weglassen.
     07.10. (Florian: „fehlerhafte Texte“): „mehr als 3 Momente aus einem Match“ und „nur 6 Momente zur Auswahl“ sind
-    bei einem Abend der Normalfall und keine Warnung; Szenen statt Momente. 08.10. („Jede Szene nur in einem Video“):
-    „Cooldown aufgehoben“ fällt weg – vorher hieß es „wenig neues Material – x von y Szenen kennst du schon“; im
-    einfachen Modus kommt keine gesehene Szene mehr in ein neues Video (alte Videos zeigen die Zeile nicht mehr)."""
+    bei einem Abend der Normalfall und keine Warnung; Szenen statt Momente. 08.10.: „Cooldown aufgehoben“ fällt weg –
+    im einfachen Modus wird die Sperre nie aufgehoben, bekannte Szenen zählt die Zeile „♻️ …“ (entwurf_text_einfach)."""
     h = h.removeprefix("⚠️ ")
     if h.startswith(regie.COOLDOWN_AUFGEHOBEN):
         return None
@@ -236,8 +235,11 @@ def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row
     Szenen statt Momente, ✅/❌ wie die Knöpfe – ohne Bogen, Stimmung, BPM und „🧠 Aus #…“ (das sagt der Satz nach
     deinem Grund schon). Deine Clip-Auswahl („🎯 nur Spielabend …“) steht als normale Zeile, nicht als Warnung.
     Hat der Bot mit nie gezeigten starken Szenen früherer Abende aufgefüllt (Stufe 4), sagt es „+2 Szenen von früheren
-    Abenden“. 08.10. („Jede Szene nur in einem Video“): „🆕 n neue Szenen · m schon gezeigt“ nur noch bei einer neuen
-    Fassung nach ❌ – als „m aus dem Video davor“; sonst ist jede Szene neu für dich, die Zeile sagte nichts mehr."""
+    Abenden“. „🆕 n neue Szenen · m aus dem Video davor“ nur bei einer neuen Fassung nach ❌ (dann ohne „+n …“ – das
+    sagte das Video davor schon). Abwechslung mit Ermüdung (08.10., Florian: ehrlich, ohne Fachbegriffe): bekannte
+    Szenen zählt „♻️ 2 Szenen kennst du schon“ (bei einer Fassung „… aus früheren Videos“); kommt keine Szene vom Abend
+    (🎬 gemischt), steht dort „📅 Alle Szenen von früheren Abenden“ statt „+n …“."""
+    momente = {s["moment"] for s in liste["segmente"] if s.get("rolle") != "hook"}
     n = len({s["moment"] for s in liste["segmente"]})
     art = "" if liste["format"] == "short" else f"{FORMAT_NAMEN.get(liste['format'], liste['format'])} · "
     teile = [f"🎬 <b>Video #{zeile['id']}</b> · {art}{liste['dauer_s']:.0f} s · {_szenen_zahl(n)}"]
@@ -245,12 +247,24 @@ def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row
         teile.append(zeile_viral)
     a = liste.get("auswahl")
     if a:
-        if (liste.get("parameter") or {}).get("ersetzt"):   # neue Fassung: welche Szenen du aus dem Video davor kennst
-            teile.append(f"🆕 {_szenen_zahl(int(a['neu']), 'neue ')}"
-                         + (f" · {a['schon_gezeigt']} aus dem Video davor" if a.get("schon_gezeigt") else ""))
-        if frueher := len(a.get("nachschub") or []):   # Stufe 4 (08.10.): nie gezeigte starke Szenen früherer Abende
+        bekannt = set(a.get("wiederholt") or [])
+        fassung = bool((liste.get("parameter") or {}).get("ersetzt"))
+        frueher_alle = set(a.get("nachschub") or [])
+        if fassung:   # neue Fassung: welche Szenen du aus dem Video davor kennst (woher sie sind, sagte es schon)
+            davor = int(a.get("schon_gezeigt") or 0) - len(bekannt)
+            if int(a["neu"]):
+                teile.append(f"🆕 {_szenen_zahl(int(a['neu']), 'neue ')}" + (f" · {davor} aus dem Video davor"
+                                                                             if davor > 0 else ""))
+            elif davor > 0:   # 08.10.: statt „🆕 0 neue Szenen · …“
+                teile.append(f"↩️ {_szenen_zahl(davor)} aus dem Video davor")
+        elif frueher_alle and momente and momente <= frueher_alle:   # 08.10.: gemischt – keine Szene vom Abend
+            teile.append("📅 Alle Szenen von früheren Abenden")
+        elif frueher := len(frueher_alle - bekannt):   # Stufe 4 (08.10.): neue starke Szenen früherer Abende
             teile.append("+1 Szene von einem früheren Abend" if frueher == 1 else
                          f"+{frueher} Szenen von früheren Abenden")
+        if bekannt:   # 08.10.: ehrlich sagen, was du schon kennst
+            teile.append(f"♻️ {_szenen_zahl(len(bekannt))} " + ("kennst du aus früheren Videos" if fassung
+                                                                 else "kennst du schon"))
     if m := liste.get("musik"):
         teile.append(f"🎵 {escape(m['titel'])}" + (f" – {escape(m['kuenstler'])}" if m.get("kuenstler") else ""))
     warnungen: list[str] = []
@@ -468,9 +482,11 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
     nur_matches (07.10.): die neue Fassung nach ❌ kommt aus denselben Matches wie das abgelehnte Video.
     anders_als (07.10., ❌ → 🥱): Entwurf, den du langweilig fandest – die neue Fassung ist anders geschnitten
     (Aufbau, Tempo, Song) und tauscht seine schwächere Hälfte gegen neue Szenen (regeln.neue_fassung).
-    ersetzt (08.10., „Jede Szene nur in einem Video“): Video, das diese neue Fassung nach ❌ ersetzt (jeder Grund) – sie
-    darf seine Szenen und die seiner Vorgänger-Fassungen wieder nehmen (szenen.ersetzt_kette, Parameter „ersetzt“).
-    Fehler: regie.KeineNeuenSzenen, wenn es dafür keine neuen Szenen gibt."""
+    ersetzt (08.10.): Video, das diese neue Fassung nach ❌ ersetzt (jeder Grund) – seine Szenen und die seiner
+    Vorgänger-Fassungen sind für sie frei und keine Wiederholung (szenen.ersetzt_kette, Parameter „ersetzt“).
+    Abwechslung mit Ermüdung (08.10.): Reicht der Abend nicht, baut regie.erstelle (mischen) gemischt aus den letzten
+    Tagen – neue Szenen zuerst, bekannte gebremst, nie eine aus deinen letzten Videos.
+    Fehler: regie.ZuWenigSzenen / regie.KeineNeuenSzenen, wenn es auch gemischt nicht reicht."""
     from .sperre import sperre
 
     konfig.pruefe_speicher(wecken=True)  # wirft SpeicherOffline mit Grund, wenn Wecken nicht erlaubt ist
@@ -518,10 +534,10 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
             except Exception:
                 log.exception("Wirkung der letzten Bewertung")
                 gelernt = None
-            try:
+            try:   # 08.10.: reicht der Abend nicht, mischt regie.erstelle aus den letzten Tagen (einfacher Modus)
                 e = regie.erstelle(con, konfig, regie_fmt, parameter=parameter, ziel=ziel, nur_matches=nur_matches,
                                    hinweise_vorab=[*filter(None, [quell_hinweis]), *nachgezogen["hinweise"]],
-                                   gelernt=gelernt, variante=variante)
+                                   gelernt=gelernt, variante=variante, mischen=not variante)
             except regie.RegieFehler as fehler:
                 if not nur_matches or not quell_hinweis:   # nach ❌ kommen die Matches aus dem Video: kein ⚙️-Hinweis
                     raise
@@ -1406,7 +1422,7 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
     # Erst nach der Regel merken: die Schleife soll die neue Fassung nie ohne sie bauen. 🥱 (07.10.): anders
     # geschnitten, die schwächere Hälfte der Szenen gegen neue getauscht (fassung_auftrag → baue_entwurf)
     zusammen = folge_merken(con, eid, "fassung", laeuft=context.bot_data.get("fassung_fuer"), grund=extra,
-                            matches=sorted(regeln.matches_aus(liste)))
+                            matches=sorted(regeln.abend_aus(liste)))
     await caption(bewertung, None)
     if baut:
         text += " Die neue Fassung kommt nach dem Video, an dem ich gerade baue."

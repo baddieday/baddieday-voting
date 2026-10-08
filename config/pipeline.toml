@@ -146,6 +146,17 @@ short_mindestens_s = 0.0
 short_ziel_s = 0.0
 # "stark" = nur Multikills, Clutches, Kills im Endkampf, Victory – lieber kein Video als Füllmaterial; "alle" = auch Einzelkills
 szenen = "stark"
+# Abwechslung im einfachen Modus (08.10., Florian: „bessere öfters zeigen, aber nicht permanent“) – interne Werte,
+# bewusst nicht in ⚙️ (regie.ermuedung_regeln): Neue Szenen gehen vor. Eine Szene aus deinen letzten sperre_videos
+# Videos kommt nie ins nächste (Fassungen eines Videos zählen als eines, nie aufgehoben). Bekannte verlieren je
+# Einsatz in ermuedung_tage Tagen Punkte (Punkte × ermuedung_faktor^Einsätze). Höchstens wiederholung_anteil eines
+# Videos bekannt, solange neue dabei sind (bis 4 Szenen dürfen es mehr sein); höchstens gleich_mit_video Szenen, die
+# schon zusammen in einem Video waren. /experte: Abzug, Cooldown und Frische-Quote wie bisher ([regie.vorgaben]).
+ermuedung_tage = 30
+ermuedung_faktor = 0.5
+sperre_videos = 3
+wiederholung_anteil = 0.5
+gleich_mit_video = 2
 # Effekt-Stufe 0 aus · 1 ruhig · 2 normal · 3 wild – hier bewusst nicht gesetzt: ohne Wert gilt das Gelernte,
 # „😵 Zu hektisch“ unter ❌ setzt sie (effekt_stufe = 2)
 # pve-big höchstens so lange für den Final-Render wach halten
