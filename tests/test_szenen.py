@@ -99,13 +99,18 @@ class Langweilig(MitRegieMaterial):
                                 "(?, 'short', ?, '{}', 'gesendet', ?)", (name, str(pfad), iso(jetzt()))).lastrowid
 
     def langweilig(self, eid):
-        """❌ → 🥱 im einfachen Modus; gibt den Satz zurück und lässt die neue Fassung ohne Rendern laufen."""
+        """❌ → 🥱 im einfachen Modus; gibt den Satz und die neue Fassung zurück (None = kein Video). Gestartet wird
+        sie seit 08.10. von der Merkliste (lernbot.folge_starten, wie in der Schleife), gerendert wird nicht."""
         for daten in (f"d:{eid}:-1", f"g:{eid}:langweilig"):
             asyncio.run(lernbot.bei_klick(SimpleNamespace(callback_query=FakeQuery(daten)), self.context))
         satz = self.bot.texte[-1]
+        vorher = self.con.execute("SELECT MAX(id) FROM entwuerfe").fetchone()[0]
         with mock.patch.object(lernbot.entwurf, "entwurf"), mock.patch.object(lernbot.kritik, "bewerte"), \
                 mock.patch.object(lernbot, "sende_entwuerfe", new=mock.AsyncMock(return_value=0)):
-            return satz, asyncio.run(self.aufgaben.pop())
+            self.assertEqual(asyncio.run(lernbot.folge_starten(self.app)), 1)
+            asyncio.run(self.aufgaben.pop())
+        neu = self.con.execute("SELECT MAX(id) FROM entwuerfe").fetchone()[0]
+        return satz, (neu if neu != vorher else None)
 
     def liste(self, eid):
         return regeln.liste_aus(self.con.execute("SELECT * FROM entwuerfe WHERE id = ?", (eid,)).fetchone())

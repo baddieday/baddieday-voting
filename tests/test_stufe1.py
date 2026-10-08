@@ -5,10 +5,13 @@ Nachrichten“): deine Gründe als feste Regeln, nur starke Szenen, Songs wechse
 import asyncio
 import json
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from clip_pipeline import einstellungen, geschmack, regeln, regie, regie_lernen, sitzung
+from clip_pipeline.medien import MedienFehler
 from clip_pipeline.zeit import iso, jetzt
 
 from tests.hilfen import HAT_FFMPEG, MitSpeicher
@@ -232,6 +235,22 @@ class LernBotEinfach(MitRegieMaterial):
         asyncio.run(lernbot.bei_klick(SimpleNamespace(callback_query=q), self.context))
         return q
 
+    def zweites_video(self):
+        liste = self.tmp / "liste2.json"
+        liste.write_text(json.dumps({**LISTE, "musik": {"track_id": 4, "titel": "Song B"}}), encoding="utf-8")
+        return self.con.execute(
+            "INSERT INTO entwuerfe (name, format, schnittliste, parameter, dauer_s, status, erstellt) VALUES "
+            "('t2', 'short', ?, '{}', 46, 'gesendet', ?)", (str(liste), iso(jetzt()))).lastrowid
+
+    def schleife(self, runden=1):
+        """Wie lernbot._schleife: folge_starten, die gestarteten Aufgaben laufen gleich durch. Rückgabe: gestartet."""
+        gestartet = 0
+        for _ in range(runden):
+            gestartet += asyncio.run(lernbot.folge_starten(self.app))
+            while self.aufgaben:
+                asyncio.run(self.aufgaben.pop(0))
+        return gestartet
+
     def test_nicht_gut_ein_tipp_regel_und_neue_fassung(self):
         q = self.klick(f"d:{self.eid}:-1")
         knoepfe = [b.callback_data for reihe in q.bearbeitet[0]["reply_markup"].inline_keyboard for b in reihe]
@@ -240,7 +259,9 @@ class LernBotEinfach(MitRegieMaterial):
         self.assertEqual(regeln.ziel_regel(self.con, self.konfig), 55.0)                    # sofort gesetzt
         self.assertIn("ab jetzt 55 s", self.bot.texte[-1])
         self.assertIn("neue Fassung", self.bot.texte[-1])
-        self.assertEqual([k.__name__ for k in self.aufgaben], ["neuer_entwurf"])           # neue Fassung startet
+        self.assertEqual(lernbot.folge_zu(self.con, self.eid)["art"], "fassung")           # gemerkt, die Schleife baut
+        self.assertEqual(asyncio.run(lernbot.folge_starten(self.app)), 1)
+        self.assertEqual([k.__name__ for k in self.aufgaben], ["fassung_auftrag"])
         zeile = self.con.execute("SELECT daumen, gruende FROM entwurf_bewertungen").fetchone()
         self.assertEqual((zeile["daumen"], json.loads(zeile["gruende"])), (-1, ["kurz"]))  # bleibt Lern-Material
 
@@ -257,24 +278,130 @@ class LernBotEinfach(MitRegieMaterial):
 
     def test_hochladen_gibt_das_paket(self):
         q = self.klick(f"d:{self.eid}:1")
-        self.assertEqual([k.__name__ for k in self.aufgaben], ["sende_paket"])
+        self.assertEqual([k.__name__ for k in self.aufgaben], ["paket_auftrag"])
         self.assertEqual(self.con.execute("SELECT daumen FROM entwurf_bewertungen").fetchone()[0], 1)
         knoepfe = [b.callback_data for reihe in q.bearbeitet[0]["reply_markup"].inline_keyboard for b in reihe]
-        self.assertEqual(knoepfe, [f"d:{self.eid}:1"])          # ✅ bleibt: ging das Paket schief, nochmal tippen
+        self.assertEqual(knoepfe, [f"d:{self.eid}:1"])          # ✅ bleibt stehen
 
-    def test_grund_waehrend_der_bot_baut_wartet(self):
-        """07.10.: baut der Bot gerade, gilt der Grund noch nicht – vorher hieß es „ich baue dir jetzt eine neue
-        Fassung“, gleich danach „ich baue gerade schon“, und die Fassung kam nie."""
+    def test_hochladen_waehrend_er_packt_wird_gemerkt(self):
+        """08.10.: vorher „⏳ Ich packe gerade ein anderes Paket – tippe gleich nochmal ✅“ – und dein ✅ war nicht einmal
+        gespeichert. Jetzt zählt es sofort, und das Paket kommt nach dem laufenden."""
+        self.app.bot_data["paket_arbeitet"] = True
+        q = self.klick(f"d:{self.eid}:1")
+        self.assertEqual(q.antworten[-1], "Verstanden – dein Upload-Paket kommt nach dem, das ich gerade packe.")
+        self.assertEqual(self.con.execute("SELECT daumen FROM entwurf_bewertungen").fetchone()[0], 1)
+        self.assertEqual(self.aufgaben, [])
+        self.assertIn("Schon vorgemerkt", self.klick(f"d:{self.eid}:1").antworten[-1])        # Doppeltipp: einmal
+        self.app.bot_data["paket_arbeitet"] = False                                         # das andere ist fertig
+        self.assertEqual(asyncio.run(lernbot.folge_starten(self.app)), 1)
+        self.assertEqual([k.__name__ for k in self.aufgaben], ["paket_auftrag"])
+        self.assertTrue(self.app.bot_data["paket_arbeitet"])                              # vor dem Start gesetzt
+
+    def test_grund_waehrend_der_bot_baut_wird_gemerkt(self):
+        """08.10. (Florian tippt nie etwas zweimal): vorher hieß es „tipp gleich nochmal auf deinen Grund“, die Regel
+        galt nicht, und ohne zweiten Tipp kam nichts. Jetzt gilt die Regel sofort, die Fassung kommt nach dem Bau."""
         self.klick(f"d:{self.eid}:-1")
         self.app.bot_data["arbeitet"] = True
         q = self.klick(f"g:{self.eid}:kurz")
-        self.assertIn("tipp gleich nochmal", q.antworten[-1])
-        self.assertIsNone(regeln.ziel_regel(self.con, self.konfig))                         # keine Regel
-        self.assertEqual((self.aufgaben, self.bot.texte), ([], []))
+        self.assertEqual(q.antworten[-1], "Verstanden – kommt nach dem Video, an dem ich gerade baue.")
+        self.assertEqual(regeln.ziel_regel(self.con, self.konfig), 55.0)                    # Regel sofort
+        self.assertIn("kommt nach dem Video, an dem ich gerade baue", self.bot.texte[-1])
+        self.assertEqual(self.schleife(), 0)                                                # baut noch: wartet
+        self.app.bot_data["arbeitet"] = False                                               # der Bau ist fertig
+        with mock.patch.object(lernbot, "baue_entwurf", return_value=77) as bau:
+            self.assertEqual(self.schleife(3), 1)
+        self.assertEqual(bau.call_count, 1)                                                 # genau eine neue Fassung
+        self.assertEqual(bau.call_args.args[2], {"m1", "m2"})                              # aus denselben Matches
+        self.assertEqual(lernbot.folge_zu(self.con, self.eid)["ergebnis"], "gesendet")
+        self.assertFalse(self.app.bot_data["arbeitet"])
+
+    def test_zwei_gruende_kurz_nacheinander_eine_fassung(self):
+        """07.10. (Prüfung P4): Gründe an zwei Videos kurz nacheinander – die zweite Fassung gab mit „Ich baue gerade
+        schon“ still auf. Jetzt gelten beide Regeln, und genau eine neue Fassung kommt: die zum neuesten ❌."""
+        zweites = self.zweites_video()
+        self.klick(f"d:{self.eid}:-1")
+        self.klick(f"d:{zweites}:-1")
+
+        async def beide():
+            await asyncio.gather(*(lernbot.bei_klick(SimpleNamespace(callback_query=FakeQuery(d)), self.context)
+                                   for d in (f"g:{self.eid}:kurz", f"g:{zweites}:musik")))
+
+        asyncio.run(beide())
+        self.assertEqual((regeln.ziel_regel(self.con, self.konfig), regeln.gesperrt(self.con, "track")), (55.0, {"4"}))
+        self.assertIn("Eine neue Fassung für beide Tipps.", self.bot.texte[-1])
+        with mock.patch.object(lernbot, "baue_entwurf", return_value=77) as bau:
+            self.schleife(3)
+        self.assertEqual(bau.call_count, 1)
+        self.assertFalse(any("baue gerade schon" in t for t in self.bot.texte))
+        self.assertEqual([lernbot.folge_zu(self.con, e)["ergebnis"] for e in (self.eid, zweites)],
+                         ["zusammengelegt", "gesendet"])
+
+    def test_keine_neuen_szenen_genau_ein_satz(self):
+        """Prüfer (r1_dbqueue): ohne Erledigt-Vermerk käme „Diesmal keine neue Fassung“ in jeder Runde und nach jedem
+        Neustart wieder. Jetzt genau ein Satz – auch nach drei Schleifenrunden und einem Neustart."""
+        self.klick(f"d:{self.eid}:-1")
+        self.klick(f"g:{self.eid}:langweilig")
+        with mock.patch.object(lernbot, "baue_entwurf", side_effect=regie.KeineNeuenSzenen(0, 4)) as bau:
+            self.schleife(3)
+            neu = {k: self.app.bot_data[k] for k in ("con", "konfig", "erlaubt")}            # Neustart: Speicher weg
+            self.app.bot_data.clear()
+            self.app.bot_data.update(neu)
+            lernbot.folge_aufraeumen(self.con)
+            self.schleife(3)
+        self.assertEqual(bau.call_count, 1)
+        self.assertEqual(bau.call_args.args[3], self.eid)                                  # 🥱: anders als dieses Video
+        self.assertEqual(sum("Diesmal keine neue Fassung" in t for t in self.bot.texte), 1)
+        self.assertEqual(lernbot.folge_zu(self.con, self.eid)["ergebnis"], "kein_video")
+
+    def test_fehler_zwei_neue_versuche_dann_ein_satz(self):
+        """08.10.: statt „Tipp später nochmal“ versucht der Bot es nach 10 und nach 30 min noch einmal; nach dem dritten
+        Fehlschlag ein Satz, ohne dich um etwas zu bitten."""
+        self.klick(f"d:{self.eid}:-1")
+        self.klick(f"g:{self.eid}:neu")
+        uhr = [jetzt() + timedelta(seconds=1)]
+        with mock.patch.object(lernbot, "jetzt", side_effect=lambda: uhr[0]), \
+                mock.patch.object(lernbot, "baue_entwurf", side_effect=MedienFehler("ffmpeg hängt")) as bau, \
+                self.assertLogs("lern-bot", "ERROR"):
+            for minuten in (0, 9, 2, 29, 2, 60):     # Versuche bei 0, 11 und 42 min – davor und danach nichts
+                uhr[0] += timedelta(minutes=minuten)
+                self.schleife()
+        self.assertEqual(bau.call_count, 3)
+        fehler = [t for t in self.bot.texte if t.startswith("⚠️")]
+        self.assertEqual(fehler, ["⚠️ Die neue Fassung ließ sich auch im dritten Versuch nicht bauen – ich lasse sie "
+                                  "aus."])
+        self.assertEqual(lernbot.folge_zu(self.con, self.eid)["ergebnis"], "aufgegeben")
+
+    def test_neustart_holt_nur_junge_tipps_nach(self):
+        """Neustart (Update): ein Tipp von vor 20 min kommt trotzdem, einer von vor 3 h nicht mehr (kein Video aus
+        heiterem Himmel)."""
+        zweites = self.zweites_video()
+        for e in (self.eid, zweites):
+            self.klick(f"d:{e}:-1")
+        self.klick(f"g:{self.eid}:kurz")
+        self.assertEqual(lernbot.folge_aufraeumen(self.con, jetzt() + timedelta(hours=3)), 1)       # nach 3 h: nein
+        self.assertEqual(lernbot.folge_zu(self.con, self.eid)["ergebnis"], "zu_alt")
+        self.klick(f"g:{zweites}:lang")
+        self.assertEqual(lernbot.folge_aufraeumen(self.con, jetzt() + timedelta(minutes=20)), 0)    # nach 20 min: ja
+        self.assertEqual(asyncio.run(lernbot.folge_starten(self.app)), 1)
+        self.assertEqual(self.app.bot_data["fassung_fuer"], zweites)
+
+    def test_neues_video_gescheitert_einmal_wiederholt(self):
+        """08.10.: statt „Tipp später nochmal auf 🎬 Neues Video“ versucht es der Bot nach 10 min selbst noch einmal,
+        danach ein Satz ohne Aufforderung. 🎬 während eines Baus: das laufende Video kommt."""
+        self.app.bot_data["arbeitet"] = True
+        asyncio.run(lernbot.neuer_entwurf(self.app, "short"))
+        self.assertEqual(self.bot.texte[-1], "⏳ Ich baue gerade schon ein Video – es kommt gleich.")
         self.app.bot_data["arbeitet"] = False
-        self.klick(f"g:{self.eid}:kurz")                                                   # nochmal: wirkt jetzt
-        self.assertEqual(regeln.ziel_regel(self.con, self.konfig), 55.0)
-        self.assertEqual([k.__name__ for k in self.aufgaben], ["neuer_entwurf"])
+        with mock.patch.object(lernbot, "baue_entwurf", side_effect=MedienFehler("ffmpeg hängt")) as bau, \
+                self.assertLogs("lern-bot", "ERROR"):
+            asyncio.run(lernbot.neuer_entwurf(self.app, "short"))
+            self.assertTrue(self.bot.texte[-1].endswith("Ich versuche es in 10 Minuten noch einmal."))
+            self.assertEqual(self.schleife(), 0)                                            # erst nach 10 min
+            self.app.bot_data["knopf_nochmal"]["faellig"] = 0                               # … die sind um
+            self.assertEqual(self.schleife(2), 1)                                           # genau einmal
+        self.assertEqual(bau.call_count, 2)
+        self.assertEqual(self.bot.texte[-1], "⚠️ Das Video ließ sich auch im zweiten Versuch nicht bauen.")
+        self.assertFalse(any("Tipp" in t for t in self.bot.texte))
 
     def test_nicht_gut_am_highlight_video_ohne_short_regel(self):
         """07.10.: ❌ am Highlight-Video (Zusammenschnitt) – vorher „Shorts sind ab jetzt 75 s lang (vorher 180 s)“,

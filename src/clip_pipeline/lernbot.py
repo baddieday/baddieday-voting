@@ -25,7 +25,7 @@ import re
 import sqlite3
 import time
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 
@@ -33,7 +33,7 @@ from . import (autonom, big, db, einstellungen, entwurf, erwartung, geschmack, k
                musik, regeln, regie, regie_lernen, stile, stimmung, viral)
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
-from .zeit import iso, jetzt, utc_zu_lokal
+from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
 
 log = logging.getLogger("lern-bot")
 TEXT_MAX = 4000
@@ -81,6 +81,12 @@ GRUENDE_EINFACH = ("kurz", "langweilig", "effekte_viel", "musik")
 REGEL_KNOEPFE = (("⏱️ Zu kurz", "kurz"), ("⏳ Zu lang", "lang"), ("🥱 Langweilig", "langweilig"),
                  ("🎵 Musik", "musik"), ("😵 Zu hektisch", "hektisch"), ("🔁 Einfach neu", "neu"))
 KREISE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"
+# Merkliste (08.10., Florian: „ich tippe nie etwas zweimal“): Was nach deinem Tipp noch kommt, steht als Auftrag in
+# entwurf_bewertungen.folge und übersteht Neustart und Update (folge_merken, folge_starten)
+FOLGE_ABSTAND_MIN = (10, 30)   # nach einem Fehler: neuer Versuch nach 10, dann nach 30 min …
+FOLGE_VERSUCHE = 3             # … nach dem dritten Fehler ein Satz an dich, ohne Aufforderung
+FOLGE_HOECHSTENS_H = 2         # nach einem Neustart nur nachholen, was jünger ist – kein Überraschungsvideo
+KNOPF_NOCHMAL_MIN = 10         # ein gescheitertes 🎬 einmal nach 10 min wiederholen
 
 
 # --- Knöpfe und Texte (ohne Telegram testbar) ------------------------------------------
@@ -750,6 +756,173 @@ def blick_auf_leerlauf(app) -> None:
     app.bot_data["leerlauf_blick"] = neu
 
 
+# --- Merkliste: kein Tipp geht verloren (08.10.) ---------------------------------------------------------------
+# Vorher hieß es „tipp gleich nochmal auf deinen Grund“, „tippe gleich nochmal ✅“ (dein ✅ wurde dabei nicht einmal
+# gespeichert) oder „Tipp später nochmal“, und zwei Gründe kurz nacheinander endeten still. Jetzt wirkt dein Tipp sofort
+# (Bewertung und Regel – reine Datenbank-Arbeit), und was danach kommt, steht als Auftrag in entwurf_bewertungen.folge:
+#   {"art": "fassung" | "paket", "grund", "matches", "zeit": dein Tipp, "faellig": nächster Versuch, "versuche":
+#    Fehlschläge, "erledigt": Zeitpunkt oder null, "ergebnis": gesendet · kein_video · dauerhaft · zusammengelegt ·
+#    aufgegeben · zu_alt}
+# Gestartet wird nur aus folge_starten (30-s-Schleife; das Paket auch gleich nach ✅) – sobald der Bot frei ist.
+
+def _folge_lesen(text: str | None) -> dict | None:
+    try:
+        folge = json.loads(text) if text else None
+        if not isinstance(folge, dict) or folge.get("art") not in ("fassung", "paket"):
+            return None
+        aus_iso(folge["zeit"]), aus_iso(folge["faellig"])   # kaputte Zeiten: lieber übergehen als jede Runde scheitern
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+    return folge
+
+
+def folge_zu(con: sqlite3.Connection, entwurf_id: int) -> dict | None:
+    """Der Auftrag zu deiner Bewertung dieses Videos (offen oder erledigt) – None, wenn es keinen gibt."""
+    z = con.execute("SELECT folge FROM entwurf_bewertungen WHERE entwurf_id = ?", (entwurf_id,)).fetchone()
+    return _folge_lesen(z["folge"]) if z is not None else None
+
+
+def _offene_folgen(con: sqlite3.Connection) -> list[tuple[int, dict]]:
+    """Alle offenen Aufträge, der älteste Tipp zuerst: [(entwurf_id, folge), …]."""
+    offen = [(int(z["entwurf_id"]), f) for z in con.execute(
+        "SELECT entwurf_id, folge FROM entwurf_bewertungen WHERE folge IS NOT NULL").fetchall()
+        if (f := _folge_lesen(z["folge"])) is not None and not f.get("erledigt")]
+    return sorted(offen, key=lambda x: (str(x[1].get("zeit")), x[0]))
+
+
+def _folge_speichern(con: sqlite3.Connection, entwurf_id: int, folge: dict) -> None:
+    con.execute("UPDATE entwurf_bewertungen SET folge = ? WHERE entwurf_id = ?",
+                (json.dumps(folge, ensure_ascii=False), entwurf_id))
+
+
+def folge_merken(con: sqlite3.Connection, entwurf_id: int, art: str, laeuft: int | None = None, **daten) -> list[int]:
+    """Merkt, was nach deinem Tipp an Video entwurf_id noch kommt (die Bewertung steht schon): art "fassung" – neue
+    Fassung nach einem Grund unter ❌ (daten: grund, matches) – oder "paket" – Upload-Paket nach ✅.
+    Zur selben Zeit höchstens eine offene neue Fassung, die zum neuesten ❌ (07.10.: „warum sendet er immer 2
+    Videos?“): Eine ältere, die gerade nicht gebaut wird (laeuft = Video, dessen Fassung gerade entsteht), gilt als
+    zusammengelegt – ihre Regel gilt trotzdem. Rückgabe: die Videos, deren neue Fassung darin aufgeht."""
+    zeit = iso(jetzt())
+    zusammen = []
+    with db.transaktion(con):
+        if art == "fassung":
+            for alt, folge in _offene_folgen(con):
+                if folge["art"] == "fassung" and alt not in (entwurf_id, laeuft):
+                    _folge_speichern(con, alt, {**folge, "erledigt": zeit, "ergebnis": "zusammengelegt"})
+                    zusammen.append(alt)
+        _folge_speichern(con, entwurf_id, {"art": art, **daten, "zeit": zeit, "faellig": zeit, "versuche": 0,
+                                            "erledigt": None, "ergebnis": None})
+    return zusammen
+
+
+def folge_erledigt(con: sqlite3.Connection, entwurf_id: int, folge: dict, ergebnis: str) -> None:
+    _folge_speichern(con, entwurf_id, {**folge, "erledigt": iso(jetzt()), "ergebnis": ergebnis})
+
+
+def folge_fehlgeschlagen(con: sqlite3.Connection, entwurf_id: int, folge: dict) -> bool:
+    """Ein Versuch ist gescheitert: der nächste nach 10 bzw. 30 min (FOLGE_ABSTAND_MIN). True = das war der dritte –
+    der Auftrag ist erledigt („aufgegeben“), und der Aufrufer schickt dir einen Satz."""
+    versuche = int(folge.get("versuche") or 0) + 1
+    if versuche >= FOLGE_VERSUCHE:
+        folge_erledigt(con, entwurf_id, {**folge, "versuche": versuche}, "aufgegeben")
+        return True
+    faellig = jetzt() + timedelta(minutes=FOLGE_ABSTAND_MIN[min(versuche, len(FOLGE_ABSTAND_MIN)) - 1])
+    _folge_speichern(con, entwurf_id, {**folge, "versuche": versuche, "faellig": iso(faellig)})
+    log.info("Auftrag %s zu Video #%s: Versuch %s gescheitert, nächster um %s", folge["art"], entwurf_id, versuche,
+             iso(faellig))
+    return False
+
+
+def folge_aufraeumen(con: sqlite3.Connection, zeit: datetime | None = None) -> int:
+    """Beim Start des Bots: Offene Aufträge, deren Tipp länger als FOLGE_HOECHSTENS_H her ist (der Bot lag so lange
+    still), holt er nicht mehr nach – kein Video Stunden nach deinem Tipp. Sie gelten als erledigt („zu alt“), nur im
+    Log; gelöscht wird nichts. Jüngere startet die Schleife wie gewohnt. Rückgabe: wie viele zu alt waren."""
+    zeit = zeit or jetzt()
+    alt = 0
+    for eid, folge in _offene_folgen(con):
+        if zeit - aus_iso(folge["zeit"]) > timedelta(hours=FOLGE_HOECHSTENS_H):
+            log.info("Auftrag %s zu Video #%s ist älter als %s h – nicht mehr nachgeholt", folge["art"], eid,
+                     FOLGE_HOECHSTENS_H)
+            folge_erledigt(con, eid, folge, "zu_alt")
+            alt += 1
+    return alt
+
+
+async def folge_starten(app, nur: str | None = None) -> int:
+    """Startet fällige Aufträge der Merkliste (die Schleife alle 30 s; das Paket auch gleich nach ✅): höchstens eine
+    neue Fassung – nur, wenn der Bot gerade nicht baut –, ein Paket – nur, wenn er gerade nicht packt – und das einmal
+    wiederholte 🎬. arbeitet bzw. paket_arbeitet wird gesetzt, BEVOR die Aufgabe startet: Vorher sah die zweite von
+    zwei Aufgaben „arbeitet“ und gab mit „Ich baue gerade schon“ still auf. Rückgabe: wie viele gestartet."""
+    bd = app.bot_data
+    zeit, gestartet = jetzt(), 0
+    offen = _offene_folgen(bd["con"])
+    fassungen = [eid for eid, folge in offen if folge["art"] == "fassung" and eid != bd.get("fassung_fuer")]
+    for eid, folge in offen:
+        if folge["art"] == "fassung" and eid in fassungen[:-1]:
+            # nur die zum neuesten ❌ – eine ältere wartete z. B. nach einem Fehlschlag auf ihren nächsten Versuch
+            folge_erledigt(bd["con"], eid, folge, "zusammengelegt")
+            continue
+        if (nur and folge["art"] != nur) or aus_iso(folge["faellig"]) > zeit:
+            continue
+        if folge["art"] == "fassung" and not bd.get("arbeitet"):
+            bd["arbeitet"], bd["fassung_fuer"] = True, eid
+            app.create_task(fassung_auftrag(app, eid, folge))
+        elif folge["art"] == "paket" and not bd.get("paket_arbeitet"):
+            bd["paket_arbeitet"] = True
+            app.create_task(paket_auftrag(app, eid, folge))
+        else:
+            continue
+        gestartet += 1
+    nochmal = bd.get("knopf_nochmal")
+    if not nur and nochmal and time.monotonic() >= nochmal["faellig"] and not bd.get("arbeitet"):
+        del bd["knopf_nochmal"]
+        bd["arbeitet"] = True
+        app.create_task(neuer_entwurf(app, nochmal["fmt"], ansage=False, herkunft="nochmal"))
+        gestartet += 1
+    return gestartet
+
+
+async def fassung_auftrag(app, entwurf_id: int, folge: dict) -> str:
+    """Die neue Fassung zu deinem Grund an Video entwurf_id (arbeitet hat folge_starten schon gesetzt). Erledigt, sobald
+    das Video gesendet ist oder der „kein Video“-Satz einmal kam – vorher hätte ihn jeder Neustart wiederholt. Ein
+    Fehler (Sperre, Speicher, Platte, ffmpeg): neuer Versuch nach 10 und 30 min, nach dem dritten ein Satz.
+    Rückgabe: gesendet · kein_video · nochmal · aufgegeben."""
+    con = app.bot_data["con"]
+    try:
+        neu = await neuer_entwurf(app, "short", nur_matches=set(folge.get("matches") or []) or None, ansage=False,
+                                  anders_als=entwurf_id if folge.get("grund") == "langweilig" else None,
+                                  herkunft="auftrag")
+        ergebnis = "gesendet" if neu else "kein_video"   # None: der „kein Video“-Satz ist schon raus
+    except Exception:  # noqa: BLE001 – neuer_entwurf hat es geloggt; den nächsten Versuch plant folge_fehlgeschlagen
+        ergebnis = None
+    finally:
+        app.bot_data.pop("fassung_fuer", None)
+    if ergebnis is not None:
+        folge_erledigt(con, entwurf_id, folge, ergebnis)
+        return ergebnis
+    if folge_fehlgeschlagen(con, entwurf_id, folge):
+        await app.bot.send_message(app.bot_data["erlaubt"], "⚠️ Die neue Fassung ließ sich auch im dritten Versuch "
+                                                            "nicht bauen – ich lasse sie aus.")
+        return "aufgegeben"
+    return "nochmal"
+
+
+async def paket_auftrag(app, entwurf_id: int, folge: dict) -> str:
+    """Das Upload-Paket zu deinem ✅ (paket_arbeitet hat folge_starten schon gesetzt). Erledigt, sobald es gesendet ist
+    oder ein dauerhafter Fehler (Moment-Datei fehlt, Konfig) einmal als Satz kam; sonst wie fassung_auftrag."""
+    from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
+
+    con = app.bot_data["con"]
+    ergebnis = await lernbot_paket.sende_paket(app, entwurf_id, auftrag=folge)
+    if ergebnis != "fehler":
+        folge_erledigt(con, entwurf_id, folge, ergebnis)
+        return ergebnis
+    if folge_fehlgeschlagen(con, entwurf_id, folge):
+        await app.bot.send_message(app.bot_data["erlaubt"], f"⚠️ Das Upload-Paket für Video #{entwurf_id} ging auch im "
+                                                            "dritten Versuch schief – ich lasse es aus.")
+        return "aufgegeben"
+    return "nochmal"
+
+
 async def _schleife(app) -> None:
     from . import lernbot_zahlen  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
 
@@ -757,7 +930,8 @@ async def _schleife(app) -> None:
     while True:
         blick_auf_leerlauf(app)
         # lernbot_zahlen.aufraeumen: wartende Screenshots nach 10 min verwerfen (Lernschleife, Spec §7.1)
-        for aufgabe in (sende_meldungen, sende_wenn_frei, lernbot_zahlen.aufraeumen):
+        # folge_starten (08.10.): gemerkte Tipps – neue Fassung, Upload-Paket –, sobald der Bot frei ist
+        for aufgabe in (sende_meldungen, sende_wenn_frei, folge_starten, lernbot_zahlen.aufraeumen):
             try:
                 await aufgabe(app)
             except Exception:
@@ -855,9 +1029,16 @@ async def cmd_musik(update, context) -> None:
 
 
 async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansage: bool = True,
-                        anders_als: int | None = None) -> int | None:
+                        anders_als: int | None = None, herkunft: str = "knopf") -> int | None:
     """Baut einen Entwurf und schickt ihn – für /entwurf und automatisch nach jeder fertigen Bewertung.
     anders_als (❌ → 🥱): siehe baue_entwurf – gilt für jeden Versuch.
+
+    herkunft (08.10., Merkliste): "knopf" – 🎬, /entwurf, nach ✅ fertig; baut der Bot schon, sagt er es und das
+    laufende Video kommt. "auftrag" (neue Fassung aus der Merkliste) und "nochmal" (das einmal wiederholte 🎬):
+    arbeitet hat folge_starten schon gesetzt. Ein Fehler geht bei "auftrag" an fassung_auftrag (der plant den nächsten
+    Versuch); ein gescheitertes 🎬 im einfachen Modus wiederholt die Schleife einmal nach 10 min, danach ein Satz
+    ohne Aufforderung. Ist das Video gebaut und nur das Senden scheitert, schickt es die Schleife (sende_wenn_frei) –
+    kein zweites Video.
 
     [lernbot].auto_schwelle > 0 (B5): baut bis zu auto_versuche_max Entwürfe, verwirft dabei jeden mit zu
     niedriger Erwartung still (pruefe_auto_verwerfen, kein Foto an dich) und zeigt dir nur den ersten, der die
@@ -865,11 +1046,13 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
     etwas zu sehen, nur weil der Regisseur gerade schwach dasteht."""
     chat = app.bot_data["erlaubt"]
     einfach = not experte_an(app.bot_data["con"], app.bot_data["konfig"])
-    if app.bot_data.get("arbeitet"):
-        await app.bot.send_message(chat, "⏳ Ich baue gerade schon ein Video." if einfach else
-                                   "⏳ Ich baue gerade schon einen Entwurf.")
-        return None
-    app.bot_data["arbeitet"] = True
+    if herkunft == "knopf":
+        if app.bot_data.get("arbeitet"):
+            await app.bot.send_message(chat, "⏳ Ich baue gerade schon ein Video – es kommt gleich." if einfach else
+                                       "⏳ Ich baue gerade schon einen Entwurf.")
+            return None
+        app.bot_data["arbeitet"] = True
+        app.bot_data.pop("knopf_nochmal", None)   # du hast selbst neu getippt – die alte Wiederholung entfällt
     try:
         con = app.bot_data["con"]
         konfig = einstellungen.anwenden(con, app.bot_data["konfig"])   # ⚙️ Vorfilter usw. (29.09.)
@@ -903,7 +1086,10 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
             await app.bot.send_message(chat, f"🤖 {len(aussortiert)} {wort} automatisch aussortiert (Cutter-Note oder "
                                              "Erwartung zu niedrig)")
         t = time.monotonic()
-        await sende_entwuerfe(app)
+        try:
+            await sende_entwuerfe(app)
+        except Exception:  # noqa: BLE001 – gebaut ist es: die Schleife schickt es (sende_wenn_frei), nicht neu bauen
+            log.exception("Entwurf #%s gebaut, Senden fehlgeschlagen – die Schleife schickt ihn", eid)
         log.info("Entwurf #%s gesendet in %.0f s", eid, time.monotonic() - t)
         return eid
     except regie.ZuWenigSzenen as z:   # Stufe 1: lieber kein Video als eins mit Füllmaterial (🥱: als dasselbe)
@@ -911,10 +1097,19 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
         return None
     except Exception as e:  # dir kurz sagen, was los ist – Details ins Log
         log.exception("Entwurf fehlgeschlagen")
+        if herkunft == "auftrag":   # Merkliste: den nächsten Versuch plant fassung_auftrag, nach dem dritten ein Satz
+            raise
         # 07.10.: ohne escape – die Nachricht ist kein HTML (vorher stand „&quot;“ im Chat); einfach: ohne Fachtext
         grund = " – der Speicher ist nicht erreichbar und wird jetzt nicht geweckt" if isinstance(e, SpeicherOffline) else ""
-        await app.bot.send_message(chat, f"⚠️ Das Video ließ sich gerade nicht bauen{grund}. Tipp später nochmal auf "
-                                         "🎬 Neues Video." if einfach else f"⚠️ Entwurf fehlgeschlagen: {str(e)[:300]}")
+        if not einfach:
+            text = f"⚠️ Entwurf fehlgeschlagen: {str(e)[:300]}"
+        elif herkunft == "knopf":   # 08.10.: statt „Tipp später nochmal“ versucht er es selbst noch einmal
+            app.bot_data["knopf_nochmal"] = {"fmt": fmt, "faellig": time.monotonic() + 60 * KNOPF_NOCHMAL_MIN}
+            text = (f"⚠️ Das Video ließ sich gerade nicht bauen{grund}. Ich versuche es in {KNOPF_NOCHMAL_MIN} Minuten "
+                    "noch einmal.")
+        else:
+            text = f"⚠️ Das Video ließ sich auch im zweiten Versuch nicht bauen{grund}."
+        await app.bot.send_message(chat, text)
         return None
     finally:
         app.bot_data["arbeitet"] = False
@@ -1082,14 +1277,17 @@ async def bei_klick(update, context) -> None:
 async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: int, extra: str) -> None:
     """Einfacher Modus (Stufe 1, 07.10.): ✅ → 👍 und Upload-Paket. ❌ → 👎 und sechs Gründe. Ein Grund → feste Regel
     (regeln.wende_an), ein Satz, was sich ändert, und die neue Fassung aus denselben Matches – kein „✅ fertig“ mehr.
-    07.10. (Florian: „fehlerhafte Texte“): ✅ bleibt stehen (ging das Paket schief, tippst du nochmal). ❌ an einem
-    Nicht-Short (Highlight-Video) wendet keine Short-Regel an und baut keinen Short. Baut der Bot gerade, wartet der
-    Grund (sonst hieß es „ich baue neu“ und gleich danach „ich baue schon“ – und es kam nichts)."""
+    07.10. (Florian: „fehlerhafte Texte“): ✅ bleibt stehen. ❌ an einem Nicht-Short (Highlight-Video) wendet keine
+    Short-Regel an und baut keinen Short.
+    08.10. (Merkliste, Florian tippt nie etwas zweimal): ✅ und jeder Grund wirken sofort – Bewertung und Regel sind
+    reine Datenbank-Arbeit –, auch während der Bot baut oder packt. Paket und neue Fassung merkt er sich
+    (folge_merken) und startet sie, sobald er frei ist (folge_starten): kein „tipp gleich nochmal“ mehr."""
     from . import lernbot_paket  # hier, nicht oben: lernbot_paket darf lernbot selbst importieren
 
     con, app, chat = context.bot_data["con"], context.application, context.bot_data["erlaubt"]
     konfig = einstellungen.anwenden(con, context.bot_data["konfig"])
     liste = regeln.liste_aus(zeile)
+    vorher = folge_zu(con, eid)
 
     async def caption(bewertung, knoepfe) -> None:
         try:
@@ -1100,15 +1298,19 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
                 log.warning("Bildunterschrift #%s nicht aktualisiert: %s", eid, str(fehler)[:120])
 
     if aktion == "d" and extra == "1":
-        if context.bot_data.get("paket_arbeitet"):   # Knöpfe bleiben stehen – sonst käme nie ein Paket
-            await query.answer("⏳ Ich packe gerade ein anderes Paket – tippe gleich nochmal ✅.")
+        if vorher and vorher["art"] == "paket" and not vorher.get("erledigt"):   # Doppeltipp: nicht zweimal packen
+            await query.answer("✔️ Schon vorgemerkt – dein Upload-Paket kommt.")
             return
         grund = lernbot_paket.paket_erlaubt(con, eid)
-        await query.answer("✅ Super – dein Upload-Paket kommt gleich." if grund is None else grund[:200])
-        await caption(regie_lernen.bewerte(con, eid, daumen=1), [knoepfe_einfach(eid)[0][:1]] if grund is None else None)
+        packt = bool(context.bot_data.get("paket_arbeitet"))
+        await query.answer(grund[:200] if grund is not None else
+                           "Verstanden – dein Upload-Paket kommt nach dem, das ich gerade packe." if packt else
+                           "✅ Super – dein Upload-Paket kommt gleich.")
+        bewertung = regie_lernen.bewerte(con, eid, daumen=1)   # zählt sofort, auch während der Bot packt
         if grund is None:
-            context.bot_data["paket_arbeitet"] = True
-            app.create_task(lernbot_paket.sende_paket(app, eid))
+            folge_merken(con, eid, "paket")
+            await folge_starten(app, nur="paket")   # frei: gleich los (paket_arbeitet wird dabei gesetzt)
+        await caption(bewertung, [knoepfe_einfach(eid)[0][:1]] if grund is None else None)
         return
     if zeile["format"] != "short":   # Highlight-Video: keine Short-Regel, kein neuer Short
         await query.answer("Verstanden – dieses Video lasse ich weg.")
@@ -1121,28 +1323,34 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
     if aktion != "g" or (extra != "neu" and extra not in regie_lernen.GRUENDE):
         await query.answer("Unbekannter Knopf.")
         return
-    if context.bot_data.get("arbeitet"):   # keine Regel, Knöpfe bleiben – sonst käme die versprochene Fassung nie
-        await query.answer("⏳ Ich baue gerade noch ein Video – tipp gleich nochmal auf deinen Grund.")
-        return
     erledigt = context.bot_data.setdefault("regel_erledigt", set())
-    if eid in erledigt:   # Doppeltipp, bevor die Knöpfe weg sind: die Regel nicht zweimal anwenden
-        await query.answer("✔️ Schon erledigt – die neue Fassung kommt.")
+    if eid in erledigt or (vorher and vorher["art"] == "fassung"):   # Doppeltipp (auch nach einem Neustart):
+        await query.answer("✔️ Schon erledigt." if vorher and vorher.get("erledigt") else   # Regel nur einmal
+                           "✔️ Schon erledigt – die neue Fassung kommt.")
         return
     erledigt.add(eid)
-    await query.answer("Verstanden – die neue Fassung kommt.")
+    baut = bool(context.bot_data.get("arbeitet"))
+    await query.answer("Verstanden – kommt nach dem Video, an dem ich gerade baue." if baut else
+                       "Verstanden – die neue Fassung kommt.")
     if extra == "neu":
-        bewertung = con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
+        bewertung = (con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
+                     or regie_lernen.bewerte(con, eid, daumen=-1))
         text = "🔁 Verstanden: Ich baue eine andere Fassung – gleiche Regeln."
     else:
         bewertung = regie_lernen.bewerte(con, eid, grund=extra)   # bleibt Lern-Material (Schnitt, Aufbau, Tempo)
         text = regeln.wende_an(con, konfig, extra, liste) or f"Verstanden: {regie_lernen.GRUENDE[extra]}."
+    # Erst nach der Regel merken: die Schleife soll die neue Fassung nie ohne sie bauen. 🥱 (07.10.): anders
+    # geschnitten, die schwächere Hälfte der Szenen gegen neue getauscht (fassung_auftrag → baue_entwurf)
+    zusammen = folge_merken(con, eid, "fassung", laeuft=context.bot_data.get("fassung_fuer"), grund=extra,
+                            matches=sorted(regeln.matches_aus(liste)))
     await caption(bewertung, None)
-    if extra not in ("neu", "langweilig"):   # 🔁 und 🥱 sagen schon selbst, dass neu gebaut wird
+    if baut:
+        text += " Die neue Fassung kommt nach dem Video, an dem ich gerade baue."
+    elif extra not in ("neu", "langweilig"):   # 🔁 und 🥱 sagen schon selbst, dass neu gebaut wird
         text += " Ich baue dir jetzt eine neue Fassung."
+    if zusammen:   # zwei Gründe kurz nacheinander: eine neue Fassung für beide (07.10.: nicht zwei Videos auf einmal)
+        text += f" Eine neue Fassung für {'beide' if len(zusammen) == 1 else f'alle {len(zusammen) + 1}'} Tipps."
     await app.bot.send_message(chat, text)
-    # 🥱 (07.10.): anders geschnitten, die schwächere Hälfte der Szenen gegen neue getauscht (baue_entwurf)
-    app.create_task(neuer_entwurf(app, "short", nur_matches=regeln.matches_aus(liste) or None, ansage=False,
-                                  anders_als=eid if extra == "langweilig" else None))
 
 
 async def bei_fehler(update, context) -> None:
@@ -1176,6 +1384,10 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     async def nach_start(app) -> None:
         if v := version():   # Stufe 1: nach einem Update weißt du, dass die neue Fassung läuft (je Version einmal)
             db.lern_meldung(app.bot_data["con"], f"version:{v[0]}", f"✅ Neue Version läuft (Stand {v[1]}).")
+        try:   # 08.10.: gemerkte Tipps, die älter als 2 h sind, nicht mehr nachholen – jüngere startet die Schleife
+            folge_aufraeumen(app.bot_data["con"])
+        except Exception:  # noqa: BLE001 – der Bot soll trotzdem laufen
+            log.exception("Merkliste aufräumen")
         app.bot_data["schleife"] = asyncio.create_task(_schleife(app))
         log.info("Lern-Bot läuft.")
 
