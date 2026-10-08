@@ -28,6 +28,8 @@ class MitSpeicher(unittest.TestCase):
         self.konfig.daten["speicher"].update(host="", wol_mac="")
         self.konfig.daten.setdefault("lager", {})["wurzel"] = ""
         self.konfig.daten["datenbank"]["pfad"] = str(self.tmp / "test.db")
+        # Sperre neben der Test-Datenbank – nie die echte, auch wenn eine lokale Konfig [sperre].datei setzt (M1)
+        self.konfig.daten.setdefault("sperre", {})["datei"] = ""
         # Tests sollen nicht vom Datum abhängen: Sprint-Frist aus, Zustand von pve-big im Testordner
         self.konfig.daten.setdefault("big", {}).update(frist="", zustand_ordner=str(self.tmp / "zustand"), host="",
                                                        ssh_ziel="")

@@ -255,7 +255,7 @@ def ki_nachtragen(konfig: Konfig, entwurf_id: int) -> float | None:
     """Misst (falls nötig) und lässt die KI den Entwurf blind benoten – eigene Verbindung (läuft in einem Thread),
     unter der Pipeline-Sperre (belegt: sperre.Gesperrt). Rückgabe: KI-Note oder None (Tageslimit, Claude-Fehler)."""
     from . import kritik
-    from .sperre import sperre
+    from .sperre import pfad as sperre_pfad, sperre
 
     con = db.verbinde(konfig.datenbank)
     try:
@@ -263,7 +263,7 @@ def ki_nachtragen(konfig: Konfig, entwurf_id: int) -> float | None:
         daten = copy.deepcopy(k.daten)   # nie die geladene Konfig ändern
         daten.setdefault("regie", {}).setdefault("kritik", {})["ki"] = True   # einfacher Modus: KI nur hier, nach dem Senden
         k = Konfig(daten=daten, quelle=k.quelle)
-        with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=5.0):   # belegt: Gesperrt, der Bot probiert später
+        with sperre(sperre_pfad(konfig), warten_s=5.0):   # belegt: Gesperrt, der Bot probiert später
             kritik.bewerte(con, k, entwurf_id, ki=False, lernen=False)       # Messung (ffmpeg) unter der Sperre
         return kritik.bewerte(con, k, entwurf_id).get("ki_score")          # Claude ohne Sperre: neue Fassung wartet nicht
     finally:

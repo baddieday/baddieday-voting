@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .konfig import Konfig, sende_wake_on_lan
-from .sperre import GEHALTEN, _freigeben, _versuche
+from .sperre import GEHALTEN, _freigeben, _versuche, oeffne, pfad as sperre_pfad
 from .zeit import aus_iso, iso, jetzt
 
 log = logging.getLogger("pipeline")
@@ -221,13 +221,14 @@ def pipeline_beschaeftigt(konfig: Konfig) -> bool:
 
     Getrennter Betrieb: die Pipeline arbeitet nur im Puffer und braucht pve-big nicht – dann zählt
     stattdessen die Lager-Sperre (Abgleich/Übernahme)."""
-    return _sperre_belegt(lager_sperre(konfig) if konfig.getrennt else konfig.datenbank.with_suffix(".lock"))
+    return _sperre_belegt(lager_sperre(konfig) if konfig.getrennt else sperre_pfad(konfig))
 
 
 def _sperre_belegt(pfad: Path) -> bool:
+    """Nur probeweise und ohne anzulegen; eine nur lesbare Sperrdatei (M1) geht über O_RDONLY (sperre.oeffne)."""
     if not pfad.exists() or str(pfad.resolve()) in GEHALTEN:
         return False
-    fd = os.open(pfad, os.O_RDWR)
+    fd = oeffne(pfad, anlegen=False)
     try:
         if _versuche(fd):
             _freigeben(fd)

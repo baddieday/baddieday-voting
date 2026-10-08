@@ -41,7 +41,10 @@ ALT_REGIE=""; [ "$MIT_REGIE" = 1 ] && ALT_REGIE="$(git_p -C "$REGIE" rev-parse H
 DB="$(im_ct runuser -u pipeline -- "$PROD/.venv/bin/python" -c \
   'from clip_pipeline import konfig; print(konfig.lade().datenbank)' 2>/dev/null | tail -n 1)"
 [ -n "$DB" ] || DB="$VAR_DIR/pipeline.db"
-SPERRE="${DB%.*}.lock"
+# Pipeline-Sperre ebenso aus der Konfiguration ([sperre].datei, M1); ein älterer Code-Stand kennt sie nicht → <db>.lock
+SPERRE="$(im_ct runuser -u pipeline -- "$PROD/.venv/bin/python" -c \
+  'from clip_pipeline import konfig, sperre; print(sperre.pfad(konfig.lade()))' 2>/dev/null | tail -n 1)"
+[ -n "$SPERRE" ] || SPERRE="${DB%.*}.lock"
 im_ct test -f "$DB" || { echo "Datenbank $DB nicht gefunden – nichts geändert."; return 1; }
 SICH="$(dirname "$DB")/vor-update-$STEMPEL"
 GROESSE="$(im_ct stat -c %s "$DB")"; FREI="$(im_ct df --output=avail -B1 "$(dirname "$DB")" | tail -n 1 | tr -d ' ')"

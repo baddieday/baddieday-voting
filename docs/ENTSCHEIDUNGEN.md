@@ -884,3 +884,60 @@ einfachen Modus, eine vierte Geschmacks-Schraube, Auto-Update, Selbstreparatur a
 | N97 | ⏱️/⏳ nie gegen deine Richtung (ändert N81): Hast du dieselbe Richtung schon getippt, zählt die weitere Grenze – ⏱️ an einem älteren 40-s-Video bei „mindestens 55 s“ bleibt 55 („⏱️ Verstanden: Shorts sind schon mindestens 55 s lang.“, vorher 50), ⏳ an einem älteren, längeren entsprechend; „vorher“ nennt dann deine bisherige Grenze. Die Richtung vor dem Tipp kommt aus deinen Bewertungen ohne die des getippten Videos (`regie_lernen.laengen_richtung(ohne=…)`, `regeln.wende_an(entwurf_id=…)`). „Mehr starke Szenen gab es nicht“ steht nicht nach einer 🥱-Fassung (ihre schwächere Hälfte fehlte nur dort) |
 | N98 | Kleinkram: „🎯 nur Spielabend …“ nur, wenn keine Szene von einem früheren Abend im Video ist; „alle 4 starken Szenen … waren gerade erst in deinen letzten Videos“ statt „keine starke Szene (4 weitere …)“. /experte wie auf main: Szenen früherer Abende in der 🥱-Fassung nur hinten an, ohne Hälfte-Grenze und ohne „vorn vom Abend“ (`Kandidat.frueher`). Ein Versuch des Publikums-Modells, den die Effekt-Stufe oder das 🥱-Tempo überstimmt, fällt wie N82 weg (`regeln._ohne_scheinversuch` am Ende von `anwenden`, jede Variable). Nicht behoben (eigene Änderung): ⏳ bei 4 langen Pflicht-Szenen bleibt über der Grenze (kürzer ginge nur mit weniger als 4 Szenen oder kürzeren Teilen); das 2-Wochen-Video füllt weiter mit Einzelkills (schon vor dieser Änderung so) |
 | N99 | ⏳ als echte Obergrenze (zusätzlich zur Prüfung, beim Nachstellen gefunden; Stufe 5 versprach „nie länger“, `regeln.laenge`): Im einfachen Modus halten Nachlegen und Kürzen nach „⏳ höchstens …“ deine Grenze ein (bis auf 2 s fürs Beat-Raster, `regie.erstelle` oben_s), solange 4 Szenen bleiben – vorher schoss die letzte Szene darüber (nachgestellt: 61 statt 53 s bei „höchstens 55 s“, 46 statt 39 s bei „höchstens 40 s“). Bei 🎬 und neuen Fassungen zählt ein Plan über der Grenze nicht, solange einer darunter liegt; sind alle darüber, der kürzeste (`regie.ueber_grenze`). Sind schon 4 Szenen länger, bleibt das Video länger (N98). /experte und ⏱️ unverändert |
+
+## Mehrbenutzer (Clip-Pipeline 4.0)
+
+Auftrag: Ein Freund von Florian bekommt auf dem Mini seine eigene, vollständig getrennte Pipeline. Abnahme von Stufe 1:
+Zwei Benutzer arbeiten unabhängig und ohne Zugriff aufeinander; Florian merkt nichts. Aufbau und Stufen:
+`docs/MEHRBENUTZER.md`.
+
+### M1 · Instanz je Benutzer (08.10.2026)
+Jeder Freund betreibt dieselbe Pipeline aus demselben Code als eigene, abgeschlossene Instanz: eigener Linux-Benutzer
+`clip-<name>`, eigener Ordner `/var/lib/clip-benutzer/<name>` (Datenbank, Puffer, Regie, Musik, Cache), Konfig und
+`.env` gehören root, genau ein eigener Lern-Bot. Gestartet wird sie nur aus systemd-Vorlagen mit `CLIP_INSTANZ`; deren
+Sandbox blendet alles von Florian aus. Geteilt wird genau eins: Florians Rechen-Sperre. Florian ist die Stamm-Instanz
+ohne `CLIP_INSTANZ` – bei ihm ändert sich nichts (Konfig, Umgebung, Sperrpfad, Dienste, n8n-Vertrag). Keine Tabelle
+wird umgebaut, keine SQL-Anweisung geändert.
+
+Verworfen: eine Benutzer-Spalte in Florians Datenbank (336 SQL-Anweisungen, 52 davon ohne WHERE – beide Richter gaben
+der Trennung 4/10), ein eigener Container je Freund (Grafikchip, Code und Updates je Container), Freunde unter
+Florians Benutzer `pipeline` (kein Schutz durch den Kernel).
+
+Florians Antworten (08.10.) – sie gehen dem Plan vor:
+1. **Weg der Aufnahmen** („Muss das auf dem Mini sein, ich hab doch einen externen n8n-Server?!“): ein Briefkasten auf
+   dem vServer – ein kleiner Upload-Dienst, nicht n8n, keine Videos durch n8n. Der Mini holt über Tailscale ab und
+   rechnet („Rechnen, wo die Daten liegen“, Grafikchip). Kommt mit Stufe 2 (Programm für den PC des Freundes).
+2. **Speicher** („Wie bei dir, mit Lager“): Rohvideos der Freunde kommen ins Lager auf pve-big (eigener Unterordner je
+   Freund) und werden im Puffer nach 14 Tagen frei, wenn die Kopie im Lager bestätigt ist – wie bei Florian (B5). Kommt
+   mit Stufe 2, weil erst dann Aufnahmen von Freunden ankommen.
+3. **KI** („Eigener Claude-Zugang“): Jeder Freund nutzt sein eigenes Claude-Abo. Ohne eigenen Zugang bleibt die KI bei
+   ihm aus.
+
+Leitplanken (Florian, wörtlich): „Wie kann ich Freunden das an die Hand geben, ohne dass sie einen Server oder ähnliches
+brauchen?“ → „Telegram wie bei dir“; für ihn selbst „Auch einfacher“; „du baust es noch komplett kaputt, wenn du so
+weiter machst. Ich wollte es simplifizieren“.
+
+| Nr. | Annahme (bis Florian widerspricht) |
+|---|---|
+| M2 | Eine Rechen-Sperre für den ganzen Mini: Florians Datei `/var/lib/clip-pipeline/pipeline.lock` bleibt, wo sie ist; Freunde tragen sie als `[sperre].datei` ein und dürfen sie nur lesen. Nicht verlegt, weil Florians Lern-Bot auf einem anderen Code-Stand laufen kann und Skripte und Doku den Pfad fest nennen (`puffer-einrichten.sh`, `puffer-zurueck.sh`, `docs/PUFFER.md`) |
+| M3 | `[sperre].datei` leer oder fehlend = wie bisher neben der Datenbank (`<datenbank>.lock`); ein relativer Pfad gilt neben der Datenbank. Nur `sperre.pfad` leitet den Pfad ab (ein Test wacht darüber); `alles-aktualisieren.sh` fragt ebenfalls dort nach, ein älterer Code-Stand ergibt wie bisher `<datenbank>.lock` |
+| M4 | Darf ein Prozess die Sperrdatei nicht schreiben (EACCES, EPERM, EROFS), öffnet er sie nur lesend – flock wirkt so in beide Richtungen (`sperre.sperre` und der Belegt-Test in `big.py`). Fehlt sie und lässt sie sich nicht anlegen: klarer Fehler (`pipeline` endet mit Exit 2 und `{"fehler": "konfig"}`), nie eine Ersatzsperre daneben |
+| M5 | `/paket` im Clip-Bot rendert jetzt unter der Sperre (vorher ganz ohne) und wartet nicht: Rechnet gerade etwas anderes, kommt „⏳ Gerade rechnet ein anderer Schritt – gleich nochmal: /paket N“. Der Clip-Bot arbeitet Nachrichten nacheinander ab; langes Warten hielte jeden Klick auf |
+| M6 | Messgrundlage: Jede gehaltene Sperre schreibt beim Freigeben eine Zeile „Sperre gewartet x s, gehalten y s (Datei)“ ins Log – auch die Lager-Sperre. Wer aufgibt, schreibt keine eigene Zeile, das melden die Aufrufer wie bisher |
+| M7 | Freunde warten höchstens 15 min auf die Sperre (danach übernimmt der nächste Timer-Lauf), Florian wie bisher 7200 s. Faire Reihenfolge und Vorrang kommen in Stufe 3 |
+| M8 | Freunde laufen in Stufe 1 ohne n8n, Clip-Bot, Mic-Schritt, Zahlen-Abruf, Lager und pve-big; das Abend-Video braucht davon nichts. Auto-Freigabe, 2-Wochen-Video, Warnungen und Kennzahlen folgen in Stufe 2 bzw. 4 |
+| M9 | KI nur mit eigenem Claude-Zugang des Freundes (eigene Anmeldung in seinem Ordner, zählt gegen sein Abo). Ohne ihn ist sie aus (leeres `[decide].programm`). Florians Anmeldung gibt es im Bereich des Freundes gar nicht; sie ist nie ein Rückfall |
+| M10 | Speicher in Stufe 1: Daten der Freunde nur auf einem eigenen Volume, nie auf der Container-Platte (16 GB, Florians Datenbank) und nie in Florians Puffer. Lager-Pfad `<Instanzordner>/kein-lager`, den es nie gibt (der Ordner gehört root) – jeder Lager-Zugriff scheitert sicher. Freigeben im Puffer und Aufräumen sind erzwungen aus: bei Freunden wird in Stufe 1 nichts gelöscht |
+| M11 | Lager ab Stufe 2 (Florian: „wie bei dir, mit Lager“): eigener Unterordner je Freund auf pve-big, Freigabe im Puffer nach 14 Tagen bei bestätigter Kopie wie B5. Geplant: Florians täglicher Abgleich hält pve-big wach; danach läuft je Freund ein Abgleich als dessen eigener Benutzer in der Sandbox, der nur seinen eigenen Unterordner sieht. Ein Freund weckt nie |
+| M12 | Weg der Aufnahmen ab Stufe 2: Briefkasten auf dem vServer (kleiner Upload-Dienst, nicht n8n), der Mini holt über Tailscale ab. In Stufe 1 entfallen die Samba-Freigabe je Freund und die eigene psd1 für Freunde; bis dahin kommen Aufnahmen eines Freundes nur von Hand (als root) in seinen Eingang – das reicht für Test und Abnahme |
+| M13 | Ein Freund = ein eigener Telegram-Bot, angelegt von Florian (eigener Token, genau eine erlaubte Telegram-ID). Ein gemeinsamer Bot für alle kommt später: rund 95 Stellen im Bot wären umzubauen, und eine Telegram-Datei-ID gilt nur je Bot |
+| M14 | Florian ist Betreiber (root) und kann technisch alles sehen. Die Trennung schützt die Freunde voreinander und Florians Daten vor den Freunden |
+| M15 | Von Florian übernommen werden nur Rechnerwerte und Spielwissen (`[schnitt].encoder`/`vaapi_geraet`, `[merkmale.waffen]`) – ohne Encoder-Werte schnitten Freunde auf dem Prozessor und hielten die Sperre länger. Gelerntes, Regeln, Sperren und Tokens nie; Startwissen ist die Repo-Konfig |
+| M16 | Für Freunde gelten dieselben Regeln: nur starke Szenen, sonst „kein Video, weil …“, einfacher Modus, Zeitzone Europe/Berlin (änderbar in `instanz.toml`). Aufgenommen wird mit Nvidia App oder SteelSeries wie bei Florian |
+| M17 | Die Epic-Konto-ID ist Pflicht; der Fortnite-Name ist nur Rückfall (`replay2json` prüft Namen nur auf „enthält“) |
+| M18 | Das Whisper-Modell liegt je Freund im eigenen Cache (~480 MB) und wird einmal beim Einrichten geladen; Florians Modell ist für Freunde unsichtbar |
+| M19 | Prozessliste und Netz: Ohne `ProtectProc=invisible` sähen Prozesse der Freunde die Befehlszeilen anderer; eine Netzsperre fürs Heimnetz und Tailnet fehlt noch. Beides wird vor Ort im Container geprüft und nur eingeschaltet, wenn es dort funktioniert |
+| M20 | Kein Auto-Update, keine automatische Installation: Das Update legt die Vorlagen nur auf die Platte; eingeschaltet wird nur über `benutzer-anlegen.sh`, das Florian selbst startet. Gelöscht werden keine Benutzerdaten |
+| M21 | Keine Schema-Migration in Stufe 1. Migrationstest heißt: Ohne `CLIP_INSTANZ` bleiben Konfig und Sperrpfad gleich (Sperrpfad: `tests/test_sperre_gemeinsam.py`); das Update sichert zusätzlich jede Instanz-Datenbank |
+| M22 | Zwei Nebenbefunde werden in Stufe 1 mitbehoben: `/paket` ohne Sperre (M5) und ein Whisper-Fehler, der das Abend-Video abbricht (`sitzung.py`) |
+| M23 | Die parallel laufenden Stufen 4/5 („Nichts mehr von Hand“) kommen zuerst nach main; die Mehrbenutzer-Schritte setzen darauf auf. Berührungen nur in `sitzung.py`, `lernbot.py` und `geschmack.py` |

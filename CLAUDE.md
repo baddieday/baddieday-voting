@@ -107,6 +107,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - Inoffizielle Einreich-API für clip-battle.de: Entwurf in PLAN.md, Umsetzung im Repo `E:\GIT\clip-battle` erst nach OK (Branch?).
 - Whisper (Untertitel + Kommentar-Merkmal): Installation von `faster-whisper` freigeben?
 - Highlight-Video: Ordner mit lizenzierter Musik anlegen.
+- Mehrbenutzer (M1): Wie viel Speicher ist auf dem vServer frei (für den Briefkasten der Freunde, Stufe 2)?
 
 ## Entscheidungen
 - 2026-09-23: Kein Medal.tv – Nvidia + SteelSeries reichen; Pipeline wählt pro Moment die Aufnahme mit bester Abdeckung.
@@ -528,3 +529,23 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     43 s 62 s); nur wenn schon 4 Szenen länger sind, bleibt es länger. Bleibt ein Short unter deiner Mindestlänge,
     steht es darunter. Nachgestellt mit 10 Abenden Vorgeschichte, dann 10× 🎬: 11 von 11 Videos mit 46–71 s, keine
     Szene in mehr als 3. N92–N99.
+- 2026-10-08 (M1, Clip-Pipeline 4.0 – Florian: „Wie kann ich Freunden das an die Hand geben, ohne dass sie einen Server
+  oder ähnliches brauchen?“ → „Telegram wie bei dir“, für dich selbst „Auch einfacher“, und „du baust es noch komplett
+  kaputt, wenn du so weiter machst. Ich wollte es simplifizieren“): **Mehrbenutzer = eine abgeschlossene Instanz je
+  Freund.** Plan: `docs/MEHRBENUTZER.md`, Annahmen M2–M23: `docs/ENTSCHEIDUNGEN.md`, „Mehrbenutzer (Clip-Pipeline 4.0)“.
+  - Je Freund ein eigener Linux-Benutzer `clip-<name>`, ein eigener Ordner `/var/lib/clip-benutzer/<name>` (Datenbank,
+    Puffer, Regie, Musik, Cache), Konfig und `.env` gehören root, genau ein eigener Lern-Bot; gestartet nur aus
+    systemd-Vorlagen mit `CLIP_INSTANZ` und einer Sandbox, die alles von dir ausblendet. Gleicher Code, gleiche Regeln.
+  - Bei dir ändert sich nichts (Konfig, Umgebung, Sperrpfad, Dienste, n8n-Vertrag). Keine Benutzer-Spalte in deiner
+    Datenbank – verworfen (336 SQL-Anweisungen); getrennt wird durch eigene Dateien, Kernel und Sandbox.
+  - Geteilt wird nur deine Rechen-Sperre (`[sperre].datei`, leer = wie bisher `<datenbank>.lock`): Freunde dürfen sie
+    nur lesen, flock wirkt trotzdem; fehlt sie und lässt sich nicht anlegen, klarer Fehler statt Ersatzsperre.
+    Mitbehoben: `/paket` im Clip-Bot rendert jetzt auch unter der Sperre. Jeder gesperrte Schritt loggt „Sperre
+    gewartet x s, gehalten y s“ (Messgrundlage vor und nach dem ersten Freund).
+  - Deine Antworten: **Weg** = Briefkasten auf dem vServer (kleiner Upload-Dienst, nicht n8n, keine Videos durch n8n),
+    der Mini holt über Tailscale ab und rechnet – kommt mit Stufe 2, Samba-Freigaben je Freund entfallen. **Speicher**
+    „wie bei dir, mit Lager“ – eigener Lager-Unterordner je Freund auf pve-big, Freigabe im Puffer nach 14 Tagen bei
+    bestätigter Kopie; ab Stufe 2, vorher wird bei Freunden nichts gelöscht. **KI** = eigener Claude-Zugang je Freund;
+    ohne ihn bleibt sie bei ihm aus, deine Anmeldung ist nie Rückfall.
+  - Kein Auto-Update, keine automatische Installation: eingeschaltet wird nur über `benutzer-anlegen.sh`, das du selbst
+    startest.

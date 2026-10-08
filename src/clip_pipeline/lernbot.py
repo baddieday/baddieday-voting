@@ -489,7 +489,7 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
     Abwechslung mit Ermüdung (08.10.): Reicht der Abend nicht, baut regie.erstelle (mischen) gemischt aus den letzten
     Tagen – neue Szenen zuerst, bekannte gebremst, nie eine aus deinen letzten Videos.
     Fehler: regie.ZuWenigSzenen / regie.KeineNeuenSzenen, wenn es auch gemischt nicht reicht."""
-    from .sperre import sperre
+    from .sperre import pfad as sperre_pfad, sperre
 
     konfig.pruefe_speicher(wecken=True)  # wirft SpeicherOffline mit Grund, wenn Wecken nicht erlaubt ist
     con = db.verbinde(konfig.datenbank)
@@ -507,7 +507,7 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
             nur_matches, quell_hinweis = einstellungen.quell_matches(con, konfig)
         # Rendern ist ein rechenintensiver Schritt: gleiche Sperre wie die Pipeline (nur einer gleichzeitig)
         t0 = time.monotonic()
-        with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
+        with sperre(sperre_pfad(konfig), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
                 big.herzschlag(konfig, "lernbot"):
             t1 = time.monotonic()
             nachgezogen = stimmung_nachziehen(con, konfig, nur_matches)

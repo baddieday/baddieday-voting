@@ -22,6 +22,7 @@ from .. import (auto_freigabe, caption, db, einstellungen, erwartung, highlight,
                merkmale, publikum, shorts, uebertragung)
 from ..konfig import Konfig, SpeicherOffline
 from ..medien import MedienFehler
+from ..sperre import Gesperrt, pfad as sperre_pfad, sperre
 from ..zeit import aus_iso, iso, jetzt
 from . import aktionen, texte
 
@@ -438,6 +439,14 @@ async def cmd_gewichte(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
+def _rendere_short(konfig: Konfig, quelle, ziel, stimmen) -> None:
+    """Short für /paket unter der Pipeline-Sperre rendern – wie jeder rechenintensive Schritt (eine Sperre für den
+    ganzen Mini, M1). Ohne Warten: Rechnet gerade etwas anderes → Gesperrt. Der Clip-Bot arbeitet Nachrichten
+    nacheinander ab; ein langes Warten hielte jeden Klick auf."""
+    with sperre(sperre_pfad(konfig), warten_s=0):
+        shorts.rendere(quelle, ziel, konfig, stimmen=stimmen)
+
+
 async def sende_paket(context: ContextTypes.DEFAULT_TYPE, clip_id: int) -> None:
     """Short (als Datei, unverändert) + Caption zum Kopieren + Checkliste mit Häkchen je Plattform."""
     con, konfig, chat = _daten(context)
@@ -461,8 +470,11 @@ async def sende_paket(context: ContextTypes.DEFAULT_TYPE, clip_id: int) -> None:
         try:
             # Rendern dauert: in einem eigenen Thread, damit der Bot weiter reagiert (DB bleibt im Haupt-Thread)
             # Mikro/Chat nur bei Lachen, Jubel oder Gags (merkmale.stimmen_fuer_clip)
-            await asyncio.to_thread(shorts.rendere, konfig.absolut(clip["clip_pfad"]), ziel, konfig,
-                                    stimmen=merkmale.stimmen_fuer_clip(con, clip_id))
+            await asyncio.to_thread(_rendere_short, konfig, konfig.absolut(clip["clip_pfad"]), ziel,
+                                    merkmale.stimmen_fuer_clip(con, clip_id))
+        except Gesperrt:
+            await context.bot.send_message(chat, f"⏳ Gerade rechnet ein anderer Schritt – gleich nochmal: /paket {clip_id}")
+            return
         except MedienFehler as e:
             await context.bot.send_message(chat, f"⚠️ Short fehlgeschlagen: {escape(str(e)[:300])}")
             return

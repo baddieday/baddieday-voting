@@ -20,7 +20,7 @@ from . import aufraeumen, bestand, big, caption, db, erfassung, highlight, lerne
 from . import erwartung, merkmale, mikro  # Stufe 2 (Lernschleife): Merkmale, Mic-Schritt, Erwartung
 from .konfig import KonfigFehler, SpeicherOffline, lade
 from .medien import MedienFehler
-from .sperre import Gesperrt, sperre
+from .sperre import Gesperrt, SperreFehler, pfad as sperre_pfad, sperre
 from .vorbewertung import MERKMAL_NAMEN, MERKMALE, zahl
 from .zeit import iso, jetzt, utc_zu_lokal
 
@@ -963,7 +963,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.sperren:
             warten = float(konfig.wert("sperre.warten_s", 7200))
-            with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=warten, melde=log.info):
+            with sperre(sperre_pfad(konfig), warten_s=warten, melde=log.info):  # eine Sperre für den ganzen Mini (M1)
                 if args.befehl in WECKEN:
                     konfig.pruefe_speicher(wecken=True)
                 if konfig.getrennt:
@@ -982,6 +982,10 @@ def main(argv: list[str] | None = None) -> int:
         log.error("%s", e)
         _json({"fehler": "gesperrt", "hinweis": str(e)})
         return 4
+    except SperreFehler as e:  # M1: Sperrdatei fehlt und lässt sich nicht anlegen – ohne sie rechnet nichts
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
     except (KeyError, verarbeitung.SessionFehler, replay.ReplayFehler, MedienFehler) as e:
         log.error("%s", e)
         _json({"fehler": str(e).strip("'\"")})
