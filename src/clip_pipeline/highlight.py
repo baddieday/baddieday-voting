@@ -7,13 +7,14 @@ bleiben für vorhandene Aufrufer verfügbar; sie werden für neue Highlights nic
 
 from __future__ import annotations
 
+import copy
 import json
 import sqlite3
 import zlib
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import db, elo
+from . import db, einstellungen, elo
 from .konfig import Konfig
 from .medien import probe, vorschau
 from .verarbeitung import SessionFehler, pruefe_id
@@ -182,6 +183,19 @@ def _mmss(sekunden: float) -> str:
     return f"{s // 60:02d}:{s % 60:02d}"
 
 
+def _deine_musik(con: sqlite3.Connection, konfig: Konfig) -> Konfig:
+    """Stufe 4 (08.10.): Auch das 2-Wochen-Video bevorzugt im einfachen Modus deine Genres (einstellungen.DEINE_GENRES:
+    Techno, Hardstyle, Hardcore, Phonk) – sonst bekäme dort Rock aus der Datei den Vorrang und die selbst geladenen
+    Hardstyle- und Phonk-Titel kaum einen Einsatz. Nur dieser eine Wert; alles andere bleibt wie in der Datei.
+    /experte: die Konfig unverändert."""
+    ist_fest, genres = einstellungen.fest(con, konfig, "musik.genres_bevorzugt")
+    if not ist_fest:
+        return konfig
+    daten = copy.deepcopy(konfig.daten)
+    daten.setdefault("musik", {})["genres_bevorzugt"] = list(genres)
+    return Konfig(daten=daten, quelle=konfig.quelle)
+
+
 def erstelle(con: sqlite3.Connection, konfig: Konfig, hid: str, tage: int) -> dict:
     """n8n-Vertrag, gemeinsamer autonomer Regisseur. Bestehende Exporte bleiben erhalten."""
     from . import entwurf, regie, regie_lernen, stimmung
@@ -207,8 +221,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, hid: str, tage: int) -> di
     if zeile is None:
         stimmung.analysiere(con, konfig, nur_clips=[c["id"] for c in clips], claude=False, whisper=False)
         parameter, ziel = regie_lernen.aktuelle(con, konfig, "zusammenschnitt")
-        e = regie.erstelle(con, konfig, "zusammenschnitt", name=name, parameter=parameter, ziel=ziel,
-                           nur_matches={c["match_id"] for c in clips})
+        e = regie.erstelle(con, _deine_musik(con, konfig), "zusammenschnitt", name=name, parameter=parameter,
+                           ziel=ziel, nur_matches={c["match_id"] for c in clips})
         zeile = con.execute("SELECT * FROM entwuerfe WHERE id=?", (e["entwurf"],)).fetchone()
     liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
     regie.pruefe_dauer("zusammenschnitt", liste["dauer_s"])

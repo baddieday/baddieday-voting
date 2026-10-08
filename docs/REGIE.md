@@ -72,6 +72,11 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
   Dance-Rock und Midtempo Bass von NCS (Metal gibt es dort nicht). Diese Genres bekommen bei der Musikwahl
   `[musik].genre_bonus` = 1,5 dazu und schlagen so die alten EDM-Titel. Beim Einspielen gleich mit:
   `NCS_GENRES=hart NCS_ANZAHL=40` vor `bash` in der Einspiel-Zeile.
+- **Musik füllt sich selbst auf** (08.10., einfacher Modus): Vorrang haben nur noch Techno, Hardstyle, Hardcore, Phonk
+  und Brazilian Phonk (`einstellungen.DEINE_GENRES`, auch im 2-Wochen-Video). Sind davon weniger als 16 Titel frei
+  (🎵-Sperren zählen ab), lädt `pipeline sitzungen` tagsüber (10–17 Uhr, einmal am Tag) bis zu 10 neue von NCS
+  (`musik.nachschub`, Merker `ereignisse` Art `musik_nachschub`). Von Hand weiter:
+  `pipeline musik ncs --genre hardstyle,phonk,brazilian-phonk`.
 - Journal: „Entwurf #n gebaut in 95 s: Sperre 0 s · Stimmung 50 s (10 Clips) · Schnitt 4 s · Render 41 s“ zeigt,
   wo die Wartezeit nach ✅ fertig bleibt.
 - **Telegram über IPv4** (`[lernbot].nur_ipv4 = true`, 27.09.): Über IPv6 blieb die Warteabfrage auf dem Mini hängen,
@@ -103,7 +108,7 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 | 😵 zu hektisch | Segmente +15 % länger, Übergänge +10 %; ab +30 % nur jeder 2., ab +70 % jeder 4. Beat; dazu Hektik ×0,9 (Beat-Akzente schwächer, 0,3 … 1,3) |
 | 🎯 Stimmung getroffen | Hauptstimmung +0,5; Musikziel dieser Stimmung rückt 20 % zum benutzten Titel |
 | ⏳ zu lang | Ziel-Dauer −10 % (bis 60 %) |
-| ⏱️ zu kurz | Ziel-Dauer +11 % – hebt „zu lang“ wieder auf; beide zugleich: nichts. Short (28.09., Florian): Start 45 s, immer 30–75 s und 4–10 Momente; jede Stimme wirkt bis an diese Grenzen (vorher war bei 45 s Schluss). `pipeline lernstand` bzw. 🧠 Lernstand zeigt „Short-Länge: …“ mit deinen Stimmen |
+| ⏱️ zu kurz | Ziel-Dauer +11 % – hebt „zu lang“ wieder auf; beide zugleich: nichts. Short (28.09., Florian): Start 45 s, immer 30–75 s und 4–10 Momente; jede Stimme wirkt bis an diese Grenzen (vorher war bei 45 s Schluss). `pipeline lernstand` bzw. 🧠 Lernstand zeigt „Short-Länge: …“ mit deinen Stimmen. Einfacher Modus (Stufe 5, 08.10.): ⏱️/⏳ setzen dort eine Grenze 10 s über bzw. unter dem Video (`regeln.laenge`) – sie ist der Start fürs Publikums-Modell, das nur in deiner Richtung abweichen darf; der gelernte Faktor wirkt dort nur ohne sie |
 | ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills |
 | 🥱 Schnitt langweilig | (07.10.) nichts an den Momenten – ein Urteil über den Schnitt; im einfachen Modus lernt `geschmack.py` daraus Aufbau, Tempo und Zeitlupe, und die neue Fassung ist anders geschnitten (bis 07.10.: „Clips langweilig“, jeder Moment −1) |
 | 🎆 zu viele Effekte | Effekt-Stärke der Hauptstimmung ×0,85 (bis 0,1) – alle Effekte dieser Stimmung schwächer, schwache fallen unter die Schwelle weg |
@@ -143,6 +148,24 @@ Simulation damit: **83 verschiedene** Momente in 20 Shorts statt 18 – und die 
 (je 5× in 20 Shorts). Der Entwurf zeigt die Bilanz („Auswahl aus 120 Momenten · 14 im Cooldown“), `/lernstand`
 die Regeln. Einstellbar in `[regie.vorgaben]`.
 
+**Einfacher Modus seit 08.10.: Abwechslung mit Ermüdung** (Florian: „die Momente dürfen ruhig öfter und gemischter
+genutzt werden aber nur weil ein Clip gut ist muss der nicht immer egal wo verwendet werden … bessere öfters zeigen
+aber nicht permanent“; ersetzt „jede Szene nur in einem Video“). Statt Abzug, Cooldown und Frische-Quote
+(`szenen.verlauf`, `parameter.ermuedung`): Neue Szenen gehen vor. Eine Szene, die gerade erst (höchstens 48 h) in
+einem der letzten 3 Videos lief (Fassungen eines Videos zählen als eines), ist kein Kandidat; der Cooldown holte sie
+sonst zurück, sobald Frisches fehlte. Bekannte starke verlieren je Einsatz der letzten 30 Tage die Hälfte ihrer Punkte
+(Punkte × 0,5^Einsätze), höchstens die Hälfte bekannte (bis 4 Szenen dürfen es mehr sein), nie mehr als 2 Szenen, die
+schon zusammen in einem Video waren. Das Abend-Video bleibt beim Abend (Nachschub höchstens die Hälfte, schon wenn es
+sein Ziel um mehr als 2 s verfehlt). 🎬 und neue Fassungen (`regie._mit_lockerung`) planen bis zu dreimal – vom Abend,
+gemischt aus den letzten 12 Tagen (`parameter.mix`), gemischt und locker (`parameter.locker`: beliebig viele bekannte,
+aus demselben früheren Video höchstens die Hälfte) – und nehmen den ersten Plan, der das Ziel erreicht (vom Abend bei
+🎬 nur mit etwas Neuem), sonst den längsten; nie unter 4 Szenen. Gäbe es so gar kein Video, sperren in einem letzten
+Versuch nur die letzten 2 Videos (`regie.NOTFALL`) – für die Länge allein wird die Sperre nie gelockert. Gespeichert wird nur
+der gewählte Plan. Eine neue Fassung nach ❌ darf die Szenen ihres Videos nehmen (`parameter.ersetzt`, keine
+Wiederholung), außer sie liefen gerade erst in einem anderen Video. Werte intern in `[regie]` (`ermuedung_tage`,
+`ermuedung_faktor`, `sperre_videos`, `sperre_stunden`, `wiederholung_anteil`, `gleich_mit_video`). /experte,
+2-Wochen-Video und 🔥 Viral wie oben.
+
 Fehlt die Datei eines Moments (z. B. eine gelöschte Kopie), nimmt der Regisseur seit 27.09. den Bot-Clip
 (gleicher Inhalt; nicht nach einem Nachschnitt) statt den Moment still wegzulassen – und zählt, was fehlt
 („… · 2 ohne Datei“, Hinweis „N Momente ohne Datei übersprungen“). Scheitert das Nachziehen der Stimmung vor
@@ -164,6 +187,10 @@ Ursache der kurzen Shorts (27.09., nachgestellt): Seit „Multikills am Stück�
 und 2–3 Momenten statt 45 s. Jetzt legt der Regisseur nach dem Kürzen erneut nach (nur Momente, die unter die
 Obergrenze passen). Der gelernte `dauer_faktor` („⏳ zu lang“) spielte dabei kaum eine Rolle, konnte aber bis
 27.09. nur fallen – deshalb der neue Grund „⏱️ zu kurz“.
+
+Einfacher Modus seit 08.10.: Nach „⏳ höchstens …“ (`parameter.laenge_richtung` = "lang") ist die Obergrenze fürs
+Nachlegen und Kürzen deine Grenze + 2 s statt `max_s` – solange 4 Szenen bleiben (vorher schoss die letzte Szene
+darüber: 61 s bei „höchstens 55 s“).
 
 ## Multikills am Stück – Serie und Jump-Cut
 Bei einem Team-Wipe sterben alle umgehauenen Gegner im selben Augenblick. Die Kill-Zeiten liegen dann alle beim

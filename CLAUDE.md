@@ -451,3 +451,80 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Posts keine Noten mehr). Erste Caption-Zeile im einfachen Modus mit Songtitel, am Post gespeichert (zwei ✅ eines
     Abends bekamen vorher nie Zahlen). Nach dem Paket: „füg den Text oben unverändert ein“. KI-Note im 📋 mit echtem
     Grund; n8n „Highlight-Video fertig“ aus; Kopfzeile bleibt nach dem Tipp. N38–N47.
+  - **Stufe 4: Zu kurz? Erst mehr Anlauf** (`regie.mehr_anlauf`): Bleibt ein Short im einfachen Modus unter 30 s oder
+    mehr als 10 s unter dem Ziel, plant der Bot einmal neu – Anlauf/Ausklang mindestens 4/3 s statt gelernt 2,5/1,5 s,
+    dieselben Szenen, kein Füllmaterial (vorher „kein Video, die starken Szenen ergeben nur 22 s“ bzw. 32 s bei Ziel
+    45 s; jetzt 34 bzw. 44 s). Reicht es nicht, „kein Video“ wie bisher; gilt auch für 🥱; /experte unverändert. N48–N50.
+  - **Stufe 4: Nachschub – starke Szenen, die du noch nie gesehen hast** (`regie.erstelle`, Florian 08.10.: „Ja,
+    auffüllen“): Hat der Abend weniger als 4 ungesehene starke Szenen oder bleibt das Video auch mit mehr Anlauf zu
+    kurz, kommen nie gezeigte starke Szenen früherer Abende dazu – nur aus Matches der letzten 12 Tage (rohdaten_tage
+    − 2, sonst fehlt beim ✅ das Rohvideo), nie Einzelkills, nie Fails, höchstens die Hälfte, vorn immer eine Szene vom
+    Abend; im Video steht „+2 Szenen von früheren Abenden“. Gilt fürs Abend-Video, 🎬 und jede neue Fassung nach ❌
+    (auch 🥱, dort jetzt mit denselben Grenzen). „Kein Video“ nur, wenn auch das nicht reicht – der Satz sagt, warum.
+    Nachgestellt: dünner Abend (2 starke) vorher „kein Video“, jetzt 41 s mit 2 + 2 Szenen; 🎬 nach dem Abend-Video
+    vorher dieselben 4 Szenen, jetzt 3 neue von 6. /experte und eine Match-Wahl dort exakt wie bisher. N51–N59.
+  - **Stufe 4: Nachtrag – spät angekommenes Material zählt noch** (`sitzung._nachtrag`): Endete der neueste Abend mit
+    „kein Video“ und kommt danach noch etwas an (Clip-Dateien, Matches, die n8n später fertig hat, ein Match, das der
+    PC erst beim nächsten Start schickt), baut der 10-Minuten-Timer das Video bis 24 h nach dem Abend selbst nach –
+    vorher blieb es für immer bei „kein Video“. Nur mit neuen Szenen seit dem letzten Versuch, erst nach 45 min ohne
+    weitere Szene und ohne neues Match (wer nach einer Pause weiterspielt, bekommt das Video erst danach); höchstens
+    ein Video je Abend (keins, wenn 🎬 inzwischen eins gemacht hat), nie ältere Abende, nur einfacher Modus. Beim
+    selbst erkannten Abend zählen spät angekommene Matches desselben Abends mit (Lücke ≤ 2 h). Die Statuszeile wird
+    zu „🎮 Nachtrag: Abend vom …“ und geht mit dem Video; reicht es wieder nicht, bleibt es still. Nachgestellt
+    (Prüfer s5, s5b, PC früh aus): vorher für immer „kein Video“, jetzt je ein Video; nach einer Pause weitergespielt:
+    vorher Video mitten im Spielen, jetzt danach. N60–N65.
+  - **Stufe 4: Abwechslung mit Ermüdung** (Florian 08.10.: „Manche Szenen nerven einfach nur noch … auch wenn es gute
+    Bewertungen hat“, dann als Korrektur zu „jede Szene nur einmal“: „die Momente dürfen ruhig öfter und gemischter
+    genutzt werden aber nur weil ein Clip gut ist muss der nicht immer egal wo verwendet werden … bessere öfters zeigen
+    aber nicht permanent“; `szenen.verlauf`, `regie.erstelle`): Im einfachen Modus gehen neue Szenen immer vor. Eine
+    Szene, die gerade erst (48 h) in einem deiner letzten 3 Videos lief, kommt nicht ins nächste (Fassungen eines Videos
+    zählen als eines; für die Länge nie aufgehoben – nur wenn 🎬 oder eine neue Fassung sonst gar kein Video hätte,
+    sperren die letzten 2). Bekannte starke dürfen wiederkommen, verlieren aber je Einsatz der letzten 30 Tage die
+    Hälfte ihrer Punkte; höchstens die Hälfte eines Videos bekannte (bis 4 Szenen dürfen es mehr sein), ganz ohne Neues
+    auch nur bekannte – nie mehr als 2, die schon zusammen in einem Video waren (Fassungen zählen mit). 🎬 und neue
+    Fassungen planen bis zu dreimal – vom Abend, gemischt aus den letzten 12 Tagen, gemischt und locker (beliebig viele
+    bekannte, aus einem alten Video höchstens die Hälfte) – und nehmen den ersten Plan, der das Ziel bis auf 2 s
+    erreicht, sonst den längsten; nie unter 4 Szenen. Das Abend-Video bleibt beim Abend (vorn vom Abend, höchstens die
+    Hälfte von früher, Nachschub schon, wenn es sein Ziel verfehlt). Eine neue Fassung nach ❌ behält die Szenen ihres
+    Videos (keine Wiederholung, außer sie liefen gerade erst in einem anderen); 🥱 tauscht gegen neue, dann bekannte
+    starke, zuletzt Einzelkills vom Abend. Unter dem Video „♻️ 2 Szenen kennst du schon“. Werte intern in `[regie]`
+    (`ermuedung_tage`, `sperre_stunden` …), kein ⚙️. Nachgestellt (4 Abende, dann 14× 🎬): die beste Szene in Video 1,
+    5, 9, 13, 17 (vorher nie wieder), die anderen 3–4-mal, nie zweimal in vier Videos hintereinander; 🎬 nach dem
+    Abend-Video vorher „Kein neues Video“, jetzt ein gemischtes. Ersetzt „Jede Szene nur in einem Video“ (N66–N70);
+    /experte, 2-Wochen-Video, 🔥 Viral und Lernen unverändert, gelöscht wird nichts. N84–N91, nach der Prüfung N92–N98.
+  - **Stufe 4: Musik füllt sich selbst auf** (Florian 07.10.: „Techno/Hardstyle und Phonk“, „viel mehr Musik“;
+    `musik.nachschub`, `einstellungen.DEINE_GENRES`): Im einfachen Modus haben nur noch deine Genres Vorrang bei der
+    Musikwahl – Techno, Hardstyle, Hardcore, Phonk, Brazilian Phonk (auch im 2-Wochen-Video; Rock nicht mehr, alte Titel
+    bleiben). Sind davon weniger als 16 Songs frei (🎵-Sperren zählen ab), lädt `pipeline sitzungen` am Ende eines
+    Laufs selbst bis zu 10 NCS-Titel mit Quellenangabe nach – nur 10–17 Uhr, höchstens einmal am Tag (Merker vor dem
+    Laden), Fehler nur ins Log, kein Chat. Abweichung vom Plan: gezählt werden nur deine Genres – live hat NCS nur 9
+    Techno- und 4 Hardcore-Titel, und Titel anderer Genres hielten die Gesamtzahl über 16, Hardstyle und Phonk kämen
+    nie. /experte wie bisher (Musik von Hand); gelöscht wird nichts. N71–N74.
+  - **Stufe 5: Zuschauer lehren Aufbau, Tempo und Zeitlupe** (`geschmack.statistik`, Florian: „keine 100 oder 1000
+    Videos bewerten“, „mach doch endlich ein Video das sich immer wieder verbessert“): Im einfachen Modus sind die
+    Zuschauer jetzt der dritte Lehrer neben deinem ✅/❌ (Gewicht 1) und der KI-Note (0,34) – vorher lernten die drei
+    Schrauben dort gar nicht vom Publikum. Jedes hochgeladene Video mit Zuschauer-Note zählt für jede Schraube, die
+    darin wirkte, doppelt (Treffer (y + 1)/2, wie `stile.statistik` unter /experte). Nachgestellt (Publikum mag
+    „erzählt“): Anteil „erzählt“ in den Videos 31–60 von 24 auf 56 %, Zuschauer-Note im Schnitt +0,01 → +0,34. Der
+    Wochenbericht sagt „👀 Bei den Zuschauern kommt gut an: …“. Verstellt das Publikums-Modell nur Feinwerte des Aufbaus,
+    zählt der Aufbau trotzdem (sonst lernte ihn niemand mehr). Ohne Zuschauer-Noten alles wie bisher; /experte
+    unverändert. N75–N78.
+  - **Stufe 5: ⏱️/⏳ als Grenze mit Richtung** (`regeln.laenge`, `regie_lernen.laengen_richtung`): Im einfachen Modus
+    ist deine Länge keine feste Zahl mehr, die nur du umstellen kannst: Nach deinem letzten „⏱️ zu kurz“ ist sie eine
+    Untergrenze, nach „⏳ zu lang“ eine Obergrenze (Richtung aus deinen Bewertungen, kein neuer Schlüssel). Dein Wert ist
+    der Start; darüber bzw. darunter wählt das Publikums-Modell mit Belegen, nie dagegen – ohne Zuschauerzahlen bleibt
+    es genau dein Wert (nicht der alte gelernte, der nach vielen „zu kurz“ bei 75 s stünde). ⏱️/⏳ zählen von dem Video,
+    das du gesehen hast (10 s über bzw. unter Ziel oder echter Länge); Texte „mindestens“/„höchstens“. Ein Längen-Versuch
+    des Publikums-Modells, den die Grenze verschiebt, fällt für das Video weg (sonst stünde ein nie getesteter Versuch in
+    `lern_experimente`). Nachgestellt mit Publikum, das 60–70 s mag: Untergrenze 55 → 65 s; ⏳ am 65-s-Video →
+    höchstens 55. /experte und ein ⚙️-Wert ohne ⏱️/⏳ bleiben fest. N79–N83.
+  - **Prüfung Stufe 4/5 (zwei Prüfer, nachgestellt):** Die Sperre galt ohne Zeitgrenze – nach einer Woche Pause blieb
+    der neue Abend ohne Video (jetzt 40 s); die Fassung eines älteren Videos holte Szenen aus dem Video direkt davor.
+    🎬 nahm einen Abend-Plan bis 10 s unter dem Ziel, obwohl gemischt genug da war (43 statt 62 s bei „mindestens
+    65 s“), und ließ 3 Szenen aus einem alten Video als Video durch – jetzt die drei Pläne oben. ⏱️/⏳ an einem älteren
+    Video verschoben deine Grenze gegen deine Richtung (⏱️ an 40 s bei „mindestens 55“ ergab 50) – jetzt nie zurück
+    („schon mindestens 55 s“). Nach „⏳ höchstens …“ hält er deine Grenze jetzt wirklich ein: Die letzte Szene schoss
+    vorher darüber (61 statt 53 s bei „höchstens 55“), und mehr Anlauf gibt es nur noch unter 30 s (vorher wurden aus
+    43 s 62 s); nur wenn schon 4 Szenen länger sind, bleibt es länger. Bleibt ein Short unter deiner Mindestlänge,
+    steht es darunter. Nachgestellt mit 10 Abenden Vorgeschichte, dann 10× 🎬: 11 von 11 Videos mit 46–71 s, keine
+    Szene in mehr als 3. N92–N99.

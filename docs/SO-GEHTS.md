@@ -3,12 +3,25 @@
 ## Was von selbst passiert
 1. Du zockst. Kommt 45 Minuten lang kein neues Match dazu, gilt der Abend als vorbei (am PC musst du nichts
    einstellen), und der Lern-Bot schreibt: „🎮 Abend vom … erkannt – ich baue dein Video.“
-2. Etwas später kommt das Video. Es besteht nur aus **starken Szenen** dieses Abends: Multikills, Clutches,
-   Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann. Scheitert das Fertigmachen des Videos,
-   versucht er es 10 Minuten später selbst noch einmal (etwas langsamer, dafür sicherer); klappt auch das nicht, sagt
-   es dir die Statuszeile.
-3. Gab es zu wenig starke Szenen (ein Video braucht 4 und mindestens 30 Sekunden), kommt **kein Video**. Die
-   Statuszeile sagt dann, warum.
+2. Etwas später kommt das Video. Es besteht nur aus **starken Szenen** dieses Abends (reicht er nicht: Punkt 3):
+   Multikills, Clutches, Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann. Scheitert das
+   Fertigmachen des Videos, versucht er es 10 Minuten später selbst noch einmal (etwas langsamer, dafür sicherer);
+   klappt auch das nicht, sagt es dir die Statuszeile. **Neue Szenen gehen immer vor.** Bekannte kommen nur ab und zu
+   wieder – die besseren öfter, aber keine, die gerade erst in deinen letzten Videos lief (in den letzten 2 Tagen), und
+   nie dieselbe Zusammenstellung. Unter dem Video steht dann „♻️ 2 Szenen kennst du schon“.
+3. Sind die starken Szenen zusammen deutlich zu kurz, zeigt der Bot von jeder etwas mehr – ein paar Sekunden mehr davor
+   und danach. Hat der Abend zu wenige (ein Video braucht 4 und mindestens 30 Sekunden) oder reicht es nicht bis zu
+   deiner Länge, nimmt er starke Szenen der letzten Tage dazu – zuerst welche, die du noch nie gesehen hast –,
+   höchstens die Hälfte, der Anfang ist immer vom Abend. Im Video steht dann „+2 Szenen von früheren Abenden“. Bleibt
+   es trotzdem kürzer als deine Mindestlänge (⏱️), steht das unter dem Video. Reicht es nicht einmal für 30 Sekunden,
+   kommt **kein Video**, und die Statuszeile sagt, warum.
+4. Kommt danach noch etwas von diesem Abend an – etwa weil der PC früh aus war, ein Match länger gebraucht hat oder du
+   nach einer Pause weiterspielst –, baut der Bot das Video bis zu 24 Stunden später selbst nach (frühestens 45
+   Minuten nach deinem letzten Match). Die Statuszeile wird dann zu „🎮 Nachtrag: Abend vom …“, und das Video kommt
+   wie sonst. Tippen musst du dafür nichts; reicht es immer noch nicht, bleibt es still.
+5. **Musik:** Techno, Hardstyle, Hardcore und Phonk haben Vorrang. Werden die Songs knapp – auch durch dein 🎵 –,
+   holt der Bot tagsüber selbst neue (von NoCopyrightSounds, die Quellenangabe steht im Text zum Hochladen).
+   Besorgen musst du keine; eigene Songs kannst du weiter mit Quellenangabe als Bildunterschrift schicken.
 
 ## Was du tust
 - **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen. **Füg den Text beim
@@ -19,12 +32,15 @@
 
 | Grund | Was sich ändert (für immer, bis du es selbst änderst – außer bei 🥱 und 🔁) |
 |---|---|
-| ⏱️ Zu kurz | Shorts werden 10 Sekunden länger (höchstens 75 s) |
-| ⏳ Zu lang | Shorts werden 10 Sekunden kürzer (mindestens 30 s) |
-| 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen Szenen, die du noch nicht gesehen hast – erst vom selben Abend, dann starke von früheren Abenden. Gibt es keine, kommt kein Video. Gesperrt wird nichts. Hast du die Effekte mit 😵 gesenkt, holt 🥱 sie eine Stufe zurück (höchstens bis normal) – das bleibt so. |
-| 🎵 Musik | Dieser Song kommt nie wieder |
+| ⏱️ Zu kurz | Shorts werden ab jetzt rund 10 Sekunden länger als dieses Video (höchstens 75 s) – kürzer werden sie erst wieder mit ⏳. Noch länger nur, wenn es bei den Zuschauern besser ankommt |
+| ⏳ Zu lang | Shorts werden ab jetzt rund 10 Sekunden kürzer als dieses Video (mindestens 30 s) – länger werden sie erst wieder mit ⏱️. Noch kürzer nur, wenn es bei den Zuschauern besser ankommt |
+| 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen andere – zuerst gegen Szenen, die du noch nicht gesehen hast (erst vom selben Abend, dann starke von früheren Abenden), sonst gegen starke, die nicht gerade erst in deinen letzten Videos liefen; Einzelkills nur, wenn es sonst nicht reicht. Nur wenn es gar keine gibt, kommt kein Video. Gesperrt wird nichts. Hast du die Effekte mit 😵 gesenkt, holt 🥱 sie eine Stufe zurück (höchstens bis normal) – das bleibt so. |
+| 🎵 Musik | Dieser Song kommt nie wieder – neue Songs holt der Bot selbst |
 | 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus); zurück geht es mit 🥱 |
 | 🔁 Einfach neu | Andere Fassung, gleiche Regeln |
+
+Die neue Fassung ersetzt das Video: Seine Szenen darf sie wieder nehmen (das zählt nicht als Wiederholung) – nach ⏱️
+bleiben sie, und neue kommen dazu.
 
 Du tippst nie etwas zweimal: Dein ✅ und dein Grund gelten sofort, auch wenn der Bot gerade baut oder packt. Die
 neue Fassung bzw. das Upload-Paket merkt er sich und erledigt es, sobald er frei ist – auch nach einem Update oder
@@ -43,13 +59,19 @@ Bei jedem Video stellt er drei Dinge selbst ein und merkt sich, was ankommt:
 - **Tempo:** schnelle oder ruhige Schnitte
 - **Zeitlupe:** viel oder wenig
 
-Er lernt aus deinen ✅/❌ und aus der Note einer KI, die sich jedes Video nach dem Senden anschaut (zählt ein Drittel
-so viel wie du). Dein Grund unter ❌ zählt mit: „🎵 Musik“ oder „⏱️ Zu kurz“ werden nicht dem Aufbau angelastet.
-Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen immer vor.** Sonntags ab 18 Uhr
-kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert hat.
+Er lernt aus deinen ✅/❌, aus den **Zuschauerzahlen** deiner hochgeladenen Videos (jedes zählt doppelt so viel wie
+ein ✅/❌ von dir – du musst dafür nichts tun außer hochladen) und aus der Note einer KI, die sich jedes Video nach dem
+Senden anschaut (zählt ein Drittel so viel wie du). Dein Grund unter ❌ zählt mit: „🎵 Musik“ oder „⏱️ Zu kurz“
+werden nicht dem Aufbau angelastet. Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen
+immer vor.** Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was bei den
+Zuschauern ankommt („👀 …“), was er probiert hat.
 
 ## Knöpfe
-- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend. Baut er gerade, kommt das laufende Video
+- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend, zuerst mit Szenen, die du noch nicht
+  kennst. Reicht der Abend nicht für deine Länge (oder hat er nichts Neues mehr), mischt er aus den letzten Tagen: neue
+  zuerst, dazu bekannte, die länger nicht dran waren – die Länge geht vor. Ist alles ausgeschöpft, nimmt er notfalls
+  auch Szenen aus deinem drittletzten Video, nie aus den letzten beiden. „Kein neues Video“ kommt erst, wenn auch das nicht
+  reicht – sobald du wieder spielst, kommt ein neues. Baut er gerade, kommt das laufende Video
   (endet eine neue Fassung ohne Video, baut er danach deins); geht es schief, versucht er es nach 10 Minuten selbst
   noch einmal.
 - **📋 Stand** – deine Regeln, was beim letzten Abend passiert ist und woraus er gerade lernt („🧠 Lernt aus: deinen
@@ -59,10 +81,10 @@ kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert 
   steht dieselbe Zeile auch in der Zusammenfassung am Sonntag.
 - **/experte** – alle alten Knöpfe, Details und ⚙️ Einstellungen ein- oder ausschalten.
 
-Einstellen musst du nichts: Clips (neuester Spielabend), Szenen (nur starke) und Aufbau wählt der Bot selbst,
-Länge, Effekte und Songs ändern nur deine Gründe unter ❌. `/einstellungen` zeigt dir, was gerade gilt.
-Was du früher unter ⚙️ eingestellt hast, bleibt gespeichert. Clips, Szenen und Aufbau legt der Bot im einfachen Modus
-selbst fest – deine alten Werte dafür gelten nur unter /experte. Andere alte Werte (z. B. eine Short-Mindestlänge)
+Einstellen musst du nichts: Clips (neuester Spielabend), Szenen (nur starke), Aufbau und Musik-Richtung wählt der
+Bot selbst, Länge, Effekte und einzelne Songs ändern nur deine Gründe unter ❌. `/einstellungen` zeigt dir, was gerade gilt.
+Was du früher unter ⚙️ eingestellt hast, bleibt gespeichert. Clips, Szenen, Aufbau und Musik-Richtung legt der Bot im
+einfachen Modus selbst fest – deine alten Werte dafür gelten nur unter /experte. Andere alte Werte (z. B. eine Short-Mindestlänge)
 gelten weiter.
 
 ## Ruhe im Chat

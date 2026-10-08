@@ -272,7 +272,9 @@ def plan_parameter(con, konfig, fmt, parameter, musik_ziele):
         return p, musik
     regeln, _ = format_regeln(konfig, fmt)
     unten, oben = (30., 75.) if fmt == "short" else (75., 120.)
-    prior_ziel = max(45. if fmt == "short" else 75., min(oben, regeln["ziel_s"]*p["dauer_faktor"]))
+    # Gerundet (08.10.): 45 × 55/45 ergibt 55,00000000000001 – dann galt 55 nicht als „vorher“, und ein Versuch
+    # „55 s“ wäre keiner gewesen (deine Grenze 55 aus regeln.laenge ist der häufigste Start)
+    prior_ziel = round(max(45. if fmt == "short" else 75., min(oben, regeln["ziel_s"]*p["dauer_faktor"])), 3)
     p["ziel_dauer_s"] = prior_ziel
     p.setdefault("hook_staerkster", False)
     alt = champion(con)
