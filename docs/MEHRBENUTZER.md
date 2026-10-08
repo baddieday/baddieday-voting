@@ -1,8 +1,9 @@
 # Mehrbenutzer – eine Instanz je Freund (Entscheidung M1, 08.10.2026)
 
 Ziel Stufe 1: Ein Freund bekommt auf dem Mini seine eigene, vollständig getrennte Pipeline. Zwei Benutzer arbeiten
-unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M23: `docs/ENTSCHEIDUNGEN.md`,
-„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 von 4 ist umgesetzt (eine Rechen-Sperre), der Rest ist Plan.
+unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M32: `docs/ENTSCHEIDUNGEN.md`,
+„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 und 2 von 4 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus),
+der Rest ist Plan.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -29,16 +30,34 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
 | I/daten (= Puffer) | 0700 | `.clip-speicher`, `.clip-puffer`, `eingang/`, `replays/`, `sessions/`, `sitzungen/`, `export/` |
 | I/regie, I/musik, I/material, I/sfx, I/cache | 0700 | I/cache ist auch HOME und Whisper-Cache |
 
-## Konfig im Instanz-Modus (`CLIP_INSTANZ=I`)
-- **Quellen:** Repo-`pipeline.toml` (nie `lokal.toml`) plus `I/instanz.toml`. Dort erlaubt: `[schnitt]`, `[zeit]`,
-  `[merkmale.waffen]`, `[sperre].datei`/`warten_s`, `[instanz]`.
-- **Erzwungen:** alle Pfade unter I; kein Host, keine MAC, kein SSH-Ziel; Aufräumen und Freigeben im Puffer aus;
-  Lager-Pfad `I/kein-lager` (gibt es nie – jeder Lager-Zugriff scheitert sicher, Puffer-Betrieb ohne Lager).
-- **KI:** nur mit eigenem Claude-Zugang des Freundes (eigene Anmeldung in seinem Ordner, zählt gegen sein Abo). Ohne
-  ihn aus (leeres `[decide].programm`). Florians Anmeldung gibt es im Bereich des Freundes nicht.
-- **Umgebung:** wird vorher geleert (`TELEGRAM_*`, `LEARN_BOT_*`, `TIKTOK_*`, `YOUTUBE_*`, `CLIP_EPIC_ID`,
-  `CLAUDE_CONFIG_DIR`), danach gilt nur `I/.env`. Verboten: `--konfig`, `CLIP_KONFIG`, `CLIP_SPEICHER`, `CLIP_DATENBANK`.
-- **Pfadwächter:** Jeder Datenpfad muss (aufgelöst) in I liegen.
+## Konfig im Instanz-Modus (`CLIP_INSTANZ=I`, umgesetzt in Schritt 2)
+`konfig.lade()` schaut zuerst nach `CLIP_INSTANZ`. Ohne die Variable (Florian) läuft alles wie bisher; mit ihr gilt
+nur, was dem Freund gehört (`konfig.lade_instanz`). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` (unten).
+- **Ordner:** absoluter Pfad, Name aus a-z, 0-9, - (2–27 Zeichen), die Marke `I/.clip-benutzer` nennt genau diesen
+  Namen. I darf sich nicht mit Florians Bereichen überschneiden (`/var/lib/clip-pipeline`, `/srv`, `/opt/clip-regie`,
+  Code-Ordner).
+- **Umgebung:** Als Erstes fliegen `TELEGRAM_*`, `LEARN_BOT_*`, `TIKTOK_*`, `YOUTUBE_*`, `CLAUDE_*`, `ANTHROPIC_*` und
+  `CLIP_EPIC_ID` raus, danach gilt nur `I/.env` – und dort nur diese Namen (sonst Exit 2). Florians `.env` und
+  `lokal.toml` werden nie geöffnet. Verboten: `--konfig`, `CLIP_KONFIG`, `CLIP_SPEICHER`, `CLIP_DATENBANK` (Exit 2).
+- **Quellen:** Repo-`pipeline.toml` plus `I/instanz.toml`. Dort erlaubt: `[schnitt]`, `[zeit]`, `[merkmale.waffen]`
+  (nur Schlüssel, die die Repo-Konfig dort kennt), `[sperre]` `datei`/`warten_s`, `[instanz]` `claude`. Alles andere
+  (Datenbank, Lager, pve-big, Pfade …) ist ein Konfig-Fehler.
+- **Erzwungen:** `I/db/pipeline.db`, Puffer `I/daten`, `I/regie`, `I/musik`, `I/material`, `I/sfx`, Zustand von
+  pve-big in `I/db`; kein Host, keine MAC, kein SSH (auch kein Schlüssel); Freigeben im Puffer und Aufräumen aus;
+  Lager-Pfad `I/kein-lager` (darf es nicht geben – jeder Lager-Zugriff scheitert sicher, Puffer-Betrieb ohne Lager).
+- **Sperre:** `[sperre].datei` ist Pflicht, absolut und außerhalb von I. Fehlt `warten_s`, wartet ein Freund 900 s.
+- **Pfadwächter:** Jeder Datenpfad (auch die Unterordner im Puffer) muss aufgelöst in I liegen – ein Link hinaus ist
+  ein Konfig-Fehler.
+- **KI nur mit eigenem Claude-Zugang** (Florian: „Eigener Claude-Zugang“): ein Langzeit-Token aus `claude setup-token`
+  im Abo des Freundes, in `I/db/claude-token` (schreibt später sein Bot per `/claude`) oder als
+  `CLAUDE_CODE_OAUTH_TOKEN` in `I/.env`. Es wird erst beim Aufruf gelesen (ein später verbundener Zugang wirkt ohne
+  Neustart) und kommt nie in die Umgebung des Prozesses. claude startet dann mit eigener, kleiner Umgebung: Token,
+  `HOME=I/cache`, `CLAUDE_CONFIG_DIR=I/cache/claude`, fester Suchpfad `/usr/local/bin:/usr/bin:/bin`, `LANG`,
+  `DISABLE_AUTOUPDATER=1`. Programm: `[instanz].claude` oder `claude` aus dem festen Suchpfad – nie aus `/home`,
+  `/root`, `/var/lib/clip-pipeline` oder `/opt/clip-regie`, auch nicht über einen Link. Ohne Token startet claude bei
+  ihm nie; KI-Note, KI-Cutter und KI-Einschätzung werden dann gar nicht erst vorbereitet (keine Rechenzeit unter der
+  gemeinsamen Sperre). 📋 Stand sagt „KI-Note: aus (kein eigener Claude-Zugang)“ und nichts zu TikTok. Tageslimits
+  gelten je Instanz (eigene Datenbank).
 
 ## Trennung – jede Schicht einzeln prüfbar
 1. **Getrennte Dateien statt SQL-Filter:** eigene Datenbank, eigener Ordner. Keine SQL-Anweisung kann Daten mischen.

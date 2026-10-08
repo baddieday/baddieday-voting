@@ -549,3 +549,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     ohne ihn bleibt sie bei ihm aus, deine Anmeldung ist nie Rückfall.
   - Kein Auto-Update, keine automatische Installation: eingeschaltet wird nur über `benutzer-anlegen.sh`, das du selbst
     startest.
+  - Schritt 2 (Instanz-Modus): `CLIP_INSTANZ=I` lädt nur die eigenen Werte (`konfig.lade_instanz`) – Repo-Konfig plus
+    `I/instanz.toml` (wenige erlaubte Abschnitte), Zugänge nur aus `I/.env`, alle Pfade unter I, kein Lager, nichts
+    gelöscht; was nicht passt, endet mit Exit 2. KI nur mit eigenem Claude-Zugang des Freundes (Token aus `claude
+    setup-token` in `I/db/claude-token` oder `I/.env`, eigene kleine Umgebung); ohne startet claude bei ihm nie. Bei
+    dir unverändert. M24–M32.

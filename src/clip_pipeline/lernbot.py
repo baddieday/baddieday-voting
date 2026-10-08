@@ -1003,8 +1003,12 @@ async def _schleife(app) -> None:
 async def ki_nachtrag(app, konfig: Konfig) -> float | None:
     """Höchstens ein KI-Urteil je Runde für einen schon gesendeten Short – nie, während der Bot gerade baut. Jeder
     Entwurf wird je Bot-Lauf nur einmal versucht (Claude-Fehler, Tageslimit: kein Dauerversuch alle 30 s)."""
+    from . import claude_aufruf
+
     versucht = app.bot_data.setdefault("ki_versucht", set())
     if app.bot_data.get("arbeitet") or app.bot_data.get("ki_arbeitet"):
+        return None
+    if not claude_aufruf.ki_moeglich(konfig):   # Freund ohne eigenen Claude-Zugang (M1): kein Versuch, nichts vermerkt
         return None
     eid = geschmack.offen_fuer_ki(app.bot_data["con"], versucht)
     if eid is None:
