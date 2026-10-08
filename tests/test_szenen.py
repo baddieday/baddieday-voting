@@ -5,6 +5,7 @@ Hälfte und tauscht die schwächere gegen neue Szenen – erst vom Abend, dann s
 import asyncio
 import json
 import unittest
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest import mock
 
@@ -52,6 +53,62 @@ class Szene(MitSpeicher):
         self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx)], ["clip:1", "clip:2", "datei:3"])
         self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx, {"datei:1"})], ["datei:1", "datei:3"])
 
+    def video(self, momente, status="gesendet", *, verworfen=None, parameter="{}", erstellt="x") -> int:
+        """Ein Entwurf mit diesen Momenten (Schnittliste im Testordner)."""
+        pfad = self.tmp / f"v{self.con.execute('SELECT COUNT(*) FROM entwuerfe').fetchone()[0]}.json"
+        pfad.write_text(json.dumps({"segmente": [{"moment": m} for m in momente]}), encoding="utf-8")
+        return self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, erstellt, "
+                                "auto_verworfen) VALUES (?, 'short', ?, ?, ?, ?, ?)",
+                                (pfad.stem, str(pfad), parameter, status, erstellt, verworfen)).lastrowid
+
+    def test_verlauf_je_video(self):
+        """08.10. (Abwechslung mit Ermüdung): Fassungen eines Videos zählen als ein Video; gesperrt sind die Szenen der
+        letzten n Videos, soweit sie höchstens 48 h alt sind (Prüfung 08.10.: nach einer Pause sperrte sonst ein altes
+        Video), Einsätze zählen nur Videos der letzten Tage, dieselbe Szene unter zwei Schlüsseln ist eine. Für eine neue
+        Fassung zählt das ersetzte Video nirgends – seine Szenen sind keine Wiederholung und frei, außer ein ANDERES
+        deiner letzten Videos hat sie gerade erst gezeigt."""
+        self.moment("clip:1", "2026-10-06T20:00:00Z", match="a1")
+        self.moment("datei:1", "2026-10-06T20:00:16Z")                  # dieselbe Szene wie clip:1
+        alt = self.video(["clip:1", "clip:2"], erstellt=iso(jetzt() - timedelta(days=40)))
+        v1 = self.video(["clip:3", "datei:1"], erstellt=iso(jetzt()))
+        self.video(["clip:4"])                                            # unlesbare Zeit: zählt als neu
+        f1 = self.video(["clip:3", "clip:5"], parameter=json.dumps({"ersetzt": [v1]}), erstellt=iso(jetzt()))
+        idx = szenen.index(self.con)
+        v = szenen.verlauf(self.con, idx, tage=30, sperre=2)              # v1 + f1 ist ein Video, dann v2
+        self.assertEqual(v.gesperrt, {"clip:1", "datei:1", "clip:3", "clip:4", "clip:5"})
+        self.assertEqual(v.einsaetze, {"clip:1": 1, "datei:1": 1, "clip:3": 1, "clip:4": 1, "clip:5": 1})
+        self.assertEqual(v.videos["clip:1"], {alt, v1})
+        self.assertTrue(v.wiederholung("clip:2") and not v.wiederholung("clip:9"))
+        self.assertEqual(szenen.verlauf(self.con, idx, sperre=3).gesperrt, v.gesperrt)   # das 40 Tage alte sperrt nicht
+        fassung = szenen.verlauf(self.con, idx, ersetzt=[f1, v1], tage=30, sperre=2)   # neue Fassung von f1
+        self.assertEqual(fassung.gesperrt, {"clip:4"})                    # clip:1 ist eigen, lief sonst nur im alten
+        self.assertFalse(fassung.wiederholung("clip:1") or fassung.wiederholung("clip:5"))
+        self.assertEqual(fassung.einsaetze, {"clip:4": 1})
+        self.video(["clip:5"], erstellt=iso(jetzt()))                    # ein 🎬 danach hat clip:5 gezeigt
+        fassung = szenen.verlauf(self.con, idx, ersetzt=[f1, v1], tage=30, sperre=2)
+        self.assertEqual(fassung.gesperrt, {"clip:5", "clip:4"})          # Prüfung 08.10.: bleibt für die Fassung gesperrt
+
+    def test_verbraucht_und_ersetzt_kette(self):
+        """08.10.: verbraucht sind die Szenen aus Videos, die du gesehen hast oder die gleich kommen (fertig gerendert,
+        ein Abend-Video, das der Timer nachrendert) – nicht aus still aussortierten oder gescheiterten. Eine Fassung
+        ersetzt ihr Video samt dessen Vorgängern."""
+        video = self.video
+
+        video(["clip:1"], "gesendet")
+        video(["clip:2"], "gerendert")                          # gleich bei dir
+        video(["clip:3"], "neu")                                # Rendern gescheitert: nie gesehen
+        abend = video(["clip:4"], "neu")                        # Abend-Video, das der Timer nachholt
+        self.con.execute("INSERT INTO sitzungen (name, matches, entwurf_id, verarbeitet) VALUES ('s', '[]', ?, 'x')",
+                         (abend,))
+        video(["clip:5"], "gerendert", verworfen="Tor")         # still aussortiert
+        self.assertEqual(szenen.verbraucht(self.con), {"clip:1", "clip:2", "clip:4"})
+        alt = video(["clip:6"], "bewertet")
+        fassung = video(["clip:7"], "bewertet", parameter=json.dumps({"ersetzt": [alt]}))
+        self.assertEqual(szenen.ersetzt_kette(self.con, fassung), [fassung, alt])
+        self.assertEqual(szenen.momente_der_entwuerfe(self.con, [fassung, alt]), {"clip:6", "clip:7"})
+        kaputt = video([], "bewertet", parameter="kein json")
+        self.assertEqual(szenen.ersetzt_kette(self.con, kaputt), [kaputt])
+
     def test_fassung_zweite_aufnahme_ohne_match(self):
         # Eine lautere Nvidia-Aufnahme (ohne Match) darf ihren Clip nicht als Ersatz verdrängen, und eine behaltene
         # SteelSeries-Aufnahme zählt zum Match ihres Clips (Abend) – sonst käme der frühere Abend zu früh dran
@@ -61,14 +118,25 @@ class Szene(MitSpeicher):
             schluessel=s, match_id=match, punkte=punkte, clip_id=1 if match else None, fail=False, stark=stark,
             gesperrt=False, nachschub=False)
         idx = {"datei:nv": {"clip:7"}, "clip:7": {"datei:nv"}, "datei:ss": {"clip:6"}, "clip:6": {"datei:ss"}}
-        alle = [k("datei:ss", None, 12.0), k("clip:6", "a1", 11.0), k("clip:7", "a1", 1.0, stark=False),
-                k("datei:nv", None, 5.0), k("clip:13", "a3", 11.0), k("clip:9", "a3", 3.5), k("clip:2", "f1", 3.5)]
-        auswahl, pflicht = regie.fassung_kandidaten(
-            alle, {"behalten": ["datei:ss", "clip:13"], "ohne": ["clip:9"], "abend": ["a3"]}, idx,
-            {"datei:ss", "clip:13", "clip:9"}, {"min_momente": 3})
-        self.assertEqual([x.schluessel for x in pflicht], ["datei:ss", "clip:13"])
-        self.assertEqual({x.schluessel: x.nachschub for x in auswahl if x not in pflicht},
-                         {"clip:7": False, "clip:2": True})
+
+        def fassung(**extra):
+            alle = [k("datei:ss", None, 12.0), k("clip:6", "a1", 11.0), k("clip:7", "a1", 1.0, stark=False),
+                    k("datei:nv", None, 5.0), k("clip:13", "a3", 11.0), k("clip:9", "a3", 3.5), k("clip:2", "f1", 3.5)]
+            auswahl, pflicht = regie.fassung_kandidaten(
+                alle, {"behalten": ["datei:ss", "clip:13"], "ohne": ["clip:9"], "abend": ["a3"]}, idx,
+                {"datei:ss", "clip:13", "clip:9"}, {"min_momente": 3}, **extra)
+            return [x.schluessel for x in pflicht], {x.schluessel: (x.nachschub, getattr(x, "frueher", False),
+                                                                    getattr(x, "fueller", False))
+                                                     for x in auswahl if not any(x is p for p in pflicht)}
+
+        # /experte (ohne frueher_ok): der frühere Abend nur hinten an, ohne „höchstens die Hälfte“ (wie bis 08.10.)
+        self.assertEqual(fassung(), (["datei:ss", "clip:13"], {"clip:7": (False, False, False),
+                                                                "clip:2": (False, True, False)}))
+        # einfacher Modus: Nachschub mit Hälfte-Grenze, der Einzelkill vom Abend erst nach den bekannten starken
+        self.assertEqual(fassung(frueher_ok={"f1"}), (["datei:ss", "clip:13"], {"clip:7": (False, False, True),
+                                                                                 "clip:2": (True, False, False)}))
+        # Prüfung 08.10.: eine behaltene Szene, die gerade erst in einem anderen Video lief, ist keine Pflicht
+        self.assertEqual(fassung(frueher_ok={"f1"}, gesperrt={"clip:13"})[0], ["datei:ss"])
 
 
 @unittest.skipUnless(HAT_FFMPEG and lernbot is not None, "ffmpeg oder python-telegram-bot fehlt")
@@ -125,9 +193,10 @@ class Langweilig(MitRegieMaterial):
         self.assertFalse({"datei:2", "datei:5"} <= set(m1))                 # dieselbe Szene nie zweimal
         gut, schwach = regeln.langweilig_teilung(v1)
         satz, eid2 = self.langweilig(eid1)
-        self.assertIn("2 schwächeren tausche ich gegen neue", satz)
+        self.assertIn("2 schwächeren tausche ich gegen andere – zuerst neue", satz)   # 08.10.: auch bekannte
         self.assertNotIn("nie wieder", satz)
         v2 = self.liste(eid2)
+        self.assertEqual(v2["parameter"]["ersetzt"], [eid1])               # 08.10.: ersetzt v1, darf seine Szenen
         m2 = {m for m, _ in regeln._momente(v2)}
         self.assertTrue(set(gut) <= m2, (gut, m2))                          # die stärkere Hälfte bleibt
         self.assertFalse(set(schwach) & m2)                                 # die schwächere fehlt in dieser Fassung
@@ -160,6 +229,27 @@ class Langweilig(MitRegieMaterial):
 
 
 class Ersatz(unittest.TestCase):
+    def test_ersatz_frueherer_abende_nur_aus_erlaubten_matches(self):
+        """Stufe 4 (08.10.): Ersatz früherer Abende auch nach 🥱 nur aus Matches, die höchstens 12 Tage alt sind
+        (regie.nachschub_matches) – sonst fehlt beim ✅ das Rohvideo. Eine behaltene Szene eines früheren Abends (das
+        Video hatte Nachschub) bleibt Pflicht, zählt aber als Nachschub (höchstens die Hälfte, nie vorn)."""
+        from clip_pipeline import regie
+
+        k = lambda s, match, stark=True: SimpleNamespace(  # noqa: E731
+            schluessel=s, match_id=match, punkte=5.0, clip_id=1, fail=False, stark=stark, gesperrt=False,
+            nachschub=False)
+        alle = [k("clip:1", "a1"), k("clip:2", "a1"), k("clip:3", "a1", stark=False), k("clip:5", "o1"),
+                k("clip:6", "o1"), k("clip:7", "z1")]
+        fassung = {"behalten": ["clip:1", "clip:5"], "ohne": ["clip:2"], "abend": ["a1"]}
+        auswahl, pflicht = regie.fassung_kandidaten(alle, fassung, {}, {"clip:1", "clip:2", "clip:5"},
+                                                    {"min_momente": 3}, frueher_ok={"o1"})
+        self.assertEqual({x.schluessel: x.nachschub for x in auswahl},                 # z1: zu alt
+                         {"clip:1": False, "clip:3": False, "clip:5": True, "clip:6": True})
+        self.assertEqual([x.schluessel for x in pflicht], ["clip:1", "clip:5"])
+        with self.assertRaises(regie.KeineNeuenSzenen):                                 # nichts Erlaubtes mehr
+            regie.fassung_kandidaten(alle, fassung, {}, {"clip:1", "clip:2", "clip:3", "clip:5"},
+                                     {"min_momente": 3}, frueher_ok=set())
+
     def test_ersatz_auch_wenn_die_behaltenen_reichen(self):
         """Prüfung 07.10.: Erreichen die behaltenen Szenen schon das Ziel, kommt trotzdem neuer Ersatz dazu – zu lang
         wird es nicht: dann geht die schwächste behaltene Szene (sonst „keine neue Fassung“, obwohl Neues da ist)."""

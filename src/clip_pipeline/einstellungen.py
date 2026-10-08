@@ -29,6 +29,10 @@ from .zeit import aus_iso, iso, jetzt, spielabend, utc_zu_lokal
 QUELLE = "lernbot.quelle"
 NEUESTES_MATCH = "match:neuestes"
 HARTE_GENRES = ["techno", "hardcore", "electronic-rock", "dance-rock", "midtempo-bass"]  # wie `musik ncs --genre hart`
+# 08.10. (Florian 07.10.: „Techno/Hardstyle und Phonk“): deine Genres – im einfachen Modus fest (EINFACH_FEST), und
+# genau diese lädt musik.nachschub selbst nach. Hardcore als nächster Verwandter von Hardstyle; Rock ohne Vorrang, alte
+# Titel bleiben. Eine eigene Liste statt HARTE_GENRES zu ändern: Sonst wäre ein gespeicherter ⚙️-Wert still ungültig.
+DEINE_GENRES = ["techno", "hardstyle", "hardcore", "phonk", "brazilian-phonk"]
 
 
 @dataclass(frozen=True)
@@ -110,13 +114,15 @@ KATALOG: tuple[Einstellung, ...] = (
 EINFACH = (QUELLE, "regie.short_ziel_s", "regie.szenen", "regie.effekt_stufe", "musik.genres_bevorzugt")
 # Einfacher Modus (07.10.): was ihn ausmacht – ohne Experten-Modus gelten diese Werte, egal was in Datei oder Bot steht.
 # KI-Cutter und Selbst-Aussortieren machten Entwürfe langsam und unvorhersehbar, der Abendstand war eine Nachricht zu
-# viel. Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌; die KI urteilt erst nach dem Senden mit.
+# viel. Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌ (seit 08.10. auch aus den Zuschauern); die
+# KI urteilt erst nach dem Senden mit.
 # 08.10. (Florian: „wenn ich alles per Hand einstellen muss … es soll autonom sein“): auch Clip-Auswahl, Stil und
 # Szenen entscheidet der Bot – alte ⚙️-Zeilen vom 29.09.–07.10. (z. B. ein fester Stil, der das Aufbau-Lernen
 # einfror) bleiben in der Tabelle und gelten unter /experte weiter, bremsen den einfachen Modus aber nicht mehr.
+# Stufe 4 (08.10.): auch die Musik – deine Genres (DEINE_GENRES) bekommen den Vorrang, und der Bot lädt sie selbst nach.
 EINFACH_FEST = {"regie.kritik.ki": False, "regie.kritik.schwelle": 0.0, "lernbot.auto_schwelle": 0.0,
                 "lernbot.abendstand": False, "regie.geschmack": True,
-                QUELLE: "abend", "regie.stil": "auto", "regie.szenen": "stark"}
+                QUELLE: "abend", "regie.stil": "auto", "regie.szenen": "stark", "musik.genres_bevorzugt": DEINE_GENRES}
 NACH_SCHLUESSEL = {e.schluessel: e for e in KATALOG}
 
 

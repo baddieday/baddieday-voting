@@ -317,6 +317,11 @@ class LernBot(MitRegieMaterial):
     def test_vor_dem_entwurf_weitere_clips_analysieren(self):
         from unittest import mock
         self.momente_anlegen(MOMENTE[:8])
+        # 08.10.: nur planen – ein fertig gerendertes Video gälte als gezeigt, und seine vier starken Szenen wären beim
+        # zweiten Bau gesperrt (sie waren in deinem letzten Video) – „Kein neues Video“ zu Recht
+        for ziel in (mock.patch.object(lernbot.entwurf, "entwurf"), mock.patch.object(lernbot.kritik, "bewerte")):
+            ziel.start()
+            self.addCleanup(ziel.stop)
         with mock.patch.object(lernbot.stimmung, "analysiere",
                                return_value={"analysiert": 3, "stimmungen": {"episch": 3}}) as analyse:
             lernbot.baue_entwurf(self.konfig, "short")
@@ -477,8 +482,17 @@ class EntwurfText(unittest.TestCase):
                     "Momente"):
             self.assertNotIn(weg, kurz)
         self.assertIn("🎬 <b>Video #7</b> · 47 s · 2 Szenen", kurz)                    # 07.10.: Video, Szenen
-        self.assertIn("🆕 1 neue Szene · 1 schon gezeigt", kurz)
+        self.assertNotIn("🆕", kurz)          # 08.10.: „🆕 … aus dem Video davor“ nur bei einer Fassung
         self.assertIn("⚠️ b", kurz)
+        liste["parameter"]["ersetzt"] = [6]   # neue Fassung von Video #6 nach ❌
+        self.assertIn("🆕 1 neue Szene · 1 aus dem Video davor", lernbot.entwurf_text({"id": 7}, liste, kurz=True))
+        del liste["parameter"]["ersetzt"]
+        liste["auswahl"]["wiederholt"] = ["b"]   # 08.10. (Abwechslung mit Ermüdung): ehrlich, was du schon kennst
+        self.assertIn("♻️ 1 Szene kennst du schon", lernbot.entwurf_text({"id": 7}, liste, kurz=True))
+        liste["hinweise"] = ["🎯 nur Spielabend 27.10. (2 Matches)"]
+        self.assertIn("🎯 nur Spielabend 27.10.", lernbot.entwurf_text({"id": 7}, liste, kurz=True))
+        liste["auswahl"]["nachschub"] = ["b"]    # Prüfung 08.10.: mit Szenen früherer Abende stimmt „nur …“ nicht
+        self.assertNotIn("🎯", lernbot.entwurf_text({"id": 7}, liste, kurz=True))
         voll = lernbot.entwurf_text({"id": 7}, liste, erwartung=0.8, kritik_text="🧐 Cutter 61")
         self.assertIn("🔮", voll)                                               # Experten-Modus wie bisher
 

@@ -35,8 +35,9 @@ def _alle(con: sqlite3.Connection, konfig: Konfig, alle: bool | None) -> bool:
 
 
 def uebersicht(con: sqlite3.Connection, konfig: Konfig, clip_bot: bool = False) -> str:
-    """Einfacher Modus (08.10.): was gerade gilt – ohne Knöpfe. Clips, Szenen und Aufbau entscheidet der Bot
-    (einstellungen.EINFACH_FEST), Länge, Effekte und Songs ändern nur deine ❌-Gründe (regeln.py). clip_bot: der
+    """Einfacher Modus (08.10.): was gerade gilt – ohne Knöpfe. Clips, Szenen, Aufbau und die Genres der Musik
+    entscheidet der Bot (einstellungen.EINFACH_FEST; neue Songs lädt musik.nachschub), Länge, Effekte und einzelne
+    Songs ändern nur deine ❌-Gründe (regeln.py). clip_bot: der
     Clip-Bot kennt /experte nicht – dort zeigt die letzte Zeile auf den Lern-Bot (Prüfung 08.10.)."""
     k = einstellungen.anwenden(con, konfig)
     _, hinweis = einstellungen.quell_matches(con, k)
@@ -44,7 +45,8 @@ def uebersicht(con: sqlite3.Connection, konfig: Konfig, clip_bot: bool = False) 
     zeilen = ["⚙️ Einstellen musst du nichts – das entscheide ich selbst.",
               "🎯 Clips: dein neuester Spielabend" + (f", {hinweis.removeprefix(abend)}"
                                                      if hinweis and hinweis.startswith(abend) else ""),
-              "🎬 Aufbau, Tempo und Zeitlupe lerne ich aus deinen ✅/❌.",
+              "🎬 Aufbau, Tempo und Zeitlupe lerne ich aus deinen ✅/❌ und den Zuschauerzahlen.",   # Stufe 5, 08.10.
+              "🎵 Musik: Techno, Hardstyle, Hardcore und Phonk – neue Songs hole ich mir selbst.",   # Stufe 4, 08.10.
               regeln.regeln_zeile(con, k)]
     if (mindestens := float(k.wert("regie.short_mindestens_s", 0.0) or 0.0)) > 0 and not regeln.ziel_regel(con, k):
         zeilen.append(f"⏱️ Shorts nie kürzer als {mindestens:.0f} s – so hast du es eingestellt.")

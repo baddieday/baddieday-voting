@@ -96,12 +96,14 @@ class Einstellungen(MitRegieMaterial):
         alter Schalter „Effekte aus“ = Stufe „aus“. Kein Menü, alte Menü-Knöpfe ändern nichts; nichts wird gelöscht."""
         from clip_pipeline import regeln
 
-        alt = {"lernbot.quelle": "match:m1", "regie.stil": "klassik", "regie.szenen": "alle", "regie.effekte.an": False}
+        alt = {"lernbot.quelle": "match:m1", "regie.stil": "klassik", "regie.szenen": "alle", "regie.effekte.an": False,
+               "musik.genres_bevorzugt": einstellungen.HARTE_GENRES}
         for schluessel, wert in alt.items():
             einstellungen.setze(self.con, schluessel, wert)
         k = einstellungen.anwenden(self.con, self.konfig)
         self.assertEqual((k.wert("lernbot.quelle"), k.wert("regie.stil"), k.wert("regie.szenen")),
                          ("abend", "auto", "stark"))
+        self.assertEqual(k.wert("musik.genres_bevorzugt"), einstellungen.DEINE_GENRES)   # Stufe 4: Hardstyle, Phonk …
         self.assertEqual(self.auswahl()[0], {"m2", "m3"})                               # der neueste Abend
         p, _ = regie_lernen.aktuelle(self.con, k, "short")
         self.assertIn(p["stil"], geschmack.KNOEPFE["aufbau"])                         # lernt (Klassik gehört nicht dazu)
@@ -109,6 +111,7 @@ class Einstellungen(MitRegieMaterial):
         self.assertIn("Effekte aus · nur starke Szenen", regeln.regeln_zeile(self.con, k))  # wie im 📋 Stand
         text = lernbot_einstellungen.menue_text(self.con, self.konfig)
         self.assertIn("🎯 Clips: dein neuester Spielabend, 28.09. (2 Matches)", text)
+        self.assertIn("🎵 Musik: Techno, Hardstyle, Hardcore und Phonk", text)
         self.assertIn("/experte", text)
         self.assertIn("/experte im Lern-Bot", lernbot_einstellungen.menue_text(self.con, self.konfig, clip_bot=True))
         self.assertEqual(lernbot_einstellungen.menue_knoepfe(self.con, self.konfig), [])  # keine Wert-Knöpfe
@@ -123,6 +126,7 @@ class Einstellungen(MitRegieMaterial):
         self.assertEqual(self.auswahl()[0], {"m1"})
         self.assertEqual(regie_lernen.aktuelle(self.con, k, "short")[0]["stil"], "klassik")
         self.assertFalse(regeln.nur_starke(self.con, k))
+        self.assertEqual(k.wert("musik.genres_bevorzugt"), einstellungen.HARTE_GENRES)  # alter ⚙️-Wert bleibt gültig
         self.assertEqual(len(lernbot_einstellungen.menue_knoepfe(self.con, self.konfig)), len(einstellungen.KATALOG))
 
     def test_auto_freigabe_im_katalog(self):

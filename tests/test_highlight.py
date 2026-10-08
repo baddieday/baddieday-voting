@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import db, entwurf, highlight, regie, regie_lernen, stimmung
+from clip_pipeline import db, einstellungen, entwurf, highlight, regie, regie_lernen, stimmung
 from clip_pipeline.zeit import iso, jetzt
 from tests.hilfen import MitSpeicher
 
@@ -22,6 +22,9 @@ class Highlight(MitSpeicher):
 
         def planen(con, konfig, fmt, **kwargs):
             self.assertEqual(fmt, "zusammenschnitt")
+            # Stufe 4 (08.10.): auch das 2-Wochen-Video bevorzugt im einfachen Modus deine Genres – die Datei bleibt
+            self.assertEqual(konfig.wert("musik.genres_bevorzugt"), einstellungen.DEINE_GENRES)
+            self.assertNotEqual(self.konfig.wert("musik.genres_bevorzugt"), einstellungen.DEINE_GENRES)
             self.assertEqual(kwargs["parameter"], {"ziel_dauer_s": 90})
             self.assertEqual(kwargs["nur_matches"], {"m1"})
             pfad = self.tmp / "liste.json"

@@ -30,7 +30,7 @@ from html import escape
 from pathlib import Path
 
 from . import (autonom, big, db, einstellungen, entwurf, erwartung, geschmack, highlight, kriterien, kritik, lernen,
-               massstab, musik, regeln, regie, regie_lernen, stile, stimmung, viral)
+               massstab, musik, regeln, regie, regie_lernen, stile, stimmung, szenen, viral)
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
@@ -45,6 +45,8 @@ ENTWURF_ZIELE = (*regie.FORMATE, *viral.KNOEPFE)   # was /entwurf und die Knöpf
 # ich alles per Hand einstellen muss …“): ohne ⚙️ – du tippst nur ✅ oder ❌ mit Grund, alles andere entscheidet der Bot.
 HILFE = """<b>So geht's</b>
 🎮 Nach dem Zocken kommt dein Video von selbst – aus den starken Szenen des Abends.
+➕ Reicht ein Abend nicht, nehme ich starke Szenen früherer Abende dazu – zuerst welche, die du noch nicht kennst.
+♻️ Neue Szenen gehen immer vor. Bekannte kommen nur ab und zu wieder – die besseren öfter, aber keine, die gerade erst in deinen letzten Videos lief.
 ✅ <b>Hochladen</b> – du bekommst Video und Text zum Hochladen.
 ❌ <b>Nicht gut</b> – tipp auf den Grund, ich baue neu. Alles andere entscheide ich selbst.
 🔧 Alles von Hand: /experte"""
@@ -211,19 +213,16 @@ def gelernt_zeile(liste: dict) -> str | None:
     return f"🧠 Aus {quelle}: " + escape(" · ".join(g["aenderungen"][:4]))
 
 
-def hinweis_einfach(h: str, auswahl: dict | None = None) -> str | None:
+def hinweis_einfach(h: str) -> str | None:
     """Hinweise des Regisseurs ohne Fachbegriffe (einfacher Modus, 06.10.); None = im einfachen Modus weglassen.
     07.10. (Florian: „fehlerhafte Texte“): „mehr als 3 Momente aus einem Match“ und „nur 6 Momente zur Auswahl“ sind
-    bei einem Abend der Normalfall und keine Warnung; „ein paar wiederholen sich“ stand auch da, wenn sich alle
-    wiederholten; Szenen statt Momente."""
+    bei einem Abend der Normalfall und keine Warnung; Szenen statt Momente. 08.10.: „Cooldown aufgehoben“ fällt weg –
+    im einfachen Modus wird die Sperre nie aufgehoben, bekannte Szenen zählt die Zeile „♻️ …“ (entwurf_text_einfach)."""
     h = h.removeprefix("⚠️ ")
     if h.startswith(regie.COOLDOWN_AUFGEHOBEN):
-        if auswahl and auswahl.get("schon_gezeigt"):
-            n = int(auswahl.get("neu", 0)) + int(auswahl["schon_gezeigt"])
-            return f"wenig neues Material – {auswahl['schon_gezeigt']} von {n} Szenen kennst du schon"
-        return "wenig neues Material – ein paar Szenen kennst du schon"
+        return None
     if (h.startswith("mehr als ") and h.endswith("aus einem Match")) or "Momente zur Auswahl" in h:
-        return None   # bei einem Abend der Normalfall; Wiederholungen sagt schon „wenig neues Material“
+        return None   # bei einem Abend der Normalfall
     return re.sub(r"\bMomente\b", "Szenen", h)
 
 
@@ -234,7 +233,14 @@ def _szenen_zahl(n: int, art: str = "") -> str:
 def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None) -> str:
     """Bildunterschrift im einfachen Modus (07.10., Florian: „fehlerhafte Texte … vereinfachen“): Video statt Entwurf,
     Szenen statt Momente, ✅/❌ wie die Knöpfe – ohne Bogen, Stimmung, BPM und „🧠 Aus #…“ (das sagt der Satz nach
-    deinem Grund schon). Deine Clip-Auswahl („🎯 nur Spielabend …“) steht als normale Zeile, nicht als Warnung."""
+    deinem Grund schon). Deine Clip-Auswahl („🎯 nur Spielabend …“) steht als normale Zeile, nicht als Warnung.
+    Hat der Bot mit nie gezeigten starken Szenen früherer Abende aufgefüllt (Stufe 4), sagt es „+2 Szenen von früheren
+    Abenden“. „🆕 n neue Szenen · m aus dem Video davor“ nur bei einer neuen Fassung nach ❌ (dann ohne „+n …“ – das
+    sagte das Video davor schon). Abwechslung mit Ermüdung (08.10., Florian: ehrlich, ohne Fachbegriffe): bekannte
+    Szenen zählt „♻️ 2 Szenen kennst du schon“ (bei einer Fassung „… aus früheren Videos“); kommt keine Szene vom Abend
+    (🎬 gemischt), steht dort „📅 Alle Szenen von früheren Abenden“ statt „+n …“. Die Zeile „🎯 nur Spielabend …“ steht
+    nur, wenn keine Szene von einem früheren Abend dabei ist (Prüfung 08.10.: sonst widersprach sie dem Video)."""
+    momente = {s["moment"] for s in liste["segmente"] if s.get("rolle") != "hook"}
     n = len({s["moment"] for s in liste["segmente"]})
     art = "" if liste["format"] == "short" else f"{FORMAT_NAMEN.get(liste['format'], liste['format'])} · "
     teile = [f"🎬 <b>Video #{zeile['id']}</b> · {art}{liste['dauer_s']:.0f} s · {_szenen_zahl(n)}"]
@@ -242,14 +248,32 @@ def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row
         teile.append(zeile_viral)
     a = liste.get("auswahl")
     if a:
-        teile.append(f"🆕 {_szenen_zahl(int(a['neu']), 'neue ')} · {a['schon_gezeigt']} schon gezeigt")
+        bekannt = set(a.get("wiederholt") or [])
+        fassung = bool((liste.get("parameter") or {}).get("ersetzt"))
+        frueher_alle = set(a.get("nachschub") or [])
+        if fassung:   # neue Fassung: welche Szenen du aus dem Video davor kennst (woher sie sind, sagte es schon)
+            davor = int(a.get("schon_gezeigt") or 0) - len(bekannt)
+            if int(a["neu"]):
+                teile.append(f"🆕 {_szenen_zahl(int(a['neu']), 'neue ')}" + (f" · {davor} aus dem Video davor"
+                                                                             if davor > 0 else ""))
+            elif davor > 0:   # 08.10.: statt „🆕 0 neue Szenen · …“
+                teile.append(f"↩️ {_szenen_zahl(davor)} aus dem Video davor")
+        elif frueher_alle and momente and momente <= frueher_alle:   # 08.10.: gemischt – keine Szene vom Abend
+            teile.append("📅 Alle Szenen von früheren Abenden")
+        elif frueher := len(frueher_alle - bekannt):   # Stufe 4 (08.10.): neue starke Szenen früherer Abende
+            teile.append("+1 Szene von einem früheren Abend" if frueher == 1 else
+                         f"+{frueher} Szenen von früheren Abenden")
+        if bekannt:   # 08.10.: ehrlich sagen, was du schon kennst
+            teile.append(f"♻️ {_szenen_zahl(len(bekannt))} " + ("kennst du aus früheren Videos" if fassung
+                                                                 else "kennst du schon"))
     if m := liste.get("musik"):
         teile.append(f"🎵 {escape(m['titel'])}" + (f" – {escape(m['kuenstler'])}" if m.get("kuenstler") else ""))
     warnungen: list[str] = []
     for h in liste.get("hinweise", []):
         if h.startswith("🎯"):
-            teile.append(escape(h))
-        elif (text := hinweis_einfach(h, a)) and text not in warnungen:
+            if not (a or {}).get("nachschub"):   # Prüfung 08.10.: „nur Spielabend …“ nur, wenn alles vom Abend ist
+                teile.append(escape(h))
+        elif (text := hinweis_einfach(h)) and text not in warnungen:
             warnungen.append(text)
     teile += [f"⚠️ {escape(w)}" for w in warnungen[:2]]
     if bewertung is not None:
@@ -453,13 +477,18 @@ def stimmung_nachziehen(con: sqlite3.Connection, konfig: Konfig, matches: set[st
     return {"analysiert": int(e.get("analysiert", 0)), "hinweise": hinweise}
 
 
-def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, anders_als: int | None = None) -> int:
+def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, anders_als: int | None = None,
+                 ersetzt: int | None = None) -> int:
     """compose + rendern. Läuft in einem Thread; SQLite-Verbindungen dürfen nicht zwischen Threads wandern.
     Schläft pve-big, wird er geweckt – aber nur, wenn er danach sicher wieder ausgeht (big.darf_wecken).
     nur_matches (07.10.): die neue Fassung nach ❌ kommt aus denselben Matches wie das abgelehnte Video.
     anders_als (07.10., ❌ → 🥱): Entwurf, den du langweilig fandest – die neue Fassung ist anders geschnitten
     (Aufbau, Tempo, Song) und tauscht seine schwächere Hälfte gegen neue Szenen (regeln.neue_fassung).
-    Fehler: regie.KeineNeuenSzenen, wenn es dafür keine neuen Szenen gibt."""
+    ersetzt (08.10.): Video, das diese neue Fassung nach ❌ ersetzt (jeder Grund) – seine Szenen und die seiner
+    Vorgänger-Fassungen sind für sie frei und keine Wiederholung (szenen.ersetzt_kette, Parameter „ersetzt“).
+    Abwechslung mit Ermüdung (08.10.): Reicht der Abend nicht, baut regie.erstelle (mischen) gemischt aus den letzten
+    Tagen – neue Szenen zuerst, bekannte gebremst, nie eine aus deinen letzten Videos.
+    Fehler: regie.ZuWenigSzenen / regie.KeineNeuenSzenen, wenn es auch gemischt nicht reicht."""
     from .sperre import sperre
 
     konfig.pruefe_speicher(wecken=True)  # wirft SpeicherOffline mit Grund, wenn Wecken nicht erlaubt ist
@@ -500,15 +529,17 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
             parameter = regeln.anwenden(con, konfig, regie_fmt, parameter)   # deine Regeln gehen vor (07.10.)
             if fassung is not None:
                 parameter["fassung"] = fassung   # regie.erstelle: Szenen behalten/tauschen, anderer Song
+            if ersetzt is not None and not variante:   # regie.erstelle: seine Szenen gelten nicht als verbraucht
+                parameter["ersetzt"] = szenen.ersetzt_kette(con, ersetzt)
             try:  # nur eine Anzeige – ein Fehler hier darf den Entwurf nicht kosten
                 gelernt = regie_lernen.wirkung(con, konfig, regie_fmt)
             except Exception:
                 log.exception("Wirkung der letzten Bewertung")
                 gelernt = None
-            try:
+            try:   # 08.10.: reicht der Abend nicht, mischt regie.erstelle aus den letzten Tagen (einfacher Modus)
                 e = regie.erstelle(con, konfig, regie_fmt, parameter=parameter, ziel=ziel, nur_matches=nur_matches,
                                    hinweise_vorab=[*filter(None, [quell_hinweis]), *nachgezogen["hinweise"]],
-                                   gelernt=gelernt, variante=variante)
+                                   gelernt=gelernt, variante=variante, mischen=not variante)
             except regie.RegieFehler as fehler:
                 if not nur_matches or not quell_hinweis:   # nach ❌ kommen die Matches aus dem Video: kein ⚙️-Hinweis
                     raise
@@ -668,8 +699,9 @@ async def _sende_entwuerfe(app) -> int:
             )
         con.execute("UPDATE entwuerfe SET status = 'gesendet', tg_nachricht_id = ? WHERE id = ?",
                     (nachricht.message_id, z["id"]))
-        if abend is not None:   # die Statuszeile „🎮 Abend erkannt …“ hat ihren Dienst getan
-            await _loesche_status(app, con, f"abend:{abend['name']}")
+        if abend is not None:   # die Statuszeile „🎮 Abend erkannt …“ bzw. „🎮 Nachtrag …“ hat ihren Dienst getan –
+            for art in ("abend", "kein", "nachtrag"):   # beim Nachtrag auch ein „kein Video“ als eigene Nachricht
+                await _loesche_status(app, con, f"{art}:{abend['name']}")
         gesendet += 1
     return gesendet
 
@@ -701,7 +733,9 @@ def _tag(zeit_utc: str, konfig: Konfig) -> str:
 
 
 async def _loesche_status(app, con: sqlite3.Connection, schluessel: str) -> None:
-    """Löscht eine schon gesendete Statuszeile (Lern-Meldung mit Telegram-Nachricht). Fehler: nur ins Log."""
+    """Löscht eine schon gesendete Statuszeile (Lern-Meldung mit Telegram-Nachricht). Fehler: nur ins Log.
+    Umgeschriebene Zeilen (kein:, fehler:, nachtrag: auf der Nachricht von abend:) teilen sich die Nachricht – sie
+    verlieren den Verweis mit, damit niemand dieselbe Nachricht ein zweites Mal löscht."""
     z = con.execute("SELECT id, tg_nachricht_id FROM lern_meldungen WHERE schluessel = ?", (schluessel,)).fetchone()
     if z is None or not z["tg_nachricht_id"]:
         return
@@ -709,7 +743,7 @@ async def _loesche_status(app, con: sqlite3.Connection, schluessel: str) -> None
         await app.bot.delete_message(app.bot_data["erlaubt"], z["tg_nachricht_id"])
     except Exception as fehler:  # zu alt, schon weg, Netz: die Zeile bleibt dann eben stehen
         log.info("Statuszeile %s nicht gelöscht: %s", schluessel, fehler)
-    con.execute("UPDATE lern_meldungen SET tg_nachricht_id = NULL WHERE id = ?", (z["id"],))
+    con.execute("UPDATE lern_meldungen SET tg_nachricht_id = NULL WHERE tg_nachricht_id = ?", (z["tg_nachricht_id"],))
 
 
 async def sende_meldungen(app) -> int:
@@ -725,7 +759,9 @@ async def sende_meldungen(app) -> int:
         if einfach and m["schluessel"].startswith("publikum:bewertet:"):   # 07.10.: Score-Liste nur für /experte
             con.execute("UPDATE lern_meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
             continue
-        if art in ("kein", "fehler"):   # Stufe 1: aus „🎮 Abend erkannt …“ wird „… kein Video, weil …“ – eine Nachricht
+        # Stufe 1: aus „🎮 Abend erkannt …“ wird „… kein Video, weil …“ – eine Nachricht je Abend; Stufe 4 (08.10.):
+        # kommt danach noch etwas an, wird dieselbe Zeile zu „🎮 Nachtrag: Abend vom …“ (sitzung._nachtrag)
+        if art in ("kein", "fehler", "nachtrag"):
             alt = con.execute("SELECT tg_nachricht_id FROM lern_meldungen WHERE schluessel = ?",
                               (f"abend:{abend}",)).fetchone()
             if alt is not None and alt["tg_nachricht_id"]:
@@ -737,7 +773,7 @@ async def sende_meldungen(app) -> int:
                     log.info("Statuszeile abend:%s nicht umgeschrieben: %s", abend, fehler)
         if tg_id is None:
             for stueck in stuecke(m["text"]):
-                nachricht = await app.bot.send_message(chat, stueck, disable_notification=art == "abend")
+                nachricht = await app.bot.send_message(chat, stueck, disable_notification=art in ("abend", "nachtrag"))
                 tg_id = tg_id or getattr(nachricht, "message_id", None)
         con.execute("UPDATE lern_meldungen SET gesendet = ?, tg_nachricht_id = ? WHERE id = ?",
                     (iso(jetzt()), tg_id, m["id"]))
@@ -900,10 +936,10 @@ async def fassung_auftrag(app, entwurf_id: int, folge: dict) -> str:
     Fehler (Sperre, Speicher, Platte, ffmpeg): neuer Versuch nach 10 und 30 min, nach dem dritten ein Satz.
     Rückgabe: gesendet · kein_video · nochmal · aufgegeben."""
     con = app.bot_data["con"]
-    try:
+    try:   # die neue Fassung ersetzt das Video: seine Szenen darf sie wieder nehmen (08.10., ersetzt)
         neu = await neuer_entwurf(app, "short", nur_matches=set(folge.get("matches") or []) or None, ansage=False,
                                   anders_als=entwurf_id if folge.get("grund") == "langweilig" else None,
-                                  herkunft="auftrag")
+                                  ersetzt=entwurf_id, herkunft="auftrag")
         ergebnis = "gesendet" if neu else "kein_video"   # None: der „kein Video“-Satz ist schon raus
     except Exception:  # noqa: BLE001 – neuer_entwurf hat es geloggt; den nächsten Versuch plant folge_fehlgeschlagen
         ergebnis = None
@@ -1044,9 +1080,9 @@ async def cmd_musik(update, context) -> None:
 
 
 async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansage: bool = True,
-                        anders_als: int | None = None, herkunft: str = "knopf") -> int | None:
+                        anders_als: int | None = None, herkunft: str = "knopf", ersetzt: int | None = None) -> int | None:
     """Baut einen Entwurf und schickt ihn – für /entwurf und automatisch nach jeder fertigen Bewertung.
-    anders_als (❌ → 🥱): siehe baue_entwurf – gilt für jeden Versuch.
+    anders_als (❌ → 🥱) und ersetzt (neue Fassung nach ❌, 08.10.): siehe baue_entwurf – gelten für jeden Versuch.
 
     herkunft (08.10., Merkliste): "knopf" – 🎬, /entwurf, nach ✅ fertig; baut der Bot schon, sagt er es und das
     laufende Video kommt (ist das eine neue Fassung aus der Merkliste, merkt er sich dein 🎬 für den Fall, dass sie
@@ -1090,7 +1126,7 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
         versuche_max = max(1, int(konfig.wert("viral.versuche_max" if ist_viral else "lernbot.auto_versuche_max", 3)))
         aussortiert = []
         for versuch in range(versuche_max):
-            eid = await asyncio.to_thread(baue_entwurf, konfig, fmt, nur_matches, anders_als)
+            eid = await asyncio.to_thread(baue_entwurf, konfig, fmt, nur_matches, anders_als, ersetzt)
             letzter = versuch == versuche_max - 1
             grund = pruefe_auto_verwerfen(con, konfig, eid) if ist_viral or not letzter else None
             if grund is None:
@@ -1384,11 +1420,12 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
         text = "🔁 Verstanden: Ich baue eine andere Fassung – gleiche Regeln."
     else:
         bewertung = regie_lernen.bewerte(con, eid, grund=extra)   # bleibt Lern-Material (Schnitt, Aufbau, Tempo)
-        text = regeln.wende_an(con, konfig, extra, liste) or f"Verstanden: {regie_lernen.GRUENDE[extra]}."
+        text = (regeln.wende_an(con, konfig, extra, liste, entwurf_id=eid)
+                or f"Verstanden: {regie_lernen.GRUENDE[extra]}.")
     # Erst nach der Regel merken: die Schleife soll die neue Fassung nie ohne sie bauen. 🥱 (07.10.): anders
     # geschnitten, die schwächere Hälfte der Szenen gegen neue getauscht (fassung_auftrag → baue_entwurf)
     zusammen = folge_merken(con, eid, "fassung", laeuft=context.bot_data.get("fassung_fuer"), grund=extra,
-                            matches=sorted(regeln.matches_aus(liste)))
+                            matches=sorted(regeln.abend_aus(liste)))
     await caption(bewertung, None)
     if baut:
         text += " Die neue Fassung kommt nach dem Video, an dem ich gerade baue."

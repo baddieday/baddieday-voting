@@ -140,10 +140,26 @@ lernen_ab = 3
 # Untergrenze fürs Ziel der Shorts in s (06.10., auch in ⚙️ „Short-Mindestlänge“); 0 = nur gelernt (45–75 s)
 short_mindestens_s = 0.0
 # Stufe 1 (07.10., regeln.py) – deine Regeln, im Bot unter ⚙️ bzw. per ❌ umgestellt:
-# feste Länge der Shorts in s (0 = automatisch); „⏱️ Zu kurz“/„⏳ Zu lang“ unter ❌ verschieben sie um 10 s
+# Länge der Shorts in s (0 = automatisch); „⏱️ Zu kurz“/„⏳ Zu lang“ unter ❌ setzen sie 10 s über/unter das Video.
+# Unter /experte fest; im einfachen Modus (Stufe 5, 08.10.) nach ⏱️ Untergrenze, nach ⏳ Obergrenze – darüber
+# bzw. darunter wählen die Zuschauerzahlen (regeln.laenge)
 short_ziel_s = 0.0
 # "stark" = nur Multikills, Clutches, Kills im Endkampf, Victory – lieber kein Video als Füllmaterial; "alle" = auch Einzelkills
 szenen = "stark"
+# Abwechslung im einfachen Modus (08.10., Florian: „bessere öfters zeigen, aber nicht permanent“) – interne Werte,
+# bewusst nicht in ⚙️ (regie.ermuedung_regeln): Neue Szenen gehen vor. Eine Szene aus deinen letzten sperre_videos
+# Videos kommt nie ins nächste, solange das Video höchstens sperre_stunden alt ist (Fassungen eines Videos zählen als
+# eines, nie aufgehoben). Bekannte verlieren je Einsatz in ermuedung_tage Tagen Punkte (Punkte × ermuedung_faktor^
+# Einsätze). Höchstens wiederholung_anteil eines Videos bekannt, solange neue dabei sind (bis 4 Szenen dürfen es mehr
+# sein); höchstens gleich_mit_video Szenen, die schon zusammen in einem Video waren. Erreicht 🎬 sein Ziel sonst nicht,
+# gelten die beiden zuletzt locker (regie.LOCKER) – die Länge geht vor; gibt es dann gar kein Video, sperren im
+# Notfall nur die letzten 2 Videos (regie.NOTFALL). /experte: Abzug, Cooldown und Frische-Quote wie bisher ([regie.vorgaben]).
+ermuedung_tage = 30
+ermuedung_faktor = 0.5
+sperre_videos = 3
+sperre_stunden = 48
+wiederholung_anteil = 0.5
+gleich_mit_video = 2
 # Effekt-Stufe 0 aus · 1 ruhig · 2 normal · 3 wild – hier bewusst nicht gesetzt: ohne Wert gilt das Gelernte,
 # „😵 Zu hektisch“ unter ❌ setzt sie (effekt_stufe = 2)
 # pve-big höchstens so lange für den Final-Render wach halten
@@ -296,7 +312,8 @@ format = "short"
 clips_zeigen = false
 
 [geschmack]
-# Lernen im einfachen Modus (07.10., geschmack.py): Aufbau, Tempo und Zeitlupe aus deinen ✅/❌ und der KI-Note.
+# Lernen im einfachen Modus (07.10., geschmack.py): Aufbau, Tempo und Zeitlupe aus deinen ✅/❌, den Zuschauerzahlen
+# (seit 08.10., je Video doppelt) und der KI-Note.
 # mut = wie oft ein Video bewusst etwas Neues probiert: 0.15 vorsichtig · 0.33 ausgewogen · 0.5 mutig
 mut = 0.5
 
