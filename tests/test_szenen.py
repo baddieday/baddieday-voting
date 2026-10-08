@@ -160,6 +160,27 @@ class Langweilig(MitRegieMaterial):
 
 
 class Ersatz(unittest.TestCase):
+    def test_ersatz_frueherer_abende_nur_aus_erlaubten_matches(self):
+        """Stufe 4 (08.10.): Ersatz früherer Abende auch nach 🥱 nur aus Matches, die höchstens 12 Tage alt sind
+        (regie.nachschub_matches) – sonst fehlt beim ✅ das Rohvideo. Eine behaltene Szene eines früheren Abends (das
+        Video hatte Nachschub) bleibt Pflicht, zählt aber als Nachschub (höchstens die Hälfte, nie vorn)."""
+        from clip_pipeline import regie
+
+        k = lambda s, match, stark=True: SimpleNamespace(  # noqa: E731
+            schluessel=s, match_id=match, punkte=5.0, clip_id=1, fail=False, stark=stark, gesperrt=False,
+            nachschub=False)
+        alle = [k("clip:1", "a1"), k("clip:2", "a1"), k("clip:3", "a1", stark=False), k("clip:5", "o1"),
+                k("clip:6", "o1"), k("clip:7", "z1")]
+        fassung = {"behalten": ["clip:1", "clip:5"], "ohne": ["clip:2"], "abend": ["a1"]}
+        auswahl, pflicht = regie.fassung_kandidaten(alle, fassung, {}, {"clip:1", "clip:2", "clip:5"},
+                                                    {"min_momente": 3}, frueher_ok={"o1"})
+        self.assertEqual({x.schluessel: x.nachschub for x in auswahl},                 # z1: zu alt
+                         {"clip:1": False, "clip:3": False, "clip:5": True, "clip:6": True})
+        self.assertEqual([x.schluessel for x in pflicht], ["clip:1", "clip:5"])
+        with self.assertRaises(regie.KeineNeuenSzenen):                                 # nichts Erlaubtes mehr
+            regie.fassung_kandidaten(alle, fassung, {}, {"clip:1", "clip:2", "clip:3", "clip:5"},
+                                     {"min_momente": 3}, frueher_ok=set())
+
     def test_ersatz_auch_wenn_die_behaltenen_reichen(self):
         """Prüfung 07.10.: Erreichen die behaltenen Szenen schon das Ziel, kommt trotzdem neuer Ersatz dazu – zu lang
         wird es nicht: dann geht die schwächste behaltene Szene (sonst „keine neue Fassung“, obwohl Neues da ist)."""

@@ -455,3 +455,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     mehr als 10 s unter dem Ziel, plant der Bot einmal neu – Anlauf/Ausklang mindestens 4/3 s statt gelernt 2,5/1,5 s,
     dieselben Szenen, kein Füllmaterial (vorher „kein Video, die starken Szenen ergeben nur 22 s“ bzw. 32 s bei Ziel
     45 s; jetzt 34 bzw. 44 s). Reicht es nicht, „kein Video“ wie bisher; gilt auch für 🥱; /experte unverändert. N48–N50.
+  - **Stufe 4: Nachschub – starke Szenen, die du noch nie gesehen hast** (`regie.erstelle`, Florian 08.10.: „Ja,
+    auffüllen“): Hat der Abend weniger als 4 ungesehene starke Szenen oder bleibt das Video auch mit mehr Anlauf zu
+    kurz, kommen nie gezeigte starke Szenen früherer Abende dazu – nur aus Matches der letzten 12 Tage (rohdaten_tage
+    − 2, sonst fehlt beim ✅ das Rohvideo), nie Einzelkills, nie Fails, höchstens die Hälfte, vorn immer eine Szene vom
+    Abend; im Video steht „+2 Szenen von früheren Abenden“. Gilt fürs Abend-Video, 🎬 und jede neue Fassung nach ❌
+    (auch 🥱, dort jetzt mit denselben Grenzen). „Kein Video“ nur, wenn auch das nicht reicht – der Satz sagt, warum.
+    Nachgestellt: dünner Abend (2 starke) vorher „kein Video“, jetzt 41 s mit 2 + 2 Szenen; 🎬 nach dem Abend-Video
+    vorher dieselben 4 Szenen, jetzt 3 neue von 6. /experte und eine Match-Wahl dort exakt wie bisher. N51–N59.

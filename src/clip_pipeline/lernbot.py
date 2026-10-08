@@ -45,6 +45,7 @@ ENTWURF_ZIELE = (*regie.FORMATE, *viral.KNOEPFE)   # was /entwurf und die Knöpf
 # ich alles per Hand einstellen muss …“): ohne ⚙️ – du tippst nur ✅ oder ❌ mit Grund, alles andere entscheidet der Bot.
 HILFE = """<b>So geht's</b>
 🎮 Nach dem Zocken kommt dein Video von selbst – aus den starken Szenen des Abends.
+➕ Reicht ein Abend nicht, nehme ich starke Szenen früherer Abende dazu, die du noch nicht kennst – höchstens die Hälfte.
 ✅ <b>Hochladen</b> – du bekommst Video und Text zum Hochladen.
 ❌ <b>Nicht gut</b> – tipp auf den Grund, ich baue neu. Alles andere entscheide ich selbst.
 🔧 Alles von Hand: /experte"""
@@ -234,7 +235,9 @@ def _szenen_zahl(n: int, art: str = "") -> str:
 def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None) -> str:
     """Bildunterschrift im einfachen Modus (07.10., Florian: „fehlerhafte Texte … vereinfachen“): Video statt Entwurf,
     Szenen statt Momente, ✅/❌ wie die Knöpfe – ohne Bogen, Stimmung, BPM und „🧠 Aus #…“ (das sagt der Satz nach
-    deinem Grund schon). Deine Clip-Auswahl („🎯 nur Spielabend …“) steht als normale Zeile, nicht als Warnung."""
+    deinem Grund schon). Deine Clip-Auswahl („🎯 nur Spielabend …“) steht als normale Zeile, nicht als Warnung.
+    Hat der Bot mit nie gezeigten starken Szenen früherer Abende aufgefüllt (Stufe 4), sagt es „+2 Szenen von früheren
+    Abenden“."""
     n = len({s["moment"] for s in liste["segmente"]})
     art = "" if liste["format"] == "short" else f"{FORMAT_NAMEN.get(liste['format'], liste['format'])} · "
     teile = [f"🎬 <b>Video #{zeile['id']}</b> · {art}{liste['dauer_s']:.0f} s · {_szenen_zahl(n)}"]
@@ -243,6 +246,9 @@ def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row
     a = liste.get("auswahl")
     if a:
         teile.append(f"🆕 {_szenen_zahl(int(a['neu']), 'neue ')} · {a['schon_gezeigt']} schon gezeigt")
+        if frueher := len(a.get("nachschub") or []):   # Stufe 4 (08.10.): nie gezeigte starke Szenen früherer Abende
+            teile.append("+1 Szene von einem früheren Abend" if frueher == 1 else
+                         f"+{frueher} Szenen von früheren Abenden")
     if m := liste.get("musik"):
         teile.append(f"🎵 {escape(m['titel'])}" + (f" – {escape(m['kuenstler'])}" if m.get("kuenstler") else ""))
     warnungen: list[str] = []

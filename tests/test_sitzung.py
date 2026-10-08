@@ -134,6 +134,30 @@ class Sitzung(MitRegieMaterial):
         self.assertTrue(sitzung._dauerhaft(MedienFehler("Moment-Datei fehlt: /srv/clips/momente/1.mp4")))
         self.assertFalse(sitzung._dauerhaft(MedienFehler("Entwurf x: hängt – 180 s ohne Fortschritt, abgebrochen")))
 
+    def test_duenner_abend_fuellt_mit_nie_gezeigten_starken_auf(self):
+        """Stufe 4 (08.10., Florian: „Ja, auffüllen“): Ein Abend mit nur 2 starken Szenen bekommt trotzdem sein Video –
+        mit nie gezeigten starken Szenen früherer Abende, höchstens die Hälfte, vorn eine vom Abend, nie ein Einzelkill.
+        Vorher: „kein Video, nur 2 starke Szenen“."""
+        for m, vor in (("a1", timedelta(hours=2)), ("o1", timedelta(days=4))):
+            self.con.execute("INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, status, erstellt, geaendert) "
+                             "VALUES (?, ?, ?, ?, 'verarbeitet', 'x', 'x')",
+                             (m, f"replays/{m}.replay", iso(jetzt() - vor), iso(jetzt() - vor + timedelta(minutes=20))))
+        self.momente_anlegen([("episch", 2, [7.0, 9.5], "a1"), ("spannend", 2, [6.0, 10.0], "a1"),
+                              ("spannend", 1, [8.0], "a1"), ("episch", 3, [5.0, 7.0, 9.0], "o1"),
+                              ("spannend", 2, [7.0, 9.5], "o1"), ("episch", 2, [6.0, 8.0], "o1")])
+        self.musik_anlegen(150, "episch")
+        self.marker("session_2026-10-08_23-10-00", ["a1"], jetzt() - timedelta(minutes=50))
+        with mock.patch.object(entwurf, "entwurf"):                          # nur planen, nicht rendern
+            neu = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["neu"][0]
+        self.assertIsNotNone(neu["entwurf"])
+        zeile = self.con.execute("SELECT * FROM entwuerfe WHERE id = ?", (neu["entwurf"],)).fetchone()
+        liste = json.loads(Path(zeile["schnittliste"]).read_text())
+        self.assertEqual(liste["segmente"][0]["match_id"], "a1")                       # vorn der Abend
+        self.assertEqual(len(liste["auswahl"]["nachschub"]), 2)                       # höchstens die Hälfte
+        self.assertNotIn("datei:3", {s["moment"] for s in liste["segmente"]})        # nie ein Einzelkill
+        self.assertIn("\n+2 Szenen von früheren Abenden\n", lernbot.entwurf_text_einfach(zeile, liste))
+        self.assertIsNone(self.con.execute("SELECT 1 FROM lern_meldungen WHERE schluessel LIKE 'kein:%'").fetchone())
+
     def test_speicher_schlaeft_kein_wecken(self):
         (self.konfig.wurzel / ".clip-speicher").unlink()
         self.konfig.daten["speicher"].update(host="pve-big", wol_mac="aa:bb:cc:dd:ee:ff")

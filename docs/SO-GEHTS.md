@@ -3,13 +3,15 @@
 ## Was von selbst passiert
 1. Du zockst. Kommt 45 Minuten lang kein neues Match dazu, gilt der Abend als vorbei (am PC musst du nichts
    einstellen), und der Lern-Bot schreibt: „🎮 Abend vom … erkannt – ich baue dein Video.“
-2. Etwas später kommt das Video. Es besteht nur aus **starken Szenen** dieses Abends: Multikills, Clutches,
-   Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann. Scheitert das Fertigmachen des Videos,
-   versucht er es 10 Minuten später selbst noch einmal (etwas langsamer, dafür sicherer); klappt auch das nicht, sagt
-   es dir die Statuszeile.
+2. Etwas später kommt das Video. Es besteht nur aus **starken Szenen** dieses Abends (reicht er nicht: Punkt 3):
+   Multikills, Clutches, Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann. Scheitert das
+   Fertigmachen des Videos, versucht er es 10 Minuten später selbst noch einmal (etwas langsamer, dafür sicherer);
+   klappt auch das nicht, sagt es dir die Statuszeile.
 3. Sind die starken Szenen zusammen zu kurz, zeigt der Bot von jeder etwas mehr – ein paar Sekunden mehr davor und
-   danach. Reicht auch das nicht (ein Video braucht 4 starke Szenen und mindestens 30 Sekunden), kommt **kein Video**.
-   Die Statuszeile sagt dann, warum.
+   danach. Hat der Abend zu wenige (ein Video braucht 4 und mindestens 30 Sekunden), nimmt er starke Szenen der
+   letzten Tage dazu, die du noch nie gesehen hast – höchstens die Hälfte, der Anfang ist immer vom Abend. Im Video
+   steht dann „+2 Szenen von früheren Abenden“. Reicht auch das nicht, kommt **kein Video**, und die Statuszeile sagt,
+   warum.
 
 ## Was du tust
 - **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen. **Füg den Text beim
@@ -22,7 +24,7 @@
 |---|---|
 | ⏱️ Zu kurz | Shorts werden 10 Sekunden länger (höchstens 75 s) |
 | ⏳ Zu lang | Shorts werden 10 Sekunden kürzer (mindestens 30 s) |
-| 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen Szenen, die du noch nicht gesehen hast – erst vom selben Abend, dann starke von früheren Abenden. Gibt es keine, kommt kein Video. Gesperrt wird nichts. Hast du die Effekte mit 😵 gesenkt, holt 🥱 sie eine Stufe zurück (höchstens bis normal) – das bleibt so. |
+| 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen Szenen, die du noch nicht gesehen hast – erst vom selben Abend, dann starke von früheren Abenden (höchstens die Hälfte des Videos). Gibt es keine, kommt kein Video. Gesperrt wird nichts. Hast du die Effekte mit 😵 gesenkt, holt 🥱 sie eine Stufe zurück (höchstens bis normal) – das bleibt so. |
 | 🎵 Musik | Dieser Song kommt nie wieder |
 | 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus); zurück geht es mit 🥱 |
 | 🔁 Einfach neu | Andere Fassung, gleiche Regeln |
@@ -50,7 +52,8 @@ Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen im
 kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert hat.
 
 ## Knöpfe
-- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend. Baut er gerade, kommt das laufende Video
+- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend; kennst du dessen Szenen schon, kommen bis zur
+  Hälfte starke Szenen früherer Abende dazu, die du noch nicht gesehen hast. Baut er gerade, kommt das laufende Video
   (endet eine neue Fassung ohne Video, baut er danach deins); geht es schief, versucht er es nach 10 Minuten selbst
   noch einmal.
 - **📋 Stand** – deine Regeln, was beim letzten Abend passiert ist und woraus er gerade lernt („🧠 Lernt aus: deinen

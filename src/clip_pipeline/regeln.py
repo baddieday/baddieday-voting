@@ -213,7 +213,9 @@ def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict) -
                     else f"⏳ Kürzer als {ZIEL_GRENZEN[0]} s geht nicht – das Ziel bleibt {neu} s.")
         text = f"{'⏱️' if grund == 'kurz' else '⏳'} Verstanden: Shorts sind ab jetzt {neu} s lang (vorher {alt} s)."
         dauer = float(liste.get("dauer_s") or 0)
-        if grund == "kurz" and dauer and dauer < alt - 5:
+        # Stufe 4 (08.10.): nur, wenn es wirklich keine ungesehenen starken Szenen früherer Abende mehr gab – sonst
+        # holt die neue Fassung sie (regie.erstelle, Nachschub) und der Satz stimmte nicht
+        if grund == "kurz" and dauer and dauer < alt - 5 and not (liste.get("auswahl") or {}).get("nachschub_uebrig"):
             text += f" Dieses Video hatte nur {dauer:.0f} s – mehr starke Szenen gab es nicht."
         return text
     if grund == "langweilig":   # 07.10.: der Schnitt langweilt – keine Sperre; was anders wird, regelt neue_fassung
@@ -260,5 +262,9 @@ def liste_aus(zeile: sqlite3.Row) -> dict:
 
 
 def matches_aus(liste: dict) -> set[str]:
-    """Matches, aus denen ein Video seine Szenen hat – für die neue Fassung aus demselben Abend."""
-    return {s["match_id"] for s in liste.get("segmente") or [] if isinstance(s, dict) and s.get("match_id")}
+    """Matches, aus denen ein Video seine Szenen hat – für die neue Fassung aus demselben Abend. Szenen früherer Abende
+    (Stufe 4, auswahl.nachschub) zählen nicht: sonst wüchse der Abend der neuen Fassung um sie, und ihre Einzelkills
+    kämen nach 🥱 als Ersatz „vom Abend“ dazu."""
+    frueher = set((liste.get("auswahl") or {}).get("nachschub") or [])
+    return {s["match_id"] for s in liste.get("segmente") or []
+            if isinstance(s, dict) and s.get("match_id") and s.get("moment") not in frueher}

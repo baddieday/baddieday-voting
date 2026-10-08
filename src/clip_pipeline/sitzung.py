@@ -15,6 +15,9 @@ Reichen die starken Szenen nicht, kommt kein Video, sondern „kein:<sitzung>“
 08.10. (Florian: „autonom … besser und schneller als mit der Hand“): Scheitert im einfachen Modus erst das Rendern,
 ist der Abend nicht verloren – der nächste Timer-Lauf rendert den Entwurf einmal auf der CPU nach (_nachholen); erst
 wenn auch das scheitert, kommt „fehler:<sitzung>“, ohne Versprechen. Unter /experte wie bisher.
+Stufe 4 (08.10., Florian: „Ja, auffüllen“): Reicht der Abend nicht, füllt regie.erstelle im einfachen Modus mit nie
+gezeigten starken Szenen früherer Abende auf (höchstens die Hälfte, Anfang vom Abend); „kein:<sitzung>“ kommt nur
+noch, wenn auch das nicht reicht – der Satz sagt dann, warum.
 """
 
 from __future__ import annotations

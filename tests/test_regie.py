@@ -3,10 +3,12 @@
 import json
 import unittest
 import unittest.mock
+from datetime import timedelta
 from pathlib import Path
 
 from clip_pipeline import einstellungen, lernen, regeln, regie, regie_lernen
 from clip_pipeline.konfig import Konfig
+from clip_pipeline.zeit import iso, jetzt
 
 from tests.hilfen import HAT_FFMPEG
 from tests.regie_hilfen import MOMENTE, MitRegieMaterial
@@ -352,8 +354,107 @@ class MehrAnlauf(MitRegieMaterial):
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 0)   # kein Video
 
 
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class Nachschub(MitRegieMaterial):
+    """Stufe 4 (08.10., Florian: „Ja, auffüllen“): Reicht der Abend nicht, kommen nie gezeigte starke Szenen früherer
+    Abende dazu – höchstens die Hälfte, vorn eine Szene vom Abend; nie Einzelkills, nie schon gezeigte, nie älter als
+    12 Tage (sonst fehlt beim ✅ das Rohvideo). Nur im einfachen Modus."""
+
+    # a1 = der Abend: 2 starke (datei:1, 2) und ein Einzelkill (3); o1 vor 5 Tagen: 3 starke (4–6), ein Einzelkill (7),
+    # eine schon gezeigte (8); z1 vor 13 Tagen: eine starke (9)
+    SZENEN = [("episch", 2, [7.0, 9.5], "a1"), ("spannend", 2, [6.0, 10.0], "a1"), ("spannend", 1, [8.0], "a1"),
+              ("episch", 3, [5.0, 7.0, 9.0], "o1"), ("spannend", 2, [7.0, 9.5], "o1"), ("episch", 2, [6.0, 8.0], "o1"),
+              ("spannend", 1, [11.0], "o1"), ("episch", 4, [6.0, 8.0, 10.0, 12.5], "o1"),
+              ("episch", 4, [6.0, 8.0, 10.0, 12.5], "z1")]
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["regie"]["szenen"] = "stark"
+        self.musik_anlegen(150, "episch")
+        for mid, tage in (("a1", 0.1), ("o1", 5.0), ("z1", 13.0)):
+            start = iso(jetzt() - timedelta(days=tage))
+            self.con.execute("INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, status, erstellt, geaendert) "
+                             "VALUES (?, ?, ?, ?, 'verarbeitet', 'x', 'x')",
+                             (mid, f"replays/{mid}.replay", start, start))
+
+    def gesendet(self, momente) -> None:
+        """Ein Video mit diesen Szenen ist bei dir angekommen (szenen.jemals_gezeigt)."""
+        n = self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0]
+        pfad = self.tmp / f"gesendet{n}.json"
+        pfad.write_text(json.dumps({"segmente": [{"moment": m} for m in momente]}), encoding="utf-8")
+        self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, erstellt) VALUES "
+                         "(?, 'short', ?, '{}', 'gesendet', 'x')", (f"gesendet{n}", str(pfad)))
+
+    def short(self, experte: bool = False) -> dict:
+        self.konfig.daten["lernbot"]["experte"] = experte
+        k = einstellungen.anwenden(self.con, self.konfig)
+        p = regeln.anwenden(self.con, k, "short", regie_lernen.aktuelle(self.con, k, "short")[0])
+        return lies(regie.erstelle(self.con, k, "short", parameter=p, nur_matches={"a1"}))
+
+    @staticmethod
+    def reihe(liste: dict) -> list[str]:
+        return [s["moment"] for s in liste["segmente"] if s.get("teil", 1) == 1 and s.get("rolle") != "hook"]
+
+    def test_duenner_abend_fuellt_auf_sonst_kein_video(self):
+        self.momente_anlegen(self.SZENEN)
+        self.gesendet(["datei:8"])
+        liste = self.short()                                     # vorher: „kein Video, nur 2 starke Szenen“
+        reihe = self.reihe(liste)
+        self.assertEqual(len(reihe), 4)
+        self.assertIn(reihe[0], {"datei:1", "datei:2"})          # vorn eine Szene vom Abend
+        self.assertTrue({"datei:1", "datei:2"} <= set(reihe))
+        frueher = liste["auswahl"]["nachschub"]
+        self.assertEqual(len(frueher), 2)                        # höchstens die Hälfte
+        self.assertTrue(set(frueher) <= {"datei:4", "datei:5", "datei:6"})   # nie Einzelkill, gezeigt oder zu alt
+        self.assertEqual(liste["auswahl"]["nachschub_uebrig"], 1)
+        self.assertEqual(regeln.matches_aus(liste), {"a1"})      # die neue Fassung nach ❌ bleibt beim Abend
+        k = einstellungen.anwenden(self.con, self.konfig)       # ⏱️: ungesehene starke gab es noch – „gab es nicht“?
+        kurz = {**liste, "dauer_s": 20.0, "parameter": {"ziel_dauer_s": 45.0}}
+        self.assertNotIn("gab es nicht", regeln.wende_an(self.con, k, "kurz", kurz))
+        kurz["auswahl"] = {**liste["auswahl"], "nachschub_uebrig": 0}
+        self.assertIn("mehr starke Szenen gab es nicht", regeln.wende_an(self.con, k, "kurz", kurz))
+        with self.assertRaises(regie.ZuWenigSzenen):             # /experte: wie bisher nur der Abend
+            self.short(experte=True)
+        self.gesendet(["datei:4", "datei:5", "datei:6"])         # Fehlerfall: keine ungesehene starke mehr
+        vorher = self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0]
+        with self.assertRaises(regie.ZuWenigSzenen) as fehler:
+            self.short()
+        satz = fehler.exception.satz(experte=False)
+        self.assertIn("nur 2 starke Szenen", satz)
+        self.assertIn("früherer Abende, die du noch nicht kennst, gibt es gerade keine", satz)
+        self.assertNotIn("⚙️", satz)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], vorher)   # kein Video
+
+    def test_neues_video_nach_dem_abend_bringt_neue_szenen(self):
+        self.momente_anlegen([(s, 3, [5.0, 7.0, 9.0], "a1") for s in ("episch", "spannend") * 2]
+                             + [(s, 2, [6.0, 8.0], "o1") for s in ("episch", "spannend", "episch")])
+        abend = self.short()
+        self.assertEqual(abend["auswahl"]["nachschub"], [])     # der Abend reicht: nur seine Szenen
+        self.gesendet(self.reihe(abend))
+        neu = self.short()                                       # 🎬: vorher dieselben 4 Szenen noch einmal
+        frueher = neu["auswahl"]["nachschub"]
+        self.assertTrue(frueher and set(frueher) <= {"datei:5", "datei:6", "datei:7"})
+        self.assertNotIn(self.reihe(neu)[0], frueher)
+        self.assertLessEqual(2 * len(frueher), len(self.reihe(neu)))
+
+
 class Auswahl(unittest.TestCase):
     """waehle(): Cooldown und Frische-Quote (27.09.) – ohne Datenbank und ffmpeg."""
+
+    def test_nachschub_hoechstens_die_haelfte_und_nie_vorn(self):
+        """Stufe 4 (08.10.): Szenen früherer Abende erst nach dem Abend, nie mehr als vom Abend, nie vorn – auch wenn
+        sie stärker sind."""
+        fmt, p = regie.FORMATE["short"], {**regie.PARAMETER, "abwechslung": 0.0, "ziel_dauer_s": 45.0}
+        abend = [self.k(f"abend{i}", 3.0, match=f"a{i}") for i in range(2)]
+        frueher = [self.k(f"alt{i}", 10.0, match=f"o{i}") for i in range(4)]
+        for k in frueher:
+            k.nachschub = True
+        self.assertEqual(regie.vorrat_s(abend + frueher, fmt, fmt["seg_min_s"]), 32.0)   # 2 + 2 Szenen à 8 s
+        gewaehlt, _, _ = regie.waehle(abend + frueher, fmt, p)
+        self.assertEqual(sum(k.nachschub for k in gewaehlt), 2)                         # Ziel 45 s: trotzdem nur 2
+        self.assertTrue({"abend0", "abend1"} <= {k.schluessel for k in gewaehlt})
+        self.assertFalse(regie.abend_vorn(regie.bogen(gewaehlt, "short"), staerkste=True)[0].nachschub)
+        self.assertFalse(regie.nachschub_darf(gewaehlt, [*gewaehlt, frueher[3]]))       # eine mehr: über die Hälfte
 
     def test_mehr_anlauf_nur_wenn_zu_kurz(self):
         p = dict(regie.PARAMETER)                                                    # gelernt: 2,5 / 1,5 s
