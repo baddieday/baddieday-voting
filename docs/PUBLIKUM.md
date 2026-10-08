@@ -339,6 +339,10 @@ des Benutzers) und warum Dienste `~/.local/bin` nicht im PATH haben.
 ### P3 · Timer clip-publikum
 
 **Was:** `clip-publikum.timer` einschalten – jeden Tag um 10:00 `pipeline publikum bewerten`.
+**Seit 08.10. von selbst:** `deploy/pve-mini/alles-aktualisieren.sh` richtet die beiden Units ein und schaltet den
+Timer an (wie `clip-sitzungen`, mit Zeile im Rückweg-Skript). Einen von dir angepassten Timer überschreibt es nicht
+und schaltet ihn nicht an. Die Schritte unten brauchst du nur, wenn du ohne das Update-Skript einspielst. Ob Zahlen
+ankommen, zeigt 📋 Stand im Lern-Bot („🧠 Lernt aus: … Zuschauern (…)“) – ohne Blick ins Journal.
 **Warum:** Der Score wird einmal je Post gesetzt, sobald er 7 Tage alt ist. Ein täglicher Lauf reicht; mehrere
 schaden nicht (nichts wird überschrieben, je Tag höchstens eine Meldung).
 **Freigabe nötig?** Ja – neuer Timer. Der Lauf ist reine Datenbank-Arbeit, weckt nie und braucht keine Sperre.
@@ -355,7 +359,8 @@ systemctl list-timers 'clip-*'
 **Prüfen:** `list-timers` zeigt clip-publikum um 10:00 (plus bis zu 10 min Zufall); `journalctl -u clip-publikum`
 nach dem ersten Lauf.
 **Rückweg:** `systemctl disable --now clip-publikum.timer` – Posts und Messungen bleiben, nur der Score kommt
-nicht mehr von selbst (von Hand geht er weiter).
+nicht mehr von selbst (von Hand geht er weiter). Das nächste `alles-aktualisieren.sh` schaltet ihn wieder ein; ohne
+TikTok-Abruf dauerhaft: `[publikum].api_abruf = false` in `lokal.toml`.
 **Was du lernst:** `Type=oneshot` (ein Lauf, dann fertig), `Persistent=true` (verpassten Lauf nachholen),
 `RandomizedDelaySec` (nicht auf die Sekunde genau), und warum Exit 1 hier rot sein soll: dann steht im Journal,
 welcher Post nicht bewertet werden konnte.

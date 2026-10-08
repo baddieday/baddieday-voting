@@ -437,3 +437,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Vorher bekam ein Video, das ab Tag 2 nicht mehr wächst, nie eine Messung ab Tag 3 und damit nie einen Score – nur
     per Screenshot. Abweichend von der Spec nur, bis der Post seinen Score hat (der wird nie überschrieben, und jede
     Messung lässt `autonom` alles neu rechnen – ohne Grenze fast 5 min je Lauf). N30–N32.
+  - **Stufe 3: Zahlen-Abruf richtet sich selbst ein, 📋 sagt ehrlich, wer lehrt:** `alles-aktualisieren.sh` richtet
+    `clip-publikum` ein und schaltet den Timer an wie `clip-sitzungen` (Rückweg-Zeile; von dir angepasste Timer werden
+    weder überschrieben noch eingeschaltet – gilt jetzt für beide). 📋 endet mit „🧠 Lernt aus: deinen ✅/❌ · KI-Note (läuft |
+    fehlt – Claude-Anmeldung nötig | kommt mit dem nächsten Video) · Zuschauern (n Videos ausgewertet | TikTok nicht
+    verbunden – einmal /tiktok | n ✅-Videos nach 3 Tagen noch ohne Zahlen)“ (`geschmack.lehrer_zeile`, ohne Netz:
+    `kritiken`, `posts`, `.env` und Token-Datei wie `publikum_adapter._token`); sie ersetzt „🧠 Gelernt aus …“ und „📊
+    Publikum: …“. Dieselbe Zeile im Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat. N33–N37.

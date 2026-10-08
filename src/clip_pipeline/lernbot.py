@@ -332,8 +332,9 @@ def autonom_text(con: sqlite3.Connection) -> str:
 def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
     """📋 Stand im einfachen Modus (06.10.): wenige Zeilen – was der Bot von dir gelernt hat, ohne Fachbegriffe.
     07.10. (Florian: „fehlerhafte Texte“): ✅/❌ wie die Knöpfe; ohne die Zeile zur Moment-Formel („noch 7
-    Bewertungen bis zum Lernen“ neben „11 von dir“ las sich wie ein Widerspruch), ohne Zähler und Version; das
-    Publikum erst, wenn es Zahlen gibt."""
+    Bewertungen bis zum Lernen“ neben „11 von dir“ las sich wie ein Widerspruch), ohne Zähler und Version.
+    08.10.: Die letzte Zeile sagt ehrlich, wer lehrt (geschmack.lehrer_zeile) – auch, ob KI-Note oder TikTok noch
+    eine einmalige Anmeldung brauchen; sie ersetzt „🧠 Gelernt aus …“ und „📊 Publikum: … ausgewertet“."""
     konfig = einstellungen.anwenden(con, konfig)
     zeilen = regie_lernen.bewertungen(con, mit_ki=False)
     gut = sum(1 for z in zeilen if z["daumen"] > 0)
@@ -348,11 +349,7 @@ def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
                                                            "hast" if mindestens > 0 else "die Länge wähle ich selbst"))
     if abend := letzter_abend_zeile(con, konfig):
         teile.append(abend)
-    if zeile := geschmack.stand_zeile(con):   # Aufbau, Tempo, Zeitlupe (Stufe 2)
-        teile.append(zeile)
-    stand = autonom.ueberblick(con)
-    if stand["ausgewertet"]:
-        teile.append(f"📊 Publikum: {stand['ausgewertet']} Video{'s' if stand['ausgewertet'] != 1 else ''} ausgewertet")
+    teile.append(geschmack.lehrer_zeile(con, konfig))   # deine ✅/❌, KI-Note, Zuschauer – ohne Netz
     return "\n".join(teile)
 
 

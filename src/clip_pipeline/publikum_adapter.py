@@ -109,6 +109,31 @@ def schreibe_cache(pfad: Path, daten: dict) -> None:
             os.unlink(tmp)
 
 
+def _angemeldet(cache: dict, client: str) -> bool:
+    """Anmeldung per /tiktok (seed "anmeldung") für genau diese App (Client Key aus .env)."""
+    return (cache.get("client_key") == client and cache.get("seed") == ANMELDUNG
+            and bool(cache.get("refresh_token")))
+
+
+def tiktok_verbunden(konfig) -> bool:
+    """Ohne Netz, für 📋 Stand und Wochenbericht (08.10.): Hat der tägliche Abruf einen TikTok-Zugang? Dieselben
+    Bedingungen wie _token – Access-Token oder Refresh-Token in .env, oder die Anmeldung per /tiktok in der Token-Datei
+    (dann Client Key und Secret in .env). Ob TikTok ihn noch annimmt, merkt erst der Abruf. Eine unlesbare Token-Datei
+    heißt „nicht verbunden“ (der Abruf scheitert daran genauso), nie ein Absturz."""
+    if os.environ.get("TIKTOK_ACCESS_TOKEN", "").strip():
+        return True
+    client = os.environ.get("TIKTOK_CLIENT_KEY", "").strip()
+    if not (client and os.environ.get("TIKTOK_CLIENT_SECRET", "").strip()):
+        return False
+    if os.environ.get("TIKTOK_REFRESH_TOKEN", "").strip():
+        return True
+    try:
+        cache = lies_cache(cache_pfad(konfig))
+    except (AdapterFehler, OSError):   # OSError: schon das Nachsehen scheitert (Rechte am Ordner)
+        return False
+    return isinstance(cache, dict) and _angemeldet(cache, client)
+
+
 def _token(plattform: str, konfig, zeit: datetime) -> str | None:
     """Access-Token bzw. automatische Erneuerung; rotierte TikTok-Refresh-Tokens
     bleiben atomar in einer privaten Datei neben der DB (Linux 0600), nie im Repo.
@@ -122,8 +147,7 @@ def _token(plattform: str, konfig, zeit: datetime) -> str | None:
     secret = os.environ.get(f"{prefix}_CLIENT_SECRET", "").strip()
     pfad = cache_pfad(konfig)
     cache = lies_cache(pfad) if plattform == "tiktok" and client and secret else {}
-    angemeldet = (cache.get("client_key") == client and cache.get("seed") == ANMELDUNG
-                  and bool(cache.get("refresh_token")))
+    angemeldet = _angemeldet(cache, client)
     if not ((refresh or angemeldet) and client and secret):
         return direkt or None
     # YouTube gibt beim Refresh keinen neuen Refresh-Token aus. Der langlebige

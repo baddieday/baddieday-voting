@@ -5,7 +5,8 @@
 #   1. Sicherung: Code-Stand beider Checkouts + Datenbank-Kopie nach /var/lib/clip-pipeline/vor-update-<Zeit>.*
 #   2. Holen: origin/main (Produktion) und den neuesten Sprint-Stand (Lern-Bot)
 #   3. Warten, bis kein Render läuft (Pipeline-Sperre, höchstens WARTEN_MIN), dann unter der Sperre umstellen:
-#      /opt/clip-pipeline → main, /opt/clip-regie → neuester Stand, neue Dienste (clip-mikro), Bots neu starten
+#      /opt/clip-pipeline → main, /opt/clip-regie → neuester Stand, neue Dienste (clip-mikro, clip-sitzungen,
+#      clip-publikum), Bots neu starten
 #   4. Probe: Dienste laufen, Datenbank antwortet; Rückweg liegt als Skript bereit
 # Weckt pve-big nie, löscht nichts, fasst .env und lokal.toml nicht an. Beliebig oft wiederholbar.
 # Optional:  … | NCS_GENRES=hart bash      (Musik nachladen: techno, hardcore, electronic-rock, dance-rock, midtempo-bass)
@@ -160,11 +161,11 @@ pakete "$PROD" "$ALT_PROD" "$ZIEL_PROD"
 # Neue Spalten/Tabellen einmal anlegen, bevor beide Bots gleichzeitig starten
 p timeout 120 "$PROD/.venv/bin/pipeline" status >/dev/null 2>&1 || echo "⚠️  pipeline status meldet einen Fehler (Probe unten zeigt mehr)"
 
-# systemd-Dienste: geänderte übernehmen, wenn du sie nicht selbst angepasst hast; neue nur clip-mikro (Mic-Schritt)
-# und clip-sitzungen (Abend-Video).
+# systemd-Dienste: geänderte übernehmen, wenn du sie nicht selbst angepasst hast; neue nur clip-mikro (Mic-Schritt),
+# clip-sitzungen (Abend-Video) und clip-publikum (Zuschauerzahlen: TikTok-Abruf und Datenbank, keine Sperre, weckt nie).
 # clip-aufraeumen bleibt immer aus („Nie löschen“). Der Lern-Bot läuft aus $REGIE, falls es den gibt.
 lernbot_form() { if [ "$MIT_REGIE" = 1 ]; then sed "s#/opt/clip-pipeline#$REGIE#g" | { getent group render >/dev/null && cat || sed "/^SupplementaryGroups=/d"; }; else cat; fi; }
-neu_an=(); geaendert=0
+neu_an=(); eigen=(); geaendert=0
 for quelle in "$PROD"/deploy/systemd/*.service "$PROD"/deploy/systemd/*.timer "$PROD"/deploy/systemd/*.path \
               "$PROD"/deploy/systemd/*.service.d/*.conf; do
   [ -f "$quelle" ] || continue
@@ -183,9 +184,11 @@ for quelle in "$PROD"/deploy/systemd/*.service "$PROD"/deploy/systemd/*.timer "$
       printf "%s\n" "$soll" > "$ziel"; geaendert=1; echo "Dienst aktualisiert: $rel"
     else
       echo "ℹ️  $rel weicht vom Repo ab (von dir angepasst?) – nicht überschrieben. Vergleich: diff $ziel $quelle"
+      eigen+=("$name")
     fi
   else
-    case "$name" in clip-mikro.*|clip-sitzungen.*)   # 07.10.: ohne clip-sitzungen kam nie ein Abend-Video
+    # 07.10.: ohne clip-sitzungen kam nie ein Abend-Video · 08.10.: ohne clip-publikum nie Zuschauerzahlen
+    case "$name" in clip-mikro.*|clip-sitzungen.*|clip-publikum.*)
       printf "%s\n" "$soll" > "$ziel"; geaendert=1; echo "Dienst neu: $rel"
       case "$name" in *.path|*.timer) neu_an+=("$name");; esac;;
     esac
@@ -196,11 +199,15 @@ if [ "${#neu_an[@]}" -gt 0 ]; then
   systemctl enable -q --now "${neu_an[@]}" && echo "eingeschaltet: ${neu_an[*]}"
   echo "systemctl disable --now ${neu_an[*]}" >> "$SICH.zurueck.sh"
 fi
-# Abend-Video (07.10.): der Timer muss laufen – auch wenn er schon installiert, aber nie eingeschaltet war
-if systemctl cat clip-sitzungen.timer >/dev/null 2>&1 && ! systemctl is-enabled -q clip-sitzungen.timer 2>/dev/null; then
-  systemctl enable -q --now clip-sitzungen.timer && echo "eingeschaltet: clip-sitzungen.timer (Abend-Video)"
-  echo "systemctl disable --now clip-sitzungen.timer" >> "$SICH.zurueck.sh"
-fi
+# Abend-Video (07.10.) und Zuschauerzahlen (08.10.): diese Timer müssen laufen – auch wenn sie schon installiert, aber
+# nie eingeschaltet waren. Einen von dir angepassten Timer (oben „weicht vom Repo ab“) fasst das Update nicht an.
+for t in clip-sitzungen.timer clip-publikum.timer; do
+  case " ${eigen[*]} " in *" $t "*) continue;; esac
+  if systemctl cat "$t" >/dev/null 2>&1 && ! systemctl is-enabled -q "$t" 2>/dev/null; then
+    systemctl enable -q --now "$t" && echo "eingeschaltet: $t"
+    echo "systemctl disable --now $t" >> "$SICH.zurueck.sh"
+  fi
+done
 
 # Beide Bots neu – sonst läge im Speicher der alte Code und auf der Platte der neue
 for d in clip-bot clip-lernbot; do

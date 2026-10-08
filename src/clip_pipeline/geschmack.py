@@ -22,6 +22,8 @@ Reihenfolge (Montage und Kino haben beide den Bogen) und das andere Tempo, das s
 
 Die KI schaut sich jedes gesendete Video danach im Hintergrund an (ki_nachtragen, Lern-Bot-Schleife) – das Video
 kommt dadurch nicht später. Sonntags ab 18 Uhr fasst wochen_text die Woche zusammen (Lern-Meldung woche:<JJJJ-Www>).
+Wer gerade lehrt – deine ✅/❌, die KI-Note, die Zuschauer – sagt lehrer_zeile (08.10.): in 📋 Stand immer, im
+Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat.
 """
 
 from __future__ import annotations
@@ -287,6 +289,8 @@ def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None
     neu = sum(1 for z in woche if ((json.loads(z["parameter"] or "{}") or {}).get("geschmack") or {}).get("experiment"))
     if neu:
         zeilen.append(f"🧪 {neu}× bewusst etwas Neues ausprobiert.")
+    if ohne_zahlen(con, bis):   # 08.10.: Zahlen fehlen – wer lehrt gerade, und was kannst nur du tun?
+        zeilen.append(lehrer_zeile(con, konfig, bis))
     zeilen.append(regeln.regeln_zeile(con, konfig).replace("📏 Deine Regeln:", "📏 Deine Regeln gelten weiter:"))
     return "\n".join(zeilen)
 
@@ -305,13 +309,50 @@ def wochenbericht(con: sqlite3.Connection, konfig: Konfig, jetzt_utc=None) -> bo
     return bool(text) and db.lern_meldung(con, schluessel, text)
 
 
-def stand_zeile(con: sqlite3.Connection) -> str | None:
-    """Für 📋 Stand: „🧠 Gelernt aus 12 Bewertungen und 8 KI-Noten – Wochenbericht sonntags“."""
-    b = beobachtungen(con)
-    daumen = sum(1 for x in b if x["daumen"] in (1, -1))
-    ki = sum(1 for x in b if x["ki"] is not None)
-    if not daumen and not ki:
-        return None
-    return (f"🧠 Gelernt aus {daumen} Bewertung{'en' if daumen != 1 else ''} und {ki} KI-Note{'n' if ki != 1 else ''}"
-            " – Wochenbericht sonntags")
+# --- Wer lehrt (08.10., „📋 sagt ehrlich, wer lehrt“) ------------------------------------------------------------
+# Nur aus vorhandenen Daten, ohne Netz: Du merkst ohne Blick ins Journal, ob KI-Note und Zuschauerzahlen ankommen.
+
+KI_FRISCH_TAGE = 3            # wie offen_fuer_ki: die KI benotet gesendete Shorts der letzten 3 Tage
+KI_SPAETESTENS_H = 6          # so lange darf ihre Note dauern (Bot baut gerade, Pipeline rechnet, Neustart)
+OHNE_ZAHLEN_TAGE = (3, 14)    # Post eines ✅-Videos, 3 bis 14 Tage alt, ohne jede Messung = „ohne Zahlen“
+
+
+def ki_stand(con: sqlite3.Connection, bis=None) -> str:
+    """„läuft“: eine KI-Note in den letzten 3 Tagen · „fehlt – Claude-Anmeldung nötig“: Videos der letzten 3 Tage,
+    älter als 6 h, keins mit Note · „kommt mit dem nächsten Video“: kein Video, an dem es sich zeigen könnte."""
+    bis = bis or jetzt()
+    seit = iso(bis - timedelta(days=KI_FRISCH_TAGE))
+    if con.execute("SELECT 1 FROM kritiken WHERE ki_score IS NOT NULL AND erstellt >= ? LIMIT 1", (seit,)).fetchone():
+        return "läuft"
+    if con.execute("""SELECT 1 FROM entwuerfe WHERE format = 'short' AND status IN ('gesendet', 'bewertet')
+                       AND datei IS NOT NULL AND erstellt >= ? AND erstellt <= ? LIMIT 1""",
+                   (seit, iso(bis - timedelta(hours=KI_SPAETESTENS_H)))).fetchone():
+        return "fehlt – Claude-Anmeldung nötig"
+    return "kommt mit dem nächsten Video"
+
+
+def ohne_zahlen(con: sqlite3.Connection, bis=None) -> int:
+    """✅-Videos, deren TikTok-Post (legt das Paket an) 3 bis 14 Tage alt ist und noch keine einzige Messung hat."""
+    bis = bis or jetzt()
+    ab, hoechstens = OHNE_ZAHLEN_TAGE
+    return con.execute("""SELECT COUNT(*) FROM posts p WHERE p.art = 'entwurf' AND p.plattform = 'tiktok'
+                            AND p.erstellt >= ? AND p.erstellt <= ?
+                            AND NOT EXISTS (SELECT 1 FROM publikum_messungen m WHERE m.post_id = p.id)""",
+                       (iso(bis - timedelta(days=hoechstens)), iso(bis - timedelta(days=ab)))).fetchone()[0]
+
+
+def lehrer_zeile(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str:
+    """„🧠 Lernt aus: deinen ✅/❌ · KI-Note (läuft) · Zuschauern (4 Videos ausgewertet)“ – in 📋 Stand immer, im
+    Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat. Fehlt etwas, das nur du einmal tun kannst (Claude
+    anmelden, TikTok verbinden), steht es hier – ohne Netz, nur aus Datenbank, .env und Token-Datei."""
+    from . import autonom, publikum_adapter   # hier, nicht oben: geschmack bleibt leicht (regie_lernen lädt es)
+
+    n = autonom.ueberblick(con)["ausgewertet"]
+    teile = [f"{n} Video{'s' if n != 1 else ''} ausgewertet"] if n else []
+    if not publikum_adapter.tiktok_verbunden(konfig):
+        teile.append("TikTok nicht verbunden – einmal /tiktok")
+    elif fehlen := ohne_zahlen(con, bis):
+        teile.append(f"{fehlen} ✅-Video{'s' if fehlen != 1 else ''} nach 3 Tagen noch ohne Zahlen")
+    zuschauer = ", ".join(teile) or "noch kein Video ausgewertet"
+    return f"🧠 Lernt aus: deinen ✅/❌ · KI-Note ({ki_stand(con, bis)}) · Zuschauern ({zuschauer})"
 

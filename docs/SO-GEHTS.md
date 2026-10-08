@@ -50,7 +50,11 @@ kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert 
 - **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend. Baut er gerade, kommt das laufende Video
   (endet eine neue Fassung ohne Video, baut er danach deins); geht es schief, versucht er es nach 10 Minuten selbst
   noch einmal.
-- **📋 Stand** – deine Regeln und was beim letzten Abend passiert ist.
+- **📋 Stand** – deine Regeln, was beim letzten Abend passiert ist und woraus er gerade lernt („🧠 Lernt aus: deinen
+  ✅/❌ · KI-Note (läuft) · Zuschauern (…)“). Steht dort „TikTok nicht verbunden – einmal /tiktok“ oder „Claude-Anmeldung
+  nötig“, fehlt ein einmaliger Schritt, den nur du machen kannst; sonst musst du nichts tun. Die Zuschauerzahlen holt
+  er jeden Tag um 10 Uhr selbst (das Update richtet das ein). Fehlen bei einem ✅-Video nach 3 Tagen noch die Zahlen,
+  steht dieselbe Zeile auch in der Zusammenfassung am Sonntag.
 - **/experte** – alle alten Knöpfe, Details und ⚙️ Einstellungen ein- oder ausschalten.
 
 Einstellen musst du nichts: Clips (neuester Spielabend), Szenen (nur starke) und Aufbau wählt der Bot selbst,
