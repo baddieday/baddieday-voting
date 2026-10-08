@@ -582,3 +582,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     gehen erst an, wenn die Prüfung in seiner Sandbox grün ist. Danach `benutzer-pruefen.sh` (alles getrennt, Bot-Link),
     `benutzer-stilllegen.sh` (aus, Daten bleiben), `benutzer-befehl.sh` (ein Befehl in seiner Sandbox). Deine eigenen
     Rechte schärft es nur auf dein „j“ (nur chmod, Rückweg-Skript). Für Freunde: `docs/FREUNDE.md`. M55–M68.
+  - Schritt 8 (Einladungslink): Statt seine Telegram-Zahl zu suchen, tippt der Freund einen Link an und drückt Start.
+    `benutzer-anlegen.sh` zeigt dir den Link (gilt 15 min, nur einmal), wartet und trägt seine Zahl selbst ein – erst
+    dann geht sein Bot an. Der Code steht nie im Log; je Bot bleibt es bei einem Empfänger. Mitbehoben: Stilllegen hält
+    jetzt auch Schritte an, die gerade laufen. M69–M74.

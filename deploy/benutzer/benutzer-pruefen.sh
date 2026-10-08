@@ -7,7 +7,8 @@
 #     und Marke (root:clip-<name>, 0640), seine Ordner (clip-<name>, 0700), kein kein-lager
 #   2 Sperre: [sperre].datei in seiner instanz.toml = deine wirksame Sperre = die in den Vorlagen eingebundene; deine
 #     Sperrdatei ist für alle lesbar und nur für dich beschreibbar
-#   3 Zugänge: Bot-Token da und verschieden von deinen und denen aller Freunde; Epic-Konto-ID da
+#   3 Zugänge: Bot-Token da und verschieden von deinen und denen aller Freunde; Epic-Konto-ID da; mit Telegram verbunden
+#     (nur Hinweis – ohne Verbindung bleibt nur sein Bot aus)
 #   4 In seiner Sandbox (clip-freund-pruefen@<name>): nichts von dir und den anderen Freunden sichtbar, und die Sperre
 #     dort ist genau deine Datei (Gerät und Inode)
 #   5 Bot-Link
@@ -167,8 +168,9 @@ else
 fi
 if grep -Eq '^[[:space:]]*CLIP_EPIC_ID=[^[:space:]]' "$I/.env" 2>/dev/null; then ok "Epic-Konto-ID eingetragen"
 else befund "Epic-Konto-ID fehlt (CLIP_EPIC_ID in $I/.env)"; fi
-if grep -Eq '^[[:space:]]*LEARN_BOT_ALLOWED_USER_ID=[0-9]' "$I/.env" 2>/dev/null; then ok "Telegram-Zahl eingetragen"
-else echo "   ℹ️  Telegram-Zahl fehlt – sein Bot bleibt aus, bis sie da ist"; fi
+if grep -Eq '^[[:space:]]*(LEARN_BOT|TELEGRAM)_ALLOWED_USER_ID=[0-9]' "$I/.env" 2>/dev/null; then
+  ok "mit Telegram verbunden (seine Zahl ist eingetragen)"
+else echo "   ℹ️  noch nicht mit Telegram verbunden – sein Bot bleibt aus. Einladungslink: bash $HIER/benutzer-anlegen.sh $NAME"; fi
 
 if [ "$VORAB" = 1 ]; then
   if [ "$BEFUNDE" = 0 ]; then sag "Vorab-Prüfung: alles in Ordnung"; exit 0; fi
@@ -224,7 +226,7 @@ except Exception as e:
     print("(Telegram nicht erreichbar: " + type(e).__name__ + ")")
     sys.exit(1)' "$I/.env" "$TELEGRAM_API" 2>/dev/null)" || true
 echo "   Bot von $NAME: ${LINK:-(unbekannt)}"
-echo "   Schick ihm den Link und docs/FREUNDE.md – er tippt in Telegram auf Start."
+echo "   Verbunden wird er über den Einladungslink aus benutzer-anlegen.sh; für ihn: docs/FREUNDE.md"
 
 if [ "$BEFUNDE" = 0 ]; then
   sag "Alles getrennt: $NAME sieht nichts von dir und den anderen Freunden."

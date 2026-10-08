@@ -3,9 +3,10 @@
 # Mehrbenutzer (docs/MEHRBENUTZER.md, „Neuen Freund anlegen“): EIN Befehl richtet einen Freund ein – eigener Benutzer
 # clip-<name> ohne Anmeldung, eigener Ordner /var/lib/clip-benutzer/<name> auf dem Freunde-Volume, eigener Bot, seine
 # Dienste (nur für diesen Namen eingeschaltet) und zum Schluss die Prüfung, dass alles getrennt ist.
-#   1 Prüfen: Name, Freunde-Volume, Code, deine Sperre · 2 Zugänge, verdeckt: Bot-Token, Epic-Konto-ID, Telegram-Zahl
+#   1 Prüfen: Name, Freunde-Volume, Code, deine Sperre · 2 Zugänge, verdeckt: Bot-Token, Epic-Konto-ID
 #   3 Benutzer, Ordner, Konfig · 4 deine Sperrdatei für alle lesbar · 5 Dienst-Vorlagen · 6 Vorab-Prüfung
-#   7 Einrichten in seiner Sandbox (Datenbank, Whisper-Modell, Musik) · 8 Einschalten · 9 Prüfung und Bot-Link
+#   7 Einrichten in seiner Sandbox (Datenbank, Whisper-Modell, Musik) · 8 Telegram: Einladungslink, er drückt Start
+#   9 Einschalten · 10 Prüfung und Bot-Link
 #   Zusatz (j/N): deine eigenen Rechte schärfen – nur chmod, mit Rückweg-Skript
 # Wiederholbar: Fertiges wird übersprungen, gefragt wird nur, was fehlt. Gelöscht wird nichts. Zugänge stehen nur in
 # <Ordner>/.env (root:clip-<name>, 0640) – nie im Log, nie auf dem Bildschirm, nie auf einer Befehlszeile.
@@ -55,6 +56,19 @@ abbruch() { echo "Abgebrochen – $1"; exit 1; }
 florian() { (cd / && runuser -u pipeline -- env -i PATH=/usr/bin:/bin LANG=C.UTF-8 "$PROD/.venv/bin/python" -I -c "$@"); }
 # Steht ein Zugang schon in seiner .env? (nur ob – der Wert wird nie gelesen oder gezeigt)
 hat() { [ -f "$I/.env" ] && grep -Eq "^[[:space:]]*$1=[^[:space:]]" "$I/.env"; }
+# Mit Telegram verbunden = seine Telegram-Zahl steht in .env (unter einem der Namen, die sein Lern-Bot liest)
+verbunden() { hat LEARN_BOT_ALLOWED_USER_ID || hat TELEGRAM_ALLOWED_USER_ID; }
+# Einen Zugang an seine .env anhängen – nur mit dem eingebauten printf, nie auf einer Befehlszeile
+env_dazu() {
+  ( umask 077
+    if [ -n "$(tail -c 1 "$I/.env")" ]; then echo >> "$I/.env"; fi
+    printf '%s=%s\n' "$1" "$2" >> "$I/.env" )
+}
+# Läuft eine Einheit gerade? Auch ein Schritt (oneshot), der noch „activating“ ist – is-active -q sieht den nicht
+laeuft() {
+  case "$(systemctl is-active "$1" 2>/dev/null || true)" in active|activating|deactivating|reloading|refreshing) return 0 ;; esac
+  return 1
+}
 stand() { if [ -e "$1" ]; then stat -c '%U:%G %a' "$1"; fi; }
 # Besitzer und Rechte setzen – nur, was abweicht
 setze() {
@@ -68,6 +82,47 @@ ordner() {
   [ -d "$1" ] || tu mkdir "$1"
   setze "$1" "$2" "$3"
 }
+# Liest einladung.json bzw. kopplung.json, die SEIN Dienst in seinen Ordner db/ geschrieben hat: root folgt keinem Link,
+# liest nur eine normale Datei, höchstens 4 KB, und gibt nur Geprüftes aus – den Link nur vom laufenden Einladungs-Dienst
+# (Lauf-Nummer), sonst Zahl und Vorname (nur druckbare Zeichen) durch einen Tab getrennt.
+FREUND_JSON_PY="$(cat <<'PY'
+import json, os, re, stat, sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+art, pfad = sys.argv[1], sys.argv[2]
+try:
+    fd = os.open(pfad, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as datei:
+        if not stat.S_ISREG(os.fstat(datei.fileno()).st_mode):
+            sys.exit(1)
+        daten = json.loads(datei.read(4096))
+except (OSError, ValueError):
+    sys.exit(1)
+if not isinstance(daten, dict):
+    sys.exit(1)
+if art == "link":
+    link = str(daten.get("link", ""))
+    if not sys.argv[3] or daten.get("lauf") != sys.argv[3] or not re.fullmatch(
+            r"https://t\.me/[A-Za-z0-9_]{5,32}\?start=[A-Za-z0-9_-]{16,64}", link):
+        sys.exit(1)
+    print(link)
+    sys.exit(0)
+zahl = daten.get("id")
+if type(zahl) is not int or not 0 < zahl < 2 ** 52:
+    sys.exit(1)
+print(f"{zahl}\t" + "".join(z for z in str(daten.get("vorname", "")) if z.isprintable())[:64])
+PY
+)"
+# Seine Telegram-Zahl aus einer Kopplung (auch aus einem früheren Lauf, z. B. nach Strg+C) – nie angezeigt
+kopplung_lesen() {
+  local zeile
+  TG_ID=""
+  TG_NAME=""
+  zeile="$(python3 -I -c "$FREUND_JSON_PY" id "$I/db/kopplung.json" 2>/dev/null || true)"
+  [[ "$zeile" == *$'\t'* ]] || return 0
+  TG_ID="${zeile%%$'\t'*}"
+  TG_NAME="${zeile#*$'\t'}"
+  [[ "$TG_ID" =~ ^[1-9][0-9]{0,15}$ ]] || { TG_ID=""; TG_NAME=""; }
+}
 zeige_log() {
   local lauf
   journalctl --sync 2>/dev/null || true
@@ -80,7 +135,7 @@ zeige_log() {
 [ ! -d /etc/pve ] || { echo "Das ist der Proxmox-Host – bitte im CT ausführen (pct enter 102)."; exit 1; }
 if [ "$PROBE" = 1 ]; then echo "PROBE: Ich zeige nur, was ich tun würde, und ändere nichts."; fi
 
-sag "1/9 Prüfen: Name, Freunde-Volume, Code, deine Sperre"
+sag "1/10 Prüfen: Name, Freunde-Volume, Code, deine Sperre"
 # Reserviert: Namen, die man mit deinen Diensten oder Ordnern verwechseln würde (clip-bot, clip-pipeline, …)
 RESERVIERT=" pipeline benutzer freund root admin "
 for d in "$PROD"/deploy/systemd/clip-*.service; do
@@ -93,7 +148,7 @@ esac
 getent passwd pipeline >/dev/null || abbruch "Benutzer pipeline fehlt – ist das der CT clips?"
 getent group render >/dev/null || abbruch "Gruppe render fehlt – ohne sie starten die Dienste nicht (Grafikchip). Bitte melden."
 [ -x "$PROD/.venv/bin/pipeline" ] || abbruch "$PROD/.venv/bin/pipeline fehlt – ist die Pipeline installiert?"
-for v in bot scan abend einrichten pruefen; do
+for v in bot scan abend einrichten pruefen koppeln; do
   [ -f "$HIER/clip-freund-$v@.service" ] || abbruch "$HIER/clip-freund-$v@.service fehlt – bitte deploy/benutzer/ vollständig."
 done
 [ -f "$HIER/benutzer-pruefen.sh" ] || abbruch "$HIER/benutzer-pruefen.sh fehlt – bitte deploy/benutzer/ vollständig."
@@ -155,10 +210,9 @@ if ! frage "Freund $NAME jetzt anlegen bzw. vervollständigen (Benutzer $U, Ordn
   echo "Abgebrochen – nichts verändert."; exit 1
 fi
 
-sag "2/9 Zugänge – verdeckt: nichts davon erscheint auf dem Bildschirm oder im Log"
+sag "2/10 Zugänge – verdeckt: nichts davon erscheint auf dem Bildschirm oder im Log"
 TOKEN=""
 EPIC=""
-TG_ID=""
 if hat LEARN_BOT_TOKEN; then echo "Bot-Token: schon da – bleibt"
 elif [ "$PROBE" = 1 ]; then echo "   (Probe: würde den Bot-Token seines Bots von @BotFather verdeckt abfragen)"
 else
@@ -179,20 +233,9 @@ else
   [[ "$EPIC" =~ ^[0-9a-f]{32}$ ]] || abbruch "eine Epic-Konto-ID hat 32 Zeichen aus 0-9 und a-f – nichts geändert."
   echo "Epic-Konto-ID: angenommen"
 fi
-# --- KOPPLUNG (Schritt 4, Einladungslink) ----------------------------------------------------------------------------
-# Hier setzt später `pipeline benutzer koppeln` die Telegram-Zahl ein: Der Freund tippt den Link seines Bots an, der Bot
-# merkt sich seine Zahl. Bis dahin fragt das Skript sie freiwillig verdeckt ab; ohne Zahl bleibt nur sein Bot aus.
-if hat LEARN_BOT_ALLOWED_USER_ID; then echo "Telegram-Zahl: schon da – bleibt"
-elif [ "$PROBE" = 1 ]; then echo "   (Probe: würde seine Telegram-Zahl verdeckt abfragen – Enter = später)"
-else
-  read -r -s -p "   Seine Telegram-Zahl (zeigt @userinfobot; Enter = später): " TG_ID || true
-  echo
-  [ -z "$TG_ID" ] || [[ "$TG_ID" =~ ^[0-9]{5,15}$ ]] || abbruch "eine Telegram-Zahl hat nur Ziffern – nichts geändert."
-  if [ -n "$TG_ID" ]; then echo "Telegram-Zahl: angenommen"; else echo "Telegram-Zahl: später – sein Bot bleibt bis dahin aus"; fi
-fi
-# --- Ende KOPPLUNG ---------------------------------------------------------------------------------------------------
+# Seine Telegram-Zahl fragt das Skript nicht ab – die kommt in Schritt 8 über den Einladungslink
 
-sag "3/9 Benutzer $U (ohne Anmeldung), Ordner, Marken, Konfig"
+sag "3/10 Benutzer $U (ohne Anmeldung), Ordner, Marken, Konfig"
 if [ "$NEUER_BENUTZER" = 1 ]; then
   tu useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$U"
 fi
@@ -215,7 +258,7 @@ done
 ENV_NEU=0
 if [ "$PROBE" = 1 ]; then
   if [ -f "$I/.env" ]; then echo "   $I/.env: schon da"; else echo "   (Probe: würde $I/.env mit seinen Zugängen schreiben)"; fi
-elif [ ! -f "$I/.env" ] || [ -n "$TOKEN$EPIC$TG_ID" ]; then
+elif [ ! -f "$I/.env" ] || [ -n "$TOKEN$EPIC" ]; then
   (
     umask 077
     if [ ! -f "$I/.env" ]; then
@@ -226,7 +269,6 @@ elif [ ! -f "$I/.env" ] || [ -n "$TOKEN$EPIC$TG_ID" ]; then
     fi
     if [ -n "$TOKEN" ]; then printf 'LEARN_BOT_TOKEN=%s\n' "$TOKEN" >> "$I/.env"; fi
     if [ -n "$EPIC" ]; then printf 'CLIP_EPIC_ID=%s\n' "$EPIC" >> "$I/.env"; fi
-    if [ -n "$TG_ID" ]; then printf 'LEARN_BOT_ALLOWED_USER_ID=%s\n' "$TG_ID" >> "$I/.env"; fi
   )
   ENV_NEU=1
   echo "   $I/.env geschrieben (Werte nicht angezeigt)"
@@ -244,13 +286,13 @@ else
 fi
 setze "$I/instanz.toml" "root:$U" 640
 
-sag "4/9 Deine Sperrdatei: für alle lesbar – so wartet $NAME auf dich und du auf ihn"
+sag "4/10 Deine Sperrdatei: für alle lesbar – so wartet $NAME auf dich und du auf ihn"
 # Fehlt sie, lege ich sie als pipeline an – eine Instanz legt nie eine eigene an (M41)
 if [ ! -e "$SPERRE" ]; then tu runuser -u pipeline -- touch "$SPERRE"; fi
 if [ "$(stat -c %a "$SPERRE" 2>/dev/null || true)" = 644 ]; then echo "   $SPERRE: schon 0644"
 else tu chmod 644 "$SPERRE"; fi
 
-sag "5/9 Dienst-Vorlagen hinlegen (eingeschaltet wird in Schritt 8 nur $NAME)"
+sag "5/10 Dienst-Vorlagen hinlegen (eingeschaltet wird in Schritt 9 nur $NAME)"
 NEU=0
 for q in "$HIER"/clip-freund-*@.service "$HIER"/clip-freund-*@.timer; do
   [ -f "$q" ] || continue
@@ -261,13 +303,13 @@ for q in "$HIER"/clip-freund-*@.service "$HIER"/clip-freund-*@.timer; do
 done
 if [ "$NEU" = 1 ]; then tu systemctl daemon-reload; fi
 
-sag "6/9 Vorab-Prüfung (Rechte, Sperre, Zugänge) – bevor etwas eingeschaltet wird"
+sag "6/10 Vorab-Prüfung (Rechte, Sperre, Zugänge) – bevor etwas eingeschaltet wird"
 if [ "$PROBE" = 1 ]; then echo "   \$ bash $HIER/benutzer-pruefen.sh $NAME --vorab"
 elif ! bash "$HIER/benutzer-pruefen.sh" "$NAME" --vorab < /dev/null; then
   abbruch "die Vorab-Prüfung hat etwas gefunden (siehe ❌) – nichts eingeschaltet. Danach nochmal: bash $0 $NAME"
 fi
 
-sag "7/9 Einrichten in seiner Sandbox: Datenbank, Whisper-Modell (~480 MB), Musik – ein paar Minuten"
+sag "7/10 Einrichten in seiner Sandbox: Datenbank, Whisper-Modell (~480 MB), Musik – ein paar Minuten"
 EINRICHTEN="clip-freund-einrichten@$NAME.service"
 if [ "$PROBE" = 1 ]; then echo "   \$ systemctl start $EINRICHTEN"
 else
@@ -277,21 +319,80 @@ else
   [ "$RC" = 0 ] || abbruch "Einrichten oder die Prüfung in seiner Sandbox ging nicht (siehe oben) – nichts eingeschaltet. Log: journalctl -u $EINRICHTEN -n 50"
 fi
 
-sag "8/9 Einschalten – nur für $NAME"
-AN=("clip-freund-scan@$NAME.timer" "clip-freund-abend@$NAME.timer")
+sag "8/10 Telegram: Einladungslink – $NAME tippt ihn an und drückt Start (keine Telegram-Zahl suchen)"
+# In seiner Sandbox wartet clip-freund-koppeln@ bis zu 15 min auf „/start <code>“ und schreibt seine Zahl nach
+# db/kopplung.json; hier wird sie gelesen und als LEARN_BOT_ALLOWED_USER_ID in seine .env eingetragen (die liest sein
+# Lern-Bot). Je Bot nur ein Empfänger: Ohne Zahl holt sein Bot nie Nachrichten ab, er geht erst in Schritt 9 an.
+KOPPELN="clip-freund-koppeln@$NAME.service"
 BOT="clip-freund-bot@$NAME.service"
-if hat LEARN_BOT_ALLOWED_USER_ID; then AN+=("$BOT")
-elif [ "$PROBE" = 1 ]; then echo "   (Probe: $BOT kommt dazu, sobald seine Telegram-Zahl in $I/.env steht)"
-else echo "   $BOT bleibt aus, bis seine Telegram-Zahl da ist (dann nochmal: bash $0 $NAME)"; fi
+# Einladung starten, dir den Link zeigen und warten, bis er Start drückt oder die Frist um ist. Strg+C beendet nur das
+# Warten – die Einladung gilt weiter, der nächste Lauf dieses Skripts trägt seine Zahl dann ein.
+koppeln() {
+  local lauf="" link="" vorher="" ende=0 pid i
+  if laeuft "$BOT"; then tu systemctl stop "$BOT"; fi   # ohne Zahl holt er nichts ab – sicher ist sicher
+  # Gezeigt wird nur der Link des neuen Laufs (bzw. der Einladung, die schon läuft) – nie einer, der liegen blieb
+  if laeuft "$KOPPELN"; then echo "   Eine Einladung von vorhin läuft noch – ich zeige ihren Link."
+  else vorher="$(systemctl show -p InvocationID --value "$KOPPELN" 2>/dev/null || true)"; fi
+  # Im Hintergrund: systemctl kehrt erst zurück, wenn die Einladung endet (läuft schon eine, wartet es auf diese)
+  echo "   \$ systemctl start $KOPPELN"
+  systemctl start "$KOPPELN" > /dev/null 2>&1 &
+  pid=$!
+  for ((i = 0; i < 30; i++)); do   # bis zu 1 min: Telegram nach dem Namen seines Bots fragen
+    kill -0 "$pid" 2>/dev/null || ende=1
+    lauf="$(systemctl show -p InvocationID --value "$KOPPELN" 2>/dev/null || true)"
+    [ -z "$vorher" ] || [ "$lauf" != "$vorher" ] || lauf=""   # der neue Lauf hat noch nicht begonnen
+    link="$(python3 -I -c "$FREUND_JSON_PY" link "$I/db/einladung.json" "$lauf" 2>/dev/null || true)"
+    if [ -n "$link" ] || [ "$ende" = 1 ]; then break; fi
+    sleep 2
+  done
+  if [ -z "$link" ]; then
+    zeige_log "$KOPPELN"
+    echo "   Der Einladungslink kam nicht (siehe oben). Log: journalctl -u $KOPPELN -n 30"
+    return 0
+  fi
+  printf '\n   👉 Schick %s diesen Link – er gilt 15 min und nur einmal:\n\n      %s\n\n' "$NAME" "$link"
+  echo "   Er tippt ihn an und drückt in Telegram auf Start. Ich warte … (Strg+C: nicht weiter warten, der Link gilt weiter)"
+  UNTERBROCHEN=0
+  trap 'UNTERBROCHEN=1' INT
+  while [ "$UNTERBROCHEN" = 0 ] && kill -0 "$pid" 2>/dev/null; do sleep 2 || true; done
+  trap - INT
+  if [ "$UNTERBROCHEN" = 1 ]; then echo; echo "   Nicht weiter gewartet – die Einladung gilt weiter."
+  else zeige_log "$KOPPELN"; fi
+  kopplung_lesen
+}
+TG_ID=""
+TG_NAME=""
+if verbunden; then echo "   Telegram: schon verbunden – bleibt"
+elif [ "$PROBE" = 1 ]; then
+  echo "   \$ systemctl start $KOPPELN"
+  echo "   (Probe: würde dir seinen Einladungslink zeigen und bis zu 15 min warten, bis er Start drückt)"
+else
+  kopplung_lesen   # schon verbunden in einem früheren Lauf?
+  if [ -z "$TG_ID" ]; then koppeln; fi
+  if [ -n "$TG_ID" ]; then
+    env_dazu LEARN_BOT_ALLOWED_USER_ID "$TG_ID"
+    ENV_NEU=1
+    echo "   Telegram: verbunden (Name in Telegram: ${TG_NAME:-?}) – seine Zahl steht jetzt in $I/.env (nicht angezeigt)"
+  else
+    echo "   Telegram: noch nicht verbunden – sein Bot bleibt aus. Später nochmal: bash $0 $NAME (neuer Link)"
+  fi
+fi
+
+sag "9/10 Einschalten – nur für $NAME"
+AN=("clip-freund-scan@$NAME.timer" "clip-freund-abend@$NAME.timer")
+if verbunden; then AN+=("$BOT")
+elif [ "$PROBE" = 1 ]; then echo "   (Probe: $BOT kommt dazu, sobald $NAME mit Telegram verbunden ist)"
+else echo "   $BOT bleibt aus, bis $NAME mit Telegram verbunden ist (dann nochmal: bash $0 $NAME)"; fi
 BOT_AN=0
 for e in "${AN[@]}"; do
   if systemctl is-enabled -q "$e" 2>/dev/null; then echo "   $e: schon an"
   else tu systemctl enable --now "$e"; [ "$e" != "$BOT" ] || BOT_AN=1; fi
 done
-# Neue Zugänge bei laufendem Bot: neu starten – er liest seine .env nur beim Start
-if [ "$ENV_NEU" = 1 ] && [ "$BOT_AN" = 0 ] && systemctl is-active -q "$BOT" 2>/dev/null; then tu systemctl restart "$BOT"; fi
+# Neue Zugänge bei eingeschaltetem Bot: neu starten – er liest seine .env nur beim Start (startet auch einen, den
+# Schritt 8 angehalten hat)
+if [ "$ENV_NEU" = 1 ] && [ "$BOT_AN" = 0 ] && systemctl is-enabled -q "$BOT" 2>/dev/null; then tu systemctl restart "$BOT"; fi
 
-sag "9/9 Prüfung: ist alles getrennt?"
+sag "10/10 Prüfung: ist alles getrennt?"
 if [ "$PROBE" = 1 ]; then echo "   \$ bash $HIER/benutzer-pruefen.sh $NAME"
 elif ! bash "$HIER/benutzer-pruefen.sh" "$NAME" < /dev/null; then
   echo "❌ Die Prüfung hat etwas gefunden (siehe oben). Bis es behoben ist, ausschalten (Daten bleiben):"
@@ -338,7 +439,8 @@ fi
 
 if [ "$PROBE" = 1 ]; then sag "Probe fertig – nichts verändert. Echt:  bash $0 $NAME"; exit 0; fi
 sag "Fertig: $NAME ist eingerichtet und von dir und den anderen Freunden getrennt."
-echo "Für $NAME: docs/FREUNDE.md – den Bot-Link oben öffnen und Start tippen; in Fortnite Replays einschalten."
+if verbunden; then echo "Für $NAME: docs/FREUNDE.md – sein Bot schreibt ihm ab jetzt; in Fortnite Replays einschalten."
+else echo "Für $NAME: docs/FREUNDE.md. Mit Telegram verbinden: nochmal bash $0 $NAME (neuer Einladungslink)."; fi
 echo "Prüfen:            bash $HIER/benutzer-pruefen.sh $NAME"
 echo "Log seines Bots:   journalctl -u $BOT -f"
 echo "Match nachholen:   bash $HIER/benutzer-befehl.sh $NAME process <ID>"

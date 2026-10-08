@@ -1,8 +1,8 @@
-"""Freund anlegen und prüfen (Mehrbenutzer M1, Stufe 1, Schritt 7): `pipeline benutzer pruefen|einrichten`.
+"""Freund anlegen und prüfen (Mehrbenutzer M1, Stufe 1, Schritt 7/8): `pipeline benutzer pruefen|einrichten|koppeln`.
 
-Läuft nur in der Instanz eines Freundes (CLIP_INSTANZ) – gestartet von den Vorlagen clip-freund-pruefen@ und
-clip-freund-einrichten@ (deploy/benutzer) mit DERSELBEN Sandbox wie seine übrigen Dienste. Florian startet beides über
-deploy/benutzer/benutzer-anlegen.sh bzw. benutzer-pruefen.sh (als root im CT).
+Läuft nur in der Instanz eines Freundes (CLIP_INSTANZ) – gestartet von den Vorlagen clip-freund-pruefen@,
+clip-freund-einrichten@ und clip-freund-koppeln@ (deploy/benutzer) mit DERSELBEN Sandbox wie seine übrigen Dienste.
+Florian startet sie über deploy/benutzer/benutzer-anlegen.sh bzw. benutzer-pruefen.sh (als root im CT).
 
 pruefen – sieht nur nach: lexists, stat und os.access, dazu die NAMEN in vier lokalen Ordnern (nie Inhalte, nie das
 Lager, kein Netz). Im Namensraum des Freundes dürfen Florians Bereiche (Datenbank, Claude-Anmeldung, Schlüssel für
@@ -18,17 +18,27 @@ einfachen Modus (bis 16 freie Titel, unter der gemeinsamen Sperre); danach pruef
 scheitern sie, steht es im Ergebnis, eingerichtet ist die Instanz trotzdem (Szenen ohne Sprache, Musik kommt tagsüber
 von selbst über musik.nachschub).
 
+koppeln – Einladungslink statt Telegram-Zahl (Schritt 8): fragt Telegram nach dem Namen seines Bots, macht einen
+Einmal-Code und legt den Link t.me/<bot>?start=<code> in I/db/einladung.json (nur für ihn und root – nie ins Log).
+Liest dann bis zu 15 min die Nachrichten seines Bots, bis „/start <code>“ in einem Einzel-Chat ankommt, schreibt die
+Zahl des Absenders nach I/db/kopplung.json (0600) und antwortet „Verbunden“. Je Bot gibt es nur einen Empfänger: koppeln
+läuft nur, solange keine Telegram-Zahl in seiner .env steht – ohne sie holt sein Bot nie Nachrichten ab.
+
 instanz_toml – läuft bei FLORIAN (ohne Instanz, als pipeline): die instanz.toml eines neuen Freundes aus Florians
 wirksamer Konfig – nur die gemeinsame Sperre, die Rechnerwerte und die Waffen-Nummern (M15).
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import secrets
 import shutil
 import stat
+import tempfile
+import time
 import tomllib
 from datetime import date
 from pathlib import Path
@@ -37,6 +47,7 @@ from typing import Any
 from . import claude_aufruf, db, sperre
 from .konfig import (INSTANZ_MARKE, INSTANZ_NAME, INSTANZ_WARTEN_S, STANDARD_KONFIG, Konfig, KonfigFehler,
                      claude_verboten, liegt_in)
+from .zeit import iso, jetzt
 
 log = logging.getLogger("pipeline")
 
@@ -158,8 +169,9 @@ def pruefen(konfig: Konfig, wurzel: Path | None = None) -> dict:
     if not str(konfig.wert("replay.ich", "") or "").strip():
         befund(inst / ".env", "CLIP_EPIC_ID fehlt – ohne Epic-Konto-ID erkennt die Pipeline die eigenen Kills nicht "
                               "sicher")
-    if not os.environ.get("LEARN_BOT_ALLOWED_USER_ID", "").strip().isdigit():
-        hinweise.append("Telegram-Zahl fehlt – der Bot startet erst mit ihr")
+    if not _telegram_zahl():
+        hinweise.append("noch nicht mit Telegram verbunden – der Bot startet erst danach (Einladungslink über "
+                        "benutzer-anlegen.sh)")
     hinweise.append(ki_hinweis(konfig))
     for name in ("HOME", "HF_HOME"):
         if not liegt_in(os.environ.get(name) or "/", inst):
@@ -255,6 +267,171 @@ def _musik(con, konfig: Konfig) -> str:
         log.warning("Musik von NCS: %s", e)
         return f"NCS nicht erreichbar ({type(e).__name__}) – die Musik kommt tagsüber von selbst"
     return f"{len(neu)} Songs von NCS geladen"
+
+
+# --- koppeln: Einladungslink statt Telegram-Zahl (Schritt 8) ----------------------------------------------------------
+
+TELEGRAM_API = "https://api.telegram.org"   # Tests: eine Attrappe auf 127.0.0.1
+KOPPELN_FRIST_S = 15 * 60                   # so lange gilt ein Einladungslink
+EINLADUNG = "einladung.json"                # I/db: der Link für benutzer-anlegen.sh (0600, nie im Log)
+KOPPLUNG = "kopplung.json"                  # I/db: Zahl und Vorname des Freundes (0600), liest benutzer-anlegen.sh
+# So liest lernbot.starte die eine erlaubte Telegram-Zahl – steht eine davon in .env, ist er schon verbunden
+ZAHL_NAMEN = ("LEARN_BOT_ALLOWED_USER_ID", "TELEGRAM_ALLOWED_USER_ID")
+VERBUNDEN = "✅ Verbunden! Ab jetzt kommen deine Videos hier an – nach jedem Spielabend eins."
+FALSCHER_LINK = ("Dieser Einladungslink gilt nicht (mehr). Öffne genau den Link, den du bekommen hast – er gilt "
+                 "15 Minuten und nur einmal.")
+
+
+def _telegram_zahl() -> str:
+    return next((w for n in ZAHL_NAMEN if (w := os.environ.get(n, "").strip()).isdigit()), "")
+
+
+def koppeln(konfig: Konfig) -> dict:
+    """Einladungslink statt Telegram-Zahl: wartet bis zu KOPPELN_FRIST_S auf „/start <code>“ und schreibt die Zahl des
+    Absenders nach I/db/kopplung.json. Ergebnis: {"ok", "name", "gekoppelt", "hinweis"} – nie Code, Link oder Zahl.
+    Ohne LEARN_BOT_TOKEN: KonfigFehler. Steht schon eine Zahl in .env, kann sein Bot laufen (je Bot nur ein Empfänger):
+    dann nichts tun, Telegram wird gar nicht gefragt."""
+    inst = _instanz(konfig)
+    name = str(konfig.wert("instanz.name", inst.name))
+    token = os.environ.get("LEARN_BOT_TOKEN", "").strip()
+    if not token:
+        raise KonfigFehler(f"LEARN_BOT_TOKEN fehlt in {inst / '.env'} – ohne eigenen Bot gibt es nichts zu verbinden")
+    if any(os.environ.get(n, "").strip() for n in ZAHL_NAMEN):
+        return {"ok": False, "name": name, "gekoppelt": False,
+                "hinweis": "schon mit Telegram verbunden (Telegram-Zahl in .env) – sein Bot holt die Nachrichten ab, "
+                           "je Bot gibt es nur einen Empfänger. Nichts geändert"}
+    # Wie im Lern-Bot: httpx loggte sonst jede Adresse samt Bot-Token; DEBUG von telegram zeigte die Nachrichten (Code)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("telegram").setLevel(logging.INFO)
+    return {"name": name, **asyncio.run(_koppeln(konfig, inst, token))}
+
+
+async def _koppeln(konfig: Konfig, inst: Path, token: str) -> dict:
+    from telegram import Bot
+    from telegram.error import InvalidToken, TelegramError
+
+    from .lernbot import anfragen   # dieselben Anfragen wie der Lern-Bot ([lernbot].nur_ipv4)
+
+    bot_anfragen, update_anfragen = anfragen(konfig)
+    bot = Bot(token, base_url=f"{TELEGRAM_API}/bot", request=bot_anfragen, get_updates_request=update_anfragen)
+    einladung = inst / "db" / EINLADUNG
+    try:
+        try:
+            await bot.initialize()   # getMe: der Name des Bots für den Link
+        except InvalidToken:   # nie den Text weitergeben – PTB schreibt den Token hinein
+            return _nicht("Telegram kennt den Bot-Token nicht – bei @BotFather prüfen. Nichts gespeichert")
+        except TelegramError as e:
+            return _nicht(f"Telegram nicht erreichbar ({type(e).__name__}) – nichts gespeichert, später nochmal")
+        code = secrets.token_urlsafe(24)   # 32 Zeichen aus A-Z a-z 0-9 _ - (Telegram erlaubt bis 64), ≈ 192 Bit
+        # Mit der Lauf-Nummer von systemd: benutzer-anlegen.sh zeigt nur den Link dieses Laufs, nie einen alten
+        _privat_schreiben(einladung, {"lauf": os.environ.get("INVOCATION_ID", ""),
+                                      "link": f"https://t.me/{bot.username}?start={code}"})
+        log.info("Einladungslink liegt bereit (%s, nur für ihn und root) – gilt %d min und nur einmal", einladung,
+                 round(KOPPELN_FRIST_S / 60))
+        return await _warte_auf_start(bot, inst, code)
+    finally:
+        einladung.unlink(missing_ok=True)   # der Code gilt nur in diesem Lauf
+        try:
+            await bot.shutdown()
+        except Exception:  # noqa: BLE001 – das Ergebnis steht schon fest
+            pass
+
+
+def _nicht(grund: str) -> dict:
+    return {"ok": False, "gekoppelt": False, "hinweis": grund}
+
+
+async def _warte_auf_start(bot, inst: Path, code: str) -> dict:
+    """Nachrichten des Bots lesen, bis „/start <code>“ kommt oder die Frist um ist. Alles Gelesene wird abgehakt."""
+    from telegram.error import BadRequest, Conflict, NetworkError, RetryAfter, TelegramError
+
+    ende = time.monotonic() + KOPPELN_FRIST_S
+    offset: int | None = None
+    geantwortet: set[int] = set()
+    while (rest := ende - time.monotonic()) >= 1:
+        try:
+            updates = await bot.get_updates(offset=offset, timeout=int(min(rest, 25)), allowed_updates=["message"])
+        except Conflict:
+            return _nicht("ein anderes Programm holt gerade die Nachrichten dieses Bots ab (läuft sein Bot noch, oder "
+                          "steckt der Token woanders?) – je Bot nur ein Empfänger. Nichts gespeichert")
+        except BadRequest:   # vor NetworkError (BadRequest ist eine davon) – nochmal fragen hilft nicht
+            return _nicht("Telegram lehnt die Abfrage ab (BadRequest) – nichts gespeichert")
+        except (RetryAfter, NetworkError) as e:   # zu viele Anfragen, Netz, Zeitüberschreitung: kurz warten, weiter
+            log.warning("Telegram: %s – nächster Versuch", type(e).__name__)
+            await asyncio.sleep(min(5.0, rest))
+            continue
+        except TelegramError as e:
+            return _nicht(f"Telegram: {type(e).__name__} – nichts gespeichert")
+        for update in updates:
+            offset = update.update_id + 1   # gelesen = abgehakt; die nächste Abfrage bestätigt es bei Telegram
+            nachricht = update.message
+            if nachricht is None:
+                continue
+            if _ist_einladung(nachricht, code):
+                absender = nachricht.from_user
+                vorname = "".join(z for z in absender.first_name or "" if z.isprintable())[:64]
+                ziel = inst / "db" / KOPPLUNG
+                _privat_schreiben(ziel, {"id": absender.id, "vorname": vorname, "zeit": iso(jetzt())})
+                log.info("Verbunden – die Telegram-Zahl steht in %s", ziel)
+                await _antworte(bot, nachricht.chat_id, VERBUNDEN)
+                await _abhaken(bot, offset)
+                return {"ok": True, "gekoppelt": True,
+                        "hinweis": "mit Telegram verbunden – benutzer-anlegen.sh trägt die Zahl ein und schaltet den "
+                                   "Bot ein"}
+            if (nachricht.chat.type == "private" and (nachricht.text or "").startswith("/start")
+                    and nachricht.chat_id not in geantwortet):   # falscher oder alter Link: einmal je Chat sagen
+                geantwortet.add(nachricht.chat_id)
+                await _antworte(bot, nachricht.chat_id, FALSCHER_LINK)
+    if offset is not None:
+        await _abhaken(bot, offset)
+    return _nicht(f"Frist abgelaufen ({round(KOPPELN_FRIST_S / 60)} min) – der Einladungslink wurde nicht geöffnet. "
+                  "Nichts gespeichert; nochmal: benutzer-anlegen.sh (neuer Link)")
+
+
+def _ist_einladung(nachricht, code: str) -> bool:
+    """Genau „/start <code>“ in einem Einzel-Chat, von einem Menschen, der selbst schreibt (nicht weitergeleitet)."""
+    absender = nachricht.from_user
+    teile = (nachricht.text or "").split()
+    return (nachricht.chat.type == "private" and absender is not None and not absender.is_bot
+            and absender.id == nachricht.chat_id and nachricht.forward_origin is None and len(teile) == 2
+            and teile[0].split("@", 1)[0] == "/start"
+            and secrets.compare_digest(teile[1].encode("utf-8"), code.encode("utf-8")))
+
+
+async def _antworte(bot, chat_id: int, text: str) -> None:
+    from telegram.error import TelegramError
+
+    try:
+        await bot.send_message(chat_id, text)
+    except TelegramError as e:   # die Kopplung steht trotzdem bzw. ein falscher Link bleibt falsch
+        log.warning("Antwort an Telegram ging nicht: %s", type(e).__name__)
+
+
+async def _abhaken(bot, offset: int) -> None:
+    """Gelesene Nachrichten bei Telegram bestätigen – sein Bot sieht sie später nicht noch einmal (auch nicht den
+    Code)."""
+    from telegram.error import TelegramError
+
+    try:
+        await bot.get_updates(offset=offset, timeout=0, allowed_updates=["message"])
+    except TelegramError as e:
+        log.warning("Telegram: Bestätigen ging nicht (%s)", type(e).__name__)
+
+
+def _privat_schreiben(ziel: Path, daten: dict) -> None:
+    """JSON atomar und nur für den Freund lesbar (0600) – wie publikum_adapter.schreibe_cache. Ein Link an der Stelle
+    wird ersetzt, nie verfolgt."""
+    fd, tmp = tempfile.mkstemp(prefix=f".{ziel.name}-", suffix=".tmp", dir=ziel.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as datei:
+            json.dump(daten, datei, ensure_ascii=False)
+            datei.flush()
+            os.fsync(datei.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, ziel)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 # --- instanz.toml für einen neuen Freund (läuft bei Florian) ----------------------------------------------------------

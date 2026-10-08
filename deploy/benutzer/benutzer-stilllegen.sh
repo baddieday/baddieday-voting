@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Im CT als root:  bash benutzer-stilllegen.sh <name> --probe   (zeigt nur)   ·   bash benutzer-stilllegen.sh <name>
 # Mehrbenutzer (docs/MEHRBENUTZER.md): schaltet die Dienste eines Freundes aus – seinen Bot, seine Timer und Schritte,
-# die gerade laufen (ein halb fertiges Match holt sein nächster Lauf nach). Seine Daten, sein Benutzer und seine Zugänge
-# bleiben, gelöscht wird nichts. Wieder an: bash benutzer-anlegen.sh <name> (überspringt Fertiges, fragt nichts neu).
+# die gerade laufen (ein halb fertiges Match holt sein nächster Lauf nach; eine offene Einladung verfällt). Seine Daten,
+# sein Benutzer und seine Zugänge bleiben, gelöscht wird nichts. Wieder an: bash benutzer-anlegen.sh <name> (überspringt
+# Fertiges, fragt nichts neu).
 set -euo pipefail
 BENUTZER_DIR="${BENUTZER_DIR:-/var/lib/clip-benutzer}"
 HIER="$(cd "$(dirname "$0")" && pwd)"
@@ -26,6 +27,11 @@ tu() {
   printf '   $%s\n' "$z"
   [ "$PROBE" = 1 ] || "$@"
 }
+# Läuft eine Einheit gerade? Auch ein Schritt (oneshot), der noch „activating“ ist – is-active -q sieht den nicht
+laeuft() {
+  case "$(systemctl is-active "$1" 2>/dev/null || true)" in active|activating|deactivating|reloading|refreshing) return 0 ;; esac
+  return 1
+}
 frage() {
   if [ "$PROBE" = 1 ]; then printf '   ? %s  -> Probe: angenommen ja\n' "$1"; return 0; fi
   local antwort=""
@@ -42,11 +48,11 @@ fi
 sag "Dienste von $NAME"
 AN=()
 for e in "clip-freund-bot@$NAME.service" "clip-freund-scan@$NAME.timer" "clip-freund-abend@$NAME.timer"; do
-  if systemctl is-enabled -q "$e" 2>/dev/null || systemctl is-active -q "$e" 2>/dev/null; then AN+=("$e"); fi
+  if systemctl is-enabled -q "$e" 2>/dev/null || laeuft "$e"; then AN+=("$e"); fi
 done
 LAEUFT=()
-for e in scan abend einrichten pruefen; do
-  if systemctl is-active -q "clip-freund-$e@$NAME.service" 2>/dev/null; then LAEUFT+=("clip-freund-$e@$NAME.service"); fi
+for e in scan abend einrichten pruefen koppeln; do
+  if laeuft "clip-freund-$e@$NAME.service"; then LAEUFT+=("clip-freund-$e@$NAME.service"); fi
 done
 if [ "${#AN[@]}" = 0 ] && [ "${#LAEUFT[@]}" = 0 ]; then
   echo "schon aus – nichts zu tun. Seine Daten liegen weiter in $BENUTZER_DIR/$NAME."; exit 0

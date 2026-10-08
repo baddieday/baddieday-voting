@@ -3,7 +3,7 @@
   prepare|analyze|decide|render --session ID     highlight --id ID --tage 14
   (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe],
    fail --session ID | --nachziehen [--tage 14], scan --verarbeiten [--max N] [--versuche N] für Freunde ohne n8n,
-   benutzer pruefen|einrichten nur in der Instanz eines Freundes)
+   benutzer pruefen|einrichten|koppeln nur in der Instanz eines Freundes)
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -682,11 +682,13 @@ def _cmd_lernstand(args, konfig, con) -> int:
 
 
 def _cmd_benutzer(args, konfig, con) -> int:
-    """Mehrbenutzer (Schritt 7): die Instanz eines Freundes prüfen (nur nachsehen) bzw. einrichten (Datenbank, Whisper,
-    Musik, danach prüfen) – nur mit CLIP_INSTANZ, gestartet von clip-freund-pruefen@/-einrichten@ in seiner Sandbox.
-    JSON: ok, name, befunde ({pfad, grund}), hinweise, sperre ({pfad, dev, ino}), bei einrichten auch eingerichtet.
-    Exit 0 ok · 1 Befund · 2 nicht in einer Instanz. Ohne Datenbank-Verbindung von main (ohne_db): pruefen legt nichts
-    an, einrichten öffnet seine Datenbank selbst."""
+    """Mehrbenutzer (Schritt 7/8): die Instanz eines Freundes prüfen (nur nachsehen), einrichten (Datenbank, Whisper,
+    Musik, danach prüfen) bzw. mit Telegram koppeln (Einladungslink) – nur mit CLIP_INSTANZ, gestartet von
+    clip-freund-pruefen@/-einrichten@/-koppeln@ in seiner Sandbox.
+    JSON: ok, name, befunde ({pfad, grund}), hinweise, sperre ({pfad, dev, ino}), bei einrichten auch eingerichtet;
+    koppeln: ok, name, gekoppelt, hinweis (nie Code, Link oder Zahl).
+    Exit 0 ok · 1 Befund bzw. nicht gekoppelt · 2 nicht in einer Instanz (koppeln: auch ohne Bot-Token). Ohne
+    Datenbank-Verbindung von main (ohne_db): pruefen legt nichts an, einrichten öffnet seine Datenbank selbst."""
     from . import benutzer
 
     if konfig.instanz is None:
@@ -695,6 +697,16 @@ def _cmd_benutzer(args, konfig, con) -> int:
         log.error("%s", hinweis)
         _json({"fehler": "konfig", "hinweis": hinweis})
         return 2
+    if args.aktion == "koppeln":
+        try:
+            ergebnis = benutzer.koppeln(konfig)
+        except KonfigFehler as e:
+            log.error("%s", e)
+            _json({"fehler": "konfig", "hinweis": str(e)})
+            return 2
+        (log.info if ergebnis["ok"] else log.error)("%s", ergebnis["hinweis"])
+        _json(ergebnis)
+        return 0 if ergebnis["ok"] else 1
     ergebnis = benutzer.einrichten(konfig) if args.aktion == "einrichten" else benutzer.pruefen(konfig)
     for b in ergebnis["befunde"]:
         log.error("Befund: %s – %s", b["pfad"], b["grund"])
@@ -1004,10 +1016,12 @@ def baue_parser() -> argparse.ArgumentParser:
     s = unter.add_parser("bot", help="Telegram-Bot starten (läuft dauerhaft)")
     s.set_defaults(fn=_cmd_bot, sperren=False)
 
-    # Mehrbenutzer (Schritt 7): nur in der Instanz eines Freundes – die Vorlagen clip-freund-pruefen@/-einrichten@
+    # Mehrbenutzer (Schritt 7/8): nur in der Instanz eines Freundes – die Vorlagen clip-freund-pruefen@/-einrichten@/
+    # -koppeln@
     s = unter.add_parser("benutzer", help="Instanz eines Freundes (nur mit CLIP_INSTANZ): pruefen (Trennung, nur "
-                                          "nachsehen) | einrichten (Datenbank, Whisper, Musik, danach pruefen)")
-    s.add_argument("aktion", choices=["pruefen", "einrichten"])
+                                          "nachsehen) | einrichten (Datenbank, Whisper, Musik, danach pruefen) | "
+                                          "koppeln (Einladungslink, wartet bis 15 min auf /start)")
+    s.add_argument("aktion", choices=["pruefen", "einrichten", "koppeln"])
     s.set_defaults(fn=_cmd_benutzer, sperren=False, ohne_db=True)   # einrichten nimmt die Sperre selbst (nur Musik)
 
     # Lernschleife „Publikum“ (Spec §12). Unterbefehle wie bei `lager`; `holen` (TikTok-API) kommt in Stufe 4.

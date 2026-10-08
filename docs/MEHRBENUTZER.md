@@ -1,10 +1,10 @@
 # Mehrbenutzer – eine Instanz je Freund (Entscheidung M1, 08.10.2026)
 
 Ziel Stufe 1: Ein Freund bekommt auf dem Mini seine eigene, vollständig getrennte Pipeline. Zwei Benutzer arbeiten
-unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M68: `docs/ENTSCHEIDUNGEN.md`,
-„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 7 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
+unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M74: `docs/ENTSCHEIDUNGEN.md`,
+„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 8 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
 Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox, Speicher für Freunde, Freund
-anlegen und prüfen mit einem Befehl), der Einladungslink ist Plan. Seite für Freunde: `docs/FREUNDE.md`.
+anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl). Seite für Freunde: `docs/FREUNDE.md`.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -21,6 +21,7 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
   - `clip-freund-abend@` + Timer – alle 10 min `sitzungen` (Abend-Video; KI nur mit eigenem Claude-Zugang)
   - `clip-freund-einrichten@`, `clip-freund-pruefen@` – einmalig, gestartet von `benutzer-anlegen.sh` und
     `benutzer-pruefen.sh` (Schritt 7)
+  - `clip-freund-koppeln@` – Einladungslink, einmalig, gestartet von `benutzer-anlegen.sh` (Schritt 8)
 - **Gemeinsam:** nur Florians Sperrdatei `/var/lib/clip-pipeline/pipeline.lock`, dazu Prozessor, Grafikchip und Netz.
 
 ## Ordner (I = `/var/lib/clip-benutzer/<name>`)
@@ -28,7 +29,7 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
 |---|---|---|
 | `/var/lib/clip-benutzer` | root 0711 | – |
 | I | `root:clip-<name>` 0750 | `instanz.toml` und `.env` (beide `root:clip-<name>` 0640), Marke `.clip-benutzer` |
-| I/db | 0700 | `pipeline.db`, `publikum-oauth.json`, `mikro.anstoss`, `big-zustand` |
+| I/db | 0700 | `pipeline.db`, `publikum-oauth.json`, `mikro.anstoss`, `big-zustand`, `kopplung.json` (0600) |
 | I/daten (= Puffer) | 0700 | `.clip-speicher`, `.clip-puffer`, `eingang/`, `replays/`, `sessions/`, `sitzungen/`, `export/` |
 | I/regie, I/musik, I/material, I/sfx, I/cache | 0700 | I/cache ist auch HOME und Whisper-Cache |
 
@@ -156,24 +157,27 @@ bash /root/freunde-volume.sh             # fragt vor jeder Änderung (j = ja); a
 ## Neuen Freund anlegen (umgesetzt, Schritt 7)
 Einmal vorher: das Freunde-Volume (oben). Je Freund rund 5 min (die meiste Zeit lädt das Whisper-Modell):
 1. Bei @BotFather mit `/newbot` einen eigenen Bot für ihn anlegen (z. B. „Max Clips“), Token bereithalten.
-2. Er schickt dir seine Epic-Konto-ID (epicgames.com → Konto, 32 Zeichen) und seine Telegram-Zahl (@userinfobot) –
-   die Zahl ersetzt später der Einladungslink.
-3. Im CT als root, erst ansehen, dann echt (fragt einmal „j“, dann die drei Werte unsichtbar):
+2. Er schickt dir seine Epic-Konto-ID (epicgames.com → Konto, 32 Zeichen). Seine Telegram-Zahl braucht es nicht mehr.
+3. Im CT als root, erst ansehen, dann echt (fragt einmal „j“, dann Token und Epic-ID unsichtbar):
    ```bash
    bash /opt/clip-pipeline/deploy/benutzer/benutzer-anlegen.sh max --probe
    bash /opt/clip-pipeline/deploy/benutzer/benutzer-anlegen.sh max
    ```
-4. Am Ende stehen „Alles getrennt“ und der Link zu seinem Bot – schick ihm den Link und `docs/FREUNDE.md`.
+4. Unterwegs zeigt es dir seinen **Einladungslink** – schick ihn ihm (gilt 15 min, nur einmal). Er tippt ihn an und
+   drückt in Telegram auf Start; sein Bot antwortet „Verbunden“, das Skript trägt seine Zahl ein und schaltet seinen Bot
+   ein. Ist er gerade nicht da: Strg+C (oder 15 min warten) – später nochmal das Skript, dann kommt ein neuer Link.
+5. Am Ende steht „Alles getrennt“ – schick ihm `docs/FREUNDE.md`.
 
 Was das Skript tut – passt etwas nicht, bricht es vor der ersten Änderung ab; ein zweiter Lauf überspringt Fertiges:
 - prüft den Namen (keine Namen deiner Dienste), das Freunde-Volume (eigener Speicher, root, 0711) und deine Sperre (=
   die in den Vorlagen) und baut seine `instanz.toml` aus deiner wirksamen Konfig: nur Sperre, Rechnerwerte, Waffen;
-- fragt Bot-Token, Epic-Konto-ID und Telegram-Zahl verdeckt ab (einen Token, den du oder ein Freund schon nutzt, lehnt
-  es ab) und schreibt sie nur in seine `.env` (root:clip-<name>, 0640) – nie auf den Bildschirm, nie ins Log;
+- fragt Bot-Token und Epic-Konto-ID verdeckt ab (einen Token, den du oder ein Freund schon nutzt, lehnt es ab) und
+  schreibt sie nur in seine `.env` (root:clip-<name>, 0640) – nie auf den Bildschirm, nie ins Log;
 - legt Benutzer `clip-<name>` ohne Anmeldung an, seine Ordner, macht deine Sperrdatei für alle lesbar (nur
   `chmod 644`) und legt fehlende Dienst-Vorlagen hin;
-- richtet in seiner Sandbox ein (Datenbank, Whisper-Modell, Musik seiner Genres) und prüft dort die Trennung – erst
-  danach schaltet es seine Dienste ein, nur für ihn (ohne Telegram-Zahl bleibt nur sein Bot aus);
+- richtet in seiner Sandbox ein (Datenbank, Whisper-Modell, Musik seiner Genres) und prüft dort die Trennung, dann
+  verbindet es ihn über den Einladungslink mit Telegram (unten) – erst danach schaltet es seine Dienste ein, nur für ihn
+  (ohne Verbindung bleibt nur sein Bot aus);
 - prüft zum Schluss alles und bietet an, deine eigenen Rechte zu schärfen (j/N, nur `chmod`: dein Ordner nur noch
   passierbar; Datenbank, claude, Schlüssel, `.env` und `lokal.toml` nur für dich; Rückweg unter `/root/benutzer-rechte/`).
   Deine Dienste laufen als pipeline und merken davon nichts.
@@ -184,7 +188,8 @@ Danach (alle im CT als root, `…` = `/opt/clip-pipeline/deploy/benutzer`):
   seiner Sandbox, dazu sein Bot-Link. Exit 1 bei einem Befund.
 - **Ein Match nachholen** (Status `fehler`): `bash …/benutzer-befehl.sh max process <ID>` – ein pipeline-Befehl als er,
   in derselben Sandbox wie seine Dienste.
-- **Ausschalten**, Daten bleiben: `bash …/benutzer-stilllegen.sh max` – wieder an mit `benutzer-anlegen.sh max`.
+- **Ausschalten**, Daten bleiben: `bash …/benutzer-stilllegen.sh max` (auch eine offene Einladung) – wieder an mit
+  `benutzer-anlegen.sh max`.
 - **KI für ihn** (freiwillig): sein eigenes Claude-Abo – Token aus `claude setup-token` als `CLAUDE_CODE_OAUTH_TOKEN` in
   seine `.env`, dazu claude global installiert (von dir, z. B. per npm). `benutzer-pruefen.sh` sagt, was fehlt.
 
@@ -200,6 +205,29 @@ Abend-Video laufen wie immer. Wartezeiten vorher und nachher: `journalctl -u cli
   (sauber → ok; Florians Puffer, eine beschreibbare `.env` oder ein anderer Freund → Exit 1 mit dem Pfad), `einrichten`
   lädt beim zweiten Lauf nichts; die Skripte in einer Scheinwurzel: Probe ändert nichts, zweiter Lauf ohne Änderung,
   derselbe Token in zwei `.env` ist ein Befund, Stilllegen schaltet nur aus, der Einzelbefehl nur mit Sandbox.
+
+## Einladungslink statt Telegram-Zahl (umgesetzt, Schritt 8)
+Der Freund muss keine Zahl suchen: Er tippt einen Link an und drückt Start.
+- **In seiner Sandbox** (`pipeline benutzer koppeln`, Vorlage `clip-freund-koppeln@`, gestartet nur von
+  `benutzer-anlegen.sh`): fragt Telegram nach dem Namen seines Bots, macht einen Einmal-Code (32 Zeichen, zufällig) und
+  legt den Link `t.me/<bot>?start=<code>` in `I/db/einladung.json` – nur für ihn und root lesbar, nie im Log. Dann
+  liest es bis zu 15 min die Nachrichten seines Bots. Kommt „/start <code>“ in einem Einzel-Chat, schreibt es die Zahl
+  des Absenders (mit Vorname) nach `I/db/kopplung.json` (0600) und antwortet „✅ Verbunden!“. Falscher oder alter Code,
+  Gruppen, andere Nachrichten: nichts gespeichert (ein falscher Start bekommt einmal „Dieser Einladungslink gilt nicht
+  (mehr)“). Alles Gelesene wird abgehakt – sein Bot sieht den Code später nicht. Nach der Frist: Exit 1.
+- **Nur ein Empfänger je Bot:** koppeln läuft nur, solange keine Telegram-Zahl in seiner `.env` steht – ohne sie holt
+  sein Bot nie Nachrichten ab (er beendet sich sofort). Das Anlege-Skript hält ihn vorher an (falls doch etwas läuft)
+  und schaltet ihn erst nach der Kopplung ein. Meldet Telegram trotzdem einen zweiten Empfänger, bricht koppeln ab,
+  ohne etwas zu speichern. Telegram fragt es wie sein Lern-Bot (über IPv4), keine neue Bibliothek.
+- **Im Anlege-Skript** (Schritt 8 von 10): zeigt dir den Link (nur den dieses Laufs), wartet, liest danach als root
+  `kopplung.json` (folgt keinem Link, nur eine Zahl und der Vorname) und hängt die Zahl als
+  `LEARN_BOT_ALLOWED_USER_ID` an seine `.env` (bleibt root:clip-<name>, 0640). Strg+C beendet nur das Warten: die
+  Einladung gilt weiter, der nächste Lauf übernimmt die Zahl ohne neuen Link.
+- Geprüft (`tests/test_koppeln.py`, Telegram als Attrappe auf 127.0.0.1): richtiger Code → Zahl in `kopplung.json`
+  (0600), „Verbunden“, nichts im Log; falscher oder alter Code, Gruppe, andere Nachricht → nichts gespeichert, nach der
+  Frist Exit 1; schon verbunden oder ein zweiter Empfänger → nichts; ohne `CLIP_INSTANZ` Exit 2, deine `.env` bleibt,
+  Telegram wird nicht gefragt. Das Skript (`tests/test_deploy_benutzer.py`): Zahl über die Kopplung, Bot erst danach,
+  ohne Kopplung nur der Bot aus, ein Link statt `kopplung.json` wird nicht gelesen, ein alter Link nie gezeigt.
 
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
@@ -225,7 +253,7 @@ weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
 ## Stufen
 1. **Sichere Benutzertrennung** (dieser Plan): gemeinsame Sperre, Instanz-Modus, Freund-Pipeline ohne n8n,
    Isolationstests, Dienst-Vorlagen mit Sandbox, Freunde-Volume (ohne Samba je Freund, M12), Anlegen und Prüfen mit
-   einem Befehl, Einladungslink.
+   einem Befehl, Einladungslink (alles umgesetzt).
 2. **Freunde liefern selbst:** Briefkasten auf dem vServer + kleines Programm für den PC, Lager je Freund mit
    Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot.
 3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.

@@ -1,5 +1,5 @@
-"""Mehrbenutzer, Stufe 1, Schritt 5–7: Dienst-Vorlagen je Freund mit Sandbox, das Update kennt Freunde, Speicher,
-Freund anlegen und prüfen.
+"""Mehrbenutzer, Stufe 1, Schritt 5–8: Dienst-Vorlagen je Freund mit Sandbox, das Update kennt Freunde, Speicher,
+Freund anlegen (mit Einladungslink) und prüfen.
 
 Fünf Teile:
 - Vorlagen (deploy/benutzer): derselbe Sandbox-Block in jeder Vorlage, eigener Benutzer, eigener Ordner, Florians
@@ -11,10 +11,12 @@ Fünf Teile:
   vorher gesichert, Vorlagen auf der Platte, nie eingeschaltet, laufende Freundes-Bots neu; ohne Freunde keine Änderung.
 - Freunde-Volume (deploy/pve-mini/freunde-volume.sh, Schritt 6) mit Attrappen wie tests/test_deploy_puffer.py: Probe
   ändert nichts, Pool-Grenze mit vollem Puffer, zweiter Lauf überspringt Fertiges, der Rückweg hängt nur aus.
-- Freund anlegen (deploy/benutzer/benutzer-*.sh, Schritt 7) in einer Scheinwurzel mit Attrappen (useradd, getent, chown,
-  runuser, systemctl, journalctl, stat; Telegram ist ein Server auf 127.0.0.1): Probe legt nichts an und ändert keinen
-  Modus, ein zweiter Lauf überspringt Fertiges, derselbe Bot-Token in zwei .env ist ein Befund, Stilllegen schaltet
-  nur aus, ein Einzelbefehl läuft nur mit der Sandbox der Vorlage. Zugänge erscheinen nie in Ausgabe oder Aufrufen.
+- Freund anlegen (deploy/benutzer/benutzer-*.sh, Schritt 7/8) in einer Scheinwurzel mit Attrappen (useradd, getent,
+  chown, runuser, systemctl, journalctl, stat; Telegram ist ein Server auf 127.0.0.1; die Einladung schreibt
+  einladung.json/kopplung.json wie clip-freund-koppeln@): Probe legt nichts an und ändert keinen Modus, die Telegram-Zahl
+  kommt über die Kopplung und der Bot erst danach an, ohne Kopplung bleibt nur der Bot aus, ein zweiter Lauf überspringt
+  Fertiges, derselbe Bot-Token in zwei .env ist ein Befund, Stilllegen schaltet nur aus (auch eine laufende Einladung),
+  ein Einzelbefehl läuft nur mit der Sandbox der Vorlage. Zugänge erscheinen nie in Ausgabe oder Aufrufen.
 """
 
 from __future__ import annotations
@@ -150,9 +152,10 @@ class Vorlagen(unittest.TestCase):
             self.assertEqual(s["ExecStart"][0], PIPELINE, name)
             befehle[name] = parser.parse_args(s["ExecStart"][1:])   # jeden Schalter gibt es wirklich
         self.assertIs(befehle["clip-freund-bot"].fn, cli._cmd_lernbot)
-        # Schritt 7: einmalig gestartet (systemctl start), nie eingeschaltet, nur in der Instanz (ohne_db: nachsehen
+        # Schritt 7/8: einmalig gestartet (systemctl start), nie eingeschaltet, nur in der Instanz (ohne_db: nachsehen
         # legt nichts an)
-        for name, aktion in (("clip-freund-pruefen", "pruefen"), ("clip-freund-einrichten", "einrichten")):
+        for name, aktion in (("clip-freund-pruefen", "pruefen"), ("clip-freund-einrichten", "einrichten"),
+                             ("clip-freund-koppeln", "koppeln")):
             s = lies_unit(DIENSTE[name])
             with self.subTest(name):
                 self.assertEqual((befehle[name].fn, befehle[name].aktion), (cli._cmd_benutzer, aktion))
@@ -826,12 +829,17 @@ FLORIAN_LERN = "700000009:AAflorianLERNbotTESTtokenNURtestsXY"
 FLORIAN_CLIP = "700000008:AAflorianCLIPbotTESTtokenNURtestsXY"
 EPIC = "0123456789ABCDEF0123456789abcdef"
 TG_ZAHL = "222333444"
+KOPPEL_CODE = "TESTcode_nur-fuer-Tests_123456789"   # den echten macht pipeline benutzer koppeln (tests/test_koppeln.py)
 GEHEIM = (MAX_TOKEN, FLORIAN_LERN, FLORIAN_CLIP, EPIC, EPIC.lower(), TG_ZAHL)
 NIE_LOESCHEN_FREUND = re.compile(r"\b(rm|rmdir|userdel|groupdel|deluser|delgroup|shred|unlink|lvremove|wipefs|mkfs)\b"
                                  r"|--purge|--delete")
 # Attrappen: jeder Aufruf landet in $STUB/aufrufe. useradd/getent arbeiten auf $STUB/passwd und $STUB/group; chown merkt
 # sich den Besitzer, stat gibt ihn zurück (Rechte echt); %d: das Freunde-Volume ist ein eigener Speicher (DEV_BENUTZER=1:
-# derselbe wie /). systemctl merkt sich Eingeschaltetes, journalctl gibt $STUB/journal aus (Log + JSON aus der Sandbox).
+# derselbe wie /). systemctl merkt sich Eingeschaltetes ($STUB/an), Laufendes ($STUB/aktiv) und Schritte, die gerade
+# laufen ($STUB/aktivierend – is-active sagt dann „activating“); journalctl gibt $STUB/journal aus (Log + JSON aus der
+# Sandbox). Die Einladung (start clip-freund-koppeln@) zählt die Lauf-Nummer hoch (show), schreibt wie der echte Dienst
+# db/einladung.json (ohne KOPPEL_CODE nicht – Telegram nicht erreichbar) und, nur mit KOPPEL_ID, als hätte er Start
+# gedrückt, db/kopplung.json. Ihr db/einladung.json bleibt danach liegen (wie nach einem hart abgebrochenen Lauf).
 FREUND_STUBS = {
     "id": '[ "$1" = -u ] && echo 0',
     "getent": '[ -f "$STUB/$1" ] || exit 2\ngrep -m1 "^$2:" "$STUB/$1" || exit 2',
@@ -852,16 +860,31 @@ esac; fi
 PATH=/usr/bin:/bin exec stat "$@"''',
     "systemctl": r'''case "$1" in
   is-enabled) shift; [ "$1" = -q ] && shift; grep -qx "$1" "$STUB/an" 2>/dev/null ;;
-  is-active) shift; [ "$1" = -q ] && shift; cat "$STUB/an" "$STUB/aktiv" 2>/dev/null | grep -qx "$1" ;;
+  is-active) shift; q=0; if [ "$1" = -q ]; then q=1; shift; fi
+    if cat "$STUB/an" "$STUB/aktiv" 2>/dev/null | grep -qx "$1"; then z=active
+    elif grep -qx "$1" "$STUB/aktivierend" 2>/dev/null; then z=activating; else z=inactive; fi
+    [ "$q" = 1 ] || echo "$z"; [ "$z" = active ] ;;
+  stop) shift; for u in "$@"; do for f in aktiv aktivierend; do grep -vx "$u" "$STUB/$f" > "$STUB/$f.neu" 2>/dev/null || true
+    cat "$STUB/$f.neu" > "$STUB/$f"; done; done ;;
   enable) shift; for u in "$@"; do case "$u" in -*) ;; *) echo "$u" >> "$STUB/an" ;; esac; done ;;
   disable) shift; for u in "$@"; do case "$u" in -*) ;; *) grep -vx "$u" "$STUB/an" > "$STUB/an.neu" || true
     cat "$STUB/an.neu" > "$STUB/an" ;; esac; done ;;
-  start) case "$2" in clip-freund-einrichten@*) exit "${EINRICHTEN_RC:-0}" ;; clip-freund-pruefen@*) exit "${PRUEFEN_RC:-0}" ;; esac ;;
-  show) echo lauf-1 ;;
+  start) case "$2" in clip-freund-einrichten@*) exit "${EINRICHTEN_RC:-0}" ;; clip-freund-pruefen@*) exit "${PRUEFEN_RC:-0}" ;;
+    clip-freund-koppeln@*) n="${2#clip-freund-koppeln@}"; d="$BENUTZER_DIR/${n%.service}/db"
+      l=$(( $(cat "$STUB/koppeln-laeufe" 2>/dev/null || echo 0) + 1 )); echo "$l" > "$STUB/koppeln-laeufe"
+      if [ -n "$KOPPEL_CODE" ]; then
+        printf '{"lauf": "lauf-%s", "link": "https://t.me/max_clips_bot?start=%s"}' "$l" "$KOPPEL_CODE" > "$d/einladung.json"
+      fi
+      if [ -n "${KOPPEL_ID:-}" ]; then printf '{"id": %s, "vorname": "Max", "zeit": "2026-10-08T20:00:00.000Z"}' \
+        "$KOPPEL_ID" > "$d/kopplung.json"; fi
+      [ -n "${KOPPEL_ID:-}" ] ;;
+  esac ;;
+  show) echo "lauf-$(cat "$STUB/koppeln-laeufe" 2>/dev/null || echo 0)" ;;
   cat) [ -f "$UNITS/$2" ] ;;
 esac''',
     "journalctl": '[ "$1" = --sync ] || cat "$STUB/journal" 2>/dev/null\ntrue',
     "systemd-run": 'printf "%s\\n" "$@" > "$STUB/systemd-run.argumente"\nexit "${RUN_RC:-0}"',
+    "sleep": "PATH=/usr/bin:/bin exec sleep 0.05",   # Warteschleifen im Test kurz
     # Löschen darf nie vorkommen – auch nicht aus Versehen
     "rm": "exit 1", "userdel": "exit 1", "groupdel": "exit 1",
 }
@@ -971,14 +994,15 @@ esac
                     "TESTORDNER": str(t), "BENUTZER_DIR": str(self.benutzer), "PROD": str(self.prod),
                     "REGIE": str(t / "opt/clip-regie"), "UNITS": str(self.units), "PUFFER": str(t / "srv/puffer"),
                     "FLORIAN_DIR": str(self.florian), "RECHTE_ABLAGE": str(t / "root/benutzer-rechte"),
-                    "TELEGRAM_API": f"http://127.0.0.1:{server.server_address[1]}"}
+                    "TELEGRAM_API": f"http://127.0.0.1:{server.server_address[1]}", "KOPPEL_CODE": KOPPEL_CODE}
 
     def lauf(self, skript: Path, *argumente: str, eingabe: str = "", **umgebung: str) -> subprocess.CompletedProcess:
         return subprocess.run(["bash", str(self.hier / skript.name), *argumente], input=eingabe, capture_output=True,
                               text=True, env={**self.env, **umgebung}, timeout=120)
 
     def anlegen_max(self) -> subprocess.CompletedProcess:
-        r = self.lauf(ANLEGEN, "max", eingabe=f"j\n{MAX_TOKEN}\n{EPIC}\n{TG_ZAHL}\nj\n")
+        """Ein Lauf, bei dem er den Einladungslink antippt (KOPPEL_ID) – Telegram-Zahl fragt das Skript nicht mehr ab."""
+        r = self.lauf(ANLEGEN, "max", eingabe=f"j\n{MAX_TOKEN}\n{EPIC}\nj\n", KOPPEL_ID=TG_ZAHL)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
@@ -1028,8 +1052,8 @@ esac
             f"$ chown root:clip-max {self.inst}/.clip-benutzer", f"$ chown clip-max:clip-max {self.inst}/db",
             f"datei = \"{self.sperre}\"",
             f"$ chmod 644 {self.sperre}", "$ install -m 644", "$ systemctl daemon-reload",
-            "$ systemctl start clip-freund-einrichten@max.service", "$ systemctl enable --now clip-freund-scan@max.timer",
-            "Probe fertig – nichts verändert"])
+            "$ systemctl start clip-freund-einrichten@max.service", "$ systemctl start clip-freund-koppeln@max.service",
+            "$ systemctl enable --now clip-freund-scan@max.timer", "Probe fertig – nichts verändert"])
         self.assertEqual(self.aenderungen(), [])
 
     def test_anlegen_und_zweiter_lauf_ueberspringt_fertiges(self):
@@ -1056,14 +1080,18 @@ esac
         self.assertFalse(os.path.lexists(self.inst / "kein-lager"))
         self.assertEqual(sorted(p.name for p in self.units.iterdir()),
                          sorted(p.name for p in self.hier.glob("clip-freund-*@.*")))
-        # erst in der Sandbox einrichten und prüfen, dann nur seine Dienste einschalten
+        # erst in der Sandbox einrichten und prüfen, dann mit Telegram verbinden, dann nur seine Dienste einschalten –
+        # den Bot erst, wenn seine Zahl in .env steht
         assertReihenfolge(self, aufrufe, ["systemctl daemon-reload", "systemctl start clip-freund-einrichten@max.service",
+                                          "systemctl start clip-freund-koppeln@max.service",
                                           "systemctl enable --now clip-freund-scan@max.timer",
                                           "systemctl enable --now clip-freund-abend@max.timer",
                                           "systemctl enable --now clip-freund-bot@max.service",
                                           "systemctl start clip-freund-pruefen@max.service"])
         self.assertEqual([z for z in aufrufe.splitlines() if "enable" in z and "@max" not in z], [])
         self.assertIn("Bot von max: https://t.me/max_clips_bot", r.stdout)
+        self.assertIn(f"https://t.me/max_clips_bot?start={KOPPEL_CODE}", r.stdout)   # der Einladungslink für dich
+        self.assertIn("Telegram: verbunden (Name in Telegram: Max)", r.stdout)
         self.assertIn("Alles getrennt", r.stdout)
         self.assertNichtsVerraten(r.stdout, r.stderr, aufrufe)
         # deine Rechte geschärft (j), Sperrdatei für alle lesbar, Rückweg liegt bereit
@@ -1080,7 +1108,8 @@ esac
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("   $ ", r.stdout)
         for satz in ("Benutzer clip-max: schon da", "Bot-Token: schon da", f"{self.inst}/.env: schon da",
-                     "clip-freund-bot@max.service: schon an", "schon geschärft – nichts zu tun"):
+                     "Telegram: schon verbunden", "clip-freund-bot@max.service: schon an",
+                     "schon geschärft – nichts zu tun"):
             self.assertIn(satz, r.stdout)
         # Einrichten läuft jedes Mal mit – es holt in der Sandbox nur Fehlendes nach (z. B. ein Whisper-Modell, das beim
         # ersten Mal nicht kam) und prüft dabei die Trennung erneut
@@ -1093,6 +1122,43 @@ esac
         for pfad, modus in ((self.florian, 0o755), (self.florian / "pipeline.db", 0o644),
                             (self.prod / ".env", 0o644), (self.sperre, 0o644)):
             self.assertEqual(stat.S_IMODE(pfad.stat().st_mode), modus, pfad)
+
+    def test_ohne_kopplung_bleibt_nur_der_bot_aus(self):
+        """Er tippt den Link nicht an: Timer an, Bot aus, keine Zahl in .env. Tippt er später (Strg+C, Einladung lief
+        weiter), übernimmt der nächste Lauf die Zahl aus kopplung.json, ohne neu zu koppeln – aber nie über einen Link."""
+        r = self.lauf(ANLEGEN, "max", eingabe=f"j\n{MAX_TOKEN}\n{EPIC}\nj\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"https://t.me/max_clips_bot?start={KOPPEL_CODE}", r.stdout)
+        self.assertIn("Telegram: noch nicht verbunden – sein Bot bleibt aus", r.stdout)
+        self.assertNotIn("ALLOWED_USER_ID", (self.inst / ".env").read_text(encoding="utf-8"))
+        aufrufe = self.aufrufe()
+        self.assertIn("systemctl enable --now clip-freund-scan@max.timer", aufrufe)
+        self.assertNotIn("enable --now clip-freund-bot@max.service", aufrufe)
+        # kopplung.json als Link (z. B. auf eine fremde Datei): root folgt ihm nicht, es wird neu eingeladen
+        db = self.inst / "db"
+        fremd = self.t / "fremd.json"
+        fremd.write_text(json.dumps({"id": 999888777, "vorname": "Fremd"}), encoding="utf-8")
+        (db / "kopplung.json").symlink_to(fremd)
+        self.neu()   # … und Telegram ist gerade nicht erreichbar: den liegen gebliebenen Link von vorhin zeigt es nie
+        r = self.lauf(ANLEGEN, "max", eingabe="j\n", KOPPEL_CODE="")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("systemctl start clip-freund-koppeln@max.service", self.aufrufe())
+        self.assertIn("Der Einladungslink kam nicht", r.stdout)
+        self.assertNotIn(KOPPEL_CODE, r.stdout)
+        self.assertNotIn("ALLOWED_USER_ID", (self.inst / ".env").read_text(encoding="utf-8"))
+        self.assertNotIn("Fremd", r.stdout)
+        # Seine echte Kopplung von vorhin: übernommen, ohne neue Einladung; der Bot geht erst jetzt an
+        (db / "kopplung.json").unlink()
+        (db / "kopplung.json").write_text(json.dumps({"id": int(TG_ZAHL), "vorname": "Max"}), encoding="utf-8")
+        self.neu()
+        r = self.lauf(ANLEGEN, "max", eingabe="j\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("clip-freund-koppeln", self.aufrufe())
+        self.assertIn(f"LEARN_BOT_ALLOWED_USER_ID={TG_ZAHL}\n", (self.inst / ".env").read_text(encoding="utf-8"))
+        self.assertIn("systemctl enable --now clip-freund-bot@max.service", self.aufrufe())
+        self.assertEqual((self.besitzer(self.inst / ".env"), stat.S_IMODE((self.inst / ".env").stat().st_mode)),
+                         ("root:clip-max", 0o640))
+        self.assertNichtsVerraten(r.stdout, r.stderr, self.aufrufe())
 
     def test_abbrueche_vor_jeder_aenderung(self):
         vorher = self.zustand()
@@ -1126,6 +1192,8 @@ esac
     def test_stilllegen_schaltet_nur_aus(self):
         self.anlegen_max()
         vorher = {k: v for k, v in self.zustand().items() if k.startswith("var/lib/clip-benutzer")}
+        # eine Einladung läuft gerade (Schritt = „activating“ – is-active -q allein sähe sie nicht)
+        (self.stub / "aktivierend").write_text("clip-freund-koppeln@max.service\n", encoding="utf-8")
         self.neu()
         r = self.lauf(STILLLEGEN, "max", "--probe")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -1134,6 +1202,7 @@ esac
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("systemctl disable --now clip-freund-bot@max.service clip-freund-scan@max.timer "
                       "clip-freund-abend@max.timer", self.aufrufe())
+        self.assertIn("systemctl stop clip-freund-koppeln@max.service", self.aufrufe())
         self.assertEqual({k: v for k, v in self.zustand().items() if k.startswith("var/lib/clip-benutzer")}, vorher)
         self.assertIn("clip-max:", (self.stub / "passwd").read_text(encoding="utf-8"))
         r = self.lauf(STILLLEGEN, "max")
