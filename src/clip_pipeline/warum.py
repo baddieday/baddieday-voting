@@ -102,7 +102,7 @@ def text(con: sqlite3.Connection, konfig: Konfig) -> str:
         fazit.append(f"📉 Wenig Material: {m['auswahl']} Momente zur Wahl, ein Short braucht 4–{max_momente} – "
                      "der Bot muss wiederholen."
                      + (f" In ⚙️ auf „alle“ stellen gibt {m['gesamt']}." if nur_matches is not None
-                        and m["gesamt"] > m["auswahl"] else ""))
+                        and m["gesamt"] > m["auswahl"] and einstellungen.experte(con, konfig) else ""))   # 08.10.
     if m["gesamt"] and (a["Einzelkill"] + a["ohne Kill"]) / m["gesamt"] >= EINZEL_VIEL:
         anteil = round(100 * (a["Einzelkill"] + a["ohne Kill"]) / m["gesamt"])
         fazit.append(f"🥱 {anteil} % sind Einzelkills oder ohne Kill – das ist das Rohmaterial; der Schnitt kann es nur "

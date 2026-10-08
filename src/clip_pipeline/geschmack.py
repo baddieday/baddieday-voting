@@ -17,7 +17,8 @@ Wahl: Thompson-Sampling je Schraube; „mutig“ (geschmack.mut, Standard 0,5): 
 bewusst auf ihre am wenigsten erprobte Einstellung gestellt (Experiment). Derselbe Aufbau nie dreimal hintereinander.
 Nach ❌ → 🥱 (07.10., „das gleiche Video mit anderen Schnitten“): die neue Fassung bekommt einen Aufbau mit ANDERER
 Reihenfolge (Montage und Kino haben beide den Bogen) und das andere Tempo, das sich wirklich spürbar unterscheidet
-(_anders). Ein fester Stil aus ⚙️ geht vor. Deine Regeln (regeln.anwenden) kommen danach – sie gehen immer vor.
+(_anders). Ein fester Stil ([regie].stil) gilt nur noch im Experten-Modus – im einfachen ist er fest „auto“
+(einstellungen.EINFACH_FEST, 08.10.). Deine Regeln (regeln.anwenden) kommen danach – sie gehen immer vor.
 
 Die KI schaut sich jedes gesendete Video danach im Hintergrund an (ki_nachtragen, Lern-Bot-Schleife) – das Video
 kommt dadurch nicht später. Sonntags ab 18 Uhr fasst wochen_text die Woche zusammen (Lern-Meldung woche:<JJJJ-Www>).
@@ -169,7 +170,7 @@ def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str = "short", anders: 
         wahl["aufbau"], wahl["tempo"] = _anders(anders, aufbauten, basis_seg)
         wahl["anders_als"] = anders.get("anders_als")
         experiment = None if experiment in ("aufbau", "tempo") else experiment
-    if fest in stile.STILE:                                              # ⚙️ fester Stil geht vor
+    if fest in stile.STILE:                                # fester Stil (nur /experte; einfach: „auto“) geht vor
         wahl["aufbau"] = fest
         experiment = None if experiment == "aufbau" else experiment
     wahl["experiment"] = experiment
@@ -282,7 +283,7 @@ def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None
     if schlecht:
         zeilen.append("👎 Kommt weniger an: " + " · ".join(NAMEN[(k, o)] + _bewertet(w) for k, o, w in schlecht))
     if not gut and not schlecht:
-        zeilen.append("🤔 Noch kein klares Bild – ich brauche ein paar ✅/❌ mehr.")
+        zeilen.append("🤔 Noch kein klares Bild – ich probiere weiter selbst aus.")   # 08.10.: keine Bitte an dich
     neu = sum(1 for z in woche if ((json.loads(z["parameter"] or "{}") or {}).get("geschmack") or {}).get("experiment"))
     if neu:
         zeilen.append(f"🧪 {neu}× bewusst etwas Neues ausprobiert.")

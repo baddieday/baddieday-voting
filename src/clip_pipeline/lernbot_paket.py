@@ -239,37 +239,56 @@ def baue_paket(konfig: Konfig, entwurf_id: int) -> dict:
     return {"datei": ergebnis["datei"], "caption": text, "dateiname": f"clip-battle_e{entwurf_id}.mp4"}
 
 
-async def sende_paket(app, entwurf_id: int) -> None:
+def dauerhaft(fehler: BaseException) -> bool:
+    """Paket-Fehler, die ein neuer Versuch nicht behebt (08.10.): Konfig, Caption-Vorlage, kaputte Schnittliste, eine
+    Moment-Datei oder die Musik fehlt (der Puffer hält Rohvideos 14 Tage), ungültige Länge – dann sofort ein klarer
+    Satz statt dreier Versuche. Sperre, Platte und ffmpeg dagegen können beim nächsten Mal klappen."""
+    if isinstance(fehler, (KonfigFehler, caption.CaptionFehler, ValueError)):
+        return True
+    return isinstance(fehler, MedienFehler) and str(fehler).startswith(("Moment-Datei fehlt", "Musik fehlt",
+                                                                        "Ungültige Videolänge"))
+
+
+async def sende_paket(app, entwurf_id: int, auftrag: dict | None = None) -> str:
     """Paket bauen (Thread) und schicken: Datei per send_document, Caption als <pre> (zum Kopieren), Checkliste
     mit Knöpfen. Fehler: dir kurz den Grund („⚠️ Upload-Paket: Moment-Datei fehlt …“, ohne Pfade mit Token o. ä.),
     Details ins Log. bot_data["paket_arbeitet"] wird immer zurückgesetzt.
 
     Bekannte Fehler (MedienFehler, KonfigFehler, CaptionFehler, Datei-/JSON-Fehler) gehen mit ihrem Text an dich;
-    ein unerwarteter Fehler nur mit seinem Typ – sein Text könnte Dinge enthalten, die nicht in den Chat gehören."""
+    ein unerwarteter Fehler nur mit seinem Typ – sein Text könnte Dinge enthalten, die nicht in den Chat gehören.
+
+    auftrag (08.10., Merkliste im einfachen Modus – lernbot.paket_auftrag): Was ein neuer Versuch beheben kann (Sperre
+    belegt, Platte, ffmpeg), geht nicht als Satz an dich – den nächsten Versuch nach 10 bzw. 30 min plant der Aufrufer,
+    erst nach dem dritten kommt ein Satz; dauerhafte Fehler (dauerhaft) sofort. Beim Wiederholen keine zweite Ansage.
+    Im einfachen Modus nie mehr „Tipp später nochmal“. Rückgabe: "gesendet", "dauerhaft" (Satz geschickt) oder
+    "fehler" (vorübergehend)."""
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     app.bot_data["paket_arbeitet"] = True
-    # 07.10. (Florian: „fehlerhafte Texte“): im einfachen Modus gibt es keinen 📦-Knopf – dort bleibt ✅ Hochladen
-    # stehen, und die Texte verweisen darauf; „Video“ statt „Entwurf“, ohne Fachbegriffe
+    # 07.10. (Florian: „fehlerhafte Texte“): im einfachen Modus gibt es keinen 📦-Knopf – „Video“ statt „Entwurf“,
+    # ohne Fachbegriffe. 08.10.: dort auch keine Bitte, es später nochmal zu versuchen – das macht die Merkliste
     einfach = not lernbot.experte_an(con, konfig)
-    nochmal = "Tipp später nochmal auf ✅ Hochladen." if einfach else "Drück 📦 später noch einmal."
+    nochmal = "" if einfach else " Drück 📦 später noch einmal."
     try:
-        await app.bot.send_message(chat, f"📦 Ich mache Video #{entwurf_id} in voller Qualität fertig … Das dauert ein "
-                                         "paar Minuten." if einfach else
-                                   f"📦 Baue das Upload-Paket für Entwurf #{entwurf_id} (1080×1920) … "
-                                   "Rendert gerade ein Entwurf, warte ich auf ihn.")
+        if auftrag is None or not auftrag.get("versuche"):
+            await app.bot.send_message(chat, f"📦 Ich mache Video #{entwurf_id} in voller Qualität fertig … Das dauert "
+                                             "ein paar Minuten." if einfach else
+                                       f"📦 Baue das Upload-Paket für Entwurf #{entwurf_id} (1080×1920) … "
+                                       "Rendert gerade ein Entwurf, warte ich auf ihn.")
         try:
             paket = await asyncio.to_thread(baue_paket, konfig, entwurf_id)
         except Gesperrt:
             log.warning("Upload-Paket Entwurf #%s: Pipeline-Sperre belegt", entwurf_id)
-            await app.bot.send_message(chat, ("⏳ Ich rechne gerade noch an etwas anderem. " if einfach else
-                                              "⏳ Gerade läuft ein anderer rechenintensiver Schritt (Pipeline-Sperre). ")
-                                       + nochmal)
-            return
+            if auftrag is None:
+                await app.bot.send_message(chat, ("⏳ Ich rechne gerade noch an etwas anderem." if einfach else
+                                                  "⏳ Gerade läuft ein anderer rechenintensiver Schritt "
+                                                  "(Pipeline-Sperre).") + nochmal)
+            return "fehler"
         except (MedienFehler, KonfigFehler, caption.CaptionFehler, OSError, ValueError) as fehler:
             log.warning("Upload-Paket Entwurf #%s: %s", entwurf_id, fehler)
-            await app.bot.send_message(chat, f"⚠️ Upload-Paket: {str(fehler)[:FEHLER_MAX]}"
-                                       + (f" {nochmal}" if einfach else ""))
-            return
+            if auftrag is not None and not dauerhaft(fehler):
+                return "fehler"
+            await app.bot.send_message(chat, f"⚠️ Upload-Paket: {str(fehler)[:FEHLER_MAX]}")
+            return "dauerhaft" if dauerhaft(fehler) else "fehler"
         with open(paket["datei"], "rb") as datei:
             # Als Datei (nicht als Video): Telegram komprimiert Dateien nicht neu, du lädst genau diese Fassung hoch.
             # Zeitgrenzen wie beim Clip-Bot-Paket: bis 48 MB hochladen dauert, 300 s Lesen/Schreiben, 30 s Verbinden
@@ -282,10 +301,13 @@ async def sende_paket(app, entwurf_id: int) -> None:
         knoepfe = knoepfe_checkliste(entwurf_id, stand)
         await app.bot.send_message(chat, _checkliste_text(entwurf_id, stand, einfach), parse_mode="HTML",
                                    reply_markup=lernbot._markup(knoepfe) if knoepfe else None)
+        return "gesendet"
     except Exception as fehler:  # der Bot soll weiterlaufen; Details (mit Traceback) nur ins Log
         log.exception("Upload-Paket Entwurf #%s fehlgeschlagen", entwurf_id)
-        await app.bot.send_message(chat, "⚠️ Das Upload-Paket ging gerade schief. " + nochmal if einfach else
-                                   f"⚠️ Upload-Paket fehlgeschlagen ({type(fehler).__name__}) – Details im Log.")
+        if auftrag is None:
+            await app.bot.send_message(chat, "⚠️ Das Upload-Paket ging gerade schief." if einfach else
+                                       f"⚠️ Upload-Paket fehlgeschlagen ({type(fehler).__name__}) – Details im Log.")
+        return "fehler"
     finally:
         app.bot_data["paket_arbeitet"] = False
 

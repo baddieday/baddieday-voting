@@ -295,11 +295,23 @@ class Paket(MitLernPaket):
         self.assertIn("später", self.bot.nachrichten[-1]["text"])
         self.assertIn("📦", self.bot.nachrichten[-1]["text"])
         self.assertFalse(self.app.bot_data["paket_arbeitet"])
-        self.konfig.daten["lernbot"]["experte"] = False   # einfacher Modus: kein 📦-Knopf – der Text nennt ✅ (07.10.)
+        # einfacher Modus (08.10.): nie mehr „Tipp später nochmal“ – im Auftrag (✅, Merkliste) gar kein Satz, den
+        # nächsten Versuch nach 10 min plant lernbot.paket_auftrag
+        self.konfig.daten["lernbot"]["experte"] = False
         with sperre(self.konfig.datenbank.with_suffix(".lock")), self.assertLogs("lern-bot", "WARNING"):
             asyncio.run(lernbot_paket.sende_paket(self.app, eid))
-        self.assertIn("✅ Hochladen", self.bot.nachrichten[-1]["text"])
-        self.assertNotIn("📦", self.bot.nachrichten[-1]["text"])
+        self.assertEqual(self.bot.nachrichten[-1]["text"], "⏳ Ich rechne gerade noch an etwas anderem.")
+        lernbot.folge_merken(self.con, eid, "paket")                           # wie nach ✅ (Bewertung steht schon)
+        folge = lernbot.folge_zu(self.con, eid)
+        vorher = len(self.bot.nachrichten)
+        with sperre(self.konfig.datenbank.with_suffix(".lock")), self.assertLogs("lern-bot", "WARNING"):
+            self.assertEqual(asyncio.run(lernbot.paket_auftrag(self.app, eid, folge)), "nochmal")
+        self.assertEqual(len(self.bot.nachrichten), vorher + 1)                # nur die Ansage, kein Fehler-Satz
+        self.assertEqual(lernbot.folge_zu(self.con, eid)["versuche"], 1)
+        self.assertEqual(asyncio.run(lernbot.paket_auftrag(self.app, eid, lernbot.folge_zu(self.con, eid))),
+                         "gesendet")                                           # der nächste Versuch klappt
+        self.assertEqual(lernbot.folge_zu(self.con, eid)["ergebnis"], "gesendet")
+        self.assertEqual(len(self.bot.dokumente), 1)
 
     def test_fehlende_moment_datei_wird_gemeldet(self):
         eid = self.entwurf_anlegen()
@@ -311,6 +323,12 @@ class Paket(MitLernPaket):
         self.assertIn("⚠️ Upload-Paket", self.bot.nachrichten[-1]["text"])
         self.assertIn("Moment-Datei fehlt", self.bot.nachrichten[-1]["text"])
         self.assertFalse(self.app.bot_data["paket_arbeitet"])
+        # 08.10.: im Auftrag (einfacher Modus) kein Warten auf drei Versuche – die Datei kommt nicht wieder
+        self.konfig.daten["lernbot"]["experte"] = False
+        with self.assertLogs("lern-bot", "WARNING"):
+            self.assertEqual(asyncio.run(lernbot_paket.sende_paket(self.app, eid, auftrag={"versuche": 1})),
+                             "dauerhaft")
+        self.assertIn("Moment-Datei fehlt", self.bot.nachrichten[-1]["text"])
 
     def test_unerwarteter_fehler_ohne_details_an_dich(self):
         eid = self.entwurf_anlegen()

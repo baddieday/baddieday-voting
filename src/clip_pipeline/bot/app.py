@@ -357,11 +357,13 @@ async def cmd_clip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/auto: Stand der Auto-Freigabe (Modus, Stufen, letzte 7 Tage, Korrekturen) mit Knopf ⚙️ Einstellungen."""
+    """/auto: Stand der Auto-Freigabe (Modus, Stufen, letzte 7 Tage, Korrekturen) mit Knopf ⚙️ Einstellungen – den
+    gibt es seit 08.10. nur im Experten-Modus (im einfachen entscheidet der Bot, ein Menü gibt es dort nicht)."""
     con, konfig, _ = _daten(context)
     u = auto_freigabe.ueberblick(con, einstellungen.anwenden(con, konfig))
+    knopf = [[("⚙️ Einstellungen", "s:m")]] if einstellungen.experte(con, konfig) else None
     await update.effective_message.reply_text(texte.auto_text(u), parse_mode=ParseMode.HTML,
-                                              reply_markup=_markup([[("⚙️ Einstellungen", "s:m")]]))
+                                              reply_markup=_markup(knopf))
 
 
 async def sende_battle(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -572,7 +574,8 @@ async def bei_fehler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None
 
 def baue_app(konfig: Konfig, token: str, erlaubt: int) -> Application:
     app = Application.builder().token(token).post_init(_nach_start).post_stop(_vor_ende).build()
-    app.bot_data.update(con=db.verbinde(konfig.datenbank), konfig=konfig, erlaubt=erlaubt)
+    # clip_bot: die gemeinsame ⚙️-Übersicht (lernbot_einstellungen) verweist hier auf /experte im Lern-Bot
+    app.bot_data.update(con=db.verbinde(konfig.datenbank), konfig=konfig, erlaubt=erlaubt, clip_bot=True)
     nur_ich = filters.User(user_id=erlaubt)
     for name, funktion in (
         ("start", cmd_hilfe), ("hilfe", cmd_hilfe), ("help", cmd_hilfe), ("status", cmd_status),

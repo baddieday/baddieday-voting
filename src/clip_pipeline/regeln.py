@@ -9,7 +9,8 @@ sichtbarer Wirkung – der Bot sagt dir in einem Satz, was er geändert hat:
   ⏳ zu lang       Ziel −10 s (ab 30 s)
   🥱 langweilig    der SCHNITT langweilt (07.10.): neue Fassung mit anderem Aufbau, Tempo und Song; die stärkere
                    Hälfte der Szenen bleibt, die schwächere wird nur in dieser Fassung durch neue ersetzt – keine
-                   Sperre (neue_fassung → geschmack.waehle und regie.fassung_kandidaten)
+                   Sperre (neue_fassung → geschmack.waehle und regie.fassung_kandidaten). 08.10.: Gegenpaar zu 😵 –
+                   gesenkte Effekte eine Stufe zurück (aus → ruhig → normal, nie darüber; mehr_effekte)
   🎵 Musik         dieser Song kommt nie wieder                             Tabelle sperren (art track)
   😵 zu hektisch   Effekte eine Stufe ruhiger (wild → normal → ruhig → aus) Einstellung regie.effekt_stufe
   (Experten-Gründe: 🎆 zu viele Effekte wie hektisch, 💥 mehr Action eine Stufe wilder)
@@ -66,7 +67,11 @@ def sperre(con: sqlite3.Connection, art: str, schluessel: list[str], grund: str)
 # --- Wirksame Werte -------------------------------------------------------------------------------------------
 
 def _gesetzt(con: sqlite3.Connection, konfig: Konfig, schluessel: str):
-    """Wert aus dem Bot (⚙️/❌) oder aus der Datei – None, wenn keiner gesetzt ist (dann gilt das Gelernte)."""
+    """Wert aus dem Bot (⚙️/❌) oder aus der Datei – None, wenn keiner gesetzt ist (dann gilt das Gelernte).
+    Was der einfache Modus festlegt (einstellungen.EINFACH_FEST), gilt dort vor einer alten ⚙️-Zeile (08.10.)."""
+    ist_fest, wert = einstellungen.fest(con, konfig, schluessel)
+    if ist_fest:
+        return wert
     bot = einstellungen.gespeichert(con)
     return bot[schluessel] if schluessel in bot else konfig.wert(schluessel, None)
 
@@ -78,9 +83,13 @@ def ziel_regel(con: sqlite3.Connection, konfig: Konfig) -> float | None:
 
 
 def stufe(con: sqlite3.Connection, konfig: Konfig) -> int | None:
-    """Deine Effekt-Stufe 0–3, None = nie gesetzt (dann gilt das Gelernte)."""
+    """Deine Effekt-Stufe 0–3, None = nie gesetzt (dann gilt das Gelernte).
+    08.10.: der alte Schalter „✨ Effekte aus“ (regie.effekte.an = false, ⚙️ vom 06.10. oder Datei) ohne Stufe zählt
+    als Stufe „aus“ – vorher hieß es im 📋 Stand „Effekte normal“, und „😵 Zu hektisch“ schaltete sie wieder EIN."""
     wert = _gesetzt(con, konfig, STUFE_SCHLUESSEL)
-    return int(wert) if wert is not None else None
+    if wert is not None:
+        return int(wert)
+    return 0 if _gesetzt(con, konfig, "regie.effekte.an") is False else None
 
 
 def nur_starke(con: sqlite3.Connection, konfig: Konfig) -> bool:
@@ -94,6 +103,10 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict
     if fmt == "short" and (ziel := ziel_regel(con, konfig)):
         p["ziel_dauer_s"] = max(ZIEL_GRENZEN[0], min(ZIEL_GRENZEN[1], ziel))
     s = stufe(con, konfig)
+    if s == STANDARD_STUFE and not einstellungen.experte(con, konfig):
+        # Prüfung 08.10.: „normal“ heißt im einfachen Modus „wie gelernt“ (wie ohne Stufe) – sonst galt nach 😵 😵 🥱 🥱
+        # überall Hektik 1,0, und der gelernte Anteil des Aufbaus (Montage 1,2, Story 0,7 …) war eingefroren
+        s = None
     if s in STUFE_WERTE:   # „ruhig“ nie wilder als gelernt, „wild“ nie ruhiger – sonst wirkte der Tipp verkehrt herum
         hektik, staerke = STUFE_WERTE[s]
         wahl = min if s < STANDARD_STUFE else max if s > STANDARD_STUFE else (lambda _gelernt, regel: regel)
@@ -151,14 +164,31 @@ def _songs_frei(con: sqlite3.Connection) -> int:
         return 0
 
 
-def _satz_langweilig(con: sqlite3.Connection, konfig: Konfig, liste: dict) -> str:
+def mehr_effekte(con: sqlite3.Connection, konfig: Konfig) -> tuple[int, int] | None:
+    """🥱 als Gegenpaar zu 😵 (08.10., Florian stellt nichts mehr von Hand ein): Hast du die Effekte gesenkt („ruhig“
+    oder „aus“, auch mit dem alten Schalter „✨ Effekte aus“), holt 🥱 sie eine Stufe zurück Richtung „normal“ – nie
+    darüber. Ohne ⚙️ blieben sie nach zweimal 😵 sonst für immer aus. Sind sie wieder an, lernt geschmack.py auch die
+    Zeitlupe wieder mit (nur_wirksame). Rückgabe (vorher, nachher) oder None: nichts geändert (nie gesetzt – dann gilt
+    das Gelernte und es kommt keine Zeile dazu –, „normal“ oder „wild“)."""
+    alt = stufe(con, konfig)
+    if alt is None or alt >= STANDARD_STUFE:
+        return None
+    einstellungen.setze(con, STUFE_SCHLUESSEL, alt + 1)
+    return alt, alt + 1
+
+
+def _satz_langweilig(con: sqlite3.Connection, konfig: Konfig, liste: dict, mehr: tuple[int, int] | None = None) -> str:
     """„🥱 Verstanden: Ich schneide es neu – anderer Aufbau, anderes Tempo, anderer Song. Die 2 besten Szenen bleiben,
-    die 2 schwächeren tausche ich gegen neue.“ – nur, was die neue Fassung auch wirklich anders macht."""
+    die 2 schwächeren tausche ich gegen neue.“ – nur, was die neue Fassung auch wirklich anders macht. mehr
+    (mehr_effekte): „… anderer Song und wieder etwas mehr Effekte: „ruhig“ statt „aus“.“"""
     fest = str(konfig.wert("regie.stil", "auto") or "auto") in stile.STILE
     teile = ["gleicher Aufbau (fest eingestellt), anderes Tempo" if fest else "anderer Aufbau, anderes Tempo"]
     if _songs_frei(con) >= 2:
         teile.append("anderer Song")
-    text = f"🥱 Verstanden: Ich schneide es neu – {', '.join(teile)}."
+    text = f"🥱 Verstanden: Ich schneide es neu – {', '.join(teile)}"
+    if mehr:
+        text += f" und wieder etwas mehr Effekte: „{STUFEN[mehr[1]]}“ statt „{STUFEN[mehr[0]]}“"
+    text += "."
     behalten, ohne = langweilig_teilung(liste)
     if ohne and behalten:
         text += (" Die beste Szene bleibt" if len(behalten) == 1 else f" Die {len(behalten)} besten Szenen bleiben")
@@ -187,7 +217,7 @@ def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict) -
             text += f" Dieses Video hatte nur {dauer:.0f} s – mehr starke Szenen gab es nicht."
         return text
     if grund == "langweilig":   # 07.10.: der Schnitt langweilt – keine Sperre; was anders wird, regelt neue_fassung
-        return _satz_langweilig(con, konfig, liste)
+        return _satz_langweilig(con, konfig, liste, mehr_effekte(con, konfig))   # 08.10.: gesenkte Effekte zurück
     if grund == "musik":
         m = liste.get("musik") or {}
         if m.get("track_id") is None:
