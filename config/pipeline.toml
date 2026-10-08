@@ -140,7 +140,9 @@ lernen_ab = 3
 # Untergrenze fürs Ziel der Shorts in s (06.10., auch in ⚙️ „Short-Mindestlänge“); 0 = nur gelernt (45–75 s)
 short_mindestens_s = 0.0
 # Stufe 1 (07.10., regeln.py) – deine Regeln, im Bot unter ⚙️ bzw. per ❌ umgestellt:
-# feste Länge der Shorts in s (0 = automatisch); „⏱️ Zu kurz“/„⏳ Zu lang“ unter ❌ verschieben sie um 10 s
+# Länge der Shorts in s (0 = automatisch); „⏱️ Zu kurz“/„⏳ Zu lang“ unter ❌ setzen sie 10 s über/unter das Video.
+# Unter /experte fest; im einfachen Modus (Stufe 5, 08.10.) nach ⏱️ Untergrenze, nach ⏳ Obergrenze – darüber
+# bzw. darunter wählen die Zuschauerzahlen (regeln.laenge)
 short_ziel_s = 0.0
 # "stark" = nur Multikills, Clutches, Kills im Endkampf, Victory – lieber kein Video als Füllmaterial; "alle" = auch Einzelkills
 szenen = "stark"

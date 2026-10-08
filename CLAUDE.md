@@ -498,3 +498,12 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Wochenbericht sagt „👀 Bei den Zuschauern kommt gut an: …“. Verstellt das Publikums-Modell nur Feinwerte des Aufbaus,
     zählt der Aufbau trotzdem (sonst lernte ihn niemand mehr). Ohne Zuschauer-Noten alles wie bisher; /experte
     unverändert. N75–N78.
+  - **Stufe 5: ⏱️/⏳ als Grenze mit Richtung** (`regeln.laenge`, `regie_lernen.laengen_richtung`): Im einfachen Modus
+    ist deine Länge keine feste Zahl mehr, die nur du umstellen kannst: Nach deinem letzten „⏱️ zu kurz“ ist sie eine
+    Untergrenze, nach „⏳ zu lang“ eine Obergrenze (Richtung aus deinen Bewertungen, kein neuer Schlüssel). Dein Wert ist
+    der Start; darüber bzw. darunter wählt das Publikums-Modell mit Belegen, nie dagegen – ohne Zuschauerzahlen bleibt
+    es genau dein Wert (nicht der alte gelernte, der nach vielen „zu kurz“ bei 75 s stünde). ⏱️/⏳ zählen von dem Video,
+    das du gesehen hast (10 s über bzw. unter Ziel oder echter Länge); Texte „mindestens“/„höchstens“. Ein Längen-Versuch
+    des Publikums-Modells, den die Grenze verschiebt, fällt für das Video weg (sonst stünde ein nie getesteter Versuch in
+    `lern_experimente`). Nachgestellt mit Publikum, das 60–70 s mag: Untergrenze 55 → 65 s; ⏳ am 65-s-Video →
+    höchstens 55. /experte und ein ⚙️-Wert ohne ⏱️/⏳ bleiben fest. N79–N83.

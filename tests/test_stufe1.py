@@ -36,11 +36,26 @@ class Regeln(MitRegieMaterial):
     def k(self):
         return einstellungen.anwenden(self.con, self.konfig)
 
+    @staticmethod
+    def video(ziel: float) -> dict:
+        """LISTE als Video mit diesem Ziel und dieser Länge – ⏱️/⏳ zählen seit Stufe 5 (08.10.) von dem Video, das du
+        gesehen hast."""
+        return {**LISTE, "parameter": {"ziel_dauer_s": ziel}, "dauer_s": ziel}
+
+    def tipp(self, grund: str, ziel: float) -> str:
+        """❌ und ein Längen-Grund an einem Short mit diesem Ziel – wie im Lern-Bot: erst die Bewertung, dann die Regel."""
+        n = self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0]
+        eid = self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, dauer_s, status, erstellt) "
+                               "VALUES (?, 'short', '/x', '{}', ?, 'gesendet', ?)", (f"v{n}", ziel, iso(jetzt()))).lastrowid
+        regie_lernen.bewerte(self.con, eid, grund=grund)
+        return regeln.wende_an(self.con, self.k(), grund, self.video(ziel))
+
     def test_jeder_grund_wirkt_sofort_und_sichtbar(self):
         self.konfig.daten["regie"]["effekte"]["an"] = True    # wie ab Werk – „aus“ zählt seit 08.10. als Stufe „aus“
-        self.assertIn("55 s lang (vorher 45 s)", regeln.wende_an(self.con, self.k(), "kurz", LISTE))
-        self.assertIn("65 s lang (vorher 55 s)", regeln.wende_an(self.con, self.k(), "kurz", LISTE))  # wirkt jedes Mal
-        self.assertIn("55 s lang (vorher 65 s)", regeln.wende_an(self.con, self.k(), "lang", LISTE))
+        self.assertIn("mindestens 55 s lang (vorher 45 s)", regeln.wende_an(self.con, self.k(), "kurz", LISTE))
+        self.assertIn("mindestens 65 s lang (vorher 55 s)",                                     # wirkt jedes Mal
+                      regeln.wende_an(self.con, self.k(), "kurz", self.video(55.0)))
+        self.assertIn("höchstens 55 s lang (vorher 65 s)", regeln.wende_an(self.con, self.k(), "lang", self.video(65.0)))
         self.assertIn("2 schwächeren tausche ich gegen neue", regeln.wende_an(self.con, self.k(), "langweilig", LISTE))
         self.assertEqual(regeln.gesperrt(self.con, "moment"), set())                  # 🥱 sperrt nichts (07.10.)
         self.assertEqual(regeln.langweilig_teilung(LISTE), (["a", "c"], ["b", "d"]))
@@ -56,8 +71,43 @@ class Regeln(MitRegieMaterial):
 
     def test_grenze_der_short_laenge(self):
         einstellungen.setze(self.con, regeln.ZIEL_SCHLUESSEL, 75.0)
-        self.assertIn("geht bei Shorts nicht", regeln.wende_an(self.con, self.k(), "kurz", LISTE))
+        self.assertIn("geht bei Shorts nicht", regeln.wende_an(self.con, self.k(), "kurz", self.video(75.0)))
         self.assertEqual(regeln.ziel_regel(self.con, self.konfig), 75.0)
+
+    def test_laenge_ist_grenze_mit_richtung(self):
+        """Stufe 5 (08.10.): Nach ⏱️ ist deine Länge eine Untergrenze, nach ⏳ eine Obergrenze – dazwischen wählt das
+        Publikums-Modell. Ohne Publikum gilt dein Wert, auch wenn das alte Lernen (3× „zu kurz“) schon 62 s wollte."""
+        def publikum(ziel: float) -> dict:
+            return {"ziel_dauer_s": ziel, "autonom": {"version": 3, "beitraege": {"ziel_dauer_s": 0.2},
+                                                      "exploration": None}}
+
+        for _ in range(3):
+            self.assertIn("ab jetzt mindestens 55 s lang (vorher 45 s)", self.tipp("kurz", 45.0))
+        self.assertEqual(regie_lernen.aktuelle(self.con, self.k(), "short")[0]["ziel_dauer_s"], 55.0)
+        einstellungen.setze(self.con, "regie.short_mindestens_s", 65.0)          # alte ⚙️-Mindestlänge: dein Tipp geht vor
+        self.assertEqual(regie_lernen.aktuelle(self.con, self.k(), "short")[0]["ziel_dauer_s"], 55.0)
+        self.assertEqual(regeln.anwenden(self.con, self.k(), "short", publikum(65.0))["ziel_dauer_s"], 65.0)
+        self.assertEqual(regeln.anwenden(self.con, self.k(), "short", publikum(45.0))["ziel_dauer_s"], 55.0)  # nie dagegen
+        self.assertIn("ab jetzt höchstens 45 s lang (vorher 55 s)", self.tipp("lang", 55.0))
+        self.assertEqual(regeln.anwenden(self.con, self.k(), "short", publikum(55.0))["ziel_dauer_s"], 45.0)
+        self.assertIn("Shorts höchstens 45 s", regeln.regeln_zeile(self.con, self.k()))
+        # ⏳ an einem Video mit Ziel 65, das mangels Szenen nur 48 s hatte: von dem, was du gesehen hast
+        self.assertIn("höchstens 40 s lang (vorher 50 s)",
+                      regeln.wende_an(self.con, self.k(), "lang", {**self.video(65.0), "dauer_s": 48.0}))
+
+    def test_laenge_versuch_gegen_die_grenze_faellt_weg(self):
+        """Ein Publikums-Versuch mit 45 s bei Untergrenze 55: das Video wird 55 s lang, und der Versuch ist für dieses
+        Video gestrichen – sonst stünde in lern_experimente ein Versuch, den es nie gab. /experte: fest wie bisher."""
+        self.tipp("kurz", 45.0)
+        versuch = {"variable": "ziel_dauer_s", "vorher": 55.0, "wert": 45.0, "hypothese": "45 s", "erwartet": None}
+        p = {"ziel_dauer_s": 45.0, "autonom": {"version": 3, "beitraege": {}, "exploration": versuch}}
+        q = regeln.anwenden(self.con, self.k(), "short", p)
+        self.assertEqual((q["ziel_dauer_s"], q["autonom"]["exploration"]), (55.0, None))
+        self.assertEqual(p["autonom"]["exploration"], versuch)                         # die Liste des Aufrufers bleibt
+        einstellungen.setze(self.con, "lernbot.experte", True)
+        einstellungen.setze(self.con, regeln.ZIEL_SCHLUESSEL, 60.0)                         # ⚙️ unter /experte
+        self.assertEqual(regeln.anwenden(self.con, self.k(), "short", {**p, "ziel_dauer_s": 65.0})["ziel_dauer_s"], 60.0)
+        self.assertIn("Shorts 60 s", regeln.regeln_zeile(self.con, self.k()))
 
     def test_alter_schalter_effekte_aus_ist_stufe_aus(self):
         """08.10.: „✨ Effekte aus“ (⚙️ vom 06.10.) ohne Stufe ist Stufe „aus“ – vorher stand im 📋 Stand „Effekte
@@ -267,7 +317,7 @@ class LernBotEinfach(MitRegieMaterial):
         self.assertEqual(knoepfe, [f"g:{self.eid}:{g}" for g in ("kurz", "lang", "langweilig", "musik", "hektisch", "neu")])
         self.klick(f"g:{self.eid}:kurz")
         self.assertEqual(regeln.ziel_regel(self.con, self.konfig), 55.0)                    # sofort gesetzt
-        self.assertIn("ab jetzt 55 s", self.bot.texte[-1])
+        self.assertIn("ab jetzt mindestens 55 s", self.bot.texte[-1])
         self.assertIn("neue Fassung", self.bot.texte[-1])
         self.assertEqual(lernbot.folge_zu(self.con, self.eid)["art"], "fassung")           # gemerkt, die Schleife baut
         self.assertEqual(asyncio.run(lernbot.folge_starten(self.app)), 1)

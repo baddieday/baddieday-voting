@@ -151,27 +151,42 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None, an
     Formats – ein „⏳ zu lang“ auf einen Zusammenschnitt kürzte vorher auch die Shorts. Was du inhaltlich magst
     (Momente, Stimmungen, Musik), gilt für beide. fmt None: alle Bewertungen wie bisher.
     anders (07.10., regeln.neue_fassung nach 🥱, nur einfacher Modus): Aufbau und Tempo anders als das abgelehnte
-    Video (geschmack.waehle) – das Tempo geht für diese eine Fassung auch vor dem Publikums-Modell."""
+    Video (geschmack.waehle) – das Tempo geht für diese eine Fassung auch vor dem Publikums-Modell.
+    Short im einfachen Modus (Stufe 5, 08.10.): Ist deine Länge eine Grenze mit Richtung (regeln.laenge), ist sie der
+    Start fürs Publikums-Modell statt des gelernten dauer_faktor – es weicht nur mit Belegen davon ab, und
+    regeln.anwenden lässt das nur in deiner Richtung zu. Ohne Publikum bleibt es also dein Wert."""
     energien = sorted(float(z["energie"] or 0) for z in con.execute("SELECT energie FROM tracks"))
     einfach = bool(konfig.wert("regie.geschmack", False))
     # Einfacher Modus (Stufe 2): die KI-Gründe lehren hier nicht mit – von der KI zählt nur ihre Note in geschmack.py
     p, ziel = _falte(bewertungen(con, mit_ki=not einfach), konfig, energien, fmt)
     if fmt is not None:
-        from . import autonom, geschmack, stile
+        from . import autonom, geschmack, regeln, stile
 
         # Schnittstil (30.09.) zuerst: relativ auf das Gelernte; das Publikumsmodell darf danach nachsteuern.
         # Einfacher Modus (07.10.): Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌, der KI-Note und
         # (Stufe 5, 08.10.) den Zuschauern
         p = geschmack.anwenden(con, konfig, fmt, p, anders=anders) if einfach else stile.anwenden(con, konfig, fmt, p)
+        grenze = einfach and fmt == "short" and (regel := regeln.laenge(con, konfig)) is not None and regel[1]
+        if grenze:
+            # Stufe 5: sonst spränge die Länge nach deinem ⏱️ auf 55 s sofort auf den alten gelernten Wert (nach vielen
+            # „zu kurz“ 75 s) – das wäre deine Richtung, aber ohne Beleg
+            p["dauer_faktor"] = regel[0] / float(format_regeln(konfig, fmt)[0]["ziel_s"])
         vorher = dict(p)
         p, ziel = autonom.plan_parameter(con, konfig, fmt, p, ziel)
+        auto = p.get("autonom") if isinstance(p.get("autonom"), dict) else {}
+        if grenze and "ziel_dauer_s" not in (auto.get("beitraege") or {}) \
+                and (auto.get("exploration") or {}).get("variable") != "ziel_dauer_s":
+            # ohne Beleg genau dein Wert – plan_parameter beginnt sonst nie unter 45 s (⏱️ an einem 30-s-Video: 40)
+            p["ziel_dauer_s"] = regel[0]
         if anders and einfach:   # 🥱: sonst drehte das Publikums-Modell das andere Tempo (seg_min_faktor) zurück
             p["seg_min_faktor"] = vorher["seg_min_faktor"]
         if "geschmack" in p:   # was das Publikums-Modell übersteuert hat, bekommt weder Lob noch Tadel
             p["geschmack"] = geschmack.nur_wirksame(vorher, p, konfig)
         grenzen = format_regeln(konfig, fmt)[0]
-        # ⚙️ Short-Länge (06.10.): deine Untergrenze – nichts Gelerntes darf darunter
-        mindestens = float(konfig.wert("regie.short_mindestens_s", 0.0) or 0.0) if fmt == "short" else 0.0
+        # ⚙️ Short-Länge (06.10.): deine Untergrenze – nichts Gelerntes darf darunter. Hast du im einfachen Modus ⏱️/⏳
+        # getippt, geht dein letzter Tipp vor (wie bis 08.10. die feste Länge) – sonst brächte ⏱️ an einem 45-s-Video
+        # nach zweimal ⏳ wieder die alte Mindestlänge (z. B. 65 s) statt 55
+        mindestens = float(konfig.wert("regie.short_mindestens_s", 0.0) or 0.0) if fmt == "short" and not grenze else 0.0
         if mindestens > 0:
             p["ziel_dauer_s"] = max(float(p.get("ziel_dauer_s") or 0.0), mindestens)
         if "ziel_dauer_s" in p:
@@ -204,6 +219,17 @@ def _deine_richtung(zeilen: list) -> set[str]:
             if g in gruende and gegen not in gruende:
                 richtung[frozenset((g, gegen))] = g
     return set(richtung.values())
+
+
+def laengen_richtung(con: sqlite3.Connection) -> str | None:
+    """Stufe 5 (08.10.): deine letzte Längen-Ansage an einem Short – "kurz" (⏱️), "lang" (⏳) oder None (nie getippt).
+    Wie _deine_richtung, aber nach dem Zeitpunkt deines Tipps geordnet (geaendert statt erstellt): Den Grund tippst du
+    nach dem ❌, auch an einem älteren Video – sonst gewönne ein früherer Tipp an einem jüngeren Video. Daraus wird deine
+    Länge im einfachen Modus eine Unter- bzw. Obergrenze (regeln.laenge)."""
+    zeilen = sorted((z for z in bewertungen(con, mit_ki=False) if z["format"] == "short"),
+                    key=lambda z: (z["geaendert"] or z["erstellt"] or "", z["entwurf_id"]))
+    richtung = _deine_richtung(zeilen) & {"kurz", "lang"}
+    return richtung.pop() if richtung else None
 
 
 def _falte(zeilen: list, konfig: Konfig, energien: list[float], fmt: str | None) -> tuple[dict, dict]:

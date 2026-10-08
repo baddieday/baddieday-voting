@@ -30,8 +30,8 @@
 
 | Grund | Was sich ändert (für immer, bis du es selbst änderst – außer bei 🥱 und 🔁) |
 |---|---|
-| ⏱️ Zu kurz | Shorts werden 10 Sekunden länger (höchstens 75 s) |
-| ⏳ Zu lang | Shorts werden 10 Sekunden kürzer (mindestens 30 s) |
+| ⏱️ Zu kurz | Shorts werden ab jetzt rund 10 Sekunden länger als dieses Video (höchstens 75 s) – kürzer werden sie erst wieder mit ⏳. Noch länger nur, wenn es bei den Zuschauern besser ankommt |
+| ⏳ Zu lang | Shorts werden ab jetzt rund 10 Sekunden kürzer als dieses Video (mindestens 30 s) – länger werden sie erst wieder mit ⏱️. Noch kürzer nur, wenn es bei den Zuschauern besser ankommt |
 | 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen Szenen, die du noch nicht gesehen hast – erst vom selben Abend, dann starke von früheren Abenden (höchstens die Hälfte des Videos). Gibt es keine, kommt kein Video. Gesperrt wird nichts. Hast du die Effekte mit 😵 gesenkt, holt 🥱 sie eine Stufe zurück (höchstens bis normal) – das bleibt so. |
 | 🎵 Musik | Dieser Song kommt nie wieder – neue Songs holt der Bot selbst |
 | 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus); zurück geht es mit 🥱 |

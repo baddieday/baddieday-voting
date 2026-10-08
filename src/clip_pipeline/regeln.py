@@ -5,8 +5,10 @@ Vorher war jeder Grund unter 👎 nur eine Stimme unter vielen: Regie-Lernen, KI
 Stil-Auswahl rechneten alle mit, und dein Knopf wurde verwässert. Jetzt ist jeder Grund eine feste Regel mit sofortiger,
 sichtbarer Wirkung – der Bot sagt dir in einem Satz, was er geändert hat:
 
-  ⏱️ zu kurz       Ziel der Shorts +10 s (bis 75 s)                         Einstellung regie.short_ziel_s
-  ⏳ zu lang       Ziel −10 s (ab 30 s)
+  ⏱️ zu kurz       Länge des Videos +10 s (bis 75 s), ab jetzt Untergrenze   Einstellung regie.short_ziel_s
+  ⏳ zu lang       Länge des Videos −10 s (ab 30 s), ab jetzt Obergrenze
+                   (Stufe 5, 08.10., nur einfacher Modus: darüber bzw. darunter wählt das Publikums-Modell mit
+                   Belegen – nie gegen deine Richtung; unter /experte bleibt die Länge fest, siehe laenge)
   🥱 langweilig    der SCHNITT langweilt (07.10.): neue Fassung mit anderem Aufbau, Tempo und Song; die stärkere
                    Hälfte der Szenen bleibt, die schwächere wird nur in dieser Fassung durch neue ersetzt – keine
                    Sperre (neue_fassung → geschmack.waehle und regie.fassung_kandidaten). 08.10.: Gegenpaar zu 😵 –
@@ -77,9 +79,46 @@ def _gesetzt(con: sqlite3.Connection, konfig: Konfig, schluessel: str):
 
 
 def ziel_regel(con: sqlite3.Connection, konfig: Konfig) -> float | None:
-    """Deine feste Short-Länge in s, None = automatisch (gelernt)."""
+    """Deine Short-Länge in s, None = automatisch (gelernt). Ob fest oder Grenze: laenge."""
     wert = _gesetzt(con, konfig, ZIEL_SCHLUESSEL)
     return float(wert) if wert else None
+
+
+GRENZE_WORT = {"kurz": "mindestens", "lang": "höchstens"}
+
+
+def laenge(con: sqlite3.Connection, konfig: Konfig) -> tuple[float, str | None] | None:
+    """Deine Short-Länge als (Sekunden, Richtung), None ohne Regel (dann gilt das Gelernte).
+    Stufe 5 (08.10., Florian: „mach doch endlich ein Video das sich immer wieder verbessert“): Im einfachen Modus ist sie
+    keine feste Länge mehr. Nach deinem letzten „⏱️ zu kurz“ ist sie eine Untergrenze (Richtung "kurz": nie kürzer),
+    nach „⏳ zu lang“ eine Obergrenze ("lang": nie länger); darüber bzw. darunter entscheidet das Publikums-Modell mit
+    Belegen (regie_lernen.aktuelle, anwenden). Die Richtung kommt aus deinen Bewertungen
+    (regie_lernen.laengen_richtung) – kein neuer Schlüssel. Richtung None = feste Länge wie bis 08.10.: unter /experte
+    und für einen Wert aus ⚙️, zu dem du nie ⏱️/⏳ getippt hast."""
+    ziel = ziel_regel(con, konfig)
+    if not ziel:
+        return None
+    ziel = max(ZIEL_GRENZEN[0], min(ZIEL_GRENZEN[1], ziel))
+    if einstellungen.experte(con, konfig):
+        return ziel, None
+    from . import regie_lernen   # hier, nicht oben: regie_lernen lädt die ganze Regie
+
+    try:
+        return ziel, regie_lernen.laengen_richtung(con)
+    except sqlite3.OperationalError:   # sehr alte Datenbank ohne Entwürfe: fest wie bisher
+        return ziel, None
+
+
+def _ohne_scheinversuch(p: dict) -> dict:
+    """Stufe 5 (08.10.): Ein Längen-Versuch des Publikums-Modells (autonom.plan_parameter), den deine Grenze verschoben
+    hat, fällt für dieses Video weg – sonst stünde in lern_experimente ein Versuch, den es nie gab
+    (autonom.snapshot_speichern). Ebenso, wenn ihn die alte ⚙️-Mindestlänge verschoben hat. Nur einfacher Modus."""
+    auto = p.get("autonom")
+    versuch = auto.get("exploration") if isinstance(auto, dict) else None
+    if isinstance(versuch, dict) and versuch.get("variable") == "ziel_dauer_s" and p.get("ziel_dauer_s") is not None \
+            and abs(float(versuch.get("wert") or 0.0) - float(p["ziel_dauer_s"])) > 0.05:
+        p["autonom"] = {**auto, "exploration": None}   # neue Liste: die des Aufrufers bleibt, wie sie ist
+    return p
 
 
 def stufe(con: sqlite3.Connection, konfig: Konfig) -> int | None:
@@ -97,13 +136,23 @@ def nur_starke(con: sqlite3.Connection, konfig: Konfig) -> bool:
 
 
 def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict:
-    """Regie-Parameter mit deinen Regeln darüber (Kopie): feste Short-Länge, Effekt-Stufe, nur starke Szenen, Songs
-    rotieren. Aufrufer: Lern-Bot (baue_entwurf) und der Abend-Ablauf (sitzung) – nach regie_lernen.aktuelle."""
+    """Regie-Parameter mit deinen Regeln darüber (Kopie): Short-Länge (fest bzw. im einfachen Modus Grenze mit
+    Richtung, laenge), Effekt-Stufe, nur starke Szenen, Songs rotieren. Aufrufer: Lern-Bot (baue_entwurf) und der
+    Abend-Ablauf (sitzung) – nach regie_lernen.aktuelle.
+    Beispiel (einfacher Modus, Stufe 5): nach ⏱️ auf 55 s will das Publikum 65 → 65; nach ⏳ auf 45 s will es 55 → 45."""
     p = dict(p)
-    if fmt == "short" and (ziel := ziel_regel(con, konfig)):
-        p["ziel_dauer_s"] = max(ZIEL_GRENZEN[0], min(ZIEL_GRENZEN[1], ziel))
+    einfach = not einstellungen.experte(con, konfig)
+    if fmt == "short" and (regel := laenge(con, konfig)):
+        ziel, richtung = regel
+        gelernt = p.get("ziel_dauer_s")
+        if richtung is None or gelernt is None:
+            p["ziel_dauer_s"] = ziel                     # fest wie bis 08.10. (/experte, ⚙️-Wert ohne ⏱️/⏳)
+        else:   # Stufe 5: Grenze in deiner Richtung – darüber bzw. darunter gilt die Wahl des Publikums-Modells
+            p["ziel_dauer_s"] = (max if richtung == "kurz" else min)(float(gelernt), ziel)
+    if einfach:
+        p = _ohne_scheinversuch(p)
     s = stufe(con, konfig)
-    if s == STANDARD_STUFE and not einstellungen.experte(con, konfig):
+    if s == STANDARD_STUFE and einfach:
         # Prüfung 08.10.: „normal“ heißt im einfachen Modus „wie gelernt“ (wie ohne Stufe) – sonst galt nach 😵 😵 🥱 🥱
         # überall Hektik 1,0, und der gelernte Anteil des Aufbaus (Montage 1,2, Story 0,7 …) war eingefroren
         s = None
@@ -201,17 +250,23 @@ def _satz_langweilig(con: sqlite3.Connection, konfig: Konfig, liste: dict, mehr:
 
 def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict) -> str | None:
     """Setzt die Regel zu einem Grund und gibt die Bestätigung für dich zurück (ein Satz, ohne Fachbegriffe).
-    None = für diesen Grund gibt es keine feste Regel (er wird nur gelernt).
-    Beispiel: „kurz“ bei Ziel 45 s → Einstellung 55 → „⏱️ Verstanden: Shorts sind ab jetzt 55 s lang (vorher 45 s).“"""
+    None = für diesen Grund gibt es keine feste Regel (er wird nur gelernt). Nur im einfachen Modus (lernbot._klick_einfach).
+    Beispiel: „kurz“ an einem 45-s-Video → Einstellung 55 → „⏱️ Verstanden: Shorts sind ab jetzt mindestens 55 s lang
+    (vorher 45 s).“ – „mindestens“/„höchstens“ seit Stufe 5 (08.10.): die Länge ist eine Grenze mit Richtung (laenge)."""
     if grund in ("kurz", "lang"):
         p = liste.get("parameter") or {}
-        alt = _rund5(ziel_regel(con, konfig) or p.get("ziel_dauer_s") or 45)
+        # Stufe 5: Schritt von dem Video, das du gesehen hast – ⏱️ von der längeren, ⏳ von der kürzeren Zahl aus Ziel
+        # und echter Länge. Das Publikum kann es über deine Grenze hinaus verlängert haben (Grenze 55, Video 65), zu
+        # wenig Material macht es kürzer als das Ziel; vom gespeicherten Wert aus hätte ⏱️ dann nichts geändert
+        gesehen = [float(x) for x in (p.get("ziel_dauer_s"), liste.get("dauer_s")) if x]
+        alt = _rund5((max if grund == "kurz" else min)(gesehen) if gesehen else (ziel_regel(con, konfig) or 45))
         neu = max(ZIEL_GRENZEN[0], min(ZIEL_GRENZEN[1], alt + (ZIEL_SCHRITT if grund == "kurz" else -ZIEL_SCHRITT)))
         einstellungen.setze(con, ZIEL_SCHLUESSEL, float(neu))
         if neu == alt:
             return (f"⏱️ Länger als {ZIEL_GRENZEN[1]} s geht bei Shorts nicht – das Ziel bleibt {neu} s." if grund == "kurz"
                     else f"⏳ Kürzer als {ZIEL_GRENZEN[0]} s geht nicht – das Ziel bleibt {neu} s.")
-        text = f"{'⏱️' if grund == 'kurz' else '⏳'} Verstanden: Shorts sind ab jetzt {neu} s lang (vorher {alt} s)."
+        text = (f"{'⏱️' if grund == 'kurz' else '⏳'} Verstanden: Shorts sind ab jetzt {GRENZE_WORT[grund]} {neu} s lang "
+                f"(vorher {alt} s).")
         dauer = float(liste.get("dauer_s") or 0)
         # Stufe 4 (08.10.): nur, wenn es wirklich keine ungesehenen starken Szenen früherer Abende mehr gab – sonst
         # holt die neue Fassung sie (regie.erstelle, Nachschub) und der Satz stimmte nicht
@@ -238,10 +293,12 @@ def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict) -
 
 
 def regeln_zeile(con: sqlite3.Connection, konfig: Konfig) -> str:
-    """„Deine Regeln: Shorts 55 s · Effekte ruhig · nur starke Szenen · 3 Songs und 12 Szenen gesperrt“."""
-    ziel = ziel_regel(con, konfig)
+    """„Deine Regeln: Shorts mindestens 55 s · Effekte ruhig · nur starke Szenen · 3 Songs und 12 Szenen gesperrt“ –
+    „mindestens“/„höchstens“ seit Stufe 5 (08.10.) im einfachen Modus; fest (/experte): „Shorts 55 s“."""
+    regel = laenge(con, konfig)
     s = stufe(con, konfig)
-    teile = [f"Shorts {ziel:.0f} s" if ziel else "Länge automatisch",
+    teile = [" ".join(filter(None, ("Shorts", GRENZE_WORT.get(regel[1]), f"{regel[0]:.0f} s"))) if regel
+             else "Länge automatisch",
              f"Effekte {STUFEN[s]}" if s is not None else "Effekte normal",
              "nur starke Szenen" if nur_starke(con, konfig) else "auch Einzelkills"]
     songs, szenen = len(gesperrt(con, "track")), len(gesperrt(con, "moment"))

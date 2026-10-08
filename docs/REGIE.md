@@ -108,7 +108,7 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
 | 😵 zu hektisch | Segmente +15 % länger, Übergänge +10 %; ab +30 % nur jeder 2., ab +70 % jeder 4. Beat; dazu Hektik ×0,9 (Beat-Akzente schwächer, 0,3 … 1,3) |
 | 🎯 Stimmung getroffen | Hauptstimmung +0,5; Musikziel dieser Stimmung rückt 20 % zum benutzten Titel |
 | ⏳ zu lang | Ziel-Dauer −10 % (bis 60 %) |
-| ⏱️ zu kurz | Ziel-Dauer +11 % – hebt „zu lang“ wieder auf; beide zugleich: nichts. Short (28.09., Florian): Start 45 s, immer 30–75 s und 4–10 Momente; jede Stimme wirkt bis an diese Grenzen (vorher war bei 45 s Schluss). `pipeline lernstand` bzw. 🧠 Lernstand zeigt „Short-Länge: …“ mit deinen Stimmen |
+| ⏱️ zu kurz | Ziel-Dauer +11 % – hebt „zu lang“ wieder auf; beide zugleich: nichts. Short (28.09., Florian): Start 45 s, immer 30–75 s und 4–10 Momente; jede Stimme wirkt bis an diese Grenzen (vorher war bei 45 s Schluss). `pipeline lernstand` bzw. 🧠 Lernstand zeigt „Short-Länge: …“ mit deinen Stimmen. Einfacher Modus (Stufe 5, 08.10.): ⏱️/⏳ setzen dort eine Grenze 10 s über bzw. unter dem Video (`regeln.laenge`) – sie ist der Start fürs Publikums-Modell, das nur in deiner Richtung abweichen darf; der gelernte Faktor wirkt dort nur ohne sie |
 | ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills |
 | 🥱 Schnitt langweilig | (07.10.) nichts an den Momenten – ein Urteil über den Schnitt; im einfachen Modus lernt `geschmack.py` daraus Aufbau, Tempo und Zeitlupe, und die neue Fassung ist anders geschnitten (bis 07.10.: „Clips langweilig“, jeder Moment −1) |
 | 🎆 zu viele Effekte | Effekt-Stärke der Hauptstimmung ×0,85 (bis 0,1) – alle Effekte dieser Stimmung schwächer, schwache fallen unter die Schwelle weg |
