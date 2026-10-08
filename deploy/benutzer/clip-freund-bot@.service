@@ -34,6 +34,9 @@ PrivateTmp=true
 # Alles nur lesbar; /home und /root gibt es nicht (dort liegen Florians Claude-Anmeldung und seine Schlüssel)
 ProtectSystem=strict
 ProtectHome=true
+# Fremde Prozesse unsichtbar: Befehlszeilen von Florian und anderen Freunden (z. B. die Epic-ID beim Replay-Lesen)
+# sieht der Freund nicht. Kann der Container das nicht, bleibt es ohne Wirkung – der Dienst startet trotzdem (M19).
+ProtectProc=invisible
 # Leere, schreibgeschützte Ordner über Florians Bereichen und allen Freunden: Puffer, Lager, Datenbank, claude,
 # Schlüssel für pve-big, lokal.toml und die Ordner der anderen gibt es hier gar nicht …
 TemporaryFileSystem=/srv:ro /var/lib/clip-pipeline:ro /var/lib/clip-benutzer:ro /opt/clip-pipeline/config:ro

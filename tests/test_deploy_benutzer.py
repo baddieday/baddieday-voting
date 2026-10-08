@@ -92,7 +92,8 @@ class Vorlagen(unittest.TestCase):
         # %i, nie %I – %I machte aus „max-2“ den Pfad „max/2“
         self.assertEqual(s["Environment"], [f"CLIP_INSTANZ={INSTANZ}", f"HOME={INSTANZ}/cache",
                                             f"XDG_CACHE_HOME={INSTANZ}/cache", f"HF_HOME={INSTANZ}/cache/huggingface"])
-        for schluessel, wert in (("ProtectSystem", "strict"), ("ProtectHome", "true"), ("PrivateTmp", "true"),
+        for schluessel, wert in (("ProtectSystem", "strict"), ("ProtectHome", "true"), ("ProtectProc", "invisible"),
+                                 ("PrivateTmp", "true"),
                                  ("NoNewPrivileges", "true"), ("WorkingDirectory", "/opt/clip-pipeline"),
                                  ("SupplementaryGroups", "render"), ("Nice", "10"), ("CPUWeight", "50"),
                                  ("MemoryMax", "3G")):
