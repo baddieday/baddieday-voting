@@ -9,11 +9,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import cli, einstellungen, entwurf, lernbot, musik, regie, sitzung
+from clip_pipeline import cli, einstellungen, entwurf, lernbot, musik, regie, sitzung, stimmung
 from clip_pipeline.medien import MedienFehler
 from clip_pipeline.zeit import UTC, iso, jetzt
 
-from tests.hilfen import HAT_FFMPEG
+from tests.hilfen import HAT_FFMPEG, testvideo
 from tests.regie_hilfen import MOMENTE, MitRegieMaterial
 
 
@@ -134,6 +134,29 @@ class Sitzung(MitRegieMaterial):
         self.assertTrue(sitzung._dauerhaft(MedienFehler("Moment-Datei fehlt: /srv/clips/momente/1.mp4")))
         self.assertFalse(sitzung._dauerhaft(MedienFehler("Entwurf x: hängt – 180 s ohne Fortschritt, abgebrochen")))
 
+    def test_whisper_fehler_trotzdem_video(self):
+        """Mehrbenutzer M37 (M22): Lässt sich das Whisper-Modell nicht laden (z. B. Cache nicht beschreibbar), kommt das
+        Abend-Video trotzdem – die Szenen werden ohne Sprache gemessen, ein Hinweis steht im Ergebnis. Vorher brach
+        jeder Lauf ab (Exit 1), und alle 10 Minuten begann alles von vorn."""
+        self.musik_anlegen(150, "episch")
+        self.abend_aus_m1_m2()
+        for match, serie in (("m1", 4), ("m2", 3), ("m1", 2), ("m2", 2)):  # vier starke Szenen, noch ohne Stimmung
+            cid = self.clip_anlegen(status="vorbewertet", match_id=match, max_gruppe=serie)
+            rel = f"sessions/{match}/clips/{cid:03d}.mp4"
+            testvideo(self.konfig.absolut(rel), dauer=self.DAUER, tonspuren=2)   # Spur 2 = Mikro → Whisper
+            self.con.execute("UPDATE clips SET clip_pfad = ? WHERE id = ?", (rel, cid))
+        kaputt = PermissionError(13, "Permission denied", "/var/lib/clip-benutzer/freund/cache/huggingface")
+        with mock.patch.object(stimmung.Transkription, "verfuegbar", return_value=True), \
+                mock.patch.object(stimmung.Transkription, "text", side_effect=kaputt) as whisper, \
+                mock.patch.object(entwurf, "entwurf"), \
+                self.assertLogs("pipeline", "ERROR"):                       # entwurf gefälscht: nur planen
+            neu = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=True)["neu"][0]
+        self.assertIsNotNone(neu["entwurf"])                                # das Abend-Video entsteht
+        self.assertIn("Stimmung fehlgeschlagen (PermissionError", neu["hinweis"])
+        self.assertTrue(neu["hinweis"].endswith("– Szenen ohne Sprache gemessen"))
+        self.assertEqual(whisper.call_count, 1)                             # der zweite Durchgang fragt Whisper nicht
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM momente").fetchone()[0], 4)
+
     def test_musik_nachschub_ohne_netz_nur_ins_log(self):
         """Stufe 4 (08.10.): Am Ende des Laufs lädt der Bot tagsüber selbst Songs deiner Genres nach. Ist NCS nicht
         erreichbar, steht es nur im Log – das Abend-Video kommt trotzdem, und der nächste Lauf (10 min später) fragt
@@ -245,3 +268,26 @@ class Sitzung(MitRegieMaterial):
             code = cli.main(["sitzungen"])
         self.assertEqual(code, 3)
         wol.assert_not_called()
+
+
+class AufgegebenesMatch(MitRegieMaterial):
+    """Mehrbenutzer M36: Auf ein Match, das `scan --versuche` aufgegeben hat (Status 'fehler'), wartet der Abend nicht
+    die 2 h – auf eins, das noch verarbeitet wird ('neu'), wie bisher schon."""
+
+    def test_wartet_nicht_auf_aufgegebenes_match(self):
+        for m in ("m1", "m2"):
+            self.con.execute("INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, status, erstellt, geaendert) "
+                             "VALUES (?, ?, 'x', 'x', ?, 'x', 'x')", (m, f"replays/{m}.replay",
+                                                                    "verarbeitet" if m == "m1" else "neu"))
+        ordner = self.konfig.wurzel / "sitzungen"
+        ordner.mkdir()
+        (ordner / "session_2026-10-08_23-10-00.json").write_text(json.dumps(
+            {"matches": ["m1", "m2"], "ende_utc": iso(jetzt() - timedelta(minutes=50))}), encoding="utf-8")
+        e = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
+        self.assertEqual((e["wartet"][0]["offen"], e["neu"]), (["m2"], []))       # m2 kommt noch: warten
+        self.con.execute("UPDATE matches SET status = 'fehler' WHERE id = 'm2'")
+        e = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
+        self.assertEqual(e["wartet"], [])                                          # aufgegeben: nicht mehr warten
+        self.assertTrue(e["neu"][0]["hinweis"].startswith("1 Match nicht verarbeitet: m2"))
+        kein = self.con.execute("SELECT text FROM lern_meldungen WHERE schluessel LIKE 'kein:%'").fetchone()[0]
+        self.assertNotIn("noch nicht fertig", kein)                                # sein Bot sagte schon „klappt nicht“

@@ -214,7 +214,7 @@ def einschaetzen(con: sqlite3.Connection, konfig: Konfig, *, maximal: int | None
     from . import claude_aufruf  # hier: claude_aufruf importiert verarbeitung (Kreis vermeiden)
 
     ergebnis: dict = {"neu": 0, "aufrufe": 0, "hinweise": []}
-    if not konfig.wert("viral.ki", True):
+    if not konfig.wert("viral.ki", True) or not claude_aufruf.ki_moeglich(konfig):   # Freund ohne eigenen Zugang (M1)
         return ergebnis
     rest = int(konfig.wert("viral.ki_pro_tag", 40)) - _ki_heute(con)
     n = min(rest, maximal if maximal is not None else int(konfig.wert("viral.ki_je_lauf", 12)))

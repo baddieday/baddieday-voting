@@ -1,0 +1,52 @@
+# Lern-Bot eines Freundes (Mehrbenutzer, docs/MEHRBENUTZER.md) – Vorlage, %i = sein Name, sein Ordner
+# /var/lib/clip-benutzer/<name>. Ein eigener Telegram-Bot mit eigenem Token (LEARN_BOT_TOKEN in <Ordner>/.env), nur für
+# seine Telegram-Zahl; er sieht nur seine eigenen Videos und lernt nur aus ihnen.
+# Installiert: alles-aktualisieren.sh legt die Vorlage nur auf die Platte, sobald es einen Freund gibt – eingeschaltet
+# wird sie nie vom Update und nicht von Hand, sondern nur über benutzer-anlegen.sh <name>.
+# Log ansehen: journalctl -u clip-freund-bot@<name> -f
+[Unit]
+Description=Clip-Pipeline Lern-Bot von %i (Freund)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline lernbot
+Restart=always
+RestartSec=10
+# --- Sandbox: in jeder Vorlage wörtlich gleich (tests/test_deploy_benutzer.py) ---
+# Eigener Benutzer clip-<name>, nur sein Ordner I = /var/lib/clip-benutzer/<name> (CLIP_INSTANZ). Seine Zugänge liest
+# die Pipeline selbst aus I/.env – kein EnvironmentFile, kein CLIP_PROJEKT. HOME und Caches (Whisper-Modell) in I/cache.
+User=clip-%i
+Group=clip-%i
+Environment=CLIP_INSTANZ=/var/lib/clip-benutzer/%i
+Environment=HOME=/var/lib/clip-benutzer/%i/cache
+Environment=XDG_CACHE_HOME=/var/lib/clip-benutzer/%i/cache
+Environment=HF_HOME=/var/lib/clip-benutzer/%i/cache/huggingface
+WorkingDirectory=/opt/clip-pipeline
+# Rendern braucht die iGPU (VA-API): Gruppe render. Freunde rechnen mit halbem Vorrang und höchstens 3 GB Speicher.
+SupplementaryGroups=render
+Nice=10
+CPUWeight=50
+MemoryMax=3G
+NoNewPrivileges=true
+PrivateTmp=true
+# Alles nur lesbar; /home und /root gibt es nicht (dort liegen Florians Claude-Anmeldung und seine Schlüssel)
+ProtectSystem=strict
+ProtectHome=true
+# Fremde Prozesse unsichtbar: Befehlszeilen von Florian und anderen Freunden (z. B. die Epic-ID beim Replay-Lesen)
+# sieht der Freund nicht. Kann der Container das nicht, bleibt es ohne Wirkung – der Dienst startet trotzdem (M19).
+ProtectProc=invisible
+# Leere, schreibgeschützte Ordner über Florians Bereichen und allen Freunden: Puffer, Lager, Datenbank, claude,
+# Schlüssel für pve-big, lokal.toml und die Ordner der anderen gibt es hier gar nicht …
+TemporaryFileSystem=/srv:ro /var/lib/clip-pipeline:ro /var/lib/clip-benutzer:ro /opt/clip-pipeline/config:ro
+# … eingebunden werden nur der eigene Ordner (schreibbar), die EINE Rechen-Sperre des Mini (Florians Datei, nur lesen –
+# flock wirkt trotzdem) und das Startwissen pipeline.toml. Fehlt eins davon, startet der Dienst nicht.
+BindPaths=/var/lib/clip-benutzer/%i
+BindReadOnlyPaths=/var/lib/clip-pipeline/pipeline.lock /opt/clip-pipeline/config/pipeline.toml
+# Florians Zugänge und sein Lern-Bot-Stand („-“: fehlt eins davon, startet der Dienst trotzdem)
+InaccessiblePaths=-/opt/clip-pipeline/.env -/opt/clip-regie
+# --- Ende Sandbox ---
+
+[Install]
+WantedBy=multi-user.target

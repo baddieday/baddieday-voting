@@ -253,17 +253,20 @@ def offen_fuer_ki(con: sqlite3.Connection, ohne: set[int] | frozenset = frozense
 
 def ki_nachtragen(konfig: Konfig, entwurf_id: int) -> float | None:
     """Misst (falls nötig) und lässt die KI den Entwurf blind benoten – eigene Verbindung (läuft in einem Thread),
-    unter der Pipeline-Sperre (belegt: sperre.Gesperrt). Rückgabe: KI-Note oder None (Tageslimit, Claude-Fehler)."""
-    from . import kritik
-    from .sperre import sperre
+    unter der Pipeline-Sperre (belegt: sperre.Gesperrt). Rückgabe: KI-Note oder None (Tageslimit, Claude-Fehler).
+    Freund ohne eigenen Claude-Zugang (M1): None, ohne zu messen – die KI ist bei ihm aus."""
+    from . import claude_aufruf, kritik
+    from .sperre import pfad as sperre_pfad, sperre
 
+    if not claude_aufruf.ki_moeglich(konfig):
+        return None
     con = db.verbinde(konfig.datenbank)
     try:
         k = einstellungen.anwenden(con, konfig)
         daten = copy.deepcopy(k.daten)   # nie die geladene Konfig ändern
         daten.setdefault("regie", {}).setdefault("kritik", {})["ki"] = True   # einfacher Modus: KI nur hier, nach dem Senden
         k = Konfig(daten=daten, quelle=k.quelle)
-        with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=5.0):   # belegt: Gesperrt, der Bot probiert später
+        with sperre(sperre_pfad(konfig), warten_s=5.0):   # belegt: Gesperrt, der Bot probiert später
             kritik.bewerte(con, k, entwurf_id, ki=False, lernen=False)       # Messung (ffmpeg) unter der Sperre
         return kritik.bewerte(con, k, entwurf_id).get("ki_score")          # Claude ohne Sperre: neue Fassung wartet nicht
     finally:
@@ -366,7 +369,9 @@ OHNE_ZAHLEN_TAGE = (3, 14)    # Post eines ✅-Videos, 3 bis 14 Tage alt, ohne j
 
 
 # Gründe aus claude_aufruf, bei denen claude gar nicht lief oder sofort abbrach – dann fehlt meist die Anmeldung
-KI_ANMELDUNG = ("nicht gefunden", "nicht nutzbar", "Exit", "programm fehlt")
+# (die letzten drei gibt es nur bei einem Freund mit eigenem Zugang, M1: Programm in fremdem Bereich, Ordner, Token weg)
+KI_ANMELDUNG = ("nicht gefunden", "nicht nutzbar", "Exit", "programm fehlt", "liegt unter", "Claude-Ordner",
+                "Claude-Zugang")
 
 
 def ki_stand(con: sqlite3.Connection, bis=None) -> str:
@@ -409,16 +414,28 @@ def ohne_zahlen(con: sqlite3.Connection, bis=None) -> int:
 def lehrer_zeile(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str:
     """„🧠 Lernt aus: deinen ✅/❌ · KI-Note (läuft) · Zuschauern (4 Videos ausgewertet)“ – in 📋 Stand immer, im
     Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat. Fehlt etwas, das nur du einmal tun kannst (Claude
-    anmelden, TikTok verbinden), steht es hier – ohne Netz, nur aus Datenbank, .env und Token-Datei."""
-    from . import autonom, publikum_adapter   # hier, nicht oben: geschmack bleibt leicht (regie_lernen lädt es)
+    anmelden, TikTok verbinden), steht es hier – ohne Netz, nur aus Datenbank, .env und Token-Datei.
+    Freund (M1): kein TikTok-Hinweis (in Stufe 1 holt bei ihm niemand Zahlen ab); ohne eigenen Claude-Zugang
+    „KI-Note: aus – verbinde dein Claude mit /claude“ (Schritt 9) statt des Anmelde-Hinweises für Florian."""
+    from . import autonom, claude_aufruf, publikum_adapter   # hier, nicht oben: geschmack bleibt leicht
 
+    freund = konfig.instanz is not None
     n = autonom.ueberblick(con)["ausgewertet"]
     teile = [f"{n} Video{'s' if n != 1 else ''} ausgewertet"] if n else []
-    if not publikum_adapter.tiktok_verbunden(konfig):
+    if freund:
+        pass
+    elif not publikum_adapter.tiktok_verbunden(konfig):
         teile.append("TikTok nicht verbunden – einmal /tiktok")
     elif fehlen := ohne_zahlen(con, bis):
         teile.append(f"{fehlen} ✅-Video{'s' if fehlen != 1 else ''} nach 3 Tagen noch ohne Zahlen – nicht "
                      "hochgeladen oder den Text dabei geändert?")   # N45: der wahrscheinliche Grund
     zuschauer = ", ".join(teile) or "noch kein Video ausgewertet"
-    return f"🧠 Lernt aus: deinen ✅/❌ · KI-Note ({ki_stand(con, bis)}) · Zuschauern ({zuschauer})"
+    if not claude_aufruf.ki_moeglich(konfig):
+        ki = "KI-Note: aus – verbinde dein Claude mit /claude"
+    else:
+        stand = ki_stand(con, bis)
+        if freund and stand.startswith("fehlt"):
+            stand = "fehlt – eigener Claude-Zugang klappt nicht, neu verbinden mit /claude"
+        ki = f"KI-Note ({stand})"
+    return f"🧠 Lernt aus: deinen ✅/❌ · {ki} · Zuschauern ({zuschauer})"
 

@@ -131,8 +131,9 @@ class UpdateRichtetEin(unittest.TestCase):
 
     def lauf(self) -> subprocess.CompletedProcess:
         innen = re.search(r"^INNEN='\n(.*?)^'$", UPDATE.read_text(encoding="utf-8"), flags=re.M | re.S).group(1)
+        # BENUTZER_DIR: nie echte Freundes-Ordner (Mehrbenutzer) anfassen, auch wenn der Test auf dem Mini läuft
         env = {**os.environ, "PATH": f"{self.stub}:{os.environ['PATH']}", "STUB": str(self.stub),
-               "UNITS": str(self.units)}
+               "UNITS": str(self.units), "BENUTZER_DIR": str(self.t / "keine-freunde")}
         # innen <PROD> <REGIE> <MIT_REGIE> <ALT_PROD> <ZIEL_PROD> <ALT_REGIE> <ZIEL_REGIE> <STEMPEL> <UNITS> <SICH>
         return subprocess.run(["bash", "-c", innen, "innen", str(self.prod), str(self.t / "regie"), "0", self.stand,
                                self.stand, "", "", "TEST", str(self.units), str(self.t / "sich")],

@@ -10,6 +10,7 @@ Was er tut:
   - analysiert vor jedem Entwurf ein paar weitere Clips (Stimmung), damit die Auswahl wächst
   - schickt Meldungen aus lern_meldungen (Alarme, abends ein Satz zum Stand, Abschlussbericht)
 Befehle: /viral · /entwurf [short|zusammenschnitt|viral|twist|highlight|fail] · /musik · /lernstand · /stand · /hilfe
+(Bot eines Freundes, Mehrbenutzer M1: /claude – eigener Claude-Zugang, lernbot_claude – statt /tiktok)
 🔥 /viral (05.10.): ein Knopf – der Bot wählt die Mischung selbst (viral.py), schätzt die Momente per KI ein, baut bis
 zu [viral].versuche_max Fassungen, lässt den Cutter-Maßstab benoten und schickt nur die beste.
 """
@@ -67,6 +68,11 @@ Veröffentlichte Videos und ihre Publikumszahlen verbessern die nächsten Entwü
 🧪 /kalibrieren – neuestes Match zum Nachprüfen: je Clip 3 Standbilder, Stimmung, Kills mit Waffen-Nummer
 🔗 /tiktok – TikTok-Konto verbinden (Zahlen kommen dann automatisch)
 Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
+
+# Freund (Mehrbenutzer M1, Schritt 9): /claude statt /tiktok – sein eigenes Claude-Abo; Zahlen von TikTok holt bei ihm
+# in Stufe 1 niemand ab. Florians Hilfe bleibt Zeichen für Zeichen, wie sie ist (hilfe_text).
+TIKTOK_ZEILE = "🔗 /tiktok – TikTok-Konto verbinden (Zahlen kommen dann automatisch)"
+CLAUDE_ZEILE = "🤖 /claude – dein Claude-Abo verbinden: dann benotet die KI jedes Video mit (freiwillig)"
 
 # Kurzbefehle (27.09.): Knöpfe im Chat wie beim Bewerten (Florian: „nicht die Tastatur ersetzen“). Callback k:0:<ziel>.
 # KURZBEFEHLE bleibt für Taps auf die alte Ersatz-Tastatur, bis sie weg ist (ReplyKeyboardRemove).
@@ -489,7 +495,7 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
     Abwechslung mit Ermüdung (08.10.): Reicht der Abend nicht, baut regie.erstelle (mischen) gemischt aus den letzten
     Tagen – neue Szenen zuerst, bekannte gebremst, nie eine aus deinen letzten Videos.
     Fehler: regie.ZuWenigSzenen / regie.KeineNeuenSzenen, wenn es auch gemischt nicht reicht."""
-    from .sperre import sperre
+    from .sperre import pfad as sperre_pfad, sperre
 
     konfig.pruefe_speicher(wecken=True)  # wirft SpeicherOffline mit Grund, wenn Wecken nicht erlaubt ist
     con = db.verbinde(konfig.datenbank)
@@ -507,7 +513,7 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
             nur_matches, quell_hinweis = einstellungen.quell_matches(con, konfig)
         # Rendern ist ein rechenintensiver Schritt: gleiche Sperre wie die Pipeline (nur einer gleichzeitig)
         t0 = time.monotonic()
-        with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
+        with sperre(sperre_pfad(konfig), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
                 big.herzschlag(konfig, "lernbot"):
             t1 = time.monotonic()
             nachgezogen = stimmung_nachziehen(con, konfig, nur_matches)
@@ -1003,8 +1009,12 @@ async def _schleife(app) -> None:
 async def ki_nachtrag(app, konfig: Konfig) -> float | None:
     """Höchstens ein KI-Urteil je Runde für einen schon gesendeten Short – nie, während der Bot gerade baut. Jeder
     Entwurf wird je Bot-Lauf nur einmal versucht (Claude-Fehler, Tageslimit: kein Dauerversuch alle 30 s)."""
+    from . import claude_aufruf
+
     versucht = app.bot_data.setdefault("ki_versucht", set())
     if app.bot_data.get("arbeitet") or app.bot_data.get("ki_arbeitet"):
+        return None
+    if not claude_aufruf.ki_moeglich(konfig):   # Freund ohne eigenen Claude-Zugang (M1): kein Versuch, nichts vermerkt
         return None
     eid = geschmack.offen_fuer_ki(app.bot_data["con"], versucht)
     if eid is None:
@@ -1027,12 +1037,20 @@ async def ki_nachtrag(app, konfig: Konfig) -> float | None:
 
 # --- Handler ---------------------------------------------------------------------------
 
-async def cmd_hilfe(update, context) -> None:
+def hilfe_text(experte: bool, freund: bool = False) -> str:
+    """Einfach: kurze Hilfe. Experte: die volle, der Teil zur Lernschleife „Publikum“ als Zusatz dahinter. Freund (M1):
+    mit /claude, ohne /tiktok – bei Florian (freund=False) genau wie bisher."""
     from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
 
+    if experte:
+        text = HILFE_EXPERTE + lernbot_publikum.HILFE_ZUSATZ
+        return text.replace(TIKTOK_ZEILE, CLAUDE_ZEILE) if freund else text
+    return f"{HILFE}\n{CLAUDE_ZEILE}" if freund else HILFE
+
+
+async def cmd_hilfe(update, context) -> None:
     experte = experte_an(context.bot_data["con"], context.bot_data["konfig"])
-    # Einfach: kurze Hilfe. Experte: die volle, der Teil zur Lernschleife „Publikum“ als Zusatz dahinter
-    text = HILFE_EXPERTE + lernbot_publikum.HILFE_ZUSATZ if experte else HILFE
+    text = hilfe_text(experte, freund=context.bot_data["konfig"].instanz is not None)
     await update.effective_message.reply_text(text, parse_mode="HTML", reply_markup=_markup(knoepfe_kurzbefehle(experte)))
 
 
@@ -1480,6 +1498,10 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
             aufgabe.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await aufgabe
+        if konfig.instanz is not None:   # Freund (M1): eine offene /claude-Anmeldung endet mit dem Bot (claude auch)
+            from . import lernbot_claude
+
+            await lernbot_claude.abbrechen(app)
 
     # concurrent_updates (27.09.): Updates laufen nebenläufig statt nacheinander. Vorher wartete jeder Klick auf den
     # vorigen (je zwei Telegram-Roundtrips) und auf Handler, die länger awaiten (Musik, Screenshot) – „Buttons laden
@@ -1505,8 +1527,14 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     from . import (lernbot_einstellungen, lernbot_kalibrierung, lernbot_paket, lernbot_publikum, lernbot_tiktok,
                    lernbot_zahlen)
 
+    # Freund (M1, Schritt 9): /claude (eigener Claude-Zugang, Text-Handler in Gruppe -1) statt /tiktok – bei Florian
+    # bleibt alles, wie es ist
+    if konfig.instanz is not None:
+        from . import lernbot_claude as verbinden
+    else:
+        verbinden = lernbot_tiktok
     for modul in (lernbot_zahlen, lernbot_paket, lernbot_publikum, lernbot_einstellungen, lernbot_kalibrierung,
-                  lernbot_tiktok):
+                  verbinden):
         modul.registriere(app, nur_ich)
     app.add_handler(CallbackQueryHandler(bei_klick))
     app.add_error_handler(bei_fehler)
@@ -1521,6 +1549,8 @@ def starte(konfig: Konfig) -> int:
         return 2
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # würde sonst URLs mit Token loggen
+    if konfig.instanz is not None:   # Freund (M1): DEBUG von telegram zeigte jede Nachricht – auch Code und Token (/claude)
+        logging.getLogger("telegram").setLevel(logging.INFO)
     app = baue_app(konfig, token, int(erlaubt))
     # Warteabfrage 5 s statt 10: Hängt eine doch einmal, gibt der Bot sie nach ~10 s auf statt nach ~15–20 s
     app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False,

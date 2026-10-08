@@ -1,0 +1,54 @@
+# Verbindet einen Freund mit seinem Bot über einen Einladungslink (Mehrbenutzer, docs/MEHRBENUTZER.md) – Vorlage,
+# %i = sein Name. Fragt Telegram nach dem Namen seines Bots, macht einen Einmal-Code und legt den Link
+# t.me/<bot>?start=<code> nach <Ordner>/db/einladung.json (nur für ihn und root, nie ins Log). Liest dann bis zu 15 min
+# die Nachrichten seines Bots, bis er den Link öffnet und Start drückt („/start <code>“ im Einzel-Chat), schreibt seine
+# Telegram-Zahl nach <Ordner>/db/kopplung.json (0600) und antwortet „Verbunden“. Falscher oder alter Code, Gruppen,
+# andere Nachrichten: nichts gespeichert. Nach der Frist Exit 1.
+# Je Bot nur ein Empfänger: läuft nur, solange keine Telegram-Zahl in <Ordner>/.env steht – ohne sie holt sein Bot nie
+# Nachrichten ab. Gestartet nur von benutzer-anlegen.sh (systemctl start im Hintergrund, kein Timer, nie eingeschaltet);
+# das trägt danach die Zahl in seine .env ein und schaltet erst dann seinen Bot ein.
+# Installiert: alles-aktualisieren.sh legt die Vorlage nur auf die Platte, sobald es einen Freund gibt.
+# Log ansehen: journalctl -u clip-freund-koppeln@<name> -n 30
+[Unit]
+Description=Clip-Pipeline: %i mit Telegram verbinden (Freund)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline benutzer koppeln
+# Der Link gilt 15 min; hängt etwas, ist nach 20 min Schluss
+TimeoutStartSec=20min
+# --- Sandbox: in jeder Vorlage wörtlich gleich (tests/test_deploy_benutzer.py) ---
+# Eigener Benutzer clip-<name>, nur sein Ordner I = /var/lib/clip-benutzer/<name> (CLIP_INSTANZ). Seine Zugänge liest
+# die Pipeline selbst aus I/.env – kein EnvironmentFile, kein CLIP_PROJEKT. HOME und Caches (Whisper-Modell) in I/cache.
+User=clip-%i
+Group=clip-%i
+Environment=CLIP_INSTANZ=/var/lib/clip-benutzer/%i
+Environment=HOME=/var/lib/clip-benutzer/%i/cache
+Environment=XDG_CACHE_HOME=/var/lib/clip-benutzer/%i/cache
+Environment=HF_HOME=/var/lib/clip-benutzer/%i/cache/huggingface
+WorkingDirectory=/opt/clip-pipeline
+# Rendern braucht die iGPU (VA-API): Gruppe render. Freunde rechnen mit halbem Vorrang und höchstens 3 GB Speicher.
+SupplementaryGroups=render
+Nice=10
+CPUWeight=50
+MemoryMax=3G
+NoNewPrivileges=true
+PrivateTmp=true
+# Alles nur lesbar; /home und /root gibt es nicht (dort liegen Florians Claude-Anmeldung und seine Schlüssel)
+ProtectSystem=strict
+ProtectHome=true
+# Fremde Prozesse unsichtbar: Befehlszeilen von Florian und anderen Freunden (z. B. die Epic-ID beim Replay-Lesen)
+# sieht der Freund nicht. Kann der Container das nicht, bleibt es ohne Wirkung – der Dienst startet trotzdem (M19).
+ProtectProc=invisible
+# Leere, schreibgeschützte Ordner über Florians Bereichen und allen Freunden: Puffer, Lager, Datenbank, claude,
+# Schlüssel für pve-big, lokal.toml und die Ordner der anderen gibt es hier gar nicht …
+TemporaryFileSystem=/srv:ro /var/lib/clip-pipeline:ro /var/lib/clip-benutzer:ro /opt/clip-pipeline/config:ro
+# … eingebunden werden nur der eigene Ordner (schreibbar), die EINE Rechen-Sperre des Mini (Florians Datei, nur lesen –
+# flock wirkt trotzdem) und das Startwissen pipeline.toml. Fehlt eins davon, startet der Dienst nicht.
+BindPaths=/var/lib/clip-benutzer/%i
+BindReadOnlyPaths=/var/lib/clip-pipeline/pipeline.lock /opt/clip-pipeline/config/pipeline.toml
+# Florians Zugänge und sein Lern-Bot-Stand („-“: fehlt eins davon, startet der Dienst trotzdem)
+InaccessiblePaths=-/opt/clip-pipeline/.env -/opt/clip-regie
+# --- Ende Sandbox ---

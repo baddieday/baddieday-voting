@@ -23,6 +23,8 @@ n8n erst später fertig hat, ein Match, das der PC erst beim nächsten Start sch
 NACHTRAG_H nach dem Abend selbst nach (_nachtrag) – vorher blieb es für immer bei „kein Video“. Nur einfacher Modus.
 Stufe 4, Musik (08.10.): Am Ende jedes Laufs lädt der Bot tagsüber selbst NCS-Titel deiner Genres nach, wenn sie zur
 Neige gehen (_musik → musik.nachschub) – keine Musik mehr von Hand. Nur einfacher Modus.
+Mehrbenutzer (08.10., M36/M37): Ein Whisper-Fehler bricht den Lauf nicht mehr ab – die Szenen werden dann ohne Sprache
+gemessen (_stimmung); auf ein Match, das `scan --versuche` aufgegeben hat (Status 'fehler'), wartet der Abend nicht.
 """
 
 from __future__ import annotations
@@ -70,9 +72,13 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
         status = {z["id"]: z["status"] for z in con.execute(
             f"SELECT id, status FROM matches WHERE id IN ({','.join('?' for _ in matches) or 'NULL'})", matches)}
         offen = [m for m in matches if status.get(m) != "verarbeitet"]
+        # M36: ein von `scan --versuche` aufgegebenes Match ('fehler') kommt nicht mehr – darauf wartet der Abend nicht,
+        # und „war noch nicht fertig“ zählt es nicht (sein Bot sagte schon „klappt nicht“). Bei Florian setzt nichts
+        # 'fehler', dort bleibt alles wie bisher.
+        kommt_noch = [m for m in offen if status.get(m) != "fehler"]
         hinweis = None
         if offen:
-            if jetzt() - ende < timedelta(hours=float(konfig.wert("sitzungen.warten_h", 2))):
+            if kommt_noch and jetzt() - ende < timedelta(hours=float(konfig.wert("sitzungen.warten_h", 2))):
                 ergebnis["wartet"].append({"sitzung": name, "offen": offen})
                 continue
             hinweis = (f"{len(offen)} Match{'' if len(offen) == 1 else 'es'} nicht verarbeitet: "
@@ -80,7 +86,8 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
         tag = _tag(konfig, ende)
         db.lern_meldung(con, f"abend:{name}", f"🎮 Abend vom {tag} erkannt ({len(matches)} Match"
                         f"{'' if len(matches) == 1 else 'es'}) – ich baue dein Video. Das dauert meist 10–30 Minuten.")
-        stimmung.analysiere(con, konfig, claude=claude, whisper=whisper)
+        # M37: vor dem Grund für „kein Video“ – 📋 zeigt den letzten Teil des Hinweises (lernbot.letzter_abend_zeile)
+        hinweis = "; ".join(filter(None, [hinweis, _stimmung(con, konfig, claude=claude, whisper=whisper)])) or None
         entwurf_id = None
         k = einstellungen.anwenden(con, konfig)            # ⚙️ und deine Regeln gelten auch für das Abend-Video
         experte = einstellungen.experte(con, k)
@@ -93,7 +100,7 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
             entwurf.entwurf(con, k, entwurf_id)
         except regie.ZuWenigSzenen as z:   # lieber kein Video als eins mit Füllmaterial (Florian, 07.10.)
             hinweis = "; ".join(filter(None, [hinweis, str(z)]))
-            db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z, len(offen), experte=experte))
+            db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z, len(kommt_noch), experte=experte))
         except Exception as fehler:  # noqa: BLE001 – vermerken und dir sagen, statt alle 10 min still neu zu versuchen
             hinweis = "; ".join(filter(None, [hinweis, str(fehler)]))
             entwurf_id = _panne(con, name, tag, fehler, entwurf_id, experte=experte)
@@ -124,6 +131,37 @@ def _musik(con: sqlite3.Connection, konfig: Konfig) -> int | None:
         log.exception("Musik-Nachschub")
         return None
     return None if neu is None else len(neu)
+
+
+def _stimmung(con: sqlite3.Connection, konfig: Konfig, *, claude: bool, whisper: bool, **auswahl) -> str | None:
+    """Stimmung für neue Szenen messen – ein Fehler darf das Abend-Video nicht verhindern (M22/M37, 08.10.). Vorher
+    brach z. B. ein Whisper-Modell, das sich nicht laden ließ (Cache nicht beschreibbar), jeden Lauf ab: kein Video,
+    die Statuszeile blieb bei „ich baue dein Video“, und alle 10 Minuten ging es von vorn los (stimmung.merkmale fängt
+    nur MedienFehler). Jetzt: Scheitert die Messung mit Sprache, misst der Lauf die Szenen gleich noch einmal ohne
+    (Lautstärke, Kills) – sonst hätte der Abend gar keine Szenen. Die Wörter fehlen dann; bei Florian holt der Mic-Schritt
+    sie nach, sobald Whisper wieder geht. Scheitert auch das, geht es wie im Lern-Bot mit den Szenen weiter, die schon da
+    sind (fehlende holt der Nachtrag später). auswahl: nur_clips/maximal wie stimmung.analysiere.
+    Rückgabe: Hinweis fürs Ergebnis (ohne „; “, der trennt in sitzungen.hinweis) oder None, wenn alles klappte."""
+    try:
+        stimmung.analysiere(con, konfig, claude=claude, whisper=whisper, **auswahl)
+        return None
+    except Exception as fehler:  # noqa: BLE001 – das Video ist wichtiger
+        log.exception("Stimmung %s Sprache fehlgeschlagen", "mit" if whisper else "ohne")
+        hinweis = f"Stimmung fehlgeschlagen ({_kurz(fehler)})"
+    if not whisper:
+        return hinweis
+    try:
+        stimmung.analysiere(con, konfig, claude=claude, whisper=False, **auswahl)
+    except Exception as fehler:  # noqa: BLE001
+        log.exception("Stimmung auch ohne Sprache fehlgeschlagen")
+        return f"{hinweis}, auch ohne Sprache ({_kurz(fehler)})"
+    return f"{hinweis} – Szenen ohne Sprache gemessen"
+
+
+def _kurz(fehler: Exception) -> str:
+    """„PermissionError: [Errno 13] …“ – eine Zeile, höchstens 80 Zeichen Meldung, ohne „;“ (Trenner im Hinweis)."""
+    text = " ".join(str(fehler).split()).replace(";", ",")
+    return f"{type(fehler).__name__}: {text[:80]}"
 
 
 def _lerne(con: sqlite3.Connection, k: Konfig) -> None:
@@ -185,11 +223,8 @@ def _nachtrag(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, w
     matches = _mit_spaeten(con, name, _ids(z["matches"]))
     if _schon_video(con, matches, seit):
         return []
-    if offen := _offene_clips(con, konfig, matches):
-        try:
-            stimmung.analysiere(con, konfig, claude=claude, whisper=whisper, nur_clips=offen, maximal=len(offen))
-        except Exception:  # noqa: BLE001 – dann eben mit den Szenen, die schon da sind
-            log.exception("Nachtrag %s: Stimmung nachziehen", name)
+    if offen := _offene_clips(con, konfig, matches):   # Fehler: nur ins Log, weiter mit den Szenen, die da sind
+        _stimmung(con, konfig, claude=claude, whisper=whisper, nur_clips=offen, maximal=len(offen))
     neueste = _neueste_szene(con, matches)
     if neueste is None or neueste <= seit:
         return []                                      # nichts Neues seit dem letzten Versuch

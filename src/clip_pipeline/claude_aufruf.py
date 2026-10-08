@@ -30,21 +30,31 @@ Inhalte des Arbeitsordners); die Rohantwort gehört nur in publikum_messungen.ro
 Reihenfolge der Schalter: `claude --help` beschreibt `--allowedTools <tools...>` – der Schalter nimmt also mehrere
 Werte, bis zum nächsten Schalter. Damit der Auftrag sicher nicht als weiterer Werkzeug-Name gelesen wird, steht
 `--no-session-persistence` zwischen „Read“ und dem Auftrag, und der Auftrag kommt ganz am Ende.
+
+Mehrbenutzer (M1, Florian 08.10.: „Eigener Claude-Zugang“): In der Instanz eines Freundes (konfig.instanz) läuft claude
+nur mit SEINEM Zugang – einem Langzeit-Token aus `claude setup-token` (sein eigenes Abo). Es steht in I/db/claude-token
+(schreibt sein Bot per /claude, lernbot_claude) oder als CLAUDE_CODE_OAUTH_TOKEN in I/.env und wird erst beim Aufruf gelesen, so
+wirkt ein später verbundener Zugang ohne Neustart. claude bekommt dann eine eigene, kleine Umgebung (Token, HOME und
+CLAUDE_CONFIG_DIR unter I/cache, fester PATH, kein Auto-Update) – nie Florians Umgebung oder Anmeldung. Ohne Token
+startet claude bei ihm nie (Hinweis KEIN_ZUGANG, wie „kein claude“). Bei Florian bleibt der Aufruf genau wie bisher.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 import shutil
 import sqlite3
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import db, schema
-from .konfig import Konfig
+from .konfig import CLAUDE_TOKEN_NAME, Konfig, KonfigFehler, claude_verboten, liegt_in, lies_env
 from .verarbeitung import _json_aus_text  # erstes {…} aus einem Text – dieselbe Hilfe wie für decide und Stimmung
 
 log = logging.getLogger("pipeline")
@@ -53,6 +63,13 @@ log = logging.getLogger("pipeline")
 SCHALTER = ("-p", "--output-format", "json", "--allowedTools", "Read", "--no-session-persistence")
 # In `ereignisse.art` – danach zählt die Wochenzahl der Claude-Aufrufe (Spec §12)
 EREIGNIS_ART = "claude"
+
+# Instanz eines Freundes (M1): woher sein Token kommt, wo claude gesucht wird, was es sonst sieht
+TOKEN_DATEI = "claude-token"                        # I/db/claude-token (0600, gehört dem Freund)
+TOKEN_FORM = re.compile(r"[A-Za-z0-9._~+/=-]{20,4096}")   # eine Zeile ohne Leerzeichen (sk-ant-oat01-…)
+SUCHPFAD = "/usr/local/bin:/usr/bin:/bin"          # nie der PATH des Aufrufers (dort kann Florians ~/.local/bin stehen)
+KEIN_ZUGANG = "kein eigener Claude-Zugang"
+NICHT_GEFUNDEN = "claude nicht gefunden"
 
 
 @dataclass
@@ -92,19 +109,26 @@ def _frage(konfig: Konfig, auftrag: str, arbeitsordner: Path, schema_name: str, 
         return ClaudeAntwort(None, f"Schema {schema_name} nicht lesbar ({type(e).__name__})", None)
 
     # Programm finden – ohne claude gibt es keinen Aufruf, sondern einen Hinweis (dann: Hand-Eingabe)
-    name = konfig.wert("decide.programm")
-    if not name:
-        return ClaudeAntwort(None, "[decide].programm fehlt in der Konfiguration", None)
-    programm = shutil.which(str(name))
-    if programm is None:
-        return ClaudeAntwort(None, "claude nicht gefunden", None)
+    zusatz: dict = {}   # Florian: nichts – der Aufruf bleibt genau wie bisher (eigene Umgebung des Dienstes)
+    if konfig.instanz is not None:   # Freund (M1): nur mit eigenem Zugang, eigener kleiner Umgebung
+        start = _instanz_start(konfig)
+        if isinstance(start, str):
+            return ClaudeAntwort(None, start, None)
+        programm, zusatz["env"] = start
+    else:
+        name = konfig.wert("decide.programm")
+        if not name:
+            return ClaudeAntwort(None, "[decide].programm fehlt in der Konfiguration", None)
+        programm = shutil.which(str(name))
+        if programm is None:
+            return ClaudeAntwort(None, NICHT_GEFUNDEN, None)
 
     # Aufrufen: nur Leserecht, nur im Arbeitsordner; stdout/stderr bleiben hier (nie ins Log)
     try:
         # stdin=DEVNULL: claude -p liest zusätzlich von stdin, wenn dort etwas angeschlossen ist – so wartet es nie
         lauf = subprocess.run([programm, *SCHALTER, auftrag], cwd=arbeitsordner, stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s,
-                              check=False)
+                              check=False, **zusatz)
     except OSError as e:  # startet gar nicht (PermissionError, FileNotFoundError) – kein Aufruf gegen das Abo
         return ClaudeAntwort(None, f"claude nicht nutzbar ({type(e).__name__})", None)
     except subprocess.TimeoutExpired as e:  # hing – run bricht claude ab; bis dahin lief es, das zählt
@@ -131,6 +155,106 @@ def _frage(konfig: Konfig, auftrag: str, arbeitsordner: Path, schema_name: str, 
     if fehler := schema.pruefe(daten, muster):
         return ClaudeAntwort(None, f"Antwort passt nicht zum Schema: {fehler[0]}", roh, gestartet=True)
     return ClaudeAntwort(daten, None, roh, gestartet=True)
+
+
+# --- Instanz eines Freundes (M1): nur mit eigenem Claude-Zugang -----------------------------------------------------
+
+def instanz_token(konfig: Konfig) -> str | None:
+    """Das eigene Claude-Token des Freundes, jedes Mal frisch gelesen: zuerst I/db/claude-token, sonst
+    CLAUDE_CODE_OAUTH_TOKEN aus I/.env (aus der Datei selbst, nie aus der Umgebung). None = kein brauchbares Token –
+    auch bei Florian (er hat keine Instanz)."""
+    inst = konfig.instanz
+    if inst is None:
+        return None
+    token = ""
+    try:
+        token = (inst / "db" / TOKEN_DATEI).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        pass
+    except (OSError, UnicodeDecodeError) as e:
+        log.warning("Claude-Token der Instanz nicht lesbar (%s)", type(e).__name__)
+    if not token:
+        try:
+            token = lies_env(inst / ".env").get(CLAUDE_TOKEN_NAME, "").strip()
+        except (OSError, UnicodeDecodeError) as e:
+            log.warning("%s nicht lesbar (%s)", inst / ".env", type(e).__name__)
+    if token and not TOKEN_FORM.fullmatch(token):
+        log.warning("Claude-Token der Instanz hat eine unerwartete Form – KI bleibt aus")
+        return None
+    return token or None
+
+
+def ki_moeglich(konfig: Konfig) -> bool:
+    """Darf die KI hier überhaupt laufen? Florian: immer True (dort entscheiden wie bisher die Schalter und ob claude
+    da ist). Freund: nur mit eigenem Token. Für Stellen, die vor dem Aufruf teure Vorarbeit leisten (Kontaktbogen,
+    Messung unter der gemeinsamen Sperre) – den Start selbst verhindert ohnehin _frage."""
+    return konfig.instanz is None or instanz_token(konfig) is not None
+
+
+def _instanz_start(konfig: Konfig) -> tuple[str, dict[str, str]] | str:
+    """(Programm, Umgebung mit Token) für claude in der Instanz – oder der Hinweis, warum es nicht startet. Ohne
+    eigenes Token startet claude nie (KEIN_ZUGANG, wird vor allem anderen geprüft)."""
+    token = instanz_token(konfig)
+    if token is None:
+        return KEIN_ZUGANG
+    start = instanz_umgebung(konfig)
+    if isinstance(start, str):
+        return start
+    programm, umgebung = start
+    return programm, {CLAUDE_TOKEN_NAME: token, **umgebung}
+
+
+def instanz_umgebung(konfig: Konfig) -> tuple[str, dict[str, str]] | str:
+    """(Programm, Umgebung OHNE Token) für claude in der Instanz – oder der Hinweis, warum es nicht startet. Auch für
+    `claude setup-token` per /claude (lernbot_claude), das das Token erst holt. Das Programm: [instanz].claude (in
+    lade_instanz geprüft) oder „claude“ aus SUCHPFAD; nie aus Florians Bereich oder einem Home-Ordner, auch nicht über
+    einen Link. Die Umgebung enthält nur, was claude braucht – nichts vom Aufrufer."""
+    inst = konfig.instanz
+    if inst is None:
+        return "keine Instanz"
+    eigen = str(konfig.wert("instanz.claude", "") or "").strip()
+    programm = shutil.which(eigen) if eigen else shutil.which("claude", path=SUCHPFAD)
+    if programm is None:
+        return NICHT_GEFUNDEN
+    if bereich := claude_verboten(programm):
+        return f"claude liegt unter {bereich} – nicht genutzt"
+    cache = inst / "cache"
+    ordner = cache / "claude"
+    if not liegt_in(ordner, inst):   # ein Link aus I/cache hinaus (z. B. zu Florians Anmeldung) – nie folgen
+        return "Claude-Ordner liegt außerhalb der Instanz"
+    try:
+        ordner.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as e:
+        return f"Claude-Ordner nicht anlegbar ({type(e).__name__})"
+    suchpfad = os.pathsep.join(dict.fromkeys([str(Path(programm).parent), *SUCHPFAD.split(":")]))
+    return programm, {"HOME": str(cache), "CLAUDE_CONFIG_DIR": str(ordner), "PATH": suchpfad, "LANG": "C.UTF-8",
+                      "DISABLE_AUTOUPDATER": "1"}
+
+
+def token_speichern(konfig: Konfig, token: str) -> Path:
+    """Das eigene Claude-Token des Freundes atomar nach I/db/claude-token (0600, eine Zeile) – instanz_token liest es
+    beim nächsten Aufruf, ohne Neustart. Schreibt sein Bot per /claude (lernbot_claude). Nur in der Instanz; passt die
+    Form nicht (TOKEN_FORM), ValueError – nichts geschrieben, das Token steht nie in der Meldung. Ein Link an der Stelle
+    wird ersetzt, nie verfolgt."""
+    inst = konfig.instanz
+    if inst is None:
+        raise KonfigFehler("Ein Claude-Token speichert nur die Instanz eines Freundes (CLIP_INSTANZ)")
+    token = token.strip()
+    if not TOKEN_FORM.fullmatch(token):
+        raise ValueError("Claude-Token hat eine unerwartete Form")
+    ziel = inst / "db" / TOKEN_DATEI
+    fd, tmp = tempfile.mkstemp(prefix=f".{TOKEN_DATEI}-", suffix=".tmp", dir=ziel.parent)   # mkstemp: schon 0600
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as datei:
+            datei.write(token + "\n")
+            datei.flush()
+            os.fsync(datei.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, ziel)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+    return ziel
 
 
 def protokolliere(con: sqlite3.Connection, zweck: str, antwort: ClaudeAntwort) -> None:
