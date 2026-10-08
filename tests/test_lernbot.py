@@ -489,6 +489,10 @@ class EntwurfText(unittest.TestCase):
         del liste["parameter"]["ersetzt"]
         liste["auswahl"]["wiederholt"] = ["b"]   # 08.10. (Abwechslung mit Ermüdung): ehrlich, was du schon kennst
         self.assertIn("♻️ 1 Szene kennst du schon", lernbot.entwurf_text({"id": 7}, liste, kurz=True))
+        liste["hinweise"] = ["🎯 nur Spielabend 27.10. (2 Matches)"]
+        self.assertIn("🎯 nur Spielabend 27.10.", lernbot.entwurf_text({"id": 7}, liste, kurz=True))
+        liste["auswahl"]["nachschub"] = ["b"]    # Prüfung 08.10.: mit Szenen früherer Abende stimmt „nur …“ nicht
+        self.assertNotIn("🎯", lernbot.entwurf_text({"id": 7}, liste, kurz=True))
         voll = lernbot.entwurf_text({"id": 7}, liste, erwartung=0.8, kritik_text="🧐 Cutter 61")
         self.assertIn("🔮", voll)                                               # Experten-Modus wie bisher
 

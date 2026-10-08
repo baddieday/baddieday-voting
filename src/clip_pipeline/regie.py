@@ -28,11 +28,13 @@ Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der K
                  (höchstens 12 Tage alt, nachschub_matches) – nach dem Abend, nie mehr als vom Abend (nachschub_darf),
                  nie vorn (abend_vorn). Dieselben Grenzen gelten für die 🥱-Fassung.
                  Abwechslung mit Ermüdung (08.10., einfacher Modus, ersetzt dort Abzug, Cooldown und Frische-Quote):
-                 neue Szenen zuerst; eine Szene aus deinen letzten 3 Videos ist nie Kandidat; bekannte verlieren je
-                 Einsatz der letzten 30 Tage die Hälfte ihrer Punkte, höchstens die Hälfte des Videos bekannte (bis
-                 zur Mindestzahl 4 dürfen es mehr sein), höchstens 2 Szenen, die schon zusammen in einem Video waren
-                 (szenen.verlauf, p["ermuedung"]). Eine neue Fassung nach ❌ darf die Szenen des Videos nehmen, das sie
-                 ersetzt (p["ersetzt"]). Reicht der Abend nicht, mischt 🎬 aus den letzten Tagen (p["mix"]).
+                 neue Szenen zuerst; eine Szene, die gerade erst (48 h) in einem deiner letzten 3 Videos lief, ist nie
+                 Kandidat; bekannte verlieren je Einsatz der letzten 30 Tage die Hälfte ihrer Punkte, höchstens die
+                 Hälfte des Videos bekannte (bis zur Mindestzahl 4 dürfen es mehr sein), höchstens 2 Szenen, die schon
+                 zusammen in einem Video waren (szenen.verlauf, p["ermuedung"]). Eine neue Fassung nach ❌ darf die
+                 Szenen des Videos nehmen, das sie ersetzt (p["ersetzt"]). Erreicht 🎬 (oder eine neue Fassung) vom
+                 Abend sein Ziel nicht, mischt es aus den letzten Tagen (p["mix"]), zuletzt mit lockerer
+                 Zusammenstellung (p["locker"], _mit_lockerung) – die Länge geht vor.
   2. Bogen       Einstieg = zweitstärkster Moment (Hook), dann steigend, bei ~60 % eine Atempause
                  (lustig/chill), der stärkste zum Schluss. Keine gleiche Stimmung / kein gleiches Match
                  zweimal hintereinander, wenn es sich vermeiden lässt.
@@ -203,7 +205,22 @@ NACHSCHUB_RESERVE_TAGE = 2
 # Abwechslung mit Ermüdung (08.10., Florian: „die Momente dürfen ruhig öfter und gemischter genutzt werden aber nur weil
 # ein Clip gut ist muss der nicht immer egal wo verwendet werden … bessere öfters zeigen aber nicht permanent“) – nur im
 # einfachen Modus, Werte aus [regie] (ermuedung_regeln), bewusst nicht in ⚙️. Ersetzt dort „jede Szene nur einmal“.
-ERMUEDUNG = {"tage": 30.0, "faktor": 0.5, "sperre": 3, "anteil": 0.5, "gleich": 2}
+# stunden (Prüfung 08.10.): die Sperre gilt nur für Videos, die höchstens so alt sind (2 Tage) – nach einer Pause
+# sperrte sonst das letzte Video seine Szenen für immer. Nachgestellt: 18 h ließ die Szenen von gestern sofort wieder
+# zu (größter Anteil einer Szene 25 % statt 18 %), 48 h hält die Abwechslung über Tage.
+ERMUEDUNG = {"tage": 30.0, "faktor": 0.5, "sperre": 3, "stunden": 48.0, "anteil": 0.5, "gleich": 2}
+# Prüfung 08.10. (Florian: „über 100-mal gesagt, dass die Shorts zu kurz sind“): Erreicht ein Short sein Ziel nicht,
+# geht die Länge vor den Feinregeln der Zusammenstellung. So viel unter dem Ziel gilt er noch als lang genug
+# (Beat-Raster), und so locker wird die Zusammenstellung im letzten Versuch von 🎬 und neuen Fassungen
+# (_mit_lockerung): beliebig viele bekannte neben neuen, aus demselben früheren Video höchstens die Hälfte des neuen
+# Videos (mindestens gleich_mit_video) – nie drei von vier Szenen aus einem alten Video.
+ZIEL_TOLERANZ_S = 2.0
+LOCKER = {"anteil": 1.0, "gleich_haelfte": True}
+# … und gibt es so gar keinen Plan („Kein neues Video“), ein letzter Versuch, in dem das älteste der gesperrten Videos
+# frei wird – nur deine letzten 2 Videos sperren (Florian: „Wenn alle Clips ausgeschöpft sind … bessere öfters zeigen
+# aber nicht permanent“). Nachgestellt: Sperrte im Notfall nur das letzte Video, kam der Quad des Abend-Videos schon
+# zwei Videos später wieder.
+NOTFALL = {"mix": True, "locker": True, "notfall": True}
 # Jump-Cut: so lange bleibt das Bild nach der Aktion vor der Lücke, so früh vor der nächsten geht es weiter.
 # Wirksame Lücke mindestens NACH + VOR + 0,5 s – so überlappen sich die Teile nie, auch wenn Gelerntes sie verkleinert.
 SPRUNG_NACH_S = 1.5
@@ -235,10 +252,14 @@ class ZuWenigSzenen(RegieFehler):
     Füllmaterial, sondern eine klare Zeile für dich.
     schon (08.10., einfacher Modus, Abwechslung mit Ermüdung): starke Szenen, die nur fehlen, weil sie in einem deiner
     letzten Videos waren (gesperrt) – stark zählt die übrigen. Mit schon sagt der Satz „Kein neues Video …“.
-    mix: auch gemischt aus den letzten Tagen (🎬, neue Fassung) reichte es nicht – stark und schon zählen dann dort."""
+    mix: auch gemischt aus den letzten Tagen (🎬, neue Fassung) reichte es nicht – stark und schon zählen dann dort.
+    zusammen (Prüfung 08.10., nur mit mix): Szenen gäbe es, aber nur stark viele passen zusammen in ein Video – die
+    übrigen liefen gerade erst oder schon genauso zusammen."""
 
-    def __init__(self, stark: int, mindestens: int, gesamt: int, schon: int = 0, mix: bool = False):
+    def __init__(self, stark: int, mindestens: int, gesamt: int, schon: int = 0, mix: bool = False,
+                 zusammen: bool = False):
         self.stark, self.mindestens, self.gesamt, self.schon, self.mix = stark, mindestens, gesamt, schon, mix
+        self.zusammen = zusammen and mix
         self.quelle: str | None = None   # „🎯 nur Match …“, wenn deine Clip-Auswahl (⚙️) das Material eingeengt hat
         # Stufe 4 (08.10.): starke Szenen früherer Abende, die in Frage kamen (None = nicht geprüft)
         self.frueher: int | None = None
@@ -259,13 +280,19 @@ class ZuWenigSzenen(RegieFehler):
         return "Von früheren Abenden nehme ich höchstens so viele Szenen dazu, wie der Abend selbst hat."
 
     def kopf(self) -> str:
+        if self.zusammen:   # Prüfung 08.10.: gemischt nur 3 Szenen, die zusammen passen – lieber kein Video
+            return (f"aus den letzten Tagen passen nur {self.stark} starke Szene{'n' if self.stark != 1 else ''} "
+                    f"zusammen – die übrigen liefen gerade erst oder schon genauso zusammen, ein Video braucht "
+                    f"{self.mindestens}")
+        if self.schon and not self.stark:   # Prüfung 08.10.: statt „keine starke Szene (4 weitere waren …)“
+            alle = "die starke Szene" if self.schon == 1 else f"alle {self.schon} starken Szenen"
+            return (f"{alle} {'der letzten Tage' if self.mix else 'dieses Abends'} "
+                    f"{'war' if self.schon == 1 else 'waren'} gerade erst in deinen letzten Videos")
         weitere = (f" ({self.schon} weitere {'war' if self.schon == 1 else 'waren'} gerade erst in deinen letzten "
                    "Videos)") if self.schon else ""
         if self.mix:   # 08.10.: auch gemischt aus den letzten Tagen zu wenig
             return f"aus den letzten Tagen gibt es {_szenen(self.stark)}{weitere}, ein Video braucht {self.mindestens}"
         if self.schon:   # 08.10.: die übrigen waren gerade erst in deinen letzten Videos – so schnell kommt keine wieder
-            if not self.stark:
-                return "die starken Szenen dieses Abends waren gerade erst in deinen letzten Videos"
             return f"{_szenen(self.stark)}{weitere}, ein Video braucht {self.mindestens}"
         return f"{_szenen(self.stark)} (Multikill, Victory, Clutch oder Endkampf), ein Video braucht {self.mindestens}"
 
@@ -414,6 +441,9 @@ class Kandidat:
     frueher: bool = False
     wiederholung: bool = False
     videos: frozenset = field(default_factory=frozenset)
+    # 🥱-Ersatz im einfachen Modus (Prüfung 08.10.): neue schwache Szene vom Abend (Einzelkill) – erst nach allen
+    # bekannten starken (_wahl_rang), „lieber kein Füllmaterial“
+    fueller: bool = False
 
     def __post_init__(self) -> None:
         if not self.teile:  # alte Momente: genau ein Teil = Kern (wie bisher)
@@ -765,7 +795,8 @@ def ermuedung_regeln(konfig: Konfig | None) -> dict:
     Parametern des Videos (so sieht jede Schnittliste, nach welchen Regeln sie gewählt wurde)."""
     regeln = dict(ERMUEDUNG)
     for name, schluessel, unten, oben in (("tage", "ermuedung_tage", 1.0, 365.0), ("faktor", "ermuedung_faktor", 0.0, 1.0),
-                                          ("sperre", "sperre_videos", 0, 12), ("anteil", "wiederholung_anteil", 0.0, 1.0),
+                                          ("sperre", "sperre_videos", 0, 12), ("stunden", "sperre_stunden", 1.0, 240.0),
+                                          ("anteil", "wiederholung_anteil", 0.0, 1.0),
                                           ("gleich", "gleich_mit_video", 1, 10)):
         wert = konfig.wert(f"regie.{schluessel}", None) if konfig is not None else None
         if isinstance(wert, (int, float)) and not isinstance(wert, bool) and unten <= wert <= oben:
@@ -775,8 +806,9 @@ def ermuedung_regeln(konfig: Konfig | None) -> dict:
 
 def _wahl_rang(k: Kandidat) -> int:
     """Reihenfolge der Auswahl: 0 neue Szene vom Abend (oder aus dem Video, das eine Fassung ersetzt), 1 neue Szene
-    eines früheren Abends, 2 bekannte (einfacher Modus) – unter den bekannten zählen nur die Punkte nach Ermüdung."""
-    return 2 if k.wiederholung else int(k.von_frueher)
+    eines früheren Abends, 2 bekannte (einfacher Modus) – unter den bekannten zählen nur die Punkte nach Ermüdung –,
+    3 Einzelkill als 🥱-Ersatz im einfachen Modus (Kandidat.fueller, nur wenn sonst nichts reicht)."""
+    return 3 if k.fueller else 2 if k.wiederholung else int(k.von_frueher)
 
 
 def zu_viele_bekannte(auswahl: list[Kandidat], p: dict, min_m: int) -> bool:
@@ -794,12 +826,16 @@ def zu_viele_bekannte(auswahl: list[Kandidat], p: dict, min_m: int) -> bool:
 
 def schon_zusammen(auswahl: list[Kandidat], k: Kandidat, p: dict) -> bool:
     """Regel „nicht dieselbe Zusammenstellung“ (einfacher Modus): Wären mit k mehr als gleich (2) Szenen des Videos
-    schon zusammen in einem früheren Video gewesen (Kandidat.videos)?"""
+    schon zusammen in einem früheren Video gewesen (Kandidat.videos)? Locker (gleich_haelfte, Prüfung 08.10.): bis zur
+    Hälfte des Videos mit k – bei 6 Szenen 3, bei 4 Szenen weiter 2."""
     regeln = p.get("ermuedung")
     if not regeln or not k.videos:
         return False
+    andere = [x for x in auswahl if x is not k]
     grenze = int(regeln["gleich"])
-    return any(1 + sum(1 for x in auswahl if x is not k and v in x.videos) > grenze for v in k.videos)
+    if regeln.get("gleich_haelfte"):
+        grenze = max(grenze, (len(andere) + 1) // 2)
+    return any(1 + sum(1 for x in andere if v in x.videos) > grenze for v in k.videos)
 
 
 def bekannte_darf(auswahl: list[Kandidat], k: Kandidat, p: dict, min_m: int) -> bool:
@@ -1305,8 +1341,8 @@ def nachschub_matches(con: sqlite3.Connection, konfig: Konfig, abend) -> set[str
 
 
 def fassung_kandidaten(alle: list[Kandidat], fassung: dict, idx: dict[str, set[str]], gezeigt: set[str],
-                       fmt: dict, frueher_ok: set[str] | None = None, *, mix: bool = False
-                       ) -> tuple[list[Kandidat], list[Kandidat]]:
+                       fmt: dict, frueher_ok: set[str] | None = None, *, mix: bool = False,
+                       gesperrt: set[str] | None = None) -> tuple[list[Kandidat], list[Kandidat]]:
     """🥱-Fassung (07.10., Florian: „die guten Szenen behalten, der Rest wird durch neue ersetzt“): (Kandidaten, Pflicht).
 
     Pflicht = die stärkere Hälfte des abgelehnten Videos (fassung["behalten"], je Szene). Die schwächere Hälfte
@@ -1316,12 +1352,19 @@ def fassung_kandidaten(alle: list[Kandidat], fassung: dict, idx: dict[str, set[s
     – Auswahl und Nachlegen nehmen sie erst nach dem Abend, das Kürzen wirft sie zuerst). Bekannte Szenen
     (Kandidat.wiederholung, nur einfacher Modus) nur, wenn sie stark sind – waehle nimmt sie erst nach allen neuen.
     Datei-Momente ohne Match bleiben wie im Abend-Weg draußen.
-    frueher_ok (Stufe 4, nachschub_matches): nur aus diesen Matches darf (b) kommen – None = ohne Grenze (bis 08.10.).
+    frueher_ok (Stufe 4, nachschub_matches; None = /experte): nur aus diesen Matches darf (b) kommen. Unter /experte
+    zählen Szenen früherer Abende nur für die Reihenfolge (Kandidat.frueher, ohne „höchstens die Hälfte“ – wie bis 08.10.).
     Eine behaltene Szene eines früheren Abends (das Video hatte Nachschub) bleibt Pflicht, zählt aber als Nachschub.
+    Prüfung 08.10. (einfacher Modus): Eine behaltene Szene, die gerade erst in einem anderen deiner letzten Videos lief
+    (gesperrt), ist keine Pflicht – sie fehlt wie die schwächere Hälfte; neue Einzelkills vom Abend kommen erst nach den
+    bekannten starken (Kandidat.fueller, „lieber kein Füllmaterial“).
     Fehler: KeineNeuenSzenen (mix: Satz für den gemischten Versuch), wenn es keinen Ersatz gibt oder zusammen weniger
     Szenen als ein Video braucht."""
     behalten = szenen.erweitert(fassung.get("behalten") or [], idx)
     raus = szenen.erweitert(fassung.get("ohne") or [], idx) - behalten
+    if gesperrt:   # gerade erst in einem anderen Video – keine Pflicht, fehlt in dieser Fassung
+        nicht = behalten & szenen.erweitert(gesperrt, idx)
+        behalten, raus = behalten - nicht, raus | nicht
     gezeigt = szenen.erweitert(gezeigt, idx)
     # Eine zweite Aufnahme ohne Match (Nvidia/SteelSeries) im Video zeigt eine Szene aus dem Match ihres Clips
     ohne_match = {k.schluessel for k in alle if not k.match_id}
@@ -1345,7 +1388,12 @@ def fassung_kandidaten(alle: list[Kandidat], fassung: dict, idx: dict[str, set[s
         elif k.match_id not in abend:
             if not k.stark or (frueher_ok is not None and k.match_id not in frueher_ok):
                 continue
-            k.nachschub = True
+            if frueher_ok is None:
+                k.frueher = True       # /experte: erst nach dem Abend, ohne Hälfte-Grenze (wie bis 08.10.)
+            else:
+                k.nachschub = True
+        elif frueher_ok is not None and not k.stark:
+            k.fueller = True           # einfacher Modus: ein Einzelkill erst nach den bekannten starken
         auswahl.append(k)
     ersatz, mindestens = len(auswahl) - len(pflicht), momente_grenzen(fmt)[0]
     if not ersatz or len(auswahl) < mindestens:
@@ -1363,8 +1411,10 @@ def mehr_anlauf(p: dict, gesamt: float, ziel_s: float, unten: float) -> dict | N
     """Stufe 4 (08.10.): Anlauf und Ausklang für den zweiten Plan eines zu kurzen Shorts – je max(gelernt, MEHR_ANLAUF).
     None: Der Plan reicht (mindestens `unten` und höchstens MEHR_ANLAUF_AB_S unter dem Ziel), oder mehr Anlauf ändert
     nichts, weil das Gelernte schon darüber liegt – so plant der zweite Plan nie ein drittes Mal.
+    Nach „⏳ höchstens …“ (p["laenge_richtung"] "lang", regeln.anwenden) nur bis 30 s (Prüfung 08.10.: sonst wurde aus
+    43 s mit mehr Anlauf 62 s bei „höchstens 55 s“).
     Beispiel: 32 s bei Ziel 45 s, gelernt 2,5 / 1,5 s → {"puffer_vor_s": 4.0, "puffer_nach_s": 3.0}."""
-    if not zu_kurz(gesamt, ziel_s, unten):
+    if not zu_kurz(gesamt, ziel_s, unten) or (p.get("laenge_richtung") == "lang" and gesamt >= unten - 1e-6):
         return None
     alt = {k: float(p.get(k, PARAMETER[k])) for k in MEHR_ANLAUF}
     neu = {k: max(alt[k], wert) for k, wert in MEHR_ANLAUF.items()}
@@ -1375,45 +1425,148 @@ def ordner(konfig: Konfig) -> Path:
     return Path(str(konfig.wert("regie.ordner", "/var/lib/clip-pipeline/regie")))
 
 
+def ueber_grenze(liste: dict) -> bool:
+    """Nach „⏳ höchstens …“ (parameter.laenge_richtung "lang"): Ist das Video über deiner Grenze (bis auf
+    ZIEL_TOLERANZ_S)? Das passiert nur, wenn schon 4 Szenen länger sind (erstelle kürzt sonst darauf)."""
+    p = liste.get("parameter") or {}
+    return p.get("laenge_richtung") == "lang" and bool(p.get("laenge_grenze_s")) \
+        and float(liste["dauer_s"]) > float(p["laenge_grenze_s"]) + ZIEL_TOLERANZ_S + 1e-6
+
+
+def lang_genug(plan: dict) -> bool:
+    """Erreicht ein Plan (erstelle mit _speichern=False) sein Ziel – bis auf ZIEL_TOLERANZ_S (Beat-Raster)? Über
+    deiner ⏳-Grenze zählt er nicht (Prüfung 08.10.)."""
+    return float(plan["liste"]["dauer_s"]) >= float(plan["ziel_s"]) - ZIEL_TOLERANZ_S - 1e-6 \
+        and not ueber_grenze(plan["liste"])
+
+
+def _mit_lockerung(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, parameter: dict | None,
+                   weiter: dict) -> dict:
+    """🎬 und neue Fassungen nach ❌ im einfachen Modus (erstelle mit mischen; Prüfung 08.10., Florian: „über 100-mal
+    gesagt, dass die Shorts zu kurz sind“ und „die Momente dürfen ruhig öfter und gemischter genutzt werden“): bis zu
+    drei Pläne, gespeichert wird genau einer.
+      1. vom Abend (wie das Abend-Video: höchstens die Hälfte von früheren Abenden, vorn eine Szene vom Abend),
+      2. gemischt aus den letzten Tagen (p["mix"]),
+      3. gemischt und locker (p["locker"], LOCKER): beliebig viele bekannte neben neuen, aus demselben früheren
+         Video höchstens die Hälfte des neuen Videos (bei 4 Szenen weiter 2).
+    Genommen wird der erste Plan, der sein Ziel erreicht (lang_genug) – Plan 1 bei 🎬 nur mit mindestens einer neuen
+    Szene: Hat der Abend nichts Neues mehr, holte er sonst seine bekannten Szenen in jedes vierte Video, nur weil sie vom
+    Abend sind. Erreicht keiner das Ziel, der längste (gleich lang: der frühere; bei 🎬 ohne Neues kommt Plan 1 zuletzt).
+    Nach „⏳ höchstens …“ zählt nur ein Plan unter deiner Grenze (ueber_grenze), sind alle darüber, der kürzeste.
+    Ein Plan unter 4 Szenen zählt nie (p["leiter"]). Vorher kam der gemischte Plan nur bei „kein Video“ – ein Abend-Plan
+    bis 10 s unter dem Ziel blieb, auch wenn es gemischt gereicht hätte (Prüfung: 43 s statt 62 s bei „mindestens
+    65 s“). Was immer gilt: neue Szenen zuerst, bekannte nach Ermüdung, keine aus deinen letzten 2 Videos.
+    Gibt es so gar keinen Plan, ein Notfall-Versuch (NOTFALL), in dem das älteste der 3 gesperrten Videos frei wird
+    (Florian: „Wenn alle Clips ausgeschöpft sind … bessere öfters zeigen aber nicht permanent“) – für die Länge allein
+    wird die Sperre nie gelockert. Scheitert auch der, kommt der Fehler des dritten Versuchs („Kein neues Video …“,
+    „Diesmal keine neue Fassung …“)."""
+    basis = {**(parameter or {}), "leiter": True}
+    fassung = isinstance(basis.get("fassung"), dict) or bool(basis.get("ersetzt"))
+    plaene: list[tuple[int, dict]] = []
+    fehler_: list[RegieFehler] = []
+
+    def versuch(stufe: int, extra: dict) -> dict | None:
+        try:
+            return erstelle(con, konfig, fmt_name, parameter={**basis, **extra}, **weiter, _speichern=False)
+        except ZuWenigSzenen as fehler:
+            log.info("Versuch %d: kein Video (%s)", stufe + 1, fehler)
+            fehler_.append(fehler)
+        except RegieFehler as fehler:
+            if stufe == 0:
+                raise   # wie bisher: nur „zu wenige Szenen“ führt zum gemischten Versuch
+            log.warning("Versuch %d: %s", stufe + 1, fehler)
+            fehler_.append(fehler)
+        return None
+
+    for stufe, extra in enumerate(({}, {"mix": True}, {"mix": True, "locker": True})):
+        if (plan := versuch(stufe, extra)) is None:
+            continue
+        neu = int(plan["liste"]["auswahl"].get("neu") or 0)
+        if lang_genug(plan) and (stufe > 0 or fassung or neu > 0):
+            return _speichere(con, konfig, plan["liste"])
+        log.info("Versuch %d: %.1f s bei Ziel %.0f s (%d neue Szenen) – %s", stufe + 1, plan["liste"]["dauer_s"],
+                 plan["ziel_s"], neu, "versuche weiter" if stufe < 2 else "nehme den längsten")
+        plaene.append((stufe, plan))
+    if not plaene:
+        letzter = next((f for f in reversed(fehler_) if isinstance(f, ZuWenigSzenen)), fehler_[-1])
+        if (plan := versuch(3, NOTFALL)) is None:
+            raise letzter
+        log.info("Notfall: %.1f s, nur deine letzten 2 Videos gesperrt", plan["liste"]["dauer_s"])
+        return _speichere(con, konfig, plan["liste"])
+    if not fassung and plaene[0][0] == 0 and not int(plaene[0][1]["liste"]["auswahl"].get("neu") or 0):
+        plaene = [*plaene[1:], plaene[0]]   # 🎬 ohne Neues vom Abend: gleich lang heißt gemischt
+    if not (im_rahmen := [x for x in plaene if not ueber_grenze(x[1]["liste"])]):
+        # nach ⏳ alle über deiner Grenze (schon 4 Szenen sind länger): der kürzeste
+        return _speichere(con, konfig, min(plaene, key=lambda x: float(x[1]["liste"]["dauer_s"]))[1]["liste"])
+    plaene = im_rahmen
+    beste = plaene[0][1]
+    for _stufe, plan in plaene[1:]:
+        if float(plan["liste"]["dauer_s"]) > float(beste["liste"]["dauer_s"]) + 0.5:
+            beste = plan
+    return _speichere(con, konfig, beste["liste"])
+
+
+def _speichere(con: sqlite3.Connection, konfig: Konfig, liste: dict) -> dict:
+    """Schnittliste schreiben und den Entwurf anlegen (Ende von erstelle; _mit_lockerung speichert so den gewählten
+    Plan). Rückgabe wie erstelle."""
+    name, fmt_name, musik = liste["name"], liste["format"], liste.get("musik")
+    ziel_datei = ordner(konfig) / f"{name}.json"
+    ziel_datei.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ziel_datei.with_suffix(".tmp")
+    tmp.write_text(json.dumps(liste, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(ziel_datei)
+    cur = con.execute(
+        """INSERT INTO entwuerfe (name, format, schnittliste, parameter, track_id, dauer_s, erstellt, variante)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (name, fmt_name, str(ziel_datei), json.dumps(liste["parameter"], ensure_ascii=False),
+         musik["track_id"] if musik else None, liste["dauer_s"], iso(jetzt()), liste.get("variante")),
+    )
+    momente = [s for s in liste["segmente"] if s.get("teil", 1) == 1 and s.get("rolle") != "hook"]
+    return {"entwurf": cur.lastrowid, "name": name, "format": fmt_name, "datei": str(ziel_datei),
+            "dauer_s": round(liste["dauer_s"], 1), "segmente": len(liste["segmente"]), "momente": len(momente),
+            "stimmung": liste["stimmung"], "musik": musik["titel"] if musik else None, "neu": liste["auswahl"]["neu"],
+            "hinweise": liste["hinweise"], "variante": liste.get("variante")}
+
+
 def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, parameter: dict | None = None,
              name: str | None = None, ziel: dict | None = None, nur_matches: set[str] | None = None,
              hinweise_vorab: list[str] | None = None, gelernt: dict | None = None,
-             variante: str | None = None, nachschub: bool | None = None, mischen: bool = False) -> dict:
+             variante: str | None = None, nachschub: bool | None = None, mischen: bool = False,
+             _speichern: bool = True) -> dict:
     """nur_matches: nur Momente aus diesen Matches (z. B. ein Spielabend).
     hinweise_vorab: Hinweise des Aufrufers (z. B. Lern-Bot: Stimmung nachziehen fehlgeschlagen) – kommen vorn in
     die Schnittliste, damit der Bot sie zeigt (er zeigt die ersten drei).
     variante (🔥 Viral, 05.10.): twist · highlight · fail (viral.VARIANTEN) – nur mit fmt_name "short". Mischung,
     KI-Bonus und Reihenfolge aus viral.py; Fail-Momente nur hier.
     Nachschub (Stufe 4, 08.10., Florian: „Ja, auffüllen“) – nur im einfachen Modus, für einen Short aus einem Abend
-    (nur_matches) mit „nur starke Szenen“: Hat der Abend weniger ungesehene starke Szenen, als ein Video braucht (4),
-    oder bleibt das Video auch mit mehr Anlauf zu kurz (zu_kurz), kommen nie gezeigte starke Szenen früherer Abende
-    dazu (nachschub_matches: höchstens 12 Tage alt) – nach allen Szenen vom Abend, nie mehr als vom Abend, nie vorn.
-    Gilt fürs Abend-Video, 🎬 und die neue Fassung nach ❌; /experte und eine Match-Wahl dort bleiben exakt.
+    (nur_matches) mit „nur starke Szenen“: Hat der Abend weniger neue starke Szenen, als ein Video braucht (4), oder
+    erreicht das Video sein Ziel nicht (Prüfung 08.10.: vorher erst 10 s darunter, zu_kurz), kommen starke Szenen
+    früherer Abende dazu (nachschub_matches: höchstens 12 Tage alt) – nach allen Szenen vom Abend, nie mehr als vom
+    Abend, nie vorn. Gilt fürs Abend-Video, 🎬 und die neue Fassung nach ❌; /experte und eine Match-Wahl dort bleiben
+    exakt.
     nachschub: None = selbst entscheiden; True/False legt es fest (der zweite Plan erbt die Entscheidung).
     Abwechslung mit Ermüdung (08.10., Florian: „die Momente dürfen ruhig öfter und gemischter genutzt werden aber nur
     weil ein Clip gut ist muss der nicht immer egal wo verwendet werden … bessere öfters zeigen aber nicht permanent“;
     ersetzt „jede Szene nur in einem Video“) – einfacher Modus, Short ohne 🔥 Viral (szenen.verlauf, p["ermuedung"]):
-    eine Szene aus deinen letzten 3 Videos ist kein Kandidat (nie aufgehoben); neue Szenen gehen vor; bekannte starke
+    eine Szene, die gerade erst (höchstens 48 h) in einem deiner letzten 3 Videos lief, ist kein Kandidat (nur
+    wenn es sonst gar kein Video gäbe, sperren bei 🎬 bloß deine letzten 2 Videos); neue Szenen gehen vor; bekannte starke
     verlieren je Einsatz der letzten 30 Tage die Hälfte ihrer Punkte (Abzug), höchstens die Hälfte des Videos
     bekannte (bis zur Mindestzahl dürfen es mehr sein) und nie mehr als zwei, die schon zusammen in einem Video waren.
     Sie ersetzt dort Abzug, Cooldown und Frische-Quote des Experten-Modus (frueher leer). Reicht es nicht: Nachschub,
     mehr Anlauf, sonst ZuWenigSzenen (schon: gesperrte starke Szenen).
     p["ersetzt"] (neue Fassung nach ❌, lernbot.baue_entwurf): die Szenen dieser Videos sind für sie frei und keine
     Wiederholung; bei 🥱 kommt der Ersatz nie aus ihnen (erst neue, dann bekannte starke).
-    mischen (🎬 und neue Fassungen, lernbot.baue_entwurf): Reicht es so nicht (ZuWenigSzenen), ein zweiter Versuch
-    gemischt aus den letzten Tagen (p["mix"]): dieselben Regeln, nur ohne „höchstens die Hälfte von früheren Abenden“
-    und ohne „vorn eine Szene vom Abend“. Das Abend-Video (sitzung) mischt nie. 2-Wochen-Video und /experte wie
-    bisher."""
+    mischen (🎬 und neue Fassungen, lernbot.baue_entwurf; einfacher Modus): _mit_lockerung – erst vom Abend, erreicht das
+    nicht sein Ziel, gemischt aus den letzten Tagen (p["mix"]: ohne „höchstens die Hälfte von früheren Abenden“ und
+    ohne „vorn eine Szene vom Abend“), zuletzt gemischt und locker (p["locker"]). Das Abend-Video (sitzung) mischt nie.
+    2-Wochen-Video und /experte wie bisher.
+    _speichern=False (nur _mit_lockerung): der fertige Plan {"liste", "ziel_s"} ohne Datei und ohne Entwurf."""
     if mischen and not (parameter or {}).get("mix"):
         weiter = dict(name=name, ziel=ziel, nur_matches=nur_matches, hinweise_vorab=hinweise_vorab, gelernt=gelernt,
                       variante=variante, nachschub=nachschub)
-        try:
-            return erstelle(con, konfig, fmt_name, parameter=parameter, **weiter)
-        except ZuWenigSzenen as abend:
-            if not (fmt_name == "short" and variante is None and konfig.wert("regie.geschmack", False)):
-                raise
-            log.info("Vom Abend allein kein Video (%s) – zweiter Versuch gemischt aus den letzten Tagen", abend)
-            return erstelle(con, konfig, fmt_name, parameter={**(parameter or {}), "mix": True}, **weiter)
+        if fmt_name == "short" and variante is None and konfig.wert("regie.geschmack", False):
+            return _mit_lockerung(con, konfig, fmt_name, parameter, weiter)
+        return erstelle(con, konfig, fmt_name, parameter=parameter, **weiter, _speichern=_speichern)
     if fmt_name not in FORMATE:
         raise RegieFehler(f"Unbekanntes Format {fmt_name!r}")
     viral = None
@@ -1451,21 +1604,28 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     verlauf: szenen.Verlauf | None = None   # einfacher Modus: was du schon gesehen hast, je Szene und je Video
     if einfach:
         p["ermuedung"] = ermuedung_regeln(konfig)   # waehle, Nachlegen und Kürzen lesen die Regeln von hier
+        if p.get("locker"):   # letzter Versuch von 🎬/neuer Fassung (_mit_lockerung): die Länge geht vor
+            p["ermuedung"] = {**p["ermuedung"], **LOCKER}
+        if p.get("notfall"):   # Notfall (_mit_lockerung): sonst gar kein Video – das älteste gesperrte Video wird frei
+            p["ermuedung"]["sperre"] = max(1, int(p["ermuedung"]["sperre"]) - 1)
         ersetzt = [i for i in (p.get("ersetzt") or []) if isinstance(i, int)]   # lernbot: Fassung nach ❌
         verlauf = szenen.verlauf(con, idx, ersetzt=ersetzt, tage=p["ermuedung"]["tage"],
-                                 sperre=p["ermuedung"]["sperre"])
+                                 sperre=p["ermuedung"]["sperre"], stunden=p["ermuedung"]["stunden"])
 
     def ermuede(kandidaten_: list[Kandidat]) -> None:
         """Einfacher Modus: Eine bekannte Szene (nicht aus dem Video, das eine Fassung ersetzt) verliert je Einsatz der
         letzten Tage den Faktor ihrer Punkte (½: 10 → 5 → 2,5) – so kommen bessere öfter wieder als schwache, aber
-        keine dauernd. Schwache (< 1 Punkt) verlieren etwas wie beim Abzug des Experten-Modus."""
+        keine dauernd. Schwache (< 1 Punkt) verlieren etwas wie beim Abzug des Experten-Modus. In welchen früheren
+        Videos eine Szene war (videos, für „nie dieselbe Zusammenstellung“), steht an jeder – Prüfung 08.10.: auch an
+        den Szenen des ersetzten Videos, sonst nahm eine Fassung eine dritte Szene aus demselben alten Video dazu."""
         if verlauf is None:
             return
         faktor = float(p["ermuedung"]["faktor"])
         for k in kandidaten_:
+            k.videos = verlauf.videos.get(k.schluessel, frozenset())
             if verlauf.wiederholung(k.schluessel):
                 n = verlauf.einsaetze.get(k.schluessel, 0)
-                k.wiederholung, k.gezeigt, k.videos = True, n, verlauf.videos.get(k.schluessel, frozenset())
+                k.wiederholung, k.gezeigt = True, n
                 k.abzug = round((1.0 - faktor ** n) * max(k.punkte, 1.0), 2)
                 k.punkte = round(k.punkte - k.abzug, 2)
 
@@ -1485,7 +1645,8 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         # 🥱: Ersatz nie aus deinen letzten Videos und nie aus dem abgelehnten (samt Vorgänger-Fassungen) – erst neue,
         # dann bekannte starke. /experte: nur nie gesehene wie bisher
         tabu = verlauf.gesperrt | verlauf.eigen if verlauf is not None else szenen.jemals_gezeigt(con)
-        alle, pflicht = fassung_kandidaten(alle, fassung, idx, tabu, fmt, frueher_ok, mix=mix)
+        alle, pflicht = fassung_kandidaten(alle, fassung, idx, tabu, fmt, frueher_ok, mix=mix,
+                                           gesperrt=verlauf.gesperrt if verlauf is not None else None)
         p["max_je_match"] = max(int(p["max_je_match"]), momente_grenzen(fmt)[1])   # oft nur ein Match am Abend
     else:
         if verlauf is not None:   # 08.10.: nichts aus deinen letzten Videos – die Sperre wird nie aufgehoben
@@ -1597,10 +1758,23 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
 
     segmente = plane_zeitleiste(reihe, raster, fmt, p, fps, fx)
     passt_nicht: list[Kandidat] = []  # eigene Liste: `alle` bleibt die ganze Auswahl (für Zählung und Hinweis)
+    # Prüfung 08.10.: nach „⏳ höchstens …“ ist deine Länge eine Obergrenze (regeln.laenge: „nie länger“) – Nachlegen
+    # und Kürzen halten sie ein (bis auf ZIEL_TOLERANZ_S fürs Beat-Raster), solange 4 Szenen bleiben. Vorher schoss die
+    # letzte Szene darüber (61 s bei „höchstens 55 s“). Sonst max_s wie bisher.
+    oben_s = float(fmt["max_s"])
+    if einfach and p.get("laenge_richtung") == "lang" and p.get("laenge_grenze_s"):
+        oben_s = min(oben_s, max(float(fmt["min_s"]), float(p["laenge_grenze_s"]) + ZIEL_TOLERANZ_S))
+
+    def zu_lang(segmente_: list[dict], reihe_: list[Kandidat]) -> bool:
+        """Über max_s – oder über deiner ⏳-Grenze (oben_s), solange danach noch 4 Szenen bleiben."""
+        if not segmente_ or len(reihe_) <= 1:
+            return False
+        ende = segmente_[-1]["zeit_ende"]
+        return ende > fmt["max_s"] + 1e-6 or (ende > oben_s + 1e-6 and len(reihe_) > momente_grenzen(fmt)[0])
 
     def nachlegen(reihe: list[Kandidat], segmente: list[dict]) -> tuple[list[Kandidat], list[dict]]:
         """Beat-Raster kürzt Segmente -> bis zum Ziel nachlegen: erst mit Match-Grenze, notfalls ohne.
-        Nur Momente, die unter max_s passen; die anderen merkt sich passt_nicht."""
+        Nur Momente, die unter max_s passen (über 4 Szenen hinaus unter oben_s); die anderen merkt sich passt_nicht."""
         min_m, max_m = momente_grenzen(fmt)
         # Stufen: mit Match-Grenze, ohne – und zuletzt (06.10.) auch gesperrte Momente: lieber ein schon gezeigter
         # Moment als ein Short, der weit unter dem Ziel endet (die Schätzung vorab ist nur ungefähr). Einfacher Modus
@@ -1626,7 +1800,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                 naechster_ = max(rest, key=lambda k: (-_wahl_rang(k), k.punkte, k.schluessel))   # neue vor bekannten
                 neue_reihe = ordne([*gewaehlt, naechster_])
                 neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
-                if neue_segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6:
+                if neue_segmente[-1]["zeit_ende"] > (oben_s if len(gewaehlt) >= min_m else fmt["max_s"]) + 1e-6:
                     passt_nicht.append(naechster_)
                     continue
                 gewaehlt.append(naechster_)
@@ -1643,7 +1817,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     # Auswahl nimmt den letzten Moment auch dann, wenn er über das Ziel schießt (bei Serien bis 20 s) – wurde er
     # hier gestrichen, blieb die Lücke, und die Shorts endeten bei 30–38 s mit 2–3 Momenten statt bei 45 s.
     gekuerzt = False
-    while segmente and segmente[-1]["zeit_ende"] > fmt["max_s"] + 1e-6 and len(reihe) > 1:
+    while zu_lang(segmente, reihe):
         # Frische-Quote (Review 27.09.): frische Momente sind meist die punktschwächsten – das Kürzen warf sie
         # als Erste wieder raus. Solange die Quote sonst fiele, wird unter den alten gestrichen.
         zur_wahl = [k for k in reihe[:-1] if not any(k is x for x in pflicht)] or reihe[:-1]  # Twist bleibt
@@ -1658,11 +1832,14 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         if alte and sum(1 for k in reihe if k.gezeigt == 0) <= frische_soll(len(reihe) - 1, p):
             zur_wahl = alte
         raus = min(zur_wahl, key=lambda k: (-_wahl_rang(k), k.punkte, k.intensitaet, k.schluessel))
-        reihe.remove(raus)
+        ohne_raus = [k for k in reihe if k is not raus]
+        neue_reihe = abend_vorn(ohne_raus, staerkste=vorn_staerkste) if viral is None else ohne_raus   # vorn vom Abend
+        neue_segmente = plane_zeitleiste(neue_reihe, raster, fmt, p, fps, fx)
+        if segmente[-1]["zeit_ende"] <= fmt["max_s"] + 1e-6 and neue_segmente[-1]["zeit_ende"] < fmt["min_s"] - 1e-6:
+            break   # Prüfung 08.10.: für deine ⏳-Grenze nie unter 30 s – lieber etwas darüber
         gewaehlt.remove(raus)
         passt_nicht.append(raus)
-        reihe = abend_vorn(reihe, staerkste=vorn_staerkste) if viral is None else reihe   # war vorn die Abend-Szene
-        segmente = plane_zeitleiste(reihe, raster, fmt, p, fps, fx)
+        reihe, segmente = neue_reihe, neue_segmente
         gekuerzt = True
     if gekuerzt:
         reihe, segmente = nachlegen(reihe, segmente)
@@ -1692,8 +1869,10 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         log.info("Short %.1f s bei Ziel %.0f s – plane neu mit mehr Anlauf (%.1f s davor, %.1f s danach)",
                  gesamt, ziel_s, anlauf["puffer_vor_s"], anlauf["puffer_nach_s"])
         zweiter = ("Mehr Anlauf", {**(parameter or {}), **anlauf}, nachschub)
-    elif einfach and nachschub is False and pool and zu_kurz(gesamt, ziel_s, unten):
-        log.info("Short %.1f s bei Ziel %.0f s – plane neu mit nie gezeigten starken Szenen früherer Abende (%d da)",
+    elif einfach and nachschub is False and pool and gesamt < ziel_s - ZIEL_TOLERANZ_S - 1e-6:
+        # Prüfung 08.10.: schon, wenn das Ziel nicht erreicht ist (vorher erst 10 s darunter) – nach deinem „mindestens
+        # 45 s“ blieb ein Abend mit vier starken Szenen sonst bei 40 s, obwohl frühere Abende genug hatten
+        log.info("Short %.1f s bei Ziel %.0f s – plane neu mit starken Szenen früherer Abende (%d da)",
                  gesamt, ziel_s, len(pool))
         zweiter = ("Nachschub", parameter, True)
     if zweiter is not None:
@@ -1701,7 +1880,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         try:
             return erstelle(con, konfig, fmt_name, parameter=parameter_neu, name=name, ziel=ziel,
                             nur_matches=nur_matches, hinweise_vorab=hinweise_vorab, gelernt=gelernt,
-                            nachschub=nachschub_neu)
+                            nachschub=nachschub_neu, _speichern=_speichern)
         except RegieFehler as fehler:
             if isinstance(fehler, ZuWenigSzenen) and gesamt < unten - 1e-6:
                 raise   # auch so zu kurz: kein Video wie bisher (ZuKurz, bei 🥱 KeineNeuenSzenen)
@@ -1715,6 +1894,10 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             fehler = KeineNeuenSzenen(ersatz, momente_grenzen(fmt)[0], mix=mix)
             fehler.frueher = uebrig   # Stufe 4: ungesehene früherer Abende, die die Hälfte-Grenze nicht zuließ
             raise fehler
+    elif (mix or p.get("leiter")) and len(reihe) < momente_grenzen(fmt)[0]:
+        # Prüfung 08.10.: 🎬 und neue Fassungen nur mit mindestens 4 Szenen (Florian 28.09.: 4–10) – sonst kamen 3
+        # Szenen aus demselben alten Video als „neues Video“; lieber kein Video
+        raise ZuWenigSzenen(len(reihe), momente_grenzen(fmt)[0], szenen_gesamt, schon, mix=mix, zusammen=mix)
     if nachschub_n := sum(1 for k in reihe if k.von_frueher):
         log.info("Nachschub: %d von %d Szenen von früheren Abenden (%s)", nachschub_n, len(reihe),
                  ", ".join(k.schluessel for k in reihe if k.von_frueher))
@@ -1729,6 +1912,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
                           f"{fmt['min_s']:.0f}–{fmt['max_s']:.0f} s – zu wenig passendes Material")
     if len(reihe) < momente_grenzen(fmt)[0]:
         hinweise.append(f"nur {len(reihe)} Momente (Ziel mindestens {momente_grenzen(fmt)[0]}) – zu wenig passendes Material")
+    grenze_s = float(p.get("laenge_grenze_s") or 0.0) if p.get("laenge_richtung") == "kurz" else 0.0
+    if einfach and gesamt < grenze_s - ZIEL_TOLERANZ_S - 1e-6:
+        # Prüfung 08.10. (Florian: „über 100-mal gesagt, dass die Shorts zu kurz sind“): „mindestens“ nur zusagen, wenn
+        # es gehalten wird – reichen auch Nachschub, Mischen und Lockern nicht bis zu deiner Länge, steht es dabei
+        hinweise.append(f"kürzer als deine Mindestlänge ({grenze_s:.0f} s) – mehr passende Szenen gab es gerade nicht")
     # Gezählt werden Momente, nicht Segmente (ein Moment mit Jump-Cut hat mehrere Teile, der Hook wiederholt einen)
     momente = [s for s in segmente if s.get("teil", 1) == 1 and s.get("rolle") != "hook"]
     # Einfacher Modus (08.10.): neu = noch nie gesehen; wiederholt = bekannt aus einem früheren Video (nicht aus dem,
@@ -1808,18 +1996,6 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     # Passt der Filtergraph samt Effekten auf die Befehlszeile? Sonst scheiterte erst das Rendern.
     if fx_plan["an"] and (fehler := entwurf.graph_fehler(liste, konfig)):
         raise RegieFehler("Schnittliste zu groß: " + fehler[0])
-    ziel_datei = ordner(konfig) / f"{name}.json"
-    ziel_datei.parent.mkdir(parents=True, exist_ok=True)
-    tmp = ziel_datei.with_suffix(".tmp")
-    tmp.write_text(json.dumps(liste, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(ziel_datei)
-    cur = con.execute(
-        """INSERT INTO entwuerfe (name, format, schnittliste, parameter, track_id, dauer_s, erstellt, variante)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (name, fmt_name, str(ziel_datei), json.dumps(p, ensure_ascii=False), track["id"] if track else None,
-         round(gesamt, 3), iso(jetzt()), variante),
-    )
-    return {"entwurf": cur.lastrowid, "name": name, "format": fmt_name, "datei": str(ziel_datei),
-            "dauer_s": round(gesamt, 1), "segmente": len(segmente), "momente": len(momente), "stimmung": haupt,
-            "musik": liste["musik"]["titel"] if track else None, "neu": neu, "hinweise": hinweise,
-            "variante": variante}
+    if not _speichern:   # _mit_lockerung vergleicht erst, gespeichert wird nur der gewählte Plan
+        return {"liste": liste, "ziel_s": ziel_s}
+    return _speichere(con, konfig, liste)

@@ -415,6 +415,8 @@ class Nachschub(MitRegieMaterial):
         self.assertNotIn("gab es nicht", regeln.wende_an(self.con, k, "kurz", kurz))
         kurz["auswahl"] = {**liste["auswahl"], "nachschub_uebrig": 0}
         self.assertIn("mehr starke Szenen gab es nicht", regeln.wende_an(self.con, k, "kurz", kurz))
+        langweilig = {**kurz, "parameter": {"ziel_dauer_s": 45.0, "fassung": {"ohne": ["datei:3"]}}}
+        self.assertNotIn("gab es nicht", regeln.wende_an(self.con, k, "kurz", langweilig))   # Prüfung 08.10.: nach 🥱
         with self.assertRaises(regie.ZuWenigSzenen):             # /experte: wie bisher nur der Abend
             self.short(experte=True)
         self.gesendet(["datei:4", "datei:5", "datei:6"])         # Fehlerfall: die starken liefen gerade erst
@@ -482,12 +484,16 @@ class Nachschub(MitRegieMaterial):
     def test_neue_fassung_behaelt_ihre_szenen(self):
         """Wichtigster Fehlerfall: Ist nichts Neues mehr da, endet die neue Fassung nach ❌ trotzdem nicht mit „kein
         Video“ – sie ersetzt ihr Video (ersetzt): 🥱 behält die stärkere Hälfte und nimmt bekannte, die nicht in deinen
-        letzten Videos waren (vorher „Diesmal keine neue Fassung“); ⏱️ behält die starken Szenen und wird länger. „Kein
-        neues Video“ erst, wenn wirklich nichts geht – mit dem Grund."""
+        letzten Videos waren (vorher „Diesmal keine neue Fassung“); ⏱️ behält die starken Szenen und wird länger. Ist
+        dann alles ausgeschöpft, kommt 🎬 im Notfall trotzdem – nur ohne Szene aus den letzten 2 Videos (Prüfung
+        08.10., vorher „Kein neues Video“)."""
         self.vier_abende()
         for m in ("e1", "e2", "e3", "e4"):
             self.gezeigt([m], mischen=False)
-        eid, v5 = self.gezeigt(["e4"])                                       # 🎬: die letzten neuen + bekannte
+        _e, v4 = self.gezeigt(["e4"])                                        # 🎬: die letzten neuen + bekannte
+        # 🎬: nur noch bekannte aus Video 1 und 2. Prüfung 08.10.: Eine 🥱-Fassung von Video 5 (zwei Szenen aus Video 1
+        # behalten) fände nur Ersatz aus Video 1 – drei von vier Szenen desselben alten Videos, also keine Fassung
+        eid, v5 = self.gezeigt(["e4"])
         fassung = regeln.neue_fassung(v5, eid)
         self.assertEqual(fassung["abend"], ["e4"])        # ohne Szene vom Abend: der Abend, aus dem es gebaut wurde
         f1, liste1 = self.gezeigt(fassung["abend"], ersetzt=[eid], fassung=fassung)          # ❌ 🥱
@@ -498,11 +504,21 @@ class Nachschub(MitRegieMaterial):
         stark = r1 - {"datei:22", "datei:23", "datei:24"}                    # ohne die Einzelkills (nur 🥱 nimmt sie)
         self.assertTrue(stark <= set(self.reihe(liste2)), (stark, self.reihe(liste2)))
         self.assertGreater(liste2["dauer_s"], liste1["dauer_s"])
-        with self.assertRaises(regie.ZuWenigSzenen) as fehler:              # 🎬: der Rest lief gerade erst
-            self.gezeigt(["e4"])
-        satz = fehler.exception.satz(experte=False)
-        self.assertTrue(satz.startswith("🎬 Kein neues Video: aus den letzten Tagen"), satz)
-        self.assertTrue(satz.endswith("Sobald du wieder spielst, kommt ein neues."), satz)
+        _e, liste3 = self.gezeigt(["e4"])                                    # 🎬: alles ausgeschöpft – Notfall
+        self.assertTrue(liste3["parameter"].get("notfall"))
+        letzte = set(self.reihe(v4)) | set(self.reihe(v5)) | r1 | set(self.reihe(liste2))   # 2 Videos samt Fassungen
+        self.assertFalse(set(self.reihe(liste3)) & letzte, self.reihe(liste3))
+
+    def test_hoechstens_haelt_die_grenze(self):
+        """Prüfung 08.10.: Nach „⏳ höchstens 40 s“ schoss die letzte Szene darüber (46 s, 6 Szenen) – jetzt kürzt der
+        Bot auf deine Grenze (bis auf 2 s). Fehlerfall: Sind schon 4 Szenen länger, bleiben es 4 (kein „kein Video“)."""
+        self.vier_abende()
+        _e, liste = self.gezeigt(["e1"], mischen=False, ziel_dauer_s=40.0, laenge_richtung="lang", laenge_grenze_s=40.0)
+        self.assertLessEqual(liste["dauer_s"], 42.0)
+        self.assertGreaterEqual(len(self.reihe(liste)), 4)
+        self.con.execute("DELETE FROM entwuerfe")                            # dieselben Szenen noch einmal planen
+        _e, liste = self.gezeigt(["e1"], mischen=False, ziel_dauer_s=30.0, laenge_richtung="lang", laenge_grenze_s=30.0)
+        self.assertEqual(len(self.reihe(liste)), 4)
 
 
 class Auswahl(unittest.TestCase):
@@ -537,11 +553,59 @@ class Auswahl(unittest.TestCase):
         self.assertEqual([k.schluessel for k in gewaehlt], ["neu", "alt0", "alt1", "alt4"])
         gewaehlt, _, _ = regie.waehle(bekannt, fmt, p)                      # alles ausgeschöpft
         self.assertEqual([k.schluessel for k in gewaehlt], ["alt0", "alt1", "alt4", "alt5"])
+        # Prüfung 08.10., letzter Versuch von 🎬 (locker): aus einem früheren Video höchstens die Hälfte des neuen Videos
+        locker = {**p, "ermuedung": {**regie.ERMUEDUNG, **regie.LOCKER}}
+        fuenf = [*bekannt[:2], *[self.k(f"x{i}", 1.0, match=f"x{i}") for i in range(3)]]
+        self.assertTrue(regie.schon_zusammen(bekannt[:2], bekannt[2], locker))      # 3 von 3: nie
+        self.assertFalse(regie.schon_zusammen(fuenf, bekannt[2], locker))            # 3 von 6: locker in Ordnung
+        self.assertTrue(regie.schon_zusammen(fuenf, bekannt[2], p))                  # sonst höchstens 2
+        einzel = self.k("einzel", 8.0, match="n2")
+        einzel.fueller = True       # Prüfung 08.10.: ein Einzelkill als 🥱-Ersatz erst nach den bekannten starken
+        self.assertEqual([regie._wahl_rang(x) for x in (neu, bekannt[0], einzel)], [0, 2, 3])
+
+    def test_lockerung_nimmt_den_ersten_plan_mit_ziel(self):
+        """Prüfung 08.10. (Florian: „über 100-mal gesagt, dass die Shorts zu kurz sind“): 🎬 und neue Fassungen nehmen
+        den ersten Plan, der sein Ziel erreicht – vom Abend, gemischt, gemischt und locker; vom Abend bei 🎬 nur mit
+        etwas Neuem (sonst holte der Abend seine bekannten Szenen in jedes vierte Video). Erreicht keiner das Ziel, der
+        längste; ohne Plan der Fehler des letzten Versuchs. Vorher kam „gemischt“ nur bei „kein Video“ (43 statt 62 s)."""
+        def lauf(plaene, parameter=None, grenze=None):
+            aufrufe = []
+
+            def erstelle(_con, _konfig, _fmt, *, parameter, _speichern, **_weiter):
+                stufe = 3 if "notfall" in parameter else ("mix" in parameter) + ("locker" in parameter)
+                aufrufe.append(stufe)
+                if isinstance(plaene[stufe], Exception):
+                    raise plaene[stufe]
+                dauer, neu = plaene[stufe]
+                return {"liste": {"dauer_s": dauer, "auswahl": {"neu": neu}, "stufe": stufe, "parameter": {
+                    "laenge_richtung": "lang", "laenge_grenze_s": grenze} if grenze else {}}, "ziel_s": 45.0}
+
+            with unittest.mock.patch.object(regie, "erstelle", erstelle), \
+                    unittest.mock.patch.object(regie, "_speichere", lambda _con, _konfig, liste: liste["stufe"]):
+                return regie._mit_lockerung(None, None, "short", parameter or {}, {}), aufrufe
+
+        self.assertEqual(lauf([(46.0, 2), None, None]), (0, [0]))                   # vom Abend reicht: ein Plan
+        self.assertEqual(lauf([(41.0, 2), (46.0, 0), None]), (1, [0, 1]))           # vorher blieb es bei 41 s
+        self.assertEqual(lauf([(46.0, 0), (44.0, 0), None]), (1, [0, 1]))           # nichts Neues vom Abend: gemischt
+        self.assertEqual(lauf([(46.0, 0), None, None], {"ersetzt": [3]}), (0, [0]))   # neue Fassung: bleibt dabei
+        self.assertEqual(lauf([(38.0, 1), (36.0, 0), (40.0, 0)]), (2, [0, 1, 2]))   # keiner erreicht 45 s: der längste
+        # nach „⏳ höchstens 42 s“ nie ein Plan über der Grenze, wenn einer darunter liegt – sonst der kürzeste
+        self.assertEqual(lauf([(50.0, 2), (41.0, 0), (48.0, 0)], grenze=42.0), (1, [0, 1, 2]))
+        self.assertEqual(lauf([(47.0, 2), (50.0, 0), (48.0, 0)], grenze=42.0), (0, [0, 1, 2]))
+        kein = regie.ZuWenigSzenen(2, 4, 2, mix=True)
+        # sonst gar kein Video: Notfall – nur deine letzten 2 Videos sperren (für die Länge allein nie)
+        self.assertEqual(lauf([kein, kein, kein, (38.0, 0)]), (3, [0, 1, 2, 3]))
+        with self.assertRaises(regie.ZuWenigSzenen) as fehler:                     # Fehlerfall: nirgends genug
+            lauf([kein, kein, kein, kein])
+        self.assertTrue(fehler.exception.mix)
 
     def test_mehr_anlauf_nur_wenn_zu_kurz(self):
         p = dict(regie.PARAMETER)                                                    # gelernt: 2,5 / 1,5 s
         self.assertEqual(regie.mehr_anlauf(p, 32.0, 45.0, 30.0), {"puffer_vor_s": 4.0, "puffer_nach_s": 3.0})
         self.assertIsNone(regie.mehr_anlauf(p, 36.0, 45.0, 30.0))                    # reicht: kein zweiter Plan
+        oben = {**p, "laenge_richtung": "lang"}         # Prüfung 08.10.: nach ⏳ nur bis 30 s, nie über deine Grenze
+        self.assertIsNone(regie.mehr_anlauf(oben, 32.0, 45.0, 30.0))
+        self.assertIsNotNone(regie.mehr_anlauf(oben, 25.0, 45.0, 30.0))
         # Das Gelernte liegt schon darüber: ein zweiter Plan änderte nichts (und plant nie ein drittes Mal)
         self.assertIsNone(regie.mehr_anlauf({**p, "puffer_vor_s": 5.0, "puffer_nach_s": 3.0}, 22.0, 45.0, 30.0))
 

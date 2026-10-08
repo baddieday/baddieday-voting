@@ -151,14 +151,20 @@ die Regeln. Einstellbar in `[regie.vorgaben]`.
 **Einfacher Modus seit 08.10.: Abwechslung mit Ermüdung** (Florian: „die Momente dürfen ruhig öfter und gemischter
 genutzt werden aber nur weil ein Clip gut ist muss der nicht immer egal wo verwendet werden … bessere öfters zeigen
 aber nicht permanent“; ersetzt „jede Szene nur in einem Video“). Statt Abzug, Cooldown und Frische-Quote
-(`szenen.verlauf`, `parameter.ermuedung`): Neue Szenen gehen vor. Eine Szene aus den letzten 3 Videos (Fassungen eines
-Videos zählen als eines) ist kein Kandidat – nie aufgehoben; der Cooldown holte sie sonst zurück, sobald Frisches
-fehlte. Bekannte starke verlieren je Einsatz der letzten 30 Tage die Hälfte ihrer Punkte (Punkte × 0,5^Einsätze),
-höchstens die Hälfte bekannte (bis 4 Szenen dürfen es mehr sein), nie mehr als 2 Szenen, die schon
-zusammen in einem Video waren. Reicht der Abend nicht, baut 🎬 (und eine neue Fassung) gemischt aus den letzten 12
-Tagen (`parameter.mix`); das Abend-Video bleibt beim Abend. Eine neue Fassung nach ❌ darf die Szenen ihres Videos
-nehmen (`parameter.ersetzt`, keine Wiederholung). Werte intern in `[regie]` (`ermuedung_tage`, `ermuedung_faktor`,
-`sperre_videos`, `wiederholung_anteil`, `gleich_mit_video`). /experte, 2-Wochen-Video und 🔥 Viral wie oben.
+(`szenen.verlauf`, `parameter.ermuedung`): Neue Szenen gehen vor. Eine Szene, die gerade erst (höchstens 48 h) in
+einem der letzten 3 Videos lief (Fassungen eines Videos zählen als eines), ist kein Kandidat; der Cooldown holte sie
+sonst zurück, sobald Frisches fehlte. Bekannte starke verlieren je Einsatz der letzten 30 Tage die Hälfte ihrer Punkte
+(Punkte × 0,5^Einsätze), höchstens die Hälfte bekannte (bis 4 Szenen dürfen es mehr sein), nie mehr als 2 Szenen, die
+schon zusammen in einem Video waren. Das Abend-Video bleibt beim Abend (Nachschub höchstens die Hälfte, schon wenn es
+sein Ziel um mehr als 2 s verfehlt). 🎬 und neue Fassungen (`regie._mit_lockerung`) planen bis zu dreimal – vom Abend,
+gemischt aus den letzten 12 Tagen (`parameter.mix`), gemischt und locker (`parameter.locker`: beliebig viele bekannte,
+aus demselben früheren Video höchstens die Hälfte) – und nehmen den ersten Plan, der das Ziel erreicht (vom Abend bei
+🎬 nur mit etwas Neuem), sonst den längsten; nie unter 4 Szenen. Gäbe es so gar kein Video, sperren in einem letzten
+Versuch nur die letzten 2 Videos (`regie.NOTFALL`) – für die Länge allein wird die Sperre nie gelockert. Gespeichert wird nur
+der gewählte Plan. Eine neue Fassung nach ❌ darf die Szenen ihres Videos nehmen (`parameter.ersetzt`, keine
+Wiederholung), außer sie liefen gerade erst in einem anderen Video. Werte intern in `[regie]` (`ermuedung_tage`,
+`ermuedung_faktor`, `sperre_videos`, `sperre_stunden`, `wiederholung_anteil`, `gleich_mit_video`). /experte,
+2-Wochen-Video und 🔥 Viral wie oben.
 
 Fehlt die Datei eines Moments (z. B. eine gelöschte Kopie), nimmt der Regisseur seit 27.09. den Bot-Clip
 (gleicher Inhalt; nicht nach einem Nachschnitt) statt den Moment still wegzulassen – und zählt, was fehlt
@@ -181,6 +187,10 @@ Ursache der kurzen Shorts (27.09., nachgestellt): Seit „Multikills am Stück�
 und 2–3 Momenten statt 45 s. Jetzt legt der Regisseur nach dem Kürzen erneut nach (nur Momente, die unter die
 Obergrenze passen). Der gelernte `dauer_faktor` („⏳ zu lang“) spielte dabei kaum eine Rolle, konnte aber bis
 27.09. nur fallen – deshalb der neue Grund „⏱️ zu kurz“.
+
+Einfacher Modus seit 08.10.: Nach „⏳ höchstens …“ (`parameter.laenge_richtung` = "lang") ist die Obergrenze fürs
+Nachlegen und Kürzen deine Grenze + 2 s statt `max_s` – solange 4 Szenen bleiben (vorher schoss die letzte Szene
+darüber: 61 s bei „höchstens 55 s“).
 
 ## Multikills am Stück – Serie und Jump-Cut
 Bei einem Team-Wipe sterben alle umgehauenen Gegner im selben Augenblick. Die Kill-Zeiten liegen dann alle beim

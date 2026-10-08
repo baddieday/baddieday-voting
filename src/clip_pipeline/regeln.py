@@ -110,13 +110,20 @@ def laenge(con: sqlite3.Connection, konfig: Konfig) -> tuple[float, str | None] 
 
 
 def _ohne_scheinversuch(p: dict) -> dict:
-    """Stufe 5 (08.10.): Ein Längen-Versuch des Publikums-Modells (autonom.plan_parameter), den deine Grenze verschoben
+    """Stufe 5 (08.10.): Ein Versuch des Publikums-Modells (autonom.plan_parameter), dessen Wert das Video am Ende nicht
     hat, fällt für dieses Video weg – sonst stünde in lern_experimente ein Versuch, den es nie gab
-    (autonom.snapshot_speichern). Ebenso, wenn ihn die alte ⚙️-Mindestlänge verschoben hat. Nur einfacher Modus."""
+    (autonom.snapshot_speichern): eine Länge, die deine Grenze oder die alte ⚙️-Mindestlänge verschoben hat, und
+    (Prüfung 08.10.) Effekte, die deine Effekt-Stufe überstimmt, oder ein Tempo, das 🥱 umgedreht hat. Nur einfacher
+    Modus; die Länge mit 0,05 s Spielraum (Rundung, 45 × 55/45)."""
     auto = p.get("autonom")
     versuch = auto.get("exploration") if isinstance(auto, dict) else None
-    if isinstance(versuch, dict) and versuch.get("variable") == "ziel_dauer_s" and p.get("ziel_dauer_s") is not None \
-            and abs(float(versuch.get("wert") or 0.0) - float(p["ziel_dauer_s"])) > 0.05:
+    if not isinstance(versuch, dict) or p.get(versuch.get("variable")) is None:
+        return p
+    try:
+        abstand = abs(float(versuch.get("wert") or 0.0) - float(p[versuch["variable"]]))
+    except (TypeError, ValueError):
+        return p
+    if abstand > (0.05 if versuch["variable"] == "ziel_dauer_s" else 1e-6):
         p["autonom"] = {**auto, "exploration": None}   # neue Liste: die des Aufrufers bleibt, wie sie ist
     return p
 
@@ -149,8 +156,8 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict
             p["ziel_dauer_s"] = ziel                     # fest wie bis 08.10. (/experte, ⚙️-Wert ohne ⏱️/⏳)
         else:   # Stufe 5: Grenze in deiner Richtung – darüber bzw. darunter gilt die Wahl des Publikums-Modells
             p["ziel_dauer_s"] = (max if richtung == "kurz" else min)(float(gelernt), ziel)
-    if einfach:
-        p = _ohne_scheinversuch(p)
+        if richtung is not None:   # Prüfung 08.10.: regie.mehr_anlauf streckt nach ⏳ nie über deine Grenze, und
+            p["laenge_richtung"], p["laenge_grenze_s"] = richtung, ziel   # „kürzer als deine Mindestlänge“ (regie)
     s = stufe(con, konfig)
     if s == STANDARD_STUFE and einfach:
         # Prüfung 08.10.: „normal“ heißt im einfachen Modus „wie gelernt“ (wie ohne Stufe) – sonst galt nach 😵 😵 🥱 🥱
@@ -164,7 +171,9 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict
         p["effekt_staerke"] = {st: wahl(float(gelernt.get(st, 1.0)), staerke) for st in STIMMUNGEN}
     p["nur_starke"] = nur_starke(con, konfig)
     p["musik_rotation"] = MUSIK_ROTATION
-    return p
+    # Prüfung 08.10.: erst ganz am Ende – auch die Effekt-Stufe oben (und das 🥱-Tempo aus regie_lernen.aktuelle) kann
+    # einen Versuch des Publikums-Modells überstimmt haben
+    return _ohne_scheinversuch(p) if einfach else p
 
 
 # --- Ein Grund unter ❌ → eine Regel ---------------------------------------------------------------------------
@@ -250,11 +259,29 @@ def _satz_langweilig(con: sqlite3.Connection, konfig: Konfig, liste: dict, mehr:
     return text
 
 
-def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict) -> str | None:
+def _bisherige_grenze(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int | None) -> tuple[int, str] | None:
+    """Deine Längen-Grenze VOR diesem Tipp (Wert, Richtung) – None ohne Grenze oder unter /experte. Die Bewertung des
+    Videos, an dem du gerade tippst, zählt nicht (der Lern-Bot speichert sie vor wende_an)."""
+    ziel = ziel_regel(con, konfig)
+    if not ziel or einstellungen.experte(con, konfig):
+        return None
+    from . import regie_lernen   # hier, nicht oben: regie_lernen lädt die ganze Regie
+
+    try:
+        richtung = regie_lernen.laengen_richtung(con, ohne=entwurf_id)
+    except sqlite3.OperationalError:
+        return None
+    return (_rund5(max(ZIEL_GRENZEN[0], min(ZIEL_GRENZEN[1], ziel))), richtung) if richtung else None
+
+
+def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict,
+             entwurf_id: int | None = None) -> str | None:
     """Setzt die Regel zu einem Grund und gibt die Bestätigung für dich zurück (ein Satz, ohne Fachbegriffe).
     None = für diesen Grund gibt es keine feste Regel (er wird nur gelernt). Nur im einfachen Modus (lernbot._klick_einfach).
     Beispiel: „kurz“ an einem 45-s-Video → Einstellung 55 → „⏱️ Verstanden: Shorts sind ab jetzt mindestens 55 s lang
-    (vorher 45 s).“ – „mindestens“/„höchstens“ seit Stufe 5 (08.10.): die Länge ist eine Grenze mit Richtung (laenge)."""
+    (vorher 45 s).“ – „mindestens“/„höchstens“ seit Stufe 5 (08.10.): die Länge ist eine Grenze mit Richtung (laenge).
+    entwurf_id (Prüfung 08.10.): das Video, an dem du tippst – ⏱️/⏳ verschieben deine Grenze nie gegen die Richtung,
+    die du antippst: ⏱️ an einem älteren 40-s-Video bei „mindestens 55 s“ lässt 55 stehen (vorher: 50)."""
     if grund in ("kurz", "lang"):
         p = liste.get("parameter") or {}
         # Stufe 5: Schritt von dem Video, das du gesehen hast – ⏱️ von der längeren, ⏳ von der kürzeren Zahl aus Ziel
@@ -263,16 +290,25 @@ def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict) -
         gesehen = [float(x) for x in (p.get("ziel_dauer_s"), liste.get("dauer_s")) if x]
         alt = _rund5((max if grund == "kurz" else min)(gesehen) if gesehen else (ziel_regel(con, konfig) or 45))
         neu = max(ZIEL_GRENZEN[0], min(ZIEL_GRENZEN[1], alt + (ZIEL_SCHRITT if grund == "kurz" else -ZIEL_SCHRITT)))
+        bisher = _bisherige_grenze(con, konfig, entwurf_id)
+        vorher = alt
+        if bisher is not None and bisher[1] == grund:   # dieselbe Richtung: nie zurück
+            neu = (max if grund == "kurz" else min)(neu, bisher[0])
+            vorher = bisher[0]
         einstellungen.setze(con, ZIEL_SCHLUESSEL, float(neu))
+        symbol = "⏱️" if grund == "kurz" else "⏳"
+        if bisher is not None and bisher[1] == grund and neu == bisher[0] and neu != alt:
+            return f"{symbol} Verstanden: Shorts sind schon {GRENZE_WORT[grund]} {neu} s lang."
         if neu == alt:
             return (f"⏱️ Länger als {ZIEL_GRENZEN[1]} s geht bei Shorts nicht – das Ziel bleibt {neu} s." if grund == "kurz"
                     else f"⏳ Kürzer als {ZIEL_GRENZEN[0]} s geht nicht – das Ziel bleibt {neu} s.")
-        text = (f"{'⏱️' if grund == 'kurz' else '⏳'} Verstanden: Shorts sind ab jetzt {GRENZE_WORT[grund]} {neu} s lang "
-                f"(vorher {alt} s).")
+        text = f"{symbol} Verstanden: Shorts sind ab jetzt {GRENZE_WORT[grund]} {neu} s lang (vorher {vorher} s)."
         dauer = float(liste.get("dauer_s") or 0)
-        # Stufe 4 (08.10.): nur, wenn es wirklich keine ungesehenen starken Szenen früherer Abende mehr gab – sonst
-        # holt die neue Fassung sie (regie.erstelle, Nachschub) und der Satz stimmte nicht
-        if grund == "kurz" and dauer and dauer < alt - 5 and not (liste.get("auswahl") or {}).get("nachschub_uebrig"):
+        # Stufe 4 (08.10.): nur, wenn es wirklich keine starken Szenen früherer Abende mehr gab – sonst holt die neue
+        # Fassung sie (regie.erstelle, Nachschub) und der Satz stimmte nicht. Prüfung 08.10.: auch nicht nach einer
+        # 🥱-Fassung – deren schwächere Hälfte fehlte nur dort, die nächste Fassung nimmt sie wieder
+        if grund == "kurz" and dauer and dauer < alt - 5 and not (liste.get("auswahl") or {}).get("nachschub_uebrig") \
+                and not (p.get("fassung") or {}).get("ohne"):
             text += f" Dieses Video hatte nur {dauer:.0f} s – mehr starke Szenen gab es nicht."
         return text
     if grund == "langweilig":   # 07.10.: der Schnitt langweilt – keine Sperre; was anders wird, regelt neue_fassung

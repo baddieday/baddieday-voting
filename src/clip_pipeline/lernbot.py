@@ -46,7 +46,7 @@ ENTWURF_ZIELE = (*regie.FORMATE, *viral.KNOEPFE)   # was /entwurf und die Knöpf
 HILFE = """<b>So geht's</b>
 🎮 Nach dem Zocken kommt dein Video von selbst – aus den starken Szenen des Abends.
 ➕ Reicht ein Abend nicht, nehme ich starke Szenen früherer Abende dazu – zuerst welche, die du noch nicht kennst.
-♻️ Neue Szenen gehen immer vor. Bekannte kommen nur ab und zu wieder – die besseren öfter, aber nie eine aus deinen letzten 3 Videos.
+♻️ Neue Szenen gehen immer vor. Bekannte kommen nur ab und zu wieder – die besseren öfter, aber keine, die gerade erst in deinen letzten Videos lief.
 ✅ <b>Hochladen</b> – du bekommst Video und Text zum Hochladen.
 ❌ <b>Nicht gut</b> – tipp auf den Grund, ich baue neu. Alles andere entscheide ich selbst.
 🔧 Alles von Hand: /experte"""
@@ -238,7 +238,8 @@ def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row
     Abenden“. „🆕 n neue Szenen · m aus dem Video davor“ nur bei einer neuen Fassung nach ❌ (dann ohne „+n …“ – das
     sagte das Video davor schon). Abwechslung mit Ermüdung (08.10., Florian: ehrlich, ohne Fachbegriffe): bekannte
     Szenen zählt „♻️ 2 Szenen kennst du schon“ (bei einer Fassung „… aus früheren Videos“); kommt keine Szene vom Abend
-    (🎬 gemischt), steht dort „📅 Alle Szenen von früheren Abenden“ statt „+n …“."""
+    (🎬 gemischt), steht dort „📅 Alle Szenen von früheren Abenden“ statt „+n …“. Die Zeile „🎯 nur Spielabend …“ steht
+    nur, wenn keine Szene von einem früheren Abend dabei ist (Prüfung 08.10.: sonst widersprach sie dem Video)."""
     momente = {s["moment"] for s in liste["segmente"] if s.get("rolle") != "hook"}
     n = len({s["moment"] for s in liste["segmente"]})
     art = "" if liste["format"] == "short" else f"{FORMAT_NAMEN.get(liste['format'], liste['format'])} · "
@@ -270,7 +271,8 @@ def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row
     warnungen: list[str] = []
     for h in liste.get("hinweise", []):
         if h.startswith("🎯"):
-            teile.append(escape(h))
+            if not (a or {}).get("nachschub"):   # Prüfung 08.10.: „nur Spielabend …“ nur, wenn alles vom Abend ist
+                teile.append(escape(h))
         elif (text := hinweis_einfach(h)) and text not in warnungen:
             warnungen.append(text)
     teile += [f"⚠️ {escape(w)}" for w in warnungen[:2]]
@@ -1418,7 +1420,8 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
         text = "🔁 Verstanden: Ich baue eine andere Fassung – gleiche Regeln."
     else:
         bewertung = regie_lernen.bewerte(con, eid, grund=extra)   # bleibt Lern-Material (Schnitt, Aufbau, Tempo)
-        text = regeln.wende_an(con, konfig, extra, liste) or f"Verstanden: {regie_lernen.GRUENDE[extra]}."
+        text = (regeln.wende_an(con, konfig, extra, liste, entwurf_id=eid)
+                or f"Verstanden: {regie_lernen.GRUENDE[extra]}.")
     # Erst nach der Regel merken: die Schleife soll die neue Fassung nie ohne sie bauen. 🥱 (07.10.): anders
     # geschnitten, die schwächere Hälfte der Szenen gegen neue getauscht (fassung_auftrag → baue_entwurf)
     zusammen = folge_merken(con, eid, "fassung", laeuft=context.bot_data.get("fassung_fuer"), grund=extra,

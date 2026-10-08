@@ -477,18 +477,21 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Bewertungen hat“, dann als Korrektur zu „jede Szene nur einmal“: „die Momente dürfen ruhig öfter und gemischter
     genutzt werden aber nur weil ein Clip gut ist muss der nicht immer egal wo verwendet werden … bessere öfters zeigen
     aber nicht permanent“; `szenen.verlauf`, `regie.erstelle`): Im einfachen Modus gehen neue Szenen immer vor. Eine
-    Szene aus deinen letzten 3 Videos kommt nie ins nächste (Fassungen eines Videos zählen als eines, nie aufgehoben –
-    lieber kürzer, Nachschub, mehr Anlauf oder kein Video). Bekannte starke dürfen wiederkommen, verlieren aber je
-    Einsatz der letzten 30 Tage die Hälfte ihrer Punkte; höchstens die Hälfte eines Videos bekannte (bis 4 Szenen
-    dürfen es mehr sein), ganz ohne Neues auch nur bekannte – nie mehr als 2, die schon zusammen in einem Video waren.
-    Reicht der Abend nicht, mischen 🎬 und neue Fassungen aus den letzten Tagen; das Abend-Video bleibt beim Abend
-    (vorn vom Abend, höchstens die Hälfte von früher – jetzt auch für bekannte). Eine neue Fassung nach ❌ behält die
-    Szenen ihres Videos (keine Wiederholung); 🥱 tauscht gegen neue, sonst gegen bekannte. Unter dem Video „♻️ 2
-    Szenen kennst du schon“. Werte intern in `[regie]` (`ermuedung_tage` …), kein ⚙️. Nachgestellt (4 Abende, dann
-    14× 🎬): die beste Szene in Video 1, 5, 9, 13, 17 (vorher nie wieder), die anderen 3–4-mal, nie zweimal in vier
-    Videos hintereinander; 🎬 nach dem Abend-Video vorher „Kein neues Video“, jetzt ein gemischtes. Ersetzt „Jede Szene
-    nur in einem Video“ (N66–N70); /experte, 2-Wochen-Video, 🔥 Viral und Lernen unverändert, gelöscht wird nichts.
-    N84–N91.
+    Szene, die gerade erst (48 h) in einem deiner letzten 3 Videos lief, kommt nicht ins nächste (Fassungen eines Videos
+    zählen als eines; für die Länge nie aufgehoben – nur wenn 🎬 oder eine neue Fassung sonst gar kein Video hätte,
+    sperren die letzten 2). Bekannte starke dürfen wiederkommen, verlieren aber je Einsatz der letzten 30 Tage die
+    Hälfte ihrer Punkte; höchstens die Hälfte eines Videos bekannte (bis 4 Szenen dürfen es mehr sein), ganz ohne Neues
+    auch nur bekannte – nie mehr als 2, die schon zusammen in einem Video waren (Fassungen zählen mit). 🎬 und neue
+    Fassungen planen bis zu dreimal – vom Abend, gemischt aus den letzten 12 Tagen, gemischt und locker (beliebig viele
+    bekannte, aus einem alten Video höchstens die Hälfte) – und nehmen den ersten Plan, der das Ziel bis auf 2 s
+    erreicht, sonst den längsten; nie unter 4 Szenen. Das Abend-Video bleibt beim Abend (vorn vom Abend, höchstens die
+    Hälfte von früher, Nachschub schon, wenn es sein Ziel verfehlt). Eine neue Fassung nach ❌ behält die Szenen ihres
+    Videos (keine Wiederholung, außer sie liefen gerade erst in einem anderen); 🥱 tauscht gegen neue, dann bekannte
+    starke, zuletzt Einzelkills vom Abend. Unter dem Video „♻️ 2 Szenen kennst du schon“. Werte intern in `[regie]`
+    (`ermuedung_tage`, `sperre_stunden` …), kein ⚙️. Nachgestellt (4 Abende, dann 14× 🎬): die beste Szene in Video 1,
+    5, 9, 13, 17 (vorher nie wieder), die anderen 3–4-mal, nie zweimal in vier Videos hintereinander; 🎬 nach dem
+    Abend-Video vorher „Kein neues Video“, jetzt ein gemischtes. Ersetzt „Jede Szene nur in einem Video“ (N66–N70);
+    /experte, 2-Wochen-Video, 🔥 Viral und Lernen unverändert, gelöscht wird nichts. N84–N91, nach der Prüfung N92–N98.
   - **Stufe 4: Musik füllt sich selbst auf** (Florian 07.10.: „Techno/Hardstyle und Phonk“, „viel mehr Musik“;
     `musik.nachschub`, `einstellungen.DEINE_GENRES`): Im einfachen Modus haben nur noch deine Genres Vorrang bei der
     Musikwahl – Techno, Hardstyle, Hardcore, Phonk, Brazilian Phonk (auch im 2-Wochen-Video; Rock nicht mehr, alte Titel
@@ -515,3 +518,13 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     des Publikums-Modells, den die Grenze verschiebt, fällt für das Video weg (sonst stünde ein nie getesteter Versuch in
     `lern_experimente`). Nachgestellt mit Publikum, das 60–70 s mag: Untergrenze 55 → 65 s; ⏳ am 65-s-Video →
     höchstens 55. /experte und ein ⚙️-Wert ohne ⏱️/⏳ bleiben fest. N79–N83.
+  - **Prüfung Stufe 4/5 (zwei Prüfer, nachgestellt):** Die Sperre galt ohne Zeitgrenze – nach einer Woche Pause blieb
+    der neue Abend ohne Video (jetzt 40 s); die Fassung eines älteren Videos holte Szenen aus dem Video direkt davor.
+    🎬 nahm einen Abend-Plan bis 10 s unter dem Ziel, obwohl gemischt genug da war (43 statt 62 s bei „mindestens
+    65 s“), und ließ 3 Szenen aus einem alten Video als Video durch – jetzt die drei Pläne oben. ⏱️/⏳ an einem älteren
+    Video verschoben deine Grenze gegen deine Richtung (⏱️ an 40 s bei „mindestens 55“ ergab 50) – jetzt nie zurück
+    („schon mindestens 55 s“). Nach „⏳ höchstens …“ hält er deine Grenze jetzt wirklich ein: Die letzte Szene schoss
+    vorher darüber (61 statt 53 s bei „höchstens 55“), und mehr Anlauf gibt es nur noch unter 30 s (vorher wurden aus
+    43 s 62 s); nur wenn schon 4 Szenen länger sind, bleibt es länger. Bleibt ein Short unter deiner Mindestlänge,
+    steht es darunter. Nachgestellt mit 10 Abenden Vorgeschichte, dann 10× 🎬: 11 von 11 Videos mit 46–71 s, keine
+    Szene in mehr als 3. N92–N99.

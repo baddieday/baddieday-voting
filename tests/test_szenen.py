@@ -63,13 +63,15 @@ class Szene(MitSpeicher):
 
     def test_verlauf_je_video(self):
         """08.10. (Abwechslung mit Ermüdung): Fassungen eines Videos zählen als ein Video; gesperrt sind die Szenen der
-        letzten n Videos, Einsätze zählen nur Videos der letzten Tage, dieselbe Szene unter zwei Schlüsseln ist eine.
-        Für eine neue Fassung zählt das ersetzte Video nirgends – seine Szenen sind frei und keine Wiederholung."""
+        letzten n Videos, soweit sie höchstens 48 h alt sind (Prüfung 08.10.: nach einer Pause sperrte sonst ein altes
+        Video), Einsätze zählen nur Videos der letzten Tage, dieselbe Szene unter zwei Schlüsseln ist eine. Für eine neue
+        Fassung zählt das ersetzte Video nirgends – seine Szenen sind keine Wiederholung und frei, außer ein ANDERES
+        deiner letzten Videos hat sie gerade erst gezeigt."""
         self.moment("clip:1", "2026-10-06T20:00:00Z", match="a1")
         self.moment("datei:1", "2026-10-06T20:00:16Z")                  # dieselbe Szene wie clip:1
         alt = self.video(["clip:1", "clip:2"], erstellt=iso(jetzt() - timedelta(days=40)))
         v1 = self.video(["clip:3", "datei:1"], erstellt=iso(jetzt()))
-        v2 = self.video(["clip:4"])                                       # unlesbare Zeit: zählt als neu
+        self.video(["clip:4"])                                            # unlesbare Zeit: zählt als neu
         f1 = self.video(["clip:3", "clip:5"], parameter=json.dumps({"ersetzt": [v1]}), erstellt=iso(jetzt()))
         idx = szenen.index(self.con)
         v = szenen.verlauf(self.con, idx, tage=30, sperre=2)              # v1 + f1 ist ein Video, dann v2
@@ -77,10 +79,14 @@ class Szene(MitSpeicher):
         self.assertEqual(v.einsaetze, {"clip:1": 1, "datei:1": 1, "clip:3": 1, "clip:4": 1, "clip:5": 1})
         self.assertEqual(v.videos["clip:1"], {alt, v1})
         self.assertTrue(v.wiederholung("clip:2") and not v.wiederholung("clip:9"))
+        self.assertEqual(szenen.verlauf(self.con, idx, sperre=3).gesperrt, v.gesperrt)   # das 40 Tage alte sperrt nicht
         fassung = szenen.verlauf(self.con, idx, ersetzt=[f1, v1], tage=30, sperre=2)   # neue Fassung von f1
-        self.assertEqual(fassung.gesperrt, {"clip:4", "clip:2"})          # clip:1 ist eigen, obwohl auch im alten
+        self.assertEqual(fassung.gesperrt, {"clip:4"})                    # clip:1 ist eigen, lief sonst nur im alten
         self.assertFalse(fassung.wiederholung("clip:1") or fassung.wiederholung("clip:5"))
         self.assertEqual(fassung.einsaetze, {"clip:4": 1})
+        self.video(["clip:5"], erstellt=iso(jetzt()))                    # ein 🎬 danach hat clip:5 gezeigt
+        fassung = szenen.verlauf(self.con, idx, ersetzt=[f1, v1], tage=30, sperre=2)
+        self.assertEqual(fassung.gesperrt, {"clip:5", "clip:4"})          # Prüfung 08.10.: bleibt für die Fassung gesperrt
 
     def test_verbraucht_und_ersetzt_kette(self):
         """08.10.: verbraucht sind die Szenen aus Videos, die du gesehen hast oder die gleich kommen (fertig gerendert,
@@ -112,14 +118,25 @@ class Szene(MitSpeicher):
             schluessel=s, match_id=match, punkte=punkte, clip_id=1 if match else None, fail=False, stark=stark,
             gesperrt=False, nachschub=False)
         idx = {"datei:nv": {"clip:7"}, "clip:7": {"datei:nv"}, "datei:ss": {"clip:6"}, "clip:6": {"datei:ss"}}
-        alle = [k("datei:ss", None, 12.0), k("clip:6", "a1", 11.0), k("clip:7", "a1", 1.0, stark=False),
-                k("datei:nv", None, 5.0), k("clip:13", "a3", 11.0), k("clip:9", "a3", 3.5), k("clip:2", "f1", 3.5)]
-        auswahl, pflicht = regie.fassung_kandidaten(
-            alle, {"behalten": ["datei:ss", "clip:13"], "ohne": ["clip:9"], "abend": ["a3"]}, idx,
-            {"datei:ss", "clip:13", "clip:9"}, {"min_momente": 3})
-        self.assertEqual([x.schluessel for x in pflicht], ["datei:ss", "clip:13"])
-        self.assertEqual({x.schluessel: x.nachschub for x in auswahl if x not in pflicht},
-                         {"clip:7": False, "clip:2": True})
+
+        def fassung(**extra):
+            alle = [k("datei:ss", None, 12.0), k("clip:6", "a1", 11.0), k("clip:7", "a1", 1.0, stark=False),
+                    k("datei:nv", None, 5.0), k("clip:13", "a3", 11.0), k("clip:9", "a3", 3.5), k("clip:2", "f1", 3.5)]
+            auswahl, pflicht = regie.fassung_kandidaten(
+                alle, {"behalten": ["datei:ss", "clip:13"], "ohne": ["clip:9"], "abend": ["a3"]}, idx,
+                {"datei:ss", "clip:13", "clip:9"}, {"min_momente": 3}, **extra)
+            return [x.schluessel for x in pflicht], {x.schluessel: (x.nachschub, getattr(x, "frueher", False),
+                                                                    getattr(x, "fueller", False))
+                                                     for x in auswahl if not any(x is p for p in pflicht)}
+
+        # /experte (ohne frueher_ok): der frühere Abend nur hinten an, ohne „höchstens die Hälfte“ (wie bis 08.10.)
+        self.assertEqual(fassung(), (["datei:ss", "clip:13"], {"clip:7": (False, False, False),
+                                                                "clip:2": (False, True, False)}))
+        # einfacher Modus: Nachschub mit Hälfte-Grenze, der Einzelkill vom Abend erst nach den bekannten starken
+        self.assertEqual(fassung(frueher_ok={"f1"}), (["datei:ss", "clip:13"], {"clip:7": (False, False, True),
+                                                                                 "clip:2": (True, False, False)}))
+        # Prüfung 08.10.: eine behaltene Szene, die gerade erst in einem anderen Video lief, ist keine Pflicht
+        self.assertEqual(fassung(frueher_ok={"f1"}, gesperrt={"clip:13"})[0], ["datei:ss"])
 
 
 @unittest.skipUnless(HAT_FFMPEG and lernbot is not None, "ffmpeg oder python-telegram-bot fehlt")

@@ -14,9 +14,9 @@ Szene). Doppelt sind also Aufnahmen ohne Clip (datei:…) gegenüber Clips oder 
 Fail-Momente (nur 🔥 Viral) bleiben draußen, damit Viral unverändert bleibt.
 
 Abwechslung mit Ermüdung (08.10., einfacher Modus, ersetzt „jede Szene nur in einem Video“): verlauf() sagt je Szene,
-ob du sie schon gesehen hast, ob sie in einem deiner letzten Videos war (gesperrt) und in wie vielen Videos der letzten
-Tage sie kam (Einsätze) – Fassungen eines Videos zählen als ein Video. Eine neue Fassung nach ❌ ersetzt ihr Video
-(ersetzt_kette): dessen Szenen sind für sie frei und keine Wiederholung. Nichts wird gelöscht; alles folgt aus den
+ob du sie schon gesehen hast, ob sie gerade erst in einem deiner letzten Videos war (gesperrt) und in wie vielen Videos
+der letzten Tage sie kam (Einsätze) – Fassungen eines Videos zählen als ein Video. Eine neue Fassung nach ❌ ersetzt ihr
+Video (ersetzt_kette): dessen Szenen sind für sie keine Wiederholung. Nichts wird gelöscht; alles folgt aus den
 Entwürfen.
 """
 
@@ -145,7 +145,7 @@ class Verlauf:
     """Was du schon gesehen hast (verlauf) – jede Menge je Szene erweitert (alle Schlüssel derselben Szene)."""
     gesehen: set[str] = field(default_factory=set)      # je in einem Video gesehen (auch im ersetzten)
     eigen: set[str] = field(default_factory=set)        # im Video, das die neue Fassung ersetzt (samt Vorgängern)
-    gesperrt: set[str] = field(default_factory=set)     # in einem deiner letzten Videos (ohne das ersetzte, ohne eigen)
+    gesperrt: set[str] = field(default_factory=set)     # gerade erst in einem deiner letzten Videos (ohne das ersetzte)
     einsaetze: dict[str, int] = field(default_factory=dict)          # Szene -> Videos in den letzten Tagen
     videos: dict[str, frozenset[int]] = field(default_factory=dict)  # Szene -> frühere Videos (für „zusammen“)
 
@@ -155,15 +155,19 @@ class Verlauf:
 
 
 def verlauf(con: sqlite3.Connection, idx: dict[str, set[str]], *, ersetzt: Iterable[int] = (), tage: float = 30.0,
-            sperre: int = 3) -> Verlauf:
+            sperre: int = 3, stunden: float = 48.0) -> Verlauf:
     """Abwechslung mit Ermüdung (08.10., Florian: „die Momente dürfen ruhig öfter und gemischter genutzt werden … bessere
     öfters zeigen, aber nicht permanent“). Ein Video = alle Fassungen eines Videos (Familie: kleinste Nummer aus dem
     Entwurf und seinem Parameter „ersetzt“), gezählt werden Videos aus _GEZEIGT, das neueste nach seiner jüngsten
-    Fassung. gesperrt = Szenen der letzten `sperre` Videos; einsaetze = in wie vielen Videos der letzten `tage` Tage
-    die Szene war (unlesbare Zeit zählt als neu); videos = in welchen früheren Videos (Familien) sie war.
-    ersetzt (neue Fassung nach ❌, ersetzt_kette): dieses Video zählt nirgends mit, seine Szenen sind eigen – frei und
-    keine Wiederholung. Beispiel: Videos #1 (a, b), #2 (c), #3 = Fassung von #1 (a, d), sperre 1 → gesperrt {a, d},
-    einsaetze a 1, b 1, c 1, d 1; mit ersetzt [3, 1]: eigen {a, b, d}, gesperrt {c}."""
+    Fassung. gesperrt = Szenen der letzten `sperre` Videos, soweit sie höchstens `stunden` alt sind (Prüfung 08.10.:
+    ohne Zeitgrenze sperrte ein Video nach einer Woche Pause noch, und „gerade erst“ stimmte nicht); einsaetze = in wie
+    vielen Videos der letzten `tage` Tage die Szene war (unlesbare Zeit zählt als neu); videos = in welchen früheren
+    Videos (Familien) sie war.
+    ersetzt (neue Fassung nach ❌, ersetzt_kette): dieses Video zählt nirgends mit, seine Szenen sind eigen – keine
+    Wiederholung und frei, außer sie liefen gerade erst in einem ANDEREN deiner letzten Videos (Prüfung 08.10.: sonst
+    brachte die Fassung eines älteren Videos Szenen aus dem Video direkt davor gleich noch einmal). Beispiel: Videos #1
+    (a, b), #2 (c), #3 = Fassung von #1 (a, d), alle von heute, sperre 1 → gesperrt {a, b, d} (beide Fassungen sind
+    ein Video), einsaetze a 1, b 1, c 1, d 1; mit ersetzt [3, 1]: eigen {a, b, d}, gesperrt {c}."""
     ersetzt = [int(i) for i in ersetzt]
     familie_von: dict[int, int] = {}
     familien: dict[int, dict] = {}
@@ -184,21 +188,22 @@ def verlauf(con: sqlite3.Connection, idx: dict[str, set[str]], *, ersetzt: Itera
         eigen_roh |= familien[fam]["momente"]
     v = Verlauf(eigen=erweitert(eigen_roh, idx))
     grenze = jetzt() - timedelta(days=float(tage))
+    sperr_grenze = jetzt() - timedelta(hours=float(stunden))
     videos: dict[str, set[int]] = {}
     andere = sorted((fam for fam in familien if fam not in weg), key=lambda fam: -familien[fam]["neuester"])
     for rang, fam in enumerate(andere):
         f = familien[fam]
         szenen_ = erweitert(f["momente"], idx)
-        if rang < int(sperre):
+        neu = f["unlesbar"] or f["zeit"] is None
+        if rang < int(sperre) and (neu or f["zeit"] >= sperr_grenze):
             v.gesperrt |= szenen_
-        if f["unlesbar"] or f["zeit"] is None or f["zeit"] >= grenze:
+        if neu or f["zeit"] >= grenze:
             for s in szenen_:
                 v.einsaetze[s] = v.einsaetze.get(s, 0) + 1
         for s in szenen_:
             videos.setdefault(s, set()).add(fam)
         v.gesehen |= szenen_
     v.gesehen |= v.eigen
-    v.gesperrt -= v.eigen
     v.videos = {s: frozenset(fams) for s, fams in videos.items()}
     return v
 

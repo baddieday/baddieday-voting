@@ -221,12 +221,13 @@ def _deine_richtung(zeilen: list) -> set[str]:
     return set(richtung.values())
 
 
-def laengen_richtung(con: sqlite3.Connection) -> str | None:
+def laengen_richtung(con: sqlite3.Connection, ohne: int | None = None) -> str | None:
     """Stufe 5 (08.10.): deine letzte Längen-Ansage an einem Short – "kurz" (⏱️), "lang" (⏳) oder None (nie getippt).
     Wie _deine_richtung, aber nach dem Zeitpunkt deines Tipps geordnet (geaendert statt erstellt): Den Grund tippst du
     nach dem ❌, auch an einem älteren Video – sonst gewönne ein früherer Tipp an einem jüngeren Video. Daraus wird deine
-    Länge im einfachen Modus eine Unter- bzw. Obergrenze (regeln.laenge)."""
-    zeilen = sorted((z for z in bewertungen(con, mit_ki=False) if z["format"] == "short"),
+    Länge im einfachen Modus eine Unter- bzw. Obergrenze (regeln.laenge).
+    ohne (Prüfung 08.10., regeln.wende_an): die Bewertung dieses Entwurfs zählt nicht – die Richtung vor deinem Tipp."""
+    zeilen = sorted((z for z in bewertungen(con, mit_ki=False) if z["format"] == "short" and z["entwurf_id"] != ohne),
                     key=lambda z: (z["geaendert"] or z["erstellt"] or "", z["entwurf_id"]))
     richtung = _deine_richtung(zeilen) & {"kurz", "lang"}
     return richtung.pop() if richtung else None
