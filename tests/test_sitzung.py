@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import cli, einstellungen, entwurf, lernbot, sitzung
+from clip_pipeline import cli, einstellungen, entwurf, lernbot, regie, sitzung
 from clip_pipeline.medien import MedienFehler
 from clip_pipeline.zeit import UTC, iso, jetzt
 
@@ -157,6 +157,64 @@ class Sitzung(MitRegieMaterial):
         self.assertNotIn("datei:3", {s["moment"] for s in liste["segmente"]})        # nie ein Einzelkill
         self.assertIn("\n+2 Szenen von früheren Abenden\n", lernbot.entwurf_text_einfach(zeile, liste))
         self.assertIsNone(self.con.execute("SELECT 1 FROM lern_meldungen WHERE schluessel LIKE 'kein:%'").fetchone())
+
+    def spiel(self, mid, vor_min):
+        """Match, das vor `vor_min` Minuten begann (20 min lang)."""
+        start = jetzt() - timedelta(minutes=vor_min)
+        self.con.execute("INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, status, erstellt, geaendert) "
+                         "VALUES (?, ?, ?, ?, 'verarbeitet', 'x', 'x')",
+                         (mid, f"replays/{mid}.replay", iso(start), iso(start + timedelta(minutes=20))))
+
+    def test_nachtrag_baut_den_abend_nach(self):
+        """Stufe 4 (08.10.): Endete der Abend mit „kein Video“ und kommt danach noch ein Match an (PC früh aus – der
+        selbst erkannte Abend kannte es nicht), baut der Bot das Video selbst nach: die Statuszeile wird zu „Nachtrag“,
+        und es bleibt bei einem Video. Vorher blieb es für immer bei „kein Video“."""
+        self.spiel("a1", 200)
+        self.spiel("a2", 150)
+        self.momente_anlegen([("episch", 2, [7.0, 9.5], "a1"), ("spannend", 1, [8.0], "a2"),
+                              ("episch", 3, [5.0, 7.0, 9.0], "a3"), ("spannend", 2, [6.0, 10.0], "a3"),
+                              ("episch", 2, [6.0, 8.0], "a3")])
+        self.musik_anlegen(150, "episch")
+        with mock.patch.object(entwurf, "entwurf"):                          # nur planen, nicht rendern
+            erst = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
+            self.assertEqual((erst["neu"][0]["sitzung"], erst["neu"][0]["entwurf"]), ("abend_a1", None))  # 1 starke
+            self.spiel("a3", 120)                                            # kommt erst jetzt an
+            self.spiel("a4", 30)                                             # … und du spielst nach der Pause weiter
+            self.con.execute("UPDATE momente SET erstellt = CASE match_id WHEN 'a3' THEN ? ELSE ? END",
+                             (iso(jetzt() - timedelta(hours=1)), iso(jetzt() - timedelta(hours=2))))
+            self.con.execute("UPDATE sitzungen SET verarbeitet = ?", (iso(jetzt() - timedelta(minutes=90)),))
+            # erst 45 min nach dem letzten Match-Ende (wie beim Erkennen des Abends) – sonst mitten im Weiterspielen
+            self.assertEqual(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["nachtrag"], [])
+            self.con.execute("UPDATE matches SET start_utc = ?, ende_utc = ? WHERE id = 'a4'",
+                             (iso(jetzt() - timedelta(minutes=80)), iso(jetzt() - timedelta(minutes=60))))
+            nachtrag = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["nachtrag"]
+            self.assertEqual(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["nachtrag"], [])
+        self.assertIsNotNone(nachtrag[0]["entwurf"])
+        s = self.con.execute("SELECT matches, entwurf_id FROM sitzungen").fetchone()
+        self.assertEqual((json.loads(s["matches"]), s["entwurf_id"]),
+                         (["a1", "a2", "a3", "a4"], nachtrag[0]["entwurf"]))
+        text = self.con.execute("SELECT text FROM lern_meldungen WHERE schluessel = 'nachtrag:abend_a1'").fetchone()[0]
+        self.assertTrue(text.startswith("🎮 Nachtrag: Abend vom "))
+
+    def test_nachtrag_nur_mit_neuem_material_und_bis_24_h(self):
+        """Ohne neues Material kein zweiter Versuch; 24 h nach dem Abend und unter /experte nie."""
+        self.momente_anlegen([("episch", 2, [7.0, 9.5], "a1"), ("spannend", 1, [8.0], "a1")])
+        self.musik_anlegen(150, "episch")
+        self.con.execute("INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, status, erstellt, geaendert) "
+                         "VALUES ('a1', 'replays/a1.replay', 'x', 'x', 'verarbeitet', 'x', 'x')")
+        self.marker("session_2026-10-08_23-10-00", ["a1"], jetzt() - timedelta(minutes=50))
+        self.assertIsNone(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["neu"][0]["entwurf"])
+        self.con.execute("UPDATE momente SET erstellt = ?", (iso(jetzt() - timedelta(hours=2)),))
+        self.con.execute("UPDATE sitzungen SET verarbeitet = ?", (iso(jetzt() - timedelta(hours=1)),))
+        with mock.patch.object(regie, "erstelle", wraps=regie.erstelle) as plan:
+            self.assertEqual(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["nachtrag"], [])
+            self.con.execute("UPDATE momente SET erstellt = ?", (iso(jetzt() - timedelta(minutes=50)),))   # neu
+            self.con.execute("UPDATE sitzungen SET ende_utc = ?", (iso(jetzt() - timedelta(hours=25)),))
+            self.assertEqual(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["nachtrag"], [])
+            self.con.execute("UPDATE sitzungen SET ende_utc = ?", (iso(jetzt() - timedelta(hours=2)),))
+            einstellungen.setze(self.con, "lernbot.experte", True)
+            self.assertEqual(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["nachtrag"], [])
+        self.assertEqual(plan.call_count, 0)
 
     def test_speicher_schlaeft_kein_wecken(self):
         (self.konfig.wurzel / ".clip-speicher").unlink()

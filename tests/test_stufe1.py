@@ -482,7 +482,7 @@ class LernBotEinfach(MitRegieMaterial):
         self.assertIsNotNone(h["hochgeladen"])
         self.assertEqual([k.__name__ for k in self.aufgaben], ["paket_auftrag"])
 
-    def test_statuszeile_wird_zu_kein_video(self):
+    def test_statuszeile_wird_zu_kein_video_und_nachtrag(self):
         from clip_pipeline import db
 
         db.lern_meldung(self.con, "abend:s1", "🎮 Abend erkannt")
@@ -491,6 +491,18 @@ class LernBotEinfach(MitRegieMaterial):
         asyncio.run(lernbot.sende_meldungen(self.app))
         self.assertEqual(len(self.bot.texte), 1)                                           # keine zweite Nachricht
         self.assertEqual(self.bot.bearbeitet, [(501, "🎮 Abend vom 06.10.: nur 2 starke Szenen – heute kein Video.")])
+        # Stufe 4 (08.10.): kommt danach noch etwas an, wird dieselbe Zeile zum Nachtrag und geht mit dem Video
+        db.lern_meldung(self.con, "nachtrag:s1", "🎮 Nachtrag: Abend vom 06.10. – ich baue dein Video.")
+        asyncio.run(lernbot.sende_meldungen(self.app))
+        self.assertEqual((len(self.bot.texte), self.bot.bearbeitet[-1]),
+                         (1, (501, "🎮 Nachtrag: Abend vom 06.10. – ich baue dein Video.")))
+        video = self.tmp / "v.mp4"
+        video.write_bytes(b"x")
+        self.con.execute("UPDATE entwuerfe SET status = 'gerendert', datei = ? WHERE id = ?", (str(video), self.eid))
+        self.con.execute("INSERT INTO sitzungen (name, matches, ende_utc, entwurf_id, verarbeitet) VALUES "
+                         "('s1', '[]', ?, ?, ?)", (iso(jetzt()), self.eid, iso(jetzt())))
+        self.assertEqual(asyncio.run(lernbot.sende_entwuerfe(self.app)), 1)
+        self.assertEqual(self.bot.geloescht, [501])                                        # genau einmal gelöscht
 
 
 @unittest.skipIf(bot_app is None, "python-telegram-bot fehlt")

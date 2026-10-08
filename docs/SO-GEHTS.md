@@ -12,6 +12,10 @@
    letzten Tage dazu, die du noch nie gesehen hast – höchstens die Hälfte, der Anfang ist immer vom Abend. Im Video
    steht dann „+2 Szenen von früheren Abenden“. Reicht auch das nicht, kommt **kein Video**, und die Statuszeile sagt,
    warum.
+4. Kommt danach noch etwas von diesem Abend an – etwa weil der PC früh aus war, ein Match länger gebraucht hat oder du
+   nach einer Pause weiterspielst –, baut der Bot das Video bis zu 24 Stunden später selbst nach (frühestens 45
+   Minuten nach deinem letzten Match). Die Statuszeile wird dann zu „🎮 Nachtrag: Abend vom …“, und das Video kommt
+   wie sonst. Tippen musst du dafür nichts; reicht es immer noch nicht, bleibt es still.
 
 ## Was du tust
 - **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen. **Füg den Text beim

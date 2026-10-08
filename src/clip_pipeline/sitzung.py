@@ -18,6 +18,9 @@ wenn auch das scheitert, kommt „fehler:<sitzung>“, ohne Versprechen. Unter /
 Stufe 4 (08.10., Florian: „Ja, auffüllen“): Reicht der Abend nicht, füllt regie.erstelle im einfachen Modus mit nie
 gezeigten starken Szenen früherer Abende auf (höchstens die Hälfte, Anfang vom Abend); „kein:<sitzung>“ kommt nur
 noch, wenn auch das nicht reicht – der Satz sagt dann, warum.
+Stufe 4, Nachtrag (08.10.): Kommt für den neuesten Abend ohne Video danach noch etwas an (Clip-Dateien, Matches, die
+n8n erst später fertig hat, ein Match, das der PC erst beim nächsten Start schickt), baut der Timer das Video bis
+NACHTRAG_H nach dem Abend selbst nach (_nachtrag) – vorher blieb es für immer bei „kein Video“. Nur einfacher Modus.
 """
 
 from __future__ import annotations
@@ -27,8 +30,9 @@ import json
 import logging
 import sqlite3
 from datetime import timedelta
+from pathlib import Path
 
-from . import db, einstellungen, entwurf, lernen, regeln, regie, regie_lernen, stimmung
+from . import db, einstellungen, entwurf, fail, lernen, material, regeln, regie, regie_lernen, stimmung
 from .konfig import Konfig
 from .medien import MedienFehler
 from .verarbeitung import SESSION_ID
@@ -36,12 +40,15 @@ from .zeit import aus_iso, iso, jetzt, spielabend
 
 log = logging.getLogger("pipeline")
 
+LUECKE = timedelta(hours=2)   # mehr Pause zwischen zwei Matches: ein anderer Abend (auto_abend, _mit_spaeten)
+NACHTRAG_H = 24               # Stufe 4: so lange nach dem Abend-Ende zählt spät angekommenes Material noch
+
 
 def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, whisper: bool = True) -> dict:
     konfig.pruefe_speicher()  # wirft SpeicherOffline -> Exit 3, kein Wecken
     ordner = konfig.wurzel / str(konfig.wert("sitzungen.ordner", "sitzungen"))
     fertig = {z["name"] for z in con.execute("SELECT name FROM sitzungen")}
-    ergebnis: dict = {"neu": [], "wartet": [], "fehler": [], "nachgeholt": _nachholen(con, konfig)}
+    ergebnis: dict = {"neu": [], "wartet": [], "fehler": [], "nachgeholt": _nachholen(con, konfig), "nachtrag": []}
     abende: list[tuple[str, list[str], object]] = []
     for datei in sorted(ordner.glob("session_*.json")) if ordner.is_dir() else []:
         name = datei.stem
@@ -75,16 +82,9 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
         entwurf_id = None
         k = einstellungen.anwenden(con, konfig)            # ⚙️ und deine Regeln gelten auch für das Abend-Video
         experte = einstellungen.experte(con, k)
-        try:  # deine 👍/👎 bis eben lehren die Moment-Formel (wie vor jedem Entwurf im Lern-Bot)
-            lernen.aktualisiere(con, k)
-        except Exception:  # noqa: BLE001 – das Video ist wichtiger; dann gelten die bisherigen Gewichte
-            log.exception("Moment-Formel vor dem Abend-Video")
+        _lerne(con, k)
         try:
-            fmt = str(k.wert("sitzungen.format", "short"))
-            parameter, ziel = regie_lernen.aktuelle(con, k, fmt)
-            parameter = regeln.anwenden(con, k, fmt, parameter)
-            e = regie.erstelle(con, k, fmt, parameter=parameter, ziel=ziel, nur_matches=set(matches))
-            entwurf_id = e["entwurf"]
+            entwurf_id = _plane(con, k, matches)
             # Die Sitzung kennt ihren Entwurf schon VOR dem Rendern: sobald er fertig ist, kann der Lern-Bot ihn als
             # „Dein Abend vom …“ schicken und die Statuszeile löschen – vorher lag dazwischen ein kleines Rennen
             _merke(con, name, matches, ende, entwurf_id, hinweis)
@@ -94,17 +94,197 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
             db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z, len(offen), experte=experte))
         except Exception as fehler:  # noqa: BLE001 – vermerken und dir sagen, statt alle 10 min still neu zu versuchen
             hinweis = "; ".join(filter(None, [hinweis, str(fehler)]))
-            if entwurf_id is not None and not experte and not _dauerhaft(fehler):
-                # 08.10.: Erst das Rendern scheiterte (z. B. hängende Grafikeinheit, Stolperstein 26.09.). Die Sitzung
-                # behält ihren Entwurf, der nächste Timer-Lauf rendert ihn einmal auf der CPU (_nachholen) – vorher war
-                # der Abend nach einem einzigen Fehler verloren, und es hieß nur „Beim nächsten Abend …“
-                _logge(name, fehler, " – der nächste Lauf versucht es noch einmal auf der CPU")
-            else:
-                entwurf_id = None
-                _melde_fehler(con, name, tag, fehler, experte=experte)
+            entwurf_id = _panne(con, name, tag, fehler, entwurf_id, experte=experte)
         _merke(con, name, matches, ende, entwurf_id, hinweis)
         ergebnis["neu"].append({"sitzung": name, "matches": len(matches), "entwurf": entwurf_id, "hinweis": hinweis})
+    if not ergebnis["wartet"]:   # wartet ein neuer Abend noch auf n8n, ist der letzte bald der ältere – kein Nachtrag
+        try:
+            ergebnis["nachtrag"] = _nachtrag(con, konfig, claude=claude, whisper=whisper)
+        except Exception:  # noqa: BLE001 – der Nachtrag ist Zugabe; die neuen Abende oben sind schon erledigt
+            log.exception("Nachtrag eines Abends ohne Video")
     return ergebnis
+
+
+def _lerne(con: sqlite3.Connection, k: Konfig) -> None:
+    """Deine 👍/👎 bis eben lehren die Moment-Formel (wie vor jedem Entwurf im Lern-Bot)."""
+    try:
+        lernen.aktualisiere(con, k)
+    except Exception:  # noqa: BLE001 – das Video ist wichtiger; dann gelten die bisherigen Gewichte
+        log.exception("Moment-Formel vor dem Abend-Video")
+
+
+def _plane(con: sqlite3.Connection, k: Konfig, matches: list[str]) -> int:
+    """Short nur aus diesen Matches, mit deinen Regeln (regeln.anwenden) – Entwurf-Nummer; Fehler wie regie.erstelle
+    (ZuWenigSzenen: lieber kein Video als Füllmaterial)."""
+    fmt = str(k.wert("sitzungen.format", "short"))
+    parameter, ziel = regie_lernen.aktuelle(con, k, fmt)
+    parameter = regeln.anwenden(con, k, fmt, parameter)
+    return regie.erstelle(con, k, fmt, parameter=parameter, ziel=ziel, nur_matches=set(matches))["entwurf"]
+
+
+def _panne(con: sqlite3.Connection, name: str, tag: str, fehler: Exception, entwurf_id: int | None, *,
+           experte: bool) -> int | None:
+    """Fehler beim Bauen: Entwurf, den der nächste Lauf nachholt, oder None (dann steht die Fehlerzeile da).
+    08.10.: Scheiterte erst das Rendern (z. B. hängende Grafikeinheit, Stolperstein 26.09.), behält die Sitzung im
+    einfachen Modus ihren Entwurf, und der nächste Timer-Lauf rendert ihn einmal auf der CPU (_nachholen) – vorher war
+    der Abend nach einem einzigen Fehler verloren, und es hieß nur „Beim nächsten Abend …“."""
+    if entwurf_id is not None and not experte and not _dauerhaft(fehler):
+        _logge(name, fehler, " – der nächste Lauf versucht es noch einmal auf der CPU")
+        return entwurf_id
+    _melde_fehler(con, name, tag, fehler, experte=experte)
+    return None
+
+
+def _nachtrag(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, whisper: bool = True) -> list[dict]:
+    """Stufe 4 (08.10., Florian: „autonom … besser und schneller als mit der Hand“): Endete der neueste Abend mit „kein
+    Video“ und ist danach noch etwas angekommen – Clip-Dateien, Matches, die n8n erst später fertig hatte, oder ein
+    Match, das der PC erst beim nächsten Start schickte (PC früh aus) –, baut der Bot das Video selbst nach. Vorher
+    blieb es für immer bei „kein Video“, und du hättest 🎬 tippen müssen (Prüfer aufgeben/s5, s5b).
+
+    Grenzen: nur im einfachen Modus; nur der neueste Abend (nie ältere, kein Video-Schwall), bis NACHTRAG_H nach seinem
+    Ende; nur bei „kein:<sitzung>“ (ein Fehler beim Bauen wird nicht wiederholt); nur mit neuen Szenen seiner Matches
+    seit dem letzten Versuch (Fails zählen nicht), und erst, wenn seit der jüngsten Szene und seit dem letzten
+    Match-Ende [sitzungen].ruhe_min (45) vergangen sind – n8n arbeitet späte Matches eins nach dem anderen ab, und nach
+    einer Pause spielst du vielleicht noch (wie bei auto_abend); höchstens ein Video je Abend – auch keins, wenn 🎬
+    inzwischen eins aus seinen Matches gemacht hat. Vorher zieht er die Stimmung der Clips dieser Matches nach.
+    Reicht es wieder nicht, bleibt deine Zeile „kein Video“ still stehen. Sonst wird die Statuszeile zu „🎮 Nachtrag:
+    Abend vom …“, und das Video kommt wie ein Abend-Video (Panne beim Rendern: _nachholen).
+    Rückgabe: [] oder [{"sitzung", "matches", "entwurf" (None = kein Video), "hinweis"}] für den versuchten Abend."""
+    z = con.execute("SELECT * FROM sitzungen ORDER BY ende_utc DESC, name DESC LIMIT 1").fetchone()
+    if z is None or z["entwurf_id"] is not None:
+        return []
+    name, ende, seit = z["name"], _zeit(z["ende_utc"]), z["verarbeitet"]
+    if ende is None or jetzt() - ende >= timedelta(hours=NACHTRAG_H):
+        return []
+    if not _gemeldet(con, f"kein:{name}") or _gemeldet(con, f"fehler:{name}"):
+        return []
+    k = einstellungen.anwenden(con, konfig)
+    if einstellungen.experte(con, k):
+        return []                                      # /experte: wie bisher – „kein Video“ bleibt
+    matches = _mit_spaeten(con, name, _ids(z["matches"]))
+    if _schon_video(con, matches, seit):
+        return []
+    if offen := _offene_clips(con, konfig, matches):
+        try:
+            stimmung.analysiere(con, konfig, claude=claude, whisper=whisper, nur_clips=offen, maximal=len(offen))
+        except Exception:  # noqa: BLE001 – dann eben mit den Szenen, die schon da sind
+            log.exception("Nachtrag %s: Stimmung nachziehen", name)
+    neueste = _neueste_szene(con, matches)
+    if neueste is None or neueste <= seit:
+        return []                                      # nichts Neues seit dem letzten Versuch
+    ruhe = timedelta(minutes=float(konfig.wert("sitzungen.ruhe_min", 45) or 0))
+    if jetzt() - aus_iso(neueste) < ruhe or jetzt() - _letztes_ende(con, matches, ende) < ruhe:
+        return []                                      # vielleicht kommt gleich noch mehr, oder du spielst noch
+    log.info("Nachtrag %s: neue Szenen seit %s – ich baue das Video", name, seit)
+    con.execute("UPDATE sitzungen SET matches = ?, verarbeitet = ? WHERE name = ?",
+                (json.dumps(matches), iso(jetzt()), name))
+    tag = _tag(konfig, ende)
+    _lerne(con, k)
+    entwurf_id, hinweis = None, z["hinweis"]
+    try:
+        entwurf_id = _plane(con, k, matches)
+        _merke(con, name, matches, ende, entwurf_id, None)
+        hinweis = None
+        db.lern_meldung(con, f"nachtrag:{name}", f"🎮 Nachtrag: Abend vom {tag} – inzwischen sind weitere Szenen "
+                                                 "angekommen, ich baue dein Video. Das dauert meist 10–30 Minuten.")
+        entwurf.entwurf(con, k, entwurf_id)
+    except regie.ZuWenigSzenen as fehler:   # reicht noch nicht: still – deine Zeile „kein Video“ bleibt stehen
+        hinweis = str(fehler)
+        log.info("Nachtrag %s: %s", name, fehler)
+    except Exception as fehler:  # noqa: BLE001
+        if entwurf_id is None:   # schon das Planen scheiterte: Details ins Log, deine Zeile bleibt
+            _logge(name, fehler, " (Nachtrag)")
+        else:
+            hinweis = str(fehler)
+            entwurf_id = _panne(con, name, tag, fehler, entwurf_id, experte=False)
+    _merke(con, name, matches, ende, entwurf_id, hinweis)
+    return [{"sitzung": name, "matches": len(matches), "entwurf": entwurf_id, "hinweis": hinweis}]
+
+
+def _gemeldet(con: sqlite3.Connection, schluessel: str) -> bool:
+    return con.execute("SELECT 1 FROM lern_meldungen WHERE schluessel = ?", (schluessel,)).fetchone() is not None
+
+
+def _ids(text: str | None) -> list[str]:
+    """sitzungen.matches als Liste (kaputtes JSON: leer)."""
+    try:
+        werte = json.loads(text or "[]")
+    except ValueError:
+        return []
+    return [m for m in werte if isinstance(m, str)] if isinstance(werte, list) else []
+
+
+def _mit_spaeten(con: sqlite3.Connection, name: str, matches: list[str]) -> list[str]:
+    """Spät angekommene Matches desselben Abends dazu (Nachtrag). Ein selbst erkannter Abend (abend_…) kennt nur die
+    Matches, die beim Erkennen da waren; kam danach noch eins an (PC früh aus: sein Replay kommt erst beim nächsten
+    Start), gehört es dazu, wenn es wie bei auto_abend höchstens LUECKE vor oder nach einem Match des Abends liegt und
+    in keiner anderen Sitzung steht. Die Datei vom PC nennt ihre Matches selbst – dort bleibt die Liste, wie sie ist."""
+    if not name.startswith("abend_"):
+        return matches
+    bekannt = set(matches)
+    for z in con.execute("SELECT matches FROM sitzungen WHERE name != ?", (name,)):
+        bekannt.update(_ids(z["matches"]))
+    zeiten = {}
+    for z in con.execute("SELECT id, start_utc, ende_utc FROM matches"):
+        start, ende = _zeit(z["start_utc"]), _zeit(z["ende_utc"])
+        if start is not None:
+            zeiten[z["id"]] = (start, ende or start)
+    eigene = [zeiten[m] for m in matches if m in zeiten]
+    if not eigene:
+        return matches
+    von, bis = min(s for s, _ in eigene), max(e for _, e in eigene)
+    dazu = []
+    for m, (start, ende) in sorted(((m, t) for m, t in zeiten.items() if m not in bekannt), key=lambda x: x[1][0]):
+        if ende >= von - LUECKE and start <= bis + LUECKE:   # nach dem Abend auch über mehrere Matches hinweg
+            dazu.append(m)
+            bis = max(bis, ende)
+    return [*matches, *dazu]
+
+
+def _schon_video(con: sqlite3.Connection, matches: list[str], seit: str) -> bool:
+    """Hat seit dem letzten Versuch schon ein Short Szenen dieser Matches (z. B. über 🎬 mit den spät angekommenen
+    Szenen)? Dann hat der Abend sein Video – sonst kämen zwei mit fast denselben Szenen (07.10.: „warum sendet er immer
+    2 Videos?“). Szenen früherer Abende im Video zählen nicht (regeln.matches_aus)."""
+    for z in con.execute("SELECT schnittliste FROM entwuerfe WHERE erstellt > ? AND format = 'short' "
+                         "AND auto_verworfen IS NULL", (seit,)):
+        try:
+            liste = json.loads(Path(z["schnittliste"]).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(liste, dict) and regeln.matches_aus(liste) & set(matches):
+            return True
+    return False
+
+
+def _offene_clips(con: sqlite3.Connection, konfig: Konfig, matches: list[str]) -> list[int]:
+    """Clips dieser Matches ohne Stimmung, deren Datei schon da ist (wie einstellungen.offene_clips, die besten zuerst;
+    von dir verworfene nie) – nur dann lohnt das Nachziehen: stimmung.analysiere liest dafür alle Replays."""
+    if not matches:
+        return []
+    platz = ",".join("?" for _ in matches)
+    return [z["id"] for z in con.execute(
+        f"""SELECT c.id, c.clip_pfad FROM clips c
+             WHERE c.match_id IN ({platz}) AND c.clip_pfad IS NOT NULL AND NOT {db.hart_verworfen_sql("c.")}
+               AND NOT EXISTS (SELECT 1 FROM momente mo WHERE mo.clip_id = c.id)
+             ORDER BY c.punkte DESC, c.id""", matches).fetchall()
+        if material.lokal(konfig, z["clip_pfad"]).is_file()]
+
+
+def _letztes_ende(con: sqlite3.Connection, matches: list[str], ende):
+    """Spätestes Match-Ende des Abends, mindestens das Abend-Ende (unlesbare Zeiten zählen nicht). Wie bei auto_abend:
+    Erst ruhe_min danach ist der Abend vorbei – spielst du nach einer Pause weiter, gehören die neuen Matches dazu."""
+    platz = ",".join("?" for _ in matches)
+    zeiten = [_zeit(z[0]) for z in con.execute(f"SELECT ende_utc FROM matches WHERE id IN ({platz})", matches)]
+    return max([ende, *(t for t in zeiten if t is not None)])
+
+
+def _neueste_szene(con: sqlite3.Connection, matches: list[str]) -> str | None:
+    """Wann die jüngste Szene (Moment) dieser Matches entstand – ohne Fails, die kommen ins Abend-Video nie."""
+    if not matches:
+        return None
+    platz = ",".join("?" for _ in matches)
+    return con.execute(f"SELECT MAX(erstellt) FROM momente WHERE match_id IN ({platz}) AND schluessel NOT LIKE ?",
+                       [*matches, f"{fail.PRAEFIX}%"]).fetchone()[0]
 
 
 def auto_abend(con: sqlite3.Connection, konfig: Konfig, schon: list[str] = ()) -> tuple[str, list[str], object] | None:
@@ -128,7 +308,7 @@ def auto_abend(con: sqlite3.Connection, konfig: Konfig, schon: list[str] = ()) -
     zeilen.sort(key=lambda x: x[1])
     block = [zeilen[-1]]
     for z in reversed(zeilen[:-1]):
-        if block[0][1] - z[2] > timedelta(hours=2):   # mehr als 2 h Pause: ein früherer Abend
+        if block[0][1] - z[2] > LUECKE:               # mehr als 2 h Pause: ein früherer Abend
             break
         block.insert(0, z)
     ende = max(z[2] for z in block)

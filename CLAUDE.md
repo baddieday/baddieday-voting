@@ -463,3 +463,13 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     (auch 🥱, dort jetzt mit denselben Grenzen). „Kein Video“ nur, wenn auch das nicht reicht – der Satz sagt, warum.
     Nachgestellt: dünner Abend (2 starke) vorher „kein Video“, jetzt 41 s mit 2 + 2 Szenen; 🎬 nach dem Abend-Video
     vorher dieselben 4 Szenen, jetzt 3 neue von 6. /experte und eine Match-Wahl dort exakt wie bisher. N51–N59.
+  - **Stufe 4: Nachtrag – spät angekommenes Material zählt noch** (`sitzung._nachtrag`): Endete der neueste Abend mit
+    „kein Video“ und kommt danach noch etwas an (Clip-Dateien, Matches, die n8n später fertig hat, ein Match, das der
+    PC erst beim nächsten Start schickt), baut der 10-Minuten-Timer das Video bis 24 h nach dem Abend selbst nach –
+    vorher blieb es für immer bei „kein Video“. Nur mit neuen Szenen seit dem letzten Versuch, erst nach 45 min ohne
+    weitere Szene und ohne neues Match (wer nach einer Pause weiterspielt, bekommt das Video erst danach); höchstens
+    ein Video je Abend (keins, wenn 🎬 inzwischen eins gemacht hat), nie ältere Abende, nur einfacher Modus. Beim
+    selbst erkannten Abend zählen spät angekommene Matches desselben Abends mit (Lücke ≤ 2 h). Die Statuszeile wird
+    zu „🎮 Nachtrag: Abend vom …“ und geht mit dem Video; reicht es wieder nicht, bleibt es still. Nachgestellt
+    (Prüfer s5, s5b, PC früh aus): vorher für immer „kein Video“, jetzt je ein Video; nach einer Pause weitergespielt:
+    vorher Video mitten im Spielen, jetzt danach. N60–N65.

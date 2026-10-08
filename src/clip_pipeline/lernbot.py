@@ -674,8 +674,9 @@ async def _sende_entwuerfe(app) -> int:
             )
         con.execute("UPDATE entwuerfe SET status = 'gesendet', tg_nachricht_id = ? WHERE id = ?",
                     (nachricht.message_id, z["id"]))
-        if abend is not None:   # die Statuszeile „🎮 Abend erkannt …“ hat ihren Dienst getan
-            await _loesche_status(app, con, f"abend:{abend['name']}")
+        if abend is not None:   # die Statuszeile „🎮 Abend erkannt …“ bzw. „🎮 Nachtrag …“ hat ihren Dienst getan –
+            for art in ("abend", "kein", "nachtrag"):   # beim Nachtrag auch ein „kein Video“ als eigene Nachricht
+                await _loesche_status(app, con, f"{art}:{abend['name']}")
         gesendet += 1
     return gesendet
 
@@ -707,7 +708,9 @@ def _tag(zeit_utc: str, konfig: Konfig) -> str:
 
 
 async def _loesche_status(app, con: sqlite3.Connection, schluessel: str) -> None:
-    """Löscht eine schon gesendete Statuszeile (Lern-Meldung mit Telegram-Nachricht). Fehler: nur ins Log."""
+    """Löscht eine schon gesendete Statuszeile (Lern-Meldung mit Telegram-Nachricht). Fehler: nur ins Log.
+    Umgeschriebene Zeilen (kein:, fehler:, nachtrag: auf der Nachricht von abend:) teilen sich die Nachricht – sie
+    verlieren den Verweis mit, damit niemand dieselbe Nachricht ein zweites Mal löscht."""
     z = con.execute("SELECT id, tg_nachricht_id FROM lern_meldungen WHERE schluessel = ?", (schluessel,)).fetchone()
     if z is None or not z["tg_nachricht_id"]:
         return
@@ -715,7 +718,7 @@ async def _loesche_status(app, con: sqlite3.Connection, schluessel: str) -> None
         await app.bot.delete_message(app.bot_data["erlaubt"], z["tg_nachricht_id"])
     except Exception as fehler:  # zu alt, schon weg, Netz: die Zeile bleibt dann eben stehen
         log.info("Statuszeile %s nicht gelöscht: %s", schluessel, fehler)
-    con.execute("UPDATE lern_meldungen SET tg_nachricht_id = NULL WHERE id = ?", (z["id"],))
+    con.execute("UPDATE lern_meldungen SET tg_nachricht_id = NULL WHERE tg_nachricht_id = ?", (z["tg_nachricht_id"],))
 
 
 async def sende_meldungen(app) -> int:
@@ -731,7 +734,9 @@ async def sende_meldungen(app) -> int:
         if einfach and m["schluessel"].startswith("publikum:bewertet:"):   # 07.10.: Score-Liste nur für /experte
             con.execute("UPDATE lern_meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
             continue
-        if art in ("kein", "fehler"):   # Stufe 1: aus „🎮 Abend erkannt …“ wird „… kein Video, weil …“ – eine Nachricht
+        # Stufe 1: aus „🎮 Abend erkannt …“ wird „… kein Video, weil …“ – eine Nachricht je Abend; Stufe 4 (08.10.):
+        # kommt danach noch etwas an, wird dieselbe Zeile zu „🎮 Nachtrag: Abend vom …“ (sitzung._nachtrag)
+        if art in ("kein", "fehler", "nachtrag"):
             alt = con.execute("SELECT tg_nachricht_id FROM lern_meldungen WHERE schluessel = ?",
                               (f"abend:{abend}",)).fetchone()
             if alt is not None and alt["tg_nachricht_id"]:
@@ -743,7 +748,7 @@ async def sende_meldungen(app) -> int:
                     log.info("Statuszeile abend:%s nicht umgeschrieben: %s", abend, fehler)
         if tg_id is None:
             for stueck in stuecke(m["text"]):
-                nachricht = await app.bot.send_message(chat, stueck, disable_notification=art == "abend")
+                nachricht = await app.bot.send_message(chat, stueck, disable_notification=art in ("abend", "nachtrag"))
                 tg_id = tg_id or getattr(nachricht, "message_id", None)
         con.execute("UPDATE lern_meldungen SET gesendet = ?, tg_nachricht_id = ? WHERE id = ?",
                     (iso(jetzt()), tg_id, m["id"]))
