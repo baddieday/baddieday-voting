@@ -114,7 +114,20 @@ def baue(clip: sqlite3.Row | dict, match: sqlite3.Row | dict | None, konfig) -> 
 
 # --- Caption für Regisseur-Entwürfe (Lernschleife „Publikum“, Spec §10.4) ---------------------
 
-def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig) -> str:
+SONG_MAX = 40  # so lang höchstens steht der Songtitel in der ersten Zeile (TikTok liefert nur 150 Zeichen zurück)
+
+
+def _mit_song(beschreibung: str, liste: dict, song_in_zeile: bool) -> str:
+    """N44: Im einfachen Modus endet die erste Zeile mit dem Songtitel („… · 6 Momente · 🎵 On & On“). Sonst hätten
+    zwei Videos desselben Abends (gleiche Szenen, fast gleich lang) dieselbe erste Zeile, und der tägliche Abruf
+    könnte keins davon zuordnen. Der Song wechselt von Video zu Video (regie.waehle_musik, musik_rotation)."""
+    titel = " ".join(str((liste.get("musik") or {}).get("titel") or "").split())
+    if not song_in_zeile or not titel:
+        return beschreibung
+    return beschreibung + " · 🎵 " + (titel if len(titel) <= SONG_MAX else titel[:SONG_MAX - 1].rstrip() + "…")
+
+
+def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig, *, song_in_zeile: bool = False) -> str:
     """Caption eines Entwurfs für das Upload-Paket: dieselbe Vorlage wie bei Clips ([caption].vorlage), gefüllt nur
     aus Fakten – nichts erfinden (CLAUDE.md). Die Schnittliste allein reicht dafür nicht (ihre Segmente tragen
     punkte/grund, aber keine Kill-Gruppe und kein Victory Royale); deshalb liest die Funktion die Datenbank:
@@ -128,6 +141,7 @@ def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig) -> str:
     Beispiel: 5 Momente, größte Gruppe Triple, Musik „NCS – Titel“ → Beschreibung mit „Triple Kill“, #triplekill,
     letzte Zeile „🎵 Song: … / Music provided by NoCopyrightSounds“.
     CaptionFehler, wenn die Vorlage einen unbekannten Platzhalter hat. Nur lesend, keine Transaktion nötig.
+    song_in_zeile (N44, nur das Paket im einfachen Modus): Songtitel ans Ende der ersten Zeile (_mit_song).
 
     So sieht die Beschreibung aus (nur Zahlen, die in den Daten stehen): „Fortnite-Highlights: Victory Royale 👑 ·
     Triple Kill · 5 Momente“. CaptionFehler auch, wenn Musik drin ist, aber ihre Quellenangabe fehlt – ohne
@@ -154,10 +168,10 @@ def entwurf_caption(con: sqlite3.Connection, liste: dict, konfig) -> str:
     teile.append("1 Moment" if len(momente) == 1 else f"{len(momente)} Momente")
     fails = _fails(con, momente)  # 🔥 Viral (05.10.): Fakten der Fail-Momente aus momente.merkmale
     if fails and liste.get("variante") == "fail":
-        return _fail_caption(liste, fails, konfig)
+        return _fail_caption(liste, fails, konfig, song_in_zeile)
     if fails:
         teile.append("1 Fail" if len(fails) == 1 else f"{len(fails)} Fails")
-    beschreibung = "Fortnite-Highlights: " + " · ".join(teile)
+    beschreibung = _mit_song("Fortnite-Highlights: " + " · ".join(teile), liste, song_in_zeile)
     # {killtyp} wie in baue(): Victory Royale schlägt die Kill-Gruppe; ohne Clip „fortnitehighlights“ (07.10.: vorher
     # „fortnite“ – die Vorlage hat #fortnite schon, der Hashtag stand dann doppelt)
     if victory:
@@ -200,7 +214,7 @@ def _fails(con: sqlite3.Connection, momente: set[str]) -> list[dict]:
     return sorted(ergebnis, key=lambda mk: -float(mk.get("fail_score") or 0))
 
 
-def _fail_caption(liste: dict, fails: list[dict], konfig) -> str:
+def _fail_caption(liste: dict, fails: list[dict], konfig, song_in_zeile: bool = False) -> str:
     """Caption des reinen Fail-Videos (05.10.): Fakten des schlimmsten Fails, Mitmach-Frage und clip-battle.de-Hinweis
     aus [caption].vorlage_fail – nur Daten, nichts erfunden. Musik-Quellenangabe wie bei jedem Entwurf (Pflicht)."""
     schlimmster = fails[0]
@@ -216,7 +230,8 @@ def _fail_caption(liste: dict, fails: list[dict], konfig) -> str:
     teile.append("1 Fail" if len(fails) == 1 else f"{len(fails)} Fails")
     vorlage = konfig.projektpfad(konfig.wert("caption.vorlage_fail", "templates/caption-fail.txt")).read_text(
         encoding="utf-8")
-    text = fuelle(vorlage, {"beschreibung": "Fortnite-Fails: " + " · ".join(teile) + " 💀"}).strip()
+    beschreibung = _mit_song("Fortnite-Fails: " + " · ".join(teile) + " 💀", liste, song_in_zeile)
+    text = fuelle(vorlage, {"beschreibung": beschreibung}).strip()
     if m := liste.get("musik"):
         quelle = str(m.get("quelle") or "").strip()
         if not quelle:

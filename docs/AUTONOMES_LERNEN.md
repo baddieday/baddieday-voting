@@ -27,6 +27,8 @@ Der vorhandene tägliche Dienst `clip-publikum` ruft `pipeline publikum bewerten
 API-Daten, aktualisiert die neue Lernschleife und erhält die ältere Wochen-Auswertung. Ohne eingerichteten
 Zugang erfolgen keine API-Aufrufe und es werden keine Messungen erfunden. Unter `[publikum]` steuern
 `api_abruf` (Standard `true`), `api_max_tage` (180), `api_intervall_stunden` (6) und `api_max_posts` (100) den Abruf.
+Posts ohne Score kommen zuerst dran (die jüngsten vorn), danach die bewerteten – so bekommt jedes neue Video seine
+tägliche Messung bis zum Score an Tag 7, auch wenn mehr als `api_max_posts` Posts im Fenster liegen (08.10., N43).
 Der 6-Stunden-Wert begrenzt wiederholte Abrufe; er ersetzt nicht den täglichen systemd-Zeitplan.
 
 | Plattform | Zugang | Tatsächlich automatisch verfügbar |

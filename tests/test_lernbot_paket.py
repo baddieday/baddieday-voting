@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import big, entwurf, konfig, publikum, regie_lernen
+from clip_pipeline import big, entwurf, highlight, konfig, publikum, regie_lernen
 from clip_pipeline import sperre as sperre_modul
 from clip_pipeline.sperre import sperre
 from clip_pipeline.zeit import UTC, iso
@@ -263,6 +263,64 @@ class Paket(MitLernPaket):
         self.assertTrue(zeile["upload_pfad"].endswith("_upload.mp4"))
         self.assertEqual(self.posts(), [])                          # das Paket allein ist noch kein Post
 
+    def test_zwei_wochen_video_einfach_volle_qualitaet_statt_checkliste(self):
+        """Stufe 3 (08.10.): Das Paket fürs 2-Wochen-Video kommt aus der fertigen Datei (seine ältesten Szenen gibt der
+        Puffer nach 14 Tagen frei) und ist für Telegram verkleinert – statt TikTok-Häkchen (es geht auf YouTube, kein
+        Post) die Zeile, wo die volle Qualität liegt. Unter /experte wie bisher mit Checkliste."""
+        eid = self.entwurf_anlegen(fmt="zusammenschnitt")
+        voll = self.konfig.ordner("highlights") / "2026-W41.mp4"
+        voll.write_bytes(b"volle-qualitaet")
+        self.con.execute("INSERT INTO highlights (name, datei, vorschau, clips, dauer, erstellt, entwurf_id) VALUES "
+                         "('2026-W41', 'highlights/2026-W41.mp4', 'highlights/v.mp4', 5, '01:30', 'x', ?)", (eid,))
+        liste = json.loads((self.tmp / "regie" / "zusammenschnitt-test-1.json").read_text(encoding="utf-8"))
+        Path(liste["segmente"][1]["datei"]).unlink()                    # eine Szene hat der Puffer schon freigegeben
+        verkleinert = []
+
+        def vorschau(quelle, ziel, **kw):
+            verkleinert.append((quelle, kw["kurze_seite"]))
+            ziel.parent.mkdir(parents=True, exist_ok=True)
+            ziel.write_bytes(b"telegram-fassung")
+            return 16
+
+        self.konfig.daten["lernbot"]["experte"] = False
+        with mock.patch.object(highlight, "vorschau", side_effect=vorschau):
+            self.assertEqual(asyncio.run(lernbot_paket.sende_paket(self.app, eid)), "gesendet")
+        self.assertEqual((verkleinert, self.renders), ([(voll, 1080)], []))   # keine Szene neu geschnitten
+        self.assertEqual(self.bot.dokumente[0]["inhalt"], b"telegram-fassung")
+        self.assertEqual(self.bot.dokumente[0]["caption"], f"📦 Video #{eid}")          # nicht „in voller Qualität“
+        letzte = self.bot.nachrichten[-1]
+        self.assertEqual(letzte["text"], "💾 Volle Qualität: Netzlaufwerk clips → Ordner highlights → 2026-W41.mp4 "
+                                         "(die Datei oben ist für Telegram verkleinert).")
+        self.assertIsNone(letzte.get("reply_markup"))
+        self.assertEqual(self.posts(), [])
+        self.konfig.daten["lernbot"]["experte"] = True
+        asyncio.run(lernbot_paket.sende_paket(self.app, eid))
+        self.assertEqual(knopf_daten(self.bot.nachrichten[-1]["reply_markup"]), [f"pt:{eid}:t"])
+
+    def test_einfach_legt_den_post_selbst_an(self):
+        """Stufe 3 (08.10.): Im einfachen Modus kein „✅ TikTok erledigt“ und kein /link mehr – ✅ unter dem Video bringt
+        das Paket, danach legt der Bot den TikTok-Post selbst an (ohne Link und Video-Nummer: welches Video es ist,
+        findet der tägliche Abruf). Ein zweites ✅ schickt das Paket noch einmal (N6) – es bleibt ein Post."""
+        self.konfig.daten["lernbot"]["experte"] = False
+        eid = self.entwurf_anlegen()
+        self.uhr = T0 + timedelta(minutes=5)
+        for _ in range(2):
+            asyncio.run(lernbot.bei_klick(SimpleNamespace(callback_query=FakeQuery(f"d:{eid}:1")), self.context))
+            self.aufgaben_ausfuehren()                                  # die Merkliste startet das Paket
+            self.uhr += timedelta(hours=1)
+        self.assertEqual(len(self.bot.dokumente), 2)
+        (p,) = self.posts()
+        self.assertEqual((p["plattform"], p["entwurf_id"], p["url"], p["video_id"], p["gepostet_utc"]),
+                         ("tiktok", eid, None, None, iso(T0 + timedelta(minutes=5))))   # Zeitpunkt des ersten Pakets
+        self.assertEqual(self.bot.nachrichten[-1]["text"], lernbot_paket.ZAHLEN_SELBST)
+        self.assertIn("füg den Text oben unverändert ein", lernbot_paket.ZAHLEN_SELBST)
+        self.assertFalse(any(n.get("reply_markup") for n in self.bot.nachrichten))   # keine Checkliste, kein Häkchen
+        # N44: Die erste Zeile endet mit dem Song (zwei Videos eines Abends unterscheiden sich so) und steht am Post
+        text = next(n["text"] for n in self.bot.nachrichten if n["text"].startswith("<pre>"))
+        erste = text.removeprefix("<pre>").splitlines()[0]
+        self.assertEqual(erste, "Fortnite-Highlights: Triple Kill · 2 Momente · 🎵 Titel")
+        self.assertEqual(json.loads(p["merkmale"])["caption_zeile"], erste)
+
     def test_zweites_paket_rendert_nicht_neu(self):
         eid = self.entwurf_anlegen()
         for _ in range(2):
@@ -308,10 +366,12 @@ class Paket(MitLernPaket):
             self.assertEqual(asyncio.run(lernbot.paket_auftrag(self.app, eid, folge)), "nochmal")
         self.assertEqual(len(self.bot.nachrichten), vorher + 1)                # nur die Ansage, kein Fehler-Satz
         self.assertEqual(lernbot.folge_zu(self.con, eid)["versuche"], 1)
+        self.assertEqual(self.posts(), [])          # Stufe 3: kein Paket, kein Post – es gibt nichts hochzuladen
         self.assertEqual(asyncio.run(lernbot.paket_auftrag(self.app, eid, lernbot.folge_zu(self.con, eid))),
                          "gesendet")                                           # der nächste Versuch klappt
         self.assertEqual(lernbot.folge_zu(self.con, eid)["ergebnis"], "gesendet")
         self.assertEqual(len(self.bot.dokumente), 1)
+        self.assertEqual([p["entwurf_id"] for p in self.posts()], [eid])     # … und legt den Post an
 
     def test_fehlende_moment_datei_wird_gemeldet(self):
         eid = self.entwurf_anlegen()

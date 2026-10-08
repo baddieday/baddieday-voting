@@ -132,6 +132,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   (SHA-256 mit Zurücklesen, Rohdaten im Lager nie überschrieben). Einführung: `docs/PUFFER.md`.
 - 2026-09-25: **Nie löschen.** Rohdaten und Clips werden nirgends automatisch gelöscht (clip-aufraeumen ist aus). Wird Speicher
   knapp (Puffer, Thin-Pool des Mini, Lager auf pve-big), kommt eine Warnung per Telegram (Prüfung einmal am Tag).
+  Einzige Ausnahme seit 08.10. (Florian: Ja): Der Puffer gibt Rohvideos über 14 Tage frei, deren Kopie im Lager
+  bestätigt ist (Stufe B5, siehe 08.10.). Im Lager, bei Clips und in der Datenbank gilt „Nie löschen“ weiter.
 - 2026-09-25: **Abgleich tagsüber** (10:00, Prüfung 11:00) – pve-big wird nie nachts geweckt, sein Lüfter soll niemanden wecken.
 - 2026-09-25: Der **Puffer hält 14 Tage Rohvideos** (`[puffer].rohdaten_tage`) – der Regisseur baut seine Momente daraus.
 - 2026-09-25 (E20): Zugang für Claude über ein flüchtiges Tailnet-Gerät (Anmeldung per Link) und Tailscale SSH im check-Modus
@@ -405,3 +407,47 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - **Florians Antworten:** Der Puffer darf Rohvideos nach 14 Tagen löschen, wenn ihre Kopie im Lager bestätigt ist
     (ersetzt für den Puffer „Nie löschen“ vom 25.09., Stufe 2). Keine Auto-Updates. Dünne Abende mit nie gesehenen
     starken Szenen auffüllen (Stufe 4).
+  - **Stufe 2 (umgesetzt): Puffer gibt frei** (`lager.gib_frei`, `[puffer].freigeben = true`): nur am Ende eines
+    fehlerfreien Abgleichs, der das Lager erreicht hat; nur Videos aus `eingang/`, deren Aufnahme UND Bestätigung im
+    Lager älter als 14 Tage sind, die im Puffer unverändert sind und deren Lager-Kopie jetzt da, gleich groß und beim
+    Zurücklesen gleich (SHA-256) ist. Kein Link, kein fremdes Dateisystem im Pfad. Erster Lauf mit etwas zum Freigeben
+    = Probe; jede Löschung in `ereignisse` (`puffer_frei`), eine Zeile in der Abschlussmeldung. Annahmen N9–N15.
+    Kein Auto-Update (Florian: „Nein, ich spiele selbst ein“).
+  - **Stufe 3: 2-Wochen-Video nur im Lern-Bot, Clip-Bot wirklich still** (Clip-Bot still UND einfacher Modus,
+    `bot.app._nur_probleme`): Das Highlight-Video schickt nur noch der Lern-Bot („🏆 Dein 2-Wochen-Video“); ✅ dort =
+    freigegeben und hochgeladen (Paket aus der fertigen Datei – Stufe 2 gibt seine ältesten Szenen schon frei –, ohne
+    TikTok-Häkchen, dafür „Volle Qualität: Netzlaufwerk clips → Ordner highlights“), ❌ = verworfen. Keine Erinnerung
+    ans Hochladen. Start und glattes Ende einer Übertragung werden nur vermerkt (`meldungen.routine`, setzt der
+    Schreiber); Fehler, Abbrüche, Probe, liegen gebliebene Videos und Warnungen kommen weiter. /experte wie bisher.
+    Annahmen N16–N20.
+  - **Stufe 3: ✅ legt den TikTok-Post selbst an** (`lernbot_paket.posts_anlegen`): Im einfachen Modus entsteht der
+    Post, sobald das Paket eines Shorts bei dir ist (je Plattform aus `[publikum].plattformen`, idempotent, ohne Link
+    und Video-Nummer – das Video findet der tägliche Abruf). Keine Checkliste, kein „✅ TikTok erledigt“, kein /link;
+    dort steht „Lad es hoch – die Zahlen hole ich mir danach selbst.“ Scheitert das Paket, kein Post (der nächste
+    Versuch der Merkliste legt ihn an); scheitert nur der Post, kommt das Paket nicht doppelt. Kein Post für das
+    2-Wochen-Video und Querformat. /experte wie bisher. Annahmen N21–N24.
+  - **Stufe 3: Der Bot findet dein hochgeladenes Video selbst – nur eindeutig** (`publikum_adapter._tiktok_zuordnen`):
+    Kein Link und kein Achten auf den Zeitpunkt mehr (vorher zählte nur ein Upload bis 30 min nach dem Häkchen). Ein
+    Video passt zu einem offenen Post bei ±72 h und ±2 s Länge; zugeordnet wird nur, wenn beide nur zueinander passen,
+    bei mehreren entscheidet die erste Zeile der Beschreibung (die Caption des Pakets, nachgerechnet). Zusätzlich zur
+    Spec: eine andere erste Zeile schließt ein Video aus, und ohne passende erste Zeile wird erst zugeordnet, wenn das
+    Fenster zu ist. Sonst bleibt der Post offen. `gepostet_utc` wird die Upload-Zeit (Tag 7 ab dem Upload). N25–N29.
+  - **Stufe 3: Auch Flops bekommen ihre Zuschauer-Note** (`publikum_adapter.importiere`): Gleiche Zahlen wie beim
+    letzten Abruf zählen nach 20 h wieder als Messung (der Timer streut bis 10 min), am selben Tag bleibt es bei einer.
+    Vorher bekam ein Video, das ab Tag 2 nicht mehr wächst, nie eine Messung ab Tag 3 und damit nie einen Score – nur
+    per Screenshot. Abweichend von der Spec nur, bis der Post seinen Score hat (der wird nie überschrieben, und jede
+    Messung lässt `autonom` alles neu rechnen – ohne Grenze fast 5 min je Lauf). N30–N32.
+  - **Stufe 3: Zahlen-Abruf richtet sich selbst ein, 📋 sagt ehrlich, wer lehrt:** `alles-aktualisieren.sh` richtet
+    `clip-publikum` ein und schaltet den Timer an wie `clip-sitzungen` (Rückweg-Zeile; von dir angepasste Timer werden
+    weder überschrieben noch eingeschaltet – gilt jetzt für beide). 📋 endet mit „🧠 Lernt aus: deinen ✅/❌ · KI-Note (läuft |
+    fehlt – Claude-Anmeldung nötig | kommt mit dem nächsten Video) · Zuschauern (n Videos ausgewertet | TikTok nicht
+    verbunden – einmal /tiktok | n ✅-Videos nach 3 Tagen noch ohne Zahlen)“ (`geschmack.lehrer_zeile`, ohne Netz:
+    `kritiken`, `posts`, `.env` und Token-Datei wie `publikum_adapter._token`); sie ersetzt „🧠 Gelernt aus …“ und „📊
+    Publikum: …“. Dieselbe Zeile im Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat. N33–N37.
+  - **Prüfung Stufe 2/3 (drei Prüfer, nachgestellt):** Voller Puffer: Der Abgleich läuft ohne DB-Sicherung weiter und
+    gibt frei (vorher brach er jeden Tag daran ab). Löschen nur strenger: auch 14 Tage vor der jüngsten Aufnahme (Uhr
+    des Mini kann springen); fehlt eine Lager-Kopie, wird sie beim nächsten Abgleich neu kopiert statt täglich gewarnt;
+    ein Kopierfehler hält die Freigabe weiter an, die Meldung sagt es. Abruf: Posts ohne Score zuerst (sonst ab ~100
+    Posts keine Noten mehr). Erste Caption-Zeile im einfachen Modus mit Songtitel, am Post gespeichert (zwei ✅ eines
+    Abends bekamen vorher nie Zahlen). Nach dem Paket: „füg den Text oben unverändert ein“. KI-Note im 📋 mit echtem
+    Grund; n8n „Highlight-Video fertig“ aus; Kopfzeile bleibt nach dem Tipp. N38–N47.

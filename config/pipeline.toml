@@ -70,7 +70,11 @@ nachtruhe_bis = "08:00"
 # ins Lager. Die Morgenprüfung läuft um 11:00 (deploy/systemd/clip-puffer-pruefen.timer).
 markierung = ".clip-puffer"    # liegt NUR im Puffer
 rohdaten_tage = 14             # so viele Tage Rohvideos (eingang/) hält der Puffer; die Übernahme holt so viele (25.09.)
-freigeben = false              # Stufe B5 (später, nur mit OK): bestätigte Rohdaten im Puffer löschen
+# Stufe B5 (Florian 08.10.: „Solange alles ins Lager gesynct ist, darf es nach 14 Tagen vom Mini gelöscht werden“):
+# Der tägliche Abgleich löscht nach einem fehlerfreien Lauf Rohvideos aus eingang/, die älter als rohdaten_tage sind und
+# deren Kopie im Lager bestätigt und eben zurückgelesen ist (lager.gib_frei). Der erste Lauf ist nur eine Probe.
+# Nie im Lager, nie Clips, Sessions, Exporte, Highlights oder die Datenbank. false = nichts löschen.
+freigeben = true
 warnung_frei_gb = 20           # Morgenprüfung: Meldung, wenn weniger frei
 alarm_frei_gb = 8
 # Lager auf pve-big: gemessen beim Abgleich (nur statvfs), gewarnt in der Morgenprüfung. Gelöscht wird nie etwas.
@@ -287,7 +291,8 @@ format = "short"
 
 [bot]
 # Clip-Bot (07.10.): false = still – jede Szene wird wie bisher (Auto-Freigabe) entschieden, aber nicht mehr geschickt;
-# es kommen nur Warnungen (Speicher, Kills ohne Aufnahme) und Highlight-Videos. true = jede Szene als Video wie früher.
+# es kommen nur Warnungen (Speicher, Kills ohne Aufnahme, Übertragungsfehler). Das Highlight-Video kommt im einfachen
+# Modus nur im Lern-Bot (08.10.), unter /experte auch hier. true = jede Szene als Video wie früher.
 clips_zeigen = false
 
 [geschmack]
@@ -333,7 +338,8 @@ screenshot_timeout_s = 120
 [publikum]
 # Lernschleife „Publikum“ (Spec §5, §6, docs/PUBLIKUM.md). Uhrzeit des täglichen Laufs `pipeline publikum bewerten`:
 # nur in deploy/systemd/clip-publikum.timer (wie bei clip-lager – eine Wahrheit).
-# Für diese Plattformen entstehen Posts (Clip-Bot: Häkchen/Link; Lern-Bot: Häkchen/Link). clip-battle.de nie.
+# Für diese Plattformen entstehen Posts (Clip-Bot: Häkchen/Link; Lern-Bot: Häkchen/Link unter /experte, im einfachen
+# Modus legt das Paket eines Shorts den Post selbst an). clip-battle.de nie.
 plattformen = ["tiktok"]
 # Der Score nimmt die Messung, die diesem Post-Alter (Tage) am nächsten liegt, und wird erst ab diesem Alter gesetzt
 alter_tage = 7

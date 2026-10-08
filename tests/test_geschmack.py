@@ -2,8 +2,10 @@
 Aufbau, Tempo und Zeitlupe lernt geschmack.py; deine Regeln gehen danach immer vor."""
 
 import json
+import os
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from clip_pipeline import db, einstellungen, geschmack, regie_lernen
 from clip_pipeline.zeit import iso, jetzt
@@ -97,6 +99,36 @@ class Geschmack(MitSpeicher):
         self.assertIn("ich probiere weiter selbst aus", text)                   # 08.10.: keine Bitte um mehr ✅/❌
         self.assertFalse(geschmack.wochenbericht(self.con, self.konfig, abend))  # je Woche einmal
         self.assertFalse(geschmack.wochenbericht(self.con, self.konfig, sonntag.replace(hour=8)))   # vormittags nie
+
+    def test_wer_lehrt_ki_note_und_fehlende_zahlen(self):
+        """08.10.: Ob die KI-Note läuft, steht nur in vorhandenen Daten (kein Video = keine Aussage); der
+        Wochenbericht nennt die Lehrer, sobald ein ✅-Video nach 3 Tagen keine Zahlen hat."""
+        self.assertEqual(geschmack.ki_stand(self.con), "kommt mit dem nächsten Video")
+        eid = self.entwurf({"aufbau": "story"}, daumen=1, erstellt=jetzt() - timedelta(hours=7))
+        self.assertEqual(geschmack.ki_stand(self.con), "fehlt – Claude-Anmeldung nötig")   # 7 h alt, keine Note
+        # N46: Der gespeicherte Grund des letzten Versuchs entscheidet – eine Antwort, die nicht ins Schema passt,
+        # heißt nicht „Anmeldung nötig“ (das ginge auf dem Server einer Panne nach, die es nicht gibt)
+        schema = {"hinweis": "KI-Cutter: Antwort passt nicht zum Schema: $.schwaechen[1]: länger als 140 Zeichen"}
+        self.con.execute("INSERT INTO kritiken (entwurf_id, score, regel_score, details, erstellt) VALUES (?, 60, 60, ?, ?)",
+                         (eid, json.dumps(schema), iso(jetzt())))
+        self.assertEqual(geschmack.ki_stand(self.con), "hakt gerade, beim nächsten Video neuer Versuch")
+        self.con.execute("UPDATE kritiken SET details = ? WHERE entwurf_id = ?",
+                         (json.dumps({"hinweis": "KI-Cutter: claude nicht gefunden"}), eid))
+        self.assertEqual(geschmack.ki_stand(self.con), "fehlt – Claude-Anmeldung nötig")
+        self.assertNotIn("🧠 Lernt aus", geschmack.wochen_text(self.con, self.konfig))   # noch fehlen keine Zahlen
+        vor_4_tagen = iso(jetzt() - timedelta(days=4))
+        self.con.execute("""INSERT INTO posts (art, ziel, entwurf_id, plattform, gepostet_utc, dauer_s, rezept, merkmale,
+                                               erstellt) VALUES ('entwurf', ?, ?, 'tiktok', ?, 45, '{}', '{}', ?)""",
+                         (f"entwurf:{eid}", eid, vor_4_tagen, vor_4_tagen))
+        self.entwurf({"aufbau": "kino"}, ki=72)                                         # die KI benotet wieder
+        tiktok = {k: "" for k in ("TIKTOK_ACCESS_TOKEN", "TIKTOK_REFRESH_TOKEN", "TIKTOK_CLIENT_KEY",
+                                  "TIKTOK_CLIENT_SECRET")}
+        with mock.patch.dict(os.environ, tiktok):
+            self.assertIn("🧠 Lernt aus: deinen ✅/❌ · KI-Note (läuft) · Zuschauern (TikTok nicht verbunden – "
+                          "einmal /tiktok)", geschmack.wochen_text(self.con, self.konfig))
+        with mock.patch.dict(os.environ, {**tiktok, "TIKTOK_ACCESS_TOKEN": "t"}):     # verbunden, Zahlen fehlen trotzdem
+            self.assertIn("Zuschauern (1 ✅-Video nach 3 Tagen noch ohne Zahlen – nicht hochgeladen oder den Text "
+                          "dabei geändert?)", geschmack.wochen_text(self.con, self.konfig))
 
 
 if __name__ == "__main__":

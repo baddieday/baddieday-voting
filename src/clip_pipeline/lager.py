@@ -10,8 +10,10 @@ Harte Regeln:
     auf den NFS-Mount eines schlafenden pve-big hinge.
   - In der Nachtruhe ([lager].nachtruhe_von/_bis) weckt der Abgleich nie – sein Lüfter soll niemanden wecken.
     Läuft pve-big ohnehin, darf abgeglichen werden.
-  - Im Puffer wird nichts gelöscht – außer alten DB-Sicherungen (keine Rohdaten, im Lager bleiben sie). Im Lager
-    auch nicht: Wird es knapp, warnt die Morgenprüfung (freier Platz, beim Abgleich per statvfs gemessen).
+  - Im Puffer wird nur zweierlei gelöscht: alte DB-Sicherungen (keine Rohdaten, im Lager bleiben sie) und – Stufe B5,
+    Florian 08.10. – Rohvideos aus eingang/, die älter als [puffer].rohdaten_tage sind und deren Kopie im Lager
+    bestätigt ist (gib_frei, nur am Ende eines fehlerfreien Abgleichs). Im Lager nie etwas: Wird es knapp, warnt die
+    Morgenprüfung (freier Platz, beim Abgleich per statvfs gemessen).
 
 Eigene Sperre <datenbank>.lager.lock (nicht die Pipeline-Sperre): Abgleich und Übernahme laufen nie doppelt,
 die Pipeline arbeitet währenddessen im Puffer weiter.
@@ -30,7 +32,7 @@ import shutil
 import sqlite3
 import stat
 import time
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -425,7 +427,10 @@ def _melde(con: sqlite3.Connection, konfig: Konfig, e: dict, abbruch_melden: boo
 
 
 def _melde_uebertragungsende(con: sqlite3.Connection, lauf: int, e: dict, verwechslung: bool) -> None:
-    """Ein Abschluss je angefangenem Lauf, auch nach Teilfehler oder Abbruch; keine rohen Fehlertexte im Chat."""
+    """Ein Abschluss je angefangenem Lauf, auch nach Teilfehler oder Abbruch; keine rohen Fehlertexte im Chat.
+    Routine (Stufe 3, 08.10. – der stille Clip-Bot vermerkt sie im einfachen Modus nur) ist er nur, wenn es nichts zu
+    wissen gibt: kein Fehler, kein Abbruch, keine zusätzlich gesicherte Fassung und nichts Meldenswertes aus der
+    Freigabe (_freigabe_meldenswert). Eine glatte Freigabe steht dann nur im Protokoll (ereignisse, puffer_frei)."""
     status = "abgebrochen" if e.get("abbruch") else "mit Fehlern beendet" if e["fehler"] else "abgeschlossen"
     symbol = "✅" if e["ok"] else "⚠️"
     teile = [f"{symbol} Übertragung Puffer → Lager {status}.",
@@ -441,13 +446,307 @@ def _melde_uebertragungsende(con: sqlite3.Connection, lauf: int, e: dict, verwec
         teile.append("Nichts verloren – im Puffer bleibt alles liegen. "
                      + ("Puffer-/Lager-Zuordnung und .clip-puffer/.clip-lager prüfen; " if verwechslung else "")
                      + "Details: pipeline lager status")
-    db.meldung(con, f"uebertragung:lager:{lauf}:ende", "\n".join(teile))
+    if e.get("freigabe_wartet"):
+        teile.append("Alte Rohvideos lösche ich erst wieder vom Mini, wenn alles im Lager ist.")
+    if e.get("sicherung_fehler"):
+        teile.append("⚠️ Die tägliche Sicherung der Datenbank ging heute nicht (Puffer voll?) – die Datenbank selbst "
+                     "ist unverändert, der nächste Abgleich versucht es wieder.")
+    teile += _freigabe_zeilen(e.get("freigabe"))
+    routine = (e["ok"] and not e["versioniert"] and not e.get("sicherung_fehler")
+               and not _freigabe_meldenswert(e.get("freigabe")))
+    db.meldung(con, f"uebertragung:lager:{lauf}:ende", "\n".join(teile), routine=routine)
+
+
+# --- Puffer freigeben (Stufe B5, Florian 08.10.) -------------------------------------------------
+
+FREI_MIN_TAGE = 1             # Schutz vor Tippfehlern: rohdaten_tage = 0 hieße „gleich nach dem Sichern löschen“
+FREI_PROBE = "puffer_probe"   # ereignisse.art: der erste Lauf mit etwas zum Freigeben hat nur gezählt
+FREI_ART = "puffer_frei"      # ereignisse.art: je gelöschtem Rohvideo eine Zeile
+_ORDNERNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+class _Bleibt(Exception):
+    """Die Datei bleibt im Puffer, nur ins Log: seit der Bestätigung geändert, kein echter Ordner/keine Datei im
+    Puffer (Link, anderes Dateisystem)."""
+
+
+class _KopieFehlt(Exception):
+    """Die Datei bleibt im Puffer, weil ihre Kopie im Lager fehlt oder nicht mehr gleich ist – das sagt der Bot."""
+
+
+@dataclass
+class _Frei:
+    relativ: str
+    teile: tuple[str, ...]          # teile[0] = eingang
+    lager_relativ: str
+    lager_teile: tuple[str, ...]
+    groesse: int
+    mtime_ns: int
+    sha256: str
+
+
+def _teile(rel: object) -> tuple[str, ...] | None:
+    """Teile eines relativen Pfads aus der Tabelle – None bei absolut, leer, Backslash, NUL, '.', '..' oder einem
+    versteckten Teil (in versteckte Ordner steigt der Abgleich nie hinab)."""
+    if not isinstance(rel, str) or not rel or rel.startswith("/") or "\\" in rel or "\x00" in rel:
+        return None
+    teile = tuple(rel.split("/"))
+    return None if any(not t or t.startswith(".") for t in teile) else teile
+
+
+def _frei_kandidaten(con: sqlite3.Connection, eingang: str, grenze: datetime, tage: float) -> list[_Frei]:
+    """Nur aus der Tabelle `lager` (b: nur was dort steht, ist im Lager zurückgelesen): Videos aus eingang/, deren
+    Aufnahme (mtime) UND Bestätigung im Lager älter als grenze sind (a), ältestes zuerst. Die Lager-Kopie muss im
+    eingang/ des Lagers liegen – Rohdaten werden dort nie überschrieben.
+    Zusätzlich (N39) muss die Aufnahme mindestens tage älter sein als die jüngste bestätigte Aufnahme in eingang/. Deren
+    Dateizeit kommt vom Gaming-PC: Springt die Uhr des Mini vor, gilt die Aufnahme von gestern so nicht als alt. Das
+    macht die Grenze nur strenger, nie lockerer."""
+    grenze_ns = int(grenze.timestamp() * 1_000_000_000)
+    zeilen = []
+    for z in con.execute("SELECT relativ, groesse, mtime_ns, sha256, bestaetigt, lager_relativ, zuerst_gesehen "
+                         "FROM lager ORDER BY mtime_ns, relativ"):
+        teile, lager_teile = _teile(z["relativ"]), _teile(z["lager_relativ"])
+        if not teile or not lager_teile or len(teile) < 2 or teile[0] != eingang or lager_teile[0] != eingang:
+            continue
+        zeilen.append((z, teile, lager_teile))
+    if zeilen:
+        neueste = max(int(z["mtime_ns"]) for z, _t, _l in zeilen)
+        grenze_ns = min(grenze_ns, neueste - int(tage * 86400) * 1_000_000_000)
+    liste = []
+    for z, teile, lager_teile in zeilen:
+        if Path(teile[-1]).suffix.lower() not in VIDEO_ENDUNGEN or _zwischendatei(teile[-1]):
+            continue
+        if int(z["groesse"]) < 0:  # Bestätigung zurückgenommen (Kopie im Lager fehlte): erst neu kopieren
+            continue
+        if not _SHA256.match(str(z["sha256"] or "")) or int(z["mtime_ns"]) >= grenze_ns:
+            continue
+        try:  # zuerst_gesehen ≤ bestaetigt; beide zählen, falls eine Zeile von Hand nachgetragen wurde
+            gesichert = max(aus_iso(z["bestaetigt"]), aus_iso(z["zuerst_gesehen"] or z["bestaetigt"]))
+        except (TypeError, ValueError):
+            continue
+        if gesichert < grenze:
+            liste.append(_Frei(z["relativ"], teile, z["lager_relativ"], lager_teile, int(z["groesse"]),
+                               int(z["mtime_ns"]), z["sha256"]))
+    return liste
+
+
+def _unterordner(fd: int, name: str, dev: int) -> int:
+    """Unterordner name von fd öffnen: nur ein echter Ordner (lstat – ein Link ist keiner) auf dem Dateisystem dev.
+    O_NOFOLLOW und der Vergleich mit dem lstat schließen aus, dass zwischen Prüfen und Öffnen etwas getauscht wurde."""
+    st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+    if not stat.S_ISDIR(st.st_mode) or st.st_dev != dev:
+        raise _Bleibt(f"{name} ist kein Ordner des Puffers (Link oder anderes Dateisystem)")
+    neu = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+    if not os.path.samestat(os.fstat(neu), st):
+        os.close(neu)
+        raise _Bleibt(f"{name} wurde während der Prüfung getauscht")
+    return neu
+
+
+def _lager_kopie(lager: Path, k: _Frei) -> tuple[Path, os.stat_result]:
+    """Die Kopie im Lager, nur per lstat (pve-big ist im Abgleich wach): jede Stufe ein echter Ordner (kein Link), am
+    Ende eine normale Datei, gleich groß (d) – sonst _KopieFehlt. Bewusst ohne st_dev-Vergleich: Unter-Datasets von
+    ZFS haben über NFS ein eigenes Gerät; dass es nicht die Puffer-Datei selbst ist, prüft _gib_eine_frei (samestat)."""
+    pfad = lager
+    for i, teil in enumerate(k.lager_teile):
+        pfad = pfad / teil
+        try:
+            st = os.lstat(pfad)
+        except (FileNotFoundError, NotADirectoryError):
+            raise _KopieFehlt("fehlt im Lager") from None
+        letzte = i == len(k.lager_teile) - 1
+        if not (stat.S_ISREG(st.st_mode) if letzte else stat.S_ISDIR(st.st_mode)):
+            raise _KopieFehlt("im Lager keine normale Datei")
+    if st.st_size != k.groesse:
+        raise _KopieFehlt(f"im Lager {st.st_size} statt {k.groesse} Bytes")
+    return pfad, st
+
+
+def _sha256_frisch(pfad: Path, st: os.stat_result) -> str:
+    """SHA-256 der Lager-Kopie, frisch vom NFS-Server: ohne einem Link zu folgen (O_NOFOLLOW, derselbe Eintrag wie beim
+    lstat), den Seiten-Cache vorher verworfen – wie beim Zurücklesen in kopiere_geprueft."""
+    fd = os.open(pfad, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_BINARY", 0))
+    try:
+        if not os.path.samestat(os.fstat(fd), st):
+            raise _KopieFehlt("im Lager während der Prüfung getauscht")
+        if hasattr(os, "posix_fadvise"):
+            with suppress(OSError):
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        h = hashlib.sha256()
+        while block := os.read(fd, BLOCK):
+            h.update(block)
+        return h.hexdigest()
+    finally:
+        os.close(fd)
+
+
+def _gib_eine_frei(con: sqlite3.Connection, konfig: Konfig, k: _Frei, eingang_fd: int, dev: int, lager: Path,
+                   probe: bool) -> None:
+    """Eine Datei prüfen (c, d, e) und – außer in der Probe – im Puffer löschen, genau im geprüften Ordner
+    (unlink mit dir_fd, kein Pfad wird neu aufgelöst). FileNotFoundError: im Puffer schon weg (früher freigegeben)."""
+    with ExitStack() as offen:
+        fd = eingang_fd
+        for teil in k.teile[1:-1]:
+            fd = _unterordner(fd, teil, dev)
+            offen.callback(os.close, fd)
+        name = k.teile[-1]
+        st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if not stat.S_ISREG(st.st_mode) or st.st_dev != dev:
+            raise _Bleibt("im Puffer keine normale Datei")
+        if _kennung(st) != (k.groesse, k.mtime_ns):  # c) seit der Bestätigung geändert: gilt nicht als gesichert
+            raise _Bleibt("seit der Bestätigung geändert")
+        kopie, kopie_st = _lager_kopie(lager, k)  # d)
+        if os.path.samestat(st, kopie_st):
+            raise KonfigFehler(f"{k.relativ}: Puffer und Lager zeigen auf dieselbe Datei")
+        if probe:
+            return
+        # e) zusätzlich zur Spec: Nach dem Löschen ist die Lager-Kopie die einzige – also vorher ganz zurücklesen
+        if _sha256_frisch(kopie, kopie_st) != k.sha256:
+            raise _KopieFehlt("im Lager mit anderer Prüfsumme")
+        _marken_da(konfig)  # Puffer und Lager noch eingehängt?
+        jetzt_st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if not os.path.samestat(jetzt_st, st) or _kennung(jetzt_st) != (k.groesse, k.mtime_ns):
+            raise _Bleibt("während der Prüfung geändert")
+        os.unlink(name, dir_fd=fd)
+    db.protokoll(con, FREI_ART, f"{k.relativ}: {k.groesse} Bytes im Puffer freigegeben – Kopie im Lager "
+                                f"{k.lager_relativ}, SHA-256 {k.sha256}")
+    log.info("Puffer: %s freigegeben (Kopie im Lager: %s)", k.relativ, k.lager_relativ)
+
+
+def gib_frei(con: sqlite3.Connection, konfig: Konfig) -> dict | None:
+    """Stufe B5 ([puffer].freigeben, Florian 08.10.: „Solange alles ins Lager gesynct ist, darf es nach 14 Tagen vom
+    Mini gelöscht werden.“). Läuft nur aus abgleich() – nach einem Lauf, der das Lager erreicht hat und ohne Fehler
+    durchlief, pve-big ist dann wach. None = abgeschaltet ([puffer].freigeben ist nicht true).
+
+    Gelöscht wird nur ein Rohvideo im Puffer-Eingang (eingang/, Endung aus VIDEO_ENDUNGEN), das
+      a) älter als [puffer].rohdaten_tage ist – Aufnahme (mtime) UND Bestätigung im Lager,
+      b) in `lager` als bestätigt steht (SHA-256 im Lager zurückgelesen),
+      c) im Puffer noch dieselbe Größe und Zeit hat wie bei der Bestätigung,
+      d) dessen Lager-Kopie in diesem Lauf da und gleich groß ist und
+      e) dessen Lager-Kopie jetzt beim Zurücklesen dieselbe SHA-256 hat (zusätzlich zur Spec, siehe oben).
+    Jede Stufe des Pfads ist ein echter Ordner auf dem Dateisystem des Puffers (kein Link, kein fremdes Dateisystem;
+    einen Bind-Mount desselben Dateisystems erkennt das nicht – den gibt es im Aufbau nicht). Nie etwas im Lager, nie
+    Ordner, nie Clips, Momente, Sitzungen, Exporte, Highlights oder die Datenbank.
+    Fehlt die Lager-Kopie oder ist sie anders, bleibt das Video, und seine Bestätigung wird zurückgenommen (groesse -1):
+    Der nächste Abgleich legt es neu ins Lager (N40, ändert N13).
+    Der erste Lauf mit etwas zum Freigeben ist nur eine Probe: zählt, löscht nichts (ereignisse 'puffer_probe').
+    Rückgabe für e["freigabe"]: {"probe", "dateien", "gb" (gelöscht bzw. in der Probe: würde), "bleibt" (Lager-Kopie
+    fehlt/anders), "bleibt_liste", "fehler", ("abbruch")}. Wirft nie (außer KeyboardInterrupt o. Ä.): Eine Panne
+    hier macht den Abgleich nicht schlechter, es bleibt dann eben alles liegen."""
+    if konfig.wert("puffer.freigeben", False) is not True:
+        return None
+    e: dict = {"probe": False, "dateien": 0, "gb": 0.0, "bleibt": 0, "bleibt_liste": [], "fehler": 0}
+    menge = 0
+    try:
+        if os.name != "posix" or os.unlink not in os.supports_dir_fd:
+            raise KonfigFehler("Freigabe im Puffer nur unter Linux")
+        eingang = str(konfig.wert("speicher.eingang", "eingang"))
+        if not _ORDNERNAME.match(eingang) or eingang not in _roh(konfig):
+            raise KonfigFehler(f"[speicher].eingang {eingang!r} ist kein Rohdaten-Ordner aus [lager].roh")
+        tage = float(konfig.wert("puffer.rohdaten_tage", 14))
+        if not tage >= FREI_MIN_TAGE:
+            raise KonfigFehler(f"[puffer].rohdaten_tage = {tage:g}: unter {FREI_MIN_TAGE} Tag gebe ich nichts frei")
+        kandidaten = _frei_kandidaten(con, eingang, jetzt() - timedelta(days=tage), tage)
+        if not kandidaten:
+            return e
+        konfig.pruefe_getrennt()  # Marken und verschiedene Dateisysteme – nur stat()
+        lager = konfig.lager_wurzel
+        e["probe"] = probe = con.execute("SELECT 1 FROM ereignisse WHERE art = ? LIMIT 1",
+                                         (FREI_PROBE,)).fetchone() is None
+        with ExitStack() as offen:
+            wurzel_fd = os.open(os.path.realpath(konfig.wurzel), os.O_RDONLY | os.O_DIRECTORY)  # /srv/clips → /srv/puffer
+            offen.callback(os.close, wurzel_fd)
+            if not os.path.samestat(os.fstat(wurzel_fd), os.stat(konfig.wurzel)):
+                raise SpeicherOffline("Puffer während der Prüfung umgehängt")
+            dev = os.fstat(wurzel_fd).st_dev
+            eingang_fd = _unterordner(wurzel_fd, eingang, dev)
+            offen.callback(os.close, eingang_fd)
+            for k in kandidaten:
+                try:
+                    _gib_eine_frei(con, konfig, k, eingang_fd, dev, lager, probe)
+                except FileNotFoundError:
+                    continue  # im Puffer schon weg (früher freigegeben) – der Normalfall für alte Zeilen
+                except _Bleibt as f:
+                    log.info("Puffer: %s bleibt – %s", k.relativ, f)
+                    continue
+                except _KopieFehlt as f:
+                    log.warning("Puffer: %s bleibt – Kopie %s; der nächste Abgleich legt sie neu ins Lager",
+                                k.relativ, f)
+                    # N40: Bestätigung zurücknehmen, nichts löschen – sammle sieht die Datei dann wieder als offen.
+                    # Fehlt die Kopie, entsteht sie neu; ist sie anders, kommt sie als name~<Zeit> daneben (_ins_lager).
+                    con.execute("UPDATE lager SET groesse = -1 WHERE relativ = ? AND groesse = ? AND mtime_ns = ?",
+                                (k.relativ, k.groesse, k.mtime_ns))
+                    e["bleibt"] += 1
+                    e["bleibt_liste"].append(f"{k.relativ}: {f}")
+                    continue
+                except OSError as f:
+                    if f.errno in ABBRUCH:  # Lager oder Puffer gestört: nicht weiter versuchen
+                        raise
+                    log.warning("Puffer: %s bleibt – %s", k.relativ, f)
+                    e["fehler"] += 1
+                    continue
+                e["dateien"] += 1
+                menge += k.groesse
+        if probe and e["dateien"]:
+            db.protokoll(con, FREI_PROBE, f"Probe: {e['dateien']} Rohvideo(s), {_gb(menge)} GB würden freigegeben "
+                                          "– nichts gelöscht")
+    except Exception as f:  # Konfig, Lager weg, Programmfehler: nichts weiter löschen, der Abgleich bleibt gut
+        log.error("Puffer-Freigabe abgebrochen: %s: %s", type(f).__name__, f)
+        e["abbruch"] = f"{type(f).__name__}: {f}"
+    e["gb"] = _gb(menge)
+    e["bleibt_liste"] = e["bleibt_liste"][:LISTE_MAX]
+    if e["dateien"]:
+        log.info("Puffer: %d alte Rohvideo(s), %.2f GB %s", e["dateien"], e["gb"],
+                 "würden freigegeben (Probe, nichts gelöscht)" if e["probe"] else "freigegeben")
+    return e
+
+
+def _zahl_gb(gb: float) -> str:
+    return f"{gb:.1f}".replace(".", ",")
+
+
+def _freigabe_meldenswert(f: dict | None) -> bool:
+    """Das sollst du auch bei stillem Clip-Bot sehen (08.10.): die einmalige Probe vor dem ersten Löschen (N11), liegen
+    gebliebene Videos (Kopie im Lager fehlt oder ist anders) und Fehler beim Freigeben."""
+    if not f:
+        return False
+    return bool((f.get("probe") and f.get("dateien")) or f.get("bleibt") or f.get("fehler") or f.get("abbruch"))
+
+
+def _freigabe_zeilen(f: dict | None) -> list[str]:
+    """Zeilen für die Abschlussmeldung des Abgleichs (Stufe B5) – nichts, wenn es nichts zu sagen gibt."""
+    if not f:
+        return []
+    zeilen = []
+    n, gb = int(f.get("dateien") or 0), _zahl_gb(float(f.get("gb") or 0))
+    videos = "1 altes Rohvideo" if n == 1 else f"{n} alte Rohvideos"
+    if n and f.get("probe"):
+        if not f.get("abbruch"):  # abgebrochene Probe: Sie zählt beim nächsten Abgleich neu, nur die ⚠️-Zeile unten
+            zeilen.append(f"🧹 Puffer – Probe: {videos} ({gb} GB) könnte ich vom Mini löschen, "
+                          f"{'die Kopie liegt' if n == 1 else 'die Kopien liegen'} sicher im Lager. Gelöscht habe ich "
+                          f"noch nichts – ab dem nächsten Abgleich lösche ich {'es' if n == 1 else 'sie'}.")
+    elif n:
+        zeilen.append(f"🧹 Puffer: {videos} vom Mini gelöscht ({gb} GB), "
+                      f"{'die Kopie liegt' if n == 1 else 'die Kopien liegen'} sicher im Lager.")
+    if b := int(f.get("bleibt") or 0):
+        beispiel = str((f.get("bleibt_liste") or [""])[0]).split(":", 1)[0]
+        zeilen.append(f"⚠️ Puffer: {'1 altes Rohvideo bleibt' if b == 1 else f'{b} alte Rohvideos bleiben'} auf dem "
+                      f"Mini – die Kopie im Lager fehlt oder ist nicht mehr gleich"
+                      + (f" (z. B. {beispiel})" if beispiel else "") + ". Nichts verloren: Ich lösche "
+                      + ("es" if b == 1 else "sie") + " nicht und lege " + ("es" if b == 1 else "sie")
+                      + " beim nächsten Abgleich neu ins Lager.")
+    if f.get("fehler") or f.get("abbruch"):
+        zeilen.append("⚠️ Puffer: Nicht alles ließ sich vom Mini löschen – es bleibt liegen, beim nächsten Abgleich "
+                      "versuche ich es wieder.")
+    return zeilen
 
 
 def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -> dict:
     """Täglicher Abgleich (Timer 10:00): DB sichern, Offenes sammeln, nur dann pve-big wecken, jede Datei
     kopieren und zurücklesen. Fehler je Datei werden gezählt, der Rest läuft weiter; ist das Lager selbst weg
-    (Markierung fehlt, EIO …), endet die Schleife mit "abbruch".
+    (Markierung fehlt, EIO …), endet die Schleife mit "abbruch". Lief alles ohne Fehler durch, gibt gib_frei alte,
+    im Lager bestätigte Rohvideos im Puffer frei (Stufe B5, "freigabe" im Ergebnis; den Exit-Code ändert sie nicht).
 
     Nachtruhe (auch beim Nachholen per Persistent=true nach einem Neustart): Schläft pve-big, wird er nicht geweckt –
     Ergebnis "nachtruhe": true, keine Meldung, das Offene wartet auf den nächsten Abgleich. Läuft er, wird abgeglichen.
@@ -469,8 +768,15 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
         abbruch_melden = verwechslung = gestartet = False
         try:
             konfig.pruefe_getrennt(mit_lager=False)  # Puffer-Seite sofort; das Lager erst nach dem Wecken
-            e["sicherung"] = sichere_datenbank(con, konfig)
-            offen = sammle(con, konfig, fertig=[e["sicherung"]])
+            try:
+                e["sicherung"] = sichere_datenbank(con, konfig)
+            except (OSError, sqlite3.Error) as f:
+                # Puffer voll (N38): Ohne diesen Ausweg bräche jeder Abgleich hier ab – nichts käme ins Lager, und die
+                # Freigabe könnte den Puffer nie mehr leeren. Die Datenbank selbst liegt nicht im Puffer.
+                log.warning("DB-Sicherung im Puffer nicht möglich (%s: %s) – Abgleich läuft ohne sie weiter",
+                            type(f).__name__, f)
+                e["sicherung_fehler"] = f"{type(f).__name__}: {str(f)[:150]}"
+            offen = sammle(con, konfig, fertig=[e["sicherung"]] if e.get("sicherung") else [])
             e.update(_umfang(offen))
             if not _wecken_noetig(con, konfig, offen):
                 log.info("Lager-Abgleich: nichts Neues (%d offen) – pve-big bleibt aus", len(offen))
@@ -485,7 +791,7 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
                      " (Nachtruhe, pve-big läuft schon)" if ruhe else "")
             db.meldung(con, f"uebertragung:lager:{lauf}:start",
                        f"🗄️ Übertragung Puffer → Lager gestartet.\n"
-                       f"{e['offen']} Dateien werden geprüft und bei Bedarf übertragen.")
+                       f"{e['offen']} Dateien werden geprüft und bei Bedarf übertragen.", routine=True)
             gestartet = True
             with _wach(konfig, "lager", f"Lager-Abgleich ({e['offen']} Dateien)", wecken=not ruhe):
                 e["lager_gebraucht"] = True
@@ -516,6 +822,12 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
                         e["versioniert_liste"].append(o.relativ)
                 if not e.get("abbruch"):
                     _miss_platz(lager, e)  # nach dem Kopieren: mit diesem Stand rechnen die nächsten Tage
+                    # Stufe B5 („solange alles ins Lager gesynct ist“): nur nach einem Lauf ohne Fehler, pve-big wach
+                    if not e["fehler"]:
+                        if (frei := gib_frei(con, konfig)) is not None:
+                            e["freigabe"] = frei
+                    elif konfig.wert("puffer.freigeben", False) is True:
+                        e["freigabe_wartet"] = True  # die Abschlussmeldung sagt, dass vorerst nichts gelöscht wird
             abbruch_melden = bool(e.get("abbruch"))
             if e.get("abbruch"):
                 log.error("Lager-Abgleich abgebrochen: %s", e["abbruch"])

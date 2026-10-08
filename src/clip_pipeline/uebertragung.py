@@ -3,6 +3,8 @@
 Start und Ende bleiben im selben Bericht: Auch ein Kopierlauf zwischen zwei Bot-Polls
 liefert beide Meldungen. Dateien bleiben erhalten, eindeutige Outbox-Schlüssel verhindern
 erneute Meldungen. Der alte Betrieb direkt auf pve-big wird hier niemals angefasst.
+Start und glattes Ende sind Routine (db.meldung routine=True): Der stille Clip-Bot vermerkt sie im
+einfachen Modus nur (Stufe 3, 08.10.); Fehler und Abbrüche kommen immer.
 """
 from __future__ import annotations
 
@@ -47,7 +49,7 @@ def hole_meldungen(con, konfig) -> int:
         with db.transaktion(con):
             neu += db.meldung(con, key + ":start", (
                 f"🔄 Übertragung Gaming-PC → Puffer gestartet ({wann}).\n"
-                f"Videos vorgemerkt: {daten['videos_geplant']}."))
+                f"Videos vorgemerkt: {daten['videos_geplant']}."), routine=True)
             if ende:
                 ok = daten["status"] == "fertig" and not daten["fehler"]
                 kopf = "✅ Übertragung Gaming-PC → Puffer abgeschlossen" if ok else (
@@ -57,5 +59,5 @@ def hole_meldungen(con, konfig) -> int:
                         f"Dateien insgesamt: {daten['dateien_kopiert']} · Fehler: {daten['fehler']}.")
                 if not ok:
                     text += "\nOffene Dateien werden beim nächsten Lauf erneut versucht."
-                neu += db.meldung(con, key + ":ende", text)
+                neu += db.meldung(con, key + ":ende", text, routine=ok)
     return neu

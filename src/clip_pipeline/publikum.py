@@ -326,7 +326,8 @@ def post_anlegen(con: sqlite3.Connection, *, art: str, ziel_id: int, plattform: 
                  zeit: datetime | None = None) -> tuple[int, bool]:
     """Legt den Post an – je (plattform, ziel) genau einmal (INSERT … ON CONFLICT DO NOTHING, E3).
 
-    daten: Ergebnis von clip_post_daten/entwurf_post_daten. gepostet_utc = zeit (Häkchen bzw. /link). Gibt es den
+    daten: Ergebnis von clip_post_daten/entwurf_post_daten. gepostet_utc = zeit (Häkchen bzw. /link; ordnet der tägliche
+    Abruf das Video selbst zu, wird es die Upload-Zeit – publikum_adapter._tiktok_zuordnen). Gibt es den
     Post schon, bleibt alles, wie es ist (auch gepostet_utc = der erste Zeitpunkt). Einen Link trägt nur
     link_nachtragen ein – eine Regel für den Link, nicht zwei. Rückgabe: (post_id, neu angelegt?), z. B. (17, True)
     beim ersten Häkchen, (17, False) beim Doppelklick. Läuft in der Transaktion des Aufrufers (öffnet selbst

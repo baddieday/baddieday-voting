@@ -2,11 +2,13 @@
 
 import asyncio
 import json
+import os
 import shutil
 import unittest
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from clip_pipeline import db, regie, regie_lernen
 from clip_pipeline.zeit import UTC
@@ -105,6 +107,23 @@ class LernBot(MitRegieMaterial):
 
         asyncio.run(lernbot.cmd_stand(SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text)), self.context))
         self.assertEqual(antworten, [text])
+
+    def test_stand_sagt_wer_lehrt(self):
+        """08.10.: 📋 sagt ohne Netz, wer lehrt – fehlt der TikTok-Zugang, steht dort, was du einmal tun musst."""
+        from clip_pipeline import publikum_adapter
+
+        nur_app = {"TIKTOK_CLIENT_KEY": "key", "TIKTOK_CLIENT_SECRET": "geheim", "TIKTOK_ACCESS_TOKEN": "",
+                   "TIKTOK_REFRESH_TOKEN": ""}   # Key und Secret in .env, aber noch nie /tiktok
+        nicht = "Zuschauern (TikTok nicht verbunden – einmal /tiktok)"
+        with mock.patch.dict(os.environ, nur_app):
+            text = lernbot.stand_kurz(self.con, self.konfig)
+            self.assertTrue(text.endswith(f"🧠 Lernt aus: deinen ✅/❌ · KI-Note (kommt mit dem nächsten Video) · {nicht}"))
+            pfad = publikum_adapter.cache_pfad(self.konfig)
+            pfad.write_text("{kaputt", encoding="utf-8")                        # Token-Datei unlesbar: kein Absturz
+            self.assertIn(nicht, lernbot.stand_kurz(self.con, self.konfig))
+            publikum_adapter.schreibe_cache(pfad, {"client_key": "key", "seed": publikum_adapter.ANMELDUNG,
+                                                   "refresh_token": "r"})      # per /tiktok verbunden
+            self.assertIn("Zuschauern (noch kein Video ausgewertet)", lernbot.stand_kurz(self.con, self.konfig))
 
     def test_bildunterschrift_zaehler_und_gelernt(self):
         zeile = {"id": 7}

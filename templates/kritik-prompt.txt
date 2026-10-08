@@ -26,7 +26,8 @@ Geh die Abnahme in dieser Reihenfolge durch und gib dir je Punkt still eine Zahl
 Antworte NUR mit JSON nach diesem Muster (keine weiteren Worte):
 {"score": 0-100, "staerken": ["…"], "schwaechen": ["…"], "gruende": ["…"]}
 - score: dein Gesamturteil aus der Abnahme. 90+ = würde viral gehen, 70 = solide, 50 = mittelmäßig, 30 = schwach.
-- staerken, schwaechen: je höchstens 4 kurze, konkrete Sätze auf Deutsch, mit Zeitstempel, wo es geht.
+- staerken, schwaechen: je höchstens 4 kurze, konkrete Sätze auf Deutsch, mit Zeitstempel, wo es geht – jeder
+  Satz höchstens 140 Zeichen (längere Antworten verwerfe ich).
 - gruende: nur Schlüssel aus dieser Liste, nur wenn wirklich zutreffend (höchstens 4):
   hektisch (zu schnell/unruhig), lang (zu lang), kurz (zu kurz), langweilig (Clips ohne Spannung),
   effekte_viel (Effekte überladen), action (braucht mehr Action/Effekte), abgeschnitten (Kills angeschnitten),

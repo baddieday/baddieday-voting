@@ -78,6 +78,7 @@
       "name": "Telegram Info",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
+      "disabled": true,
       "position": [
         940,
         400

@@ -461,7 +461,7 @@ class Konfigdatei(MitSpeicher):
         self.assertEqual((daten["lager"]["markierung"], daten["puffer"]["markierung"]), (".clip-lager", ".clip-puffer"))
         self.assertEqual(daten["lager"]["roh"], ["eingang", "replays"])
         self.assertTrue(set(daten["lager"]["roh"]) <= set(daten["lager"]["ordner"]))
-        self.assertFalse(daten["puffer"]["freigeben"])  # Löschen im Puffer erst mit Stufe B5
+        self.assertIs(daten["puffer"]["freigeben"], True)  # Stufe B5 ab Werk an (Florian 08.10.: Ja)
         self.assertEqual(daten["puffer"]["pool_status"], "/srv/big/lvm-status.txt")
         self.assertEqual((daten["telegram"]["leise_von"], daten["telegram"]["leise_bis"]), ("23:00", "08:00"))
         self.assertEqual(daten["big"]["status_gueltig_tage"], 60)

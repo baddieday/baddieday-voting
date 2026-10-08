@@ -24,6 +24,7 @@ Gaming-PC ──SMB, alle 2 min──► MINI · CT "clips" · /srv/puffer  (= /
 | **Abgleich** | einmal am Tag (10:00) Puffer → Lager, jede Datei mit SHA-256 zurückgelesen: `pipeline lager abgleich` |
 | **Übernahme** | einmalig Lager → Puffer vor dem Umschalten: `pipeline lager uebernehmen` |
 | **Nachtruhe** | 22:00–08:00 (`[lager].nachtruhe_von/_bis`): Der Abgleich weckt pve-big dann nie. |
+| **Freigabe** (B5, seit 08.10.) | am Ende eines fehlerfreien Abgleichs: Rohvideos über 14 Tage, deren Kopie im Lager bestätigt ist, werden im Puffer gelöscht – siehe „B5“ unten |
 | **getrennter Betrieb** | `[lager].wurzel` ist gesetzt. Leer = alles exakt wie bisher – das ist der eingebaute Rückweg. |
 
 ## Bevor du anfängst
@@ -435,8 +436,8 @@ wenn Schritt 3 wirklich 0 offen gezeigt hat.
 **Warum:** Der Abgleich bringt einmal am Tag das Neue ins Lager – tagsüber, damit der Lüfter von pve-big niemanden
 weckt (in der Nachtruhe 22:00–08:00 weckt er nie). Die Morgenprüfung meldet Probleme höchstens einmal
 am Tag je Thema, montags kommt ein Lebenszeichen. Das alte Aufräumen würde Puffer-Dateien verschieben und Pfade in der
-Datenbank umschreiben; im getrennten Betrieb verweigert es (Exit 2). Löschen im Puffer kommt erst mit Stufe B5 – nur
-mit deinem OK.
+Datenbank umschreiben; im getrennten Betrieb verweigert es (Exit 2). Alte Rohvideos gibt seit 08.10. der Abgleich
+selbst frei (Stufe B5, unten) – clip-aufraeumen bleibt trotzdem aus.
 **Freigabe nötig?** Ja – neue Timer; der Test-Abgleich weckt pve-big einmal, falls etwas offen ist.
 
 ```bash
@@ -567,15 +568,57 @@ anderen Fehler ab.
   fehlgeschlagen (beim nächsten Abgleich wieder) · 2 Aufruf oder Konfiguration (z. B. Puffer und Lager verwechselbar
   – dann wurde **nichts** kopiert – oder eine ungültige Nachtruhe) · 3 Lager offline bzw. pve-big nicht wach
   geworden · 4 ein anderer Abgleich läuft.
-- **Platz:** Der Puffer wird in dieser Stufe nie automatisch geleert. 96 GB reichen bei ca. 2,6 GB je Spieltag gut
-  einen Monat; die Morgenprüfung warnt unter 20 GB frei. Bestätigte Rohdaten im Puffer freizugeben (Stufe B5) kommt
-  später und nur mit deinem OK.
+- **Platz:** 96 GB reichen bei ca. 2,6 GB je Spieltag gut einen Monat. Seit 08.10. gibt der Abgleich Rohvideos über
+  14 Tage frei, deren Kopie im Lager bestätigt ist (Stufe B5, unten) – so hält der Puffer etwa 15 Tage Rohvideos
+  plus Clips und Sessions. Die Morgenprüfung warnt weiter unter 20 GB frei.
 - **Platz im Lager:** Auch auf pve-big wird nie etwas gelöscht. Stattdessen misst jeder Abgleich, der pve-big
   braucht, den freien Platz im Lager (nur `statvfs` – kein Dateiinhalt, für clip-leerlauf kein Zugriff) und legt ihn
   in `lager_laeufe` ab. Die Morgenprüfung warnt unter 200 GB frei (`[puffer].lager_warnung_frei_gb`), Alarm unter
   50 GB (`lager_alarm_frei_gb`) – höchstens einmal am Tag, mit dem Tag der Messung. Nächster Schritt dann: Platz auf
   pve-big schaffen oder die Platte erweitern. Noch keine Messung (z. B. kurz nach R6): keine Meldung. Läuft das Lager
   doch voll, bricht der Abgleich ab, und alles bleibt im Puffer, bis wieder Platz ist.
+
+## B5 · Puffer gibt alte Rohvideos frei (seit 08.10.)
+
+Florian (08.10.): „Solange alles ins Lager gesynct ist, darf es nach 14 Tagen vom Mini gelöscht werden.“ Das ist der
+einzige Löschweg im Puffer (`lager.gib_frei`, `[puffer].freigeben = true` ab Werk).
+
+**Wann:** nur am Ende eines Abgleichs, der pve-big gebraucht hat und ohne einen einzigen Fehler durchlief (kein
+Abbruch, keine Datei, die nicht ins Lager kam). Tage ohne neue Aufnahmen wecken pve-big nicht – dann wird auch nichts
+freigegeben (es kommt ja nichts dazu). Kam eine Datei nicht ins Lager, sagt die Abschlussmeldung „Alte Rohvideos lösche
+ich erst wieder vom Mini, wenn alles im Lager ist.“ Ist der Puffer so voll, dass nicht einmal die tägliche Sicherung
+der Datenbank hineinpasst, läuft der Abgleich ohne sie weiter (eine ⚠️-Zeile sagt es) – sonst könnte er den vollen
+Puffer nie mehr leeren.
+
+**Was:** nur ein Video (`.mp4`, `.mkv`, `.mov`) in `eingang/`, das
+1. als Aufnahme (Dateizeit) **und** seit seiner Bestätigung im Lager älter als `[puffer].rohdaten_tage` (14) ist –
+   und auch 14 Tage älter als die jüngste Aufnahme im Lager (deren Zeit kommt vom PC: springt die Uhr des Mini vor,
+   bleibt die Aufnahme von gestern trotzdem),
+2. in der Tabelle `lager` bestätigt steht (SHA-256 im Lager zurückgelesen),
+3. im Puffer noch genau so groß und alt ist wie bei der Bestätigung,
+4. dessen Kopie im Lager in diesem Lauf da und gleich groß ist und
+5. dessen Kopie beim erneuten Zurücklesen dieselbe SHA-256 hat – danach ist sie die einzige Kopie.
+
+Jeder Ordner auf dem Weg muss ein echter Ordner des Puffers sein (kein Link, kein anderes Dateisystem; einen
+Bind-Mount desselben Dateisystems erkennt die Prüfung nicht – den gibt es im Aufbau nicht); gelöscht wird genau im
+geprüften Ordner. **Nie:** etwas im Lager, Ordner, Bilder, Replays, Clips, Momente, Sessions, Exporte,
+Highlights, Musik, Archiv, DB-Sicherungen oder die Datenbank (die Zeilen in `lager` und `aufnahmen` bleiben).
+
+**Probe zuerst:** Der erste Abgleich, bei dem es etwas freizugeben gibt, zählt nur und schreibt eine Zeile in die
+Abschlussmeldung („🧹 Puffer – Probe: 23 alte Rohvideos (41,2 GB) könnte ich vom Mini löschen …“). Ab dem nächsten
+Abgleich wird gelöscht; je Lauf eine Zeile („🧹 Puffer: 23 alte Rohvideos vom Mini gelöscht (41,2 GB), die Kopien
+liegen sicher im Lager.“), jede Datei steht im Protokoll (`ereignisse`, Art `puffer_frei`, mit Kopie im Lager und
+Prüfsumme). Bricht die Probe ab, zählt der nächste Abgleich neu. Fehlt eine Kopie im Lager oder ist sie nicht mehr
+gleich, bleibt das Video im Puffer, die Meldung sagt es („⚠️ Puffer: … bleiben auf dem Mini“), und seine Bestätigung
+wird zurückgenommen (`lager.groesse = -1`): Der nächste Abgleich legt es neu ins Lager – fehlt die Kopie, entsteht sie
+neu, ist sie anders, kommt die Fassung aus dem Puffer als `name~<Zeit>` daneben. Im Lager wird nichts überschrieben.
+
+**Gaming-PC:** Er kopiert Freigegebenes nicht noch einmal. `Uebertragung.ps1` merkt sich jede übertragene Datei
+(Pfad, Größe, Zeit) in `%LOCALAPPDATA%\ClipPipeline\uebertragen.tsv` und lässt Dateien älter als `MaxAlterTage`
+(Vorlage 30) ganz aus. Nur wenn diese Datei auf dem PC verloren geht, kämen bis zu 30 Tage alte Aufnahmen noch einmal
+– sie stehen dann schon bestätigt in der Tabelle und gehen beim nächsten Abgleich wieder raus.
+
+**Abschalten:** in `config/lokal.toml` unter `[puffer]` `freigeben = false` – dann wird nichts mehr gelöscht.
 
 ## Telegram bei Übertragungen
 
@@ -584,6 +627,12 @@ Für **Gaming-PC → Puffer** und **Puffer → Lager** meldet der Clip-Bot den S
 Replays und Bilder zählen nicht als Videos; bereits vorhandene Dateien werden nicht erneut mitgezählt.
 Bei Fehlern oder Abbruch nennt die Abschlussmeldung die erfolgreiche Teilmenge. Leere Timerläufe, Probeläufe
 und wegen Nachtruhe aufgeschobene Abgleiche erzeugen keine Start-/Endmeldungen.
+
+**Seit 08.10. (Stufe 3) ab Werk still:** Ist der Clip-Bot still und der Lern-Bot im einfachen Modus, kommen Start und
+glattes Ende nicht mehr – sie stehen nur in der Tabelle `meldungen` (Spalte `routine`, als gesendet vermerkt). Es
+kommen weiter: Fehler, Abbrüche, eine zusätzlich gesicherte Fassung, die einmalige Probe vor dem ersten Freigeben und
+liegen gebliebene Videos. Eine glatte Freigabe steht im Protokoll (`ereignisse`, Art `puffer_frei`). Unter /experte
+kommt alles wie vorher.
 
 Zum Aktivieren den Pipeline-Code im CT und `windows/Uebertragung.ps1` im von der Windows-Aufgabe verwendeten
 Checkout aktualisieren und den vorhandenen `clip-bot` neu starten. Die vorhandene Bot-Konfiguration genügt;

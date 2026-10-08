@@ -72,6 +72,9 @@ MIGRATIONEN += [("lern_meldungen", "tg_nachricht_id", "INTEGER")]
 # Merkliste (08.10., Florian tippt nie etwas zweimal): was nach deinem Tipp noch kommt – neue Fassung nach einem Grund,
 # Upload-Paket nach ✅ – als JSON mit Versuchen und Erledigt-Vermerk (lernbot.folge_merken); NULL = nichts
 MIGRATIONEN += [("entwurf_bewertungen", "folge", "TEXT")]
+# Stufe 3 (08.10., „der Clip-Bot meldet sich nur bei Problemen“): 1 = Routine (Start oder glattes Ende einer
+# Übertragung) – der stille Clip-Bot vermerkt sie im einfachen Modus nur (bot.app._nur_probleme); NULL = normal
+MIGRATIONEN += [("meldungen", "routine", "INTEGER")]
 
 
 def verbinde(pfad: Path | str) -> sqlite3.Connection:
@@ -125,10 +128,12 @@ def protokoll(con: sqlite3.Connection, art: str, text: str, *, clip_id: int | No
     )
 
 
-def meldung(con: sqlite3.Connection, schluessel: str, text: str) -> bool:
-    """Legt eine Nachricht für den Bot an – je Schlüssel nur einmal. True = neu angelegt."""
+def meldung(con: sqlite3.Connection, schluessel: str, text: str, routine: bool = False) -> bool:
+    """Legt eine Nachricht für den Bot an – je Schlüssel nur einmal. True = neu angelegt. routine (08.10.): nichts zu
+    tun, nichts schiefgegangen (Start oder glattes Ende einer Übertragung) – der stille Clip-Bot vermerkt sie nur."""
     cursor = con.execute(
-        "INSERT OR IGNORE INTO meldungen (schluessel, text, erstellt) VALUES (?, ?, ?)", (schluessel, text, iso(jetzt()))
+        "INSERT OR IGNORE INTO meldungen (schluessel, text, erstellt, routine) VALUES (?, ?, ?, ?)",
+        (schluessel, text, iso(jetzt()), 1 if routine else None),
     )
     return cursor.rowcount == 1
 
