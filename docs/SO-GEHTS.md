@@ -11,7 +11,8 @@
    Statuszeile sagt dann, warum.
 
 ## Was du tust
-- **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen.
+- **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen. Danach hakst du nichts ab
+  und schickst keinen Link: Die Zuschauerzahlen von TikTok holt sich der Bot selbst (dafür einmal /tiktok verbinden).
 - **❌ Nicht gut** – tipp auf einen Grund. Der Bot sagt dir sofort, was er ändert, und baut eine neue Fassung:
 
 | Grund | Was sich ändert (für immer, bis du es selbst änderst – außer bei 🥱 und 🔁) |

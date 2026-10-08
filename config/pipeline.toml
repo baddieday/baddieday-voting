@@ -338,7 +338,8 @@ screenshot_timeout_s = 120
 [publikum]
 # Lernschleife „Publikum“ (Spec §5, §6, docs/PUBLIKUM.md). Uhrzeit des täglichen Laufs `pipeline publikum bewerten`:
 # nur in deploy/systemd/clip-publikum.timer (wie bei clip-lager – eine Wahrheit).
-# Für diese Plattformen entstehen Posts (Clip-Bot: Häkchen/Link; Lern-Bot: Häkchen/Link). clip-battle.de nie.
+# Für diese Plattformen entstehen Posts (Clip-Bot: Häkchen/Link; Lern-Bot: Häkchen/Link unter /experte, im einfachen
+# Modus legt das Paket eines Shorts den Post selbst an). clip-battle.de nie.
 plattformen = ["tiktok"]
 # Der Score nimmt die Messung, die diesem Post-Alter (Tage) am nächsten liegt, und wird erst ab diesem Alter gesetzt
 alter_tage = 7

@@ -297,6 +297,24 @@ class Paket(MitLernPaket):
         asyncio.run(lernbot_paket.sende_paket(self.app, eid))
         self.assertEqual(knopf_daten(self.bot.nachrichten[-1]["reply_markup"]), [f"pt:{eid}:t"])
 
+    def test_einfach_legt_den_post_selbst_an(self):
+        """Stufe 3 (08.10.): Im einfachen Modus kein „✅ TikTok erledigt“ und kein /link mehr – ✅ unter dem Video bringt
+        das Paket, danach legt der Bot den TikTok-Post selbst an (ohne Link und Video-Nummer: welches Video es ist,
+        findet der tägliche Abruf). Ein zweites ✅ schickt das Paket noch einmal (N6) – es bleibt ein Post."""
+        self.konfig.daten["lernbot"]["experte"] = False
+        eid = self.entwurf_anlegen()
+        self.uhr = T0 + timedelta(minutes=5)
+        for _ in range(2):
+            asyncio.run(lernbot.bei_klick(SimpleNamespace(callback_query=FakeQuery(f"d:{eid}:1")), self.context))
+            self.aufgaben_ausfuehren()                                  # die Merkliste startet das Paket
+            self.uhr += timedelta(hours=1)
+        self.assertEqual(len(self.bot.dokumente), 2)
+        (p,) = self.posts()
+        self.assertEqual((p["plattform"], p["entwurf_id"], p["url"], p["video_id"], p["gepostet_utc"]),
+                         ("tiktok", eid, None, None, iso(T0 + timedelta(minutes=5))))   # Zeitpunkt des ersten Pakets
+        self.assertEqual(self.bot.nachrichten[-1]["text"], "Lad es hoch – die Zahlen hole ich mir danach selbst.")
+        self.assertFalse(any(n.get("reply_markup") for n in self.bot.nachrichten))   # keine Checkliste, kein Häkchen
+
     def test_zweites_paket_rendert_nicht_neu(self):
         eid = self.entwurf_anlegen()
         for _ in range(2):
@@ -342,10 +360,12 @@ class Paket(MitLernPaket):
             self.assertEqual(asyncio.run(lernbot.paket_auftrag(self.app, eid, folge)), "nochmal")
         self.assertEqual(len(self.bot.nachrichten), vorher + 1)                # nur die Ansage, kein Fehler-Satz
         self.assertEqual(lernbot.folge_zu(self.con, eid)["versuche"], 1)
+        self.assertEqual(self.posts(), [])          # Stufe 3: kein Paket, kein Post – es gibt nichts hochzuladen
         self.assertEqual(asyncio.run(lernbot.paket_auftrag(self.app, eid, lernbot.folge_zu(self.con, eid))),
                          "gesendet")                                           # der nächste Versuch klappt
         self.assertEqual(lernbot.folge_zu(self.con, eid)["ergebnis"], "gesendet")
         self.assertEqual(len(self.bot.dokumente), 1)
+        self.assertEqual([p["entwurf_id"] for p in self.posts()], [eid])     # … und legt den Post an
 
     def test_fehlende_moment_datei_wird_gemeldet(self):
         eid = self.entwurf_anlegen()

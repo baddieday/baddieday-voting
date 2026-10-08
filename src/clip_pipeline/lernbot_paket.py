@@ -10,10 +10,14 @@ So läuft es für dich:
      (publikum.post_anlegen) und trägt den Link ein (publikum.link_nachtragen) und nennt dir die **Post-Nummer** –
      die brauchst du für die Screenshots („#17“). Ein Häkchen ohne Link legt den Post ebenfalls an (Link später
      per /link; ein zweiter /link ersetzt einen falschen).
+  So läuft 1–3 unter /experte. Im einfachen Modus (Stufe 3, 08.10.) bringt ✅ unter dem Video das Paket (Merkliste,
+  lernbot._klick_einfach), und danach legt der Bot den Post selbst an (posts_anlegen) – keine Checkliste, kein /link;
+  welches Video es auf TikTok ist, findet der tägliche Abruf (publikum_adapter).
 
 Regeln (Annahmen A5, A26, A27 – docs/ENTSCHEIDUNGEN.md, „Annahmen im Sprint Lernschleife“):
   - Shorts und Zusammenschnitte bekommen Paket, Häkchen und Post, unabhängig von manuellen Bewertungen.
     Das Paket veröffentlicht selbst nichts; die Entscheidung für den tatsächlichen Upload bleibt bei dir.
+    Im einfachen Modus legt das Paket den Post selbst an, nur für Shorts (Querformat geht auf YouTube).
   - Die Checkliste nennt nur die Post-Plattformen ([publikum].plattformen); clip-battle.de bekommt für Entwürfe
     keinen Punkt (Florian 25.09., Rückfrage R5 in docs/ENTSCHEIDUNGEN.md: keine clip-battle.de-Checkliste).
   - Das 2-Wochen-Video (highlights.entwurf_id) bekommt im einfachen Modus keine Checkliste und keinen Post, sondern
@@ -75,6 +79,8 @@ UPLOAD_FORMATE = ("short", "zusammenschnitt")
 LINK_NUMMER = re.compile(r"[eE]?([0-9]+)")
 LINK_AUFRUF = "Aufruf: /link 41 https://www.tiktok.com/@…/video/… (41 = Nummer des Entwurfs, auch e41)"
 FEHLER_MAX = 300   # so viel Fehlertext geht an dich – genug für den Grund; ffmpeg-Ausgaben wären sonst seitenlang
+# Stufe 3 (08.10.): statt der Checkliste im einfachen Modus – nur, wenn der Post schon angelegt ist (posts_anlegen)
+ZAHLEN_SELBST = "Lad es hoch – die Zahlen hole ich mir danach selbst."
 
 Knoepfe = list[list[tuple[str, str]]]
 
@@ -139,7 +145,8 @@ def knoepfe_checkliste(entwurf_id: int, stand: dict[str, bool]) -> Knoepfe:
 
 def _checkliste_text(entwurf_id: int, stand: dict[str, bool], einfach: bool = False) -> str:
     """Text der Checkliste (HTML): je Plattform ✅ oder ⬜ und was als Nächstes zu tun ist. 07.10.: „Häkchen antippen“
-    nur, solange noch eins fehlt; einfach (Lern-Bot ohne /experte): „Video“ statt „Entwurf“, ohne /link."""
+    nur, solange noch eins fehlt; einfach (Lern-Bot ohne /experte): „Video“ statt „Entwurf“, ohne /link – seit
+    Stufe 3 (08.10.) nur noch für Häkchen in älteren Nachrichten, neue Pakete haben dort keine Checkliste."""
     if not stand:
         return "📋 Keine Post-Plattform eingestellt ([publikum].plattformen) – für diesen Entwurf entsteht kein Post."
     zeilen = [f"📋 <b>{'Video' if einfach else 'Entwurf'} #{entwurf_id} – Checkliste</b>"]
@@ -188,6 +195,30 @@ def haken_setzen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, platt
     if not neu:
         return f"{_name(plattform)}: schon erledigt (Post #{post_id})", post_id
     return f"{_name(plattform)} ✅ – Post #{post_id}. Link später mit /link {entwurf_id} …", post_id
+
+
+def posts_anlegen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> bool:
+    """Stufe 3 (08.10.): Im einfachen Modus hakst du nach dem Hochladen nichts mehr ab – sende_paket legt den Post
+    selbst an, sobald das Paket bei dir ist. Nicht schon beim ✅: Scheitert das Paket, gibt es nichts hochzuladen; den
+    Post legt dann der nächste Versuch der Merkliste an. Je Plattform aus [publikum].plattformen haken_setzen –
+    idempotent, ein zweites ✅ bleibt derselbe Post mit dem ersten Zeitpunkt. Ohne Link und Video-Nummer: Welches Video
+    es ist, findet der tägliche Abruf (publikum_adapter). Nur Shorts – Querformat geht auf YouTube, das noch nicht
+    gemessen wird. Ein Fehler kostet nie das schon gesendete Paket (sonst schickte der nächste Versuch es doppelt),
+    er steht nur im Log. Rückgabe: True, wenn es jetzt zu jeder dieser Plattformen einen Post gibt."""
+    zeile = con.execute("SELECT format FROM entwuerfe WHERE id = ?", (entwurf_id,)).fetchone()
+    if zeile is None or zeile["format"] != "short":
+        return False
+    plattformen = publikum.post_plattformen(konfig)
+    fehlt = []
+    for plattform in plattformen:
+        try:
+            if haken_setzen(con, konfig, entwurf_id, plattform)[1] is None:
+                fehlt.append(plattform)
+        except Exception as fehler:  # noqa: BLE001 – Schnittliste weg, Datenbank belegt …: das Paket ist schon da
+            log.warning("Video #%s: kein %s-Post angelegt (%s: %s)", entwurf_id, plattform, type(fehler).__name__,
+                        fehler)
+            fehlt.append(plattform)
+    return bool(plattformen) and not fehlt
 
 
 def link_speichern(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, url: str,
@@ -266,8 +297,10 @@ def dauerhaft(fehler: BaseException) -> bool:
 
 async def sende_paket(app, entwurf_id: int, auftrag: dict | None = None) -> str:
     """Paket bauen (Thread) und schicken: Datei per send_document, Caption als <pre> (zum Kopieren), Checkliste
-    mit Knöpfen. Fehler: dir kurz den Grund („⚠️ Upload-Paket: Moment-Datei fehlt …“, ohne Pfade mit Token o. ä.),
-    Details ins Log. bot_data["paket_arbeitet"] wird immer zurückgesetzt.
+    mit Knöpfen – die nur unter /experte; im einfachen Modus legt der Bot danach den Post selbst an (posts_anlegen,
+    Stufe 3) und schreibt „Lad es hoch – die Zahlen hole ich mir danach selbst.“. Fehler: dir kurz den Grund
+    („⚠️ Upload-Paket: Moment-Datei fehlt …“, ohne Pfade mit Token o. ä.), Details ins Log.
+    bot_data["paket_arbeitet"] wird immer zurückgesetzt.
 
     Bekannte Fehler (MedienFehler, KonfigFehler, CaptionFehler, Datei-/JSON-Fehler) gehen mit ihrem Text an dich;
     ein unerwarteter Fehler nur mit seinem Typ – sein Text könnte Dinge enthalten, die nicht in den Chat gehören.
@@ -319,6 +352,10 @@ async def sende_paket(app, entwurf_id: int, auftrag: dict | None = None) -> str:
             # Dein ✅ hieß schon „hochgeladen“ (highlight.entscheide_entwurf) – kein Häkchen und kein TikTok-Post: es
             # geht auf YouTube, das noch nicht gemessen wird. Dafür, wo die volle Qualität liegt.
             await app.bot.send_message(chat, volle_qualitaet(zwei_wochen))
+            return "gesendet"
+        if einfach:   # Stufe 3 (08.10.): keine Checkliste mehr – den Post legt der Bot jetzt, mit dem Paket, selbst an
+            await app.bot.send_message(chat, ZAHLEN_SELBST if posts_anlegen(con, konfig, entwurf_id) else
+                                       "Lad es hoch.")
             return "gesendet"
         stand = checkliste_stand(con, konfig, entwurf_id)
         knoepfe = knoepfe_checkliste(entwurf_id, stand)

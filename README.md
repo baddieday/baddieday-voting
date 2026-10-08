@@ -8,7 +8,8 @@ Manuelle Bewertungen und Battles bleiben freiwilliges Zusatzwissen; neue Bewertu
 
 Im Lern-Bot einen **Short (30–75 s, zunächst bevorzugt 45–75 s)** oder **Zusammenschnitt (75–120 s)** erstellen,
 direkt **📦 Upload-Paket** öffnen und veröffentlichen. Danach `/link <entwurf> <url>` schicken. Ein 👍 ist weder
-für das Paket noch den Post nötig. `/lernstand` und `/stand` zeigen veröffentlichte und ausgewertete Videos,
+für das Paket noch den Post nötig. Im einfachen Modus (Standard) reicht **✅ Hochladen**: Nach dem Paket legt der Bot
+den TikTok-Post selbst an (Stufe 3, 08.10.); `/link` ist dann nur für Ausnahmen. `/lernstand` und `/stand` zeigen veröffentlichte und ausgewertete Videos,
 Lernversion, Vertrauen und aktuelle Tendenzen.
 
 Neue Messungen aktualisieren das Modell automatisch. Mit eingerichtetem Zugang holt der tägliche vorhandene

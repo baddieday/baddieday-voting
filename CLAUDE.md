@@ -420,3 +420,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     ans Hochladen. Start und glattes Ende einer Übertragung werden nur vermerkt (`meldungen.routine`, setzt der
     Schreiber); Fehler, Abbrüche, Probe, liegen gebliebene Videos und Warnungen kommen weiter. /experte wie bisher.
     Annahmen N16–N20.
+  - **Stufe 3: ✅ legt den TikTok-Post selbst an** (`lernbot_paket.posts_anlegen`): Im einfachen Modus entsteht der
+    Post, sobald das Paket eines Shorts bei dir ist (je Plattform aus `[publikum].plattformen`, idempotent, ohne Link
+    und Video-Nummer – das Video findet der tägliche Abruf). Keine Checkliste, kein „✅ TikTok erledigt“, kein /link;
+    dort steht „Lad es hoch – die Zahlen hole ich mir danach selbst.“ Scheitert das Paket, kein Post (der nächste
+    Versuch der Merkliste legt ihn an); scheitert nur der Post, kommt das Paket nicht doppelt. Kein Post für das
+    2-Wochen-Video und Querformat. /experte wie bisher. Annahmen N21–N24.

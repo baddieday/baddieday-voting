@@ -32,6 +32,9 @@ Alles läuft auf dem Mini, im Puffer-Betrieb; **nichts davon weckt pve-big**. Ze
 ## So läuft es für dich
 
 ### 1. Vom Short zum Post
+- **Einfacher Modus (Standard, seit 08.10.):** ✅ Hochladen → das Paket kommt → der Bot legt den TikTok-Post selbst
+  an. Kein Häkchen, kein `/link`; welches Video es auf TikTok ist, findet der tägliche Abruf (Abschnitt 5a). Die
+  folgenden Punkte beschreiben den Weg unter `/experte`.
 - **Lern-Bot (Entwürfe):** 👍 auf einen Short → ✅ fertig → unter dem Entwurf steht „📦 Upload-Paket“. Der Bot
   rendert die Upload-Fassung (1080×1920, auf dem Mini – aus derselben Schnittliste wie der Entwurf, also mit
   denselben Effekten des Regisseurs 2.0; Kill-Titel und Zähler bleiben im unscharfen Rand, nie im Spielbild)
