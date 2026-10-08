@@ -1,0 +1,11 @@
+# Alle 5 Minuten: neue Matches eines Freundes verarbeiten (clip-freund-scan@<name>.service, je Lauf höchstens eins).
+# Arbeitet nur in seinem eigenen Ordner, weckt pve-big nie. Eingeschaltet nur über benutzer-anlegen.sh <name>.
+[Unit]
+Description=Clip-Pipeline: neue Matches von %i alle 5 Minuten (Freund)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

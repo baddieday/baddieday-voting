@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 from clip_pipeline import db, konfig
 from clip_pipeline.zeit import UTC, iso
@@ -28,6 +31,8 @@ class MitSpeicher(unittest.TestCase):
         self.konfig.daten["speicher"].update(host="", wol_mac="")
         self.konfig.daten.setdefault("lager", {})["wurzel"] = ""
         self.konfig.daten["datenbank"]["pfad"] = str(self.tmp / "test.db")
+        # Sperre neben der Test-Datenbank – nie die echte, auch wenn eine lokale Konfig [sperre].datei setzt (M1)
+        self.konfig.daten.setdefault("sperre", {})["datei"] = ""
         # Tests sollen nicht vom Datum abhängen: Sprint-Frist aus, Zustand von pve-big im Testordner
         self.konfig.daten.setdefault("big", {}).update(frist="", zustand_ordner=str(self.tmp / "zustand"), host="",
                                                        ssh_ziel="")
@@ -77,6 +82,29 @@ class MitSpeicher(unittest.TestCase):
              iso(start + timedelta(seconds=30)), json.dumps(merkmale), file_id, elo, iso(start), iso(start)),
         )
         return int(cursor.lastrowid)
+
+
+def instanz_anlegen(basis: Path, name: str, *, sperre: Path | None, env: str = "", toml: str = "") -> Path:
+    """Instanz-Ordner eines Freundes wie später benutzer-anlegen.sh (M1): Marke mit dem Namen, eigene Ordner, Puffer mit
+    beiden Marken, instanz.toml mit der gemeinsamen Sperre (sperre=None: nur toml) und .env. Liefert den Ordner I."""
+    inst = basis / name
+    for ordner in ("db", "daten", "regie", "musik", "material", "sfx", "cache"):
+        (inst / ordner).mkdir(parents=True, exist_ok=True)
+    (inst / ".clip-benutzer").write_text(f"{name}\n", encoding="utf-8")
+    for marke in (".clip-speicher", ".clip-puffer"):
+        (inst / "daten" / marke).touch()
+    kopf = f'[sperre]\ndatei = "{sperre}"\n' if sperre is not None else ""
+    (inst / "instanz.toml").write_text(kopf + toml, encoding="utf-8")
+    (inst / ".env").write_text(env, encoding="utf-8")
+    return inst
+
+
+@contextlib.contextmanager
+def als_instanz(inst: Path, **umgebung: str):
+    """CLIP_INSTANZ=inst (und weitere Variablen) für die Dauer des Blocks. Danach ist die Umgebung wieder genau wie
+    vorher – auch wenn lade() darin Variablen entfernt oder gesetzt hat."""
+    with mock.patch.dict(os.environ, {"CLIP_INSTANZ": str(inst), **umgebung}):
+        yield
 
 
 def testvideo(ziel: Path, *, dauer=6.0, tonspuren=2, fps=30, creation_time: datetime | None = None) -> Path:

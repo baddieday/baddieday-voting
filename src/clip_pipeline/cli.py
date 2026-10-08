@@ -2,7 +2,8 @@
 
   prepare|analyze|decide|render --session ID     highlight --id ID --tage 14
   (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe],
-   fail --session ID | --nachziehen [--tage 14])
+   fail --session ID | --nachziehen [--tage 14], scan --verarbeiten [--max N] [--versuche N] für Freunde ohne n8n,
+   benutzer pruefen|einrichten|koppeln nur in der Instanz eines Freundes)
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -13,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -20,14 +22,18 @@ from . import aufraeumen, bestand, big, caption, db, erfassung, highlight, lerne
 from . import erwartung, merkmale, mikro  # Stufe 2 (Lernschleife): Merkmale, Mic-Schritt, Erwartung
 from .konfig import KonfigFehler, SpeicherOffline, lade
 from .medien import MedienFehler
-from .sperre import Gesperrt, sperre
+from .sperre import Gesperrt, SperreFehler, pfad as sperre_pfad, sperre
 from .vorbewertung import MERKMAL_NAMEN, MERKMALE, zahl
-from .zeit import iso, jetzt, utc_zu_lokal
+from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
 
 log = logging.getLogger("pipeline")
 
 # Befehle, die den Speicher brauchen: schläft der große Host, wird er per Wake-on-LAN geweckt
 WECKEN = {"prepare", "analyze", "decide", "render", "highlight", "scan", "process", "short"}
+
+# scan --versuche (Mehrbenutzer M34): Fehler, die nicht am Match liegen – sie zählen nie als Fehlschlag, der Lauf endet
+# wie bisher (Speicher offline: Exit 3, sonst 1) und der nächste Timer-Lauf versucht es wieder
+NICHT_DAS_MATCH = (SpeicherOffline, KonfigFehler, sqlite3.OperationalError)
 
 
 def utc_heute_iso() -> str:
@@ -62,17 +68,67 @@ def _cmd_highlight(args, konfig, con) -> int:
 # --- Komfort-Befehle ------------------------------------------------------------
 
 def _cmd_scan(args, konfig, con) -> int:
+    """Ohne --max/--versuche genau wie bisher. Freunde laufen ohne n8n per Timer (Mehrbenutzer, M33–M35):
+    --max N verarbeitet je Lauf nur die N ältesten offenen Matches – die gemeinsame Sperre wird so zwischen den Läufen
+    frei; --versuche N gibt ein Match nach N Fehlschlägen auf (Status 'fehler'), sonst blockierte ein kaputtes ältestes
+    Match alle neueren für immer. "offen" in der JSON-Zeile bleibt die volle Liste, "verarbeitet" nennt diesen Lauf."""
     ergebnis = erfassung.scan(con, konfig)
     if args.verarbeiten:
         ergebnis["verarbeitet"] = []
-        for sid in ergebnis["offen"]:
+        offen = ergebnis["offen"]
+        if args.max is not None and len(offen) > args.max:
+            log.info("scan: %d von %d offenen Matches in diesem Lauf, der Rest in den nächsten", args.max, len(offen))
+            offen = offen[: args.max]
+        for sid in offen:
             try:
                 ergebnis["verarbeitet"].append(verarbeitung.process(con, konfig, sid))
-            except (verarbeitung.SessionFehler, MedienFehler, replay.ReplayFehler) as e:
-                log.error("Session %s: %s", sid, e)  # ein kaputtes Match blockiert die anderen nicht
-                ergebnis["verarbeitet"].append({"session": sid, "fehler": str(e)[:300]})
+            except Exception as e:
+                bekannt = isinstance(e, (verarbeitung.SessionFehler, MedienFehler, replay.ReplayFehler))
+                if not bekannt and (args.versuche is None or isinstance(e, NICHT_DAS_MATCH)):
+                    raise  # wie bisher: der ganze Lauf endet (main schreibt die JSON-Zeile)
+                if bekannt:
+                    log.error("Session %s: %s", sid, e)  # ein kaputtes Match blockiert die anderen nicht
+                else:
+                    log.exception("Session %s: unerwarteter Fehler", sid)   # nur mit --versuche, mit Stacktrace
+                ergebnis["verarbeitet"].append(_fehlschlag(con, konfig, sid, e, args.versuche))
     _json(ergebnis)
     return 0
+
+
+def _fehlschlag(con, konfig, sid: str, fehler: Exception, versuche: int | None) -> dict:
+    """Eintrag in "verarbeitet" für ein gescheitertes Match – ohne --versuche wie bisher {"session", "fehler"}.
+    Mit --versuche (M34/M35): jeder Fehlschlag eine Zeile in ereignisse (art 'verarbeitung_fehler'), dazu "versuch";
+    ab `versuche` Fehlschlägen Status 'fehler' (scan nimmt nur 'neu'), der Grund kommt zu matches.hinweise, der Lern-Bot
+    sagt es einmal ("status": "fehler"). Gelöscht wird nichts – `pipeline process <ID>` holt das Match jederzeit nach."""
+    eintrag = {"session": sid, "fehler": str(fehler)[:300]}
+    if versuche is None:
+        return eintrag
+    text = f"{type(fehler).__name__}: {fehler}"[:300]
+    if con.in_transaction:   # Rest des gescheiterten Schritts – nie mitspeichern
+        con.execute("ROLLBACK")
+    with db.transaktion(con):
+        db.protokoll(con, "verarbeitung_fehler", text, match_id=sid)
+        eintrag["versuch"] = n = con.execute(
+            "SELECT COUNT(*) FROM ereignisse WHERE art = 'verarbeitung_fehler' AND match_id = ?", (sid,)).fetchone()[0]
+        if n >= versuche and con.execute(
+                "UPDATE matches SET status = 'fehler', hinweise = COALESCE(hinweise || char(10), '') || ?, geaendert = ? "
+                "WHERE id = ? AND status = 'neu'", (text, iso(jetzt()), sid)).rowcount:   # nur ein offenes Match
+            db.lern_meldung(con, f"match_fehler:{sid}", _aufgegeben_text(con, konfig, sid, n))
+            eintrag["status"] = "fehler"
+    if "status" in eintrag:
+        log.warning("Session %s: %d Fehlschläge – Status 'fehler', nachholen mit: pipeline process %s", sid, n, sid)
+    return eintrag
+
+
+def _aufgegeben_text(con, konfig, sid: str, n: int) -> str:
+    """Lern-Meldung für ein aufgegebenes Match (M35) – ohne Fachbegriffe, mit Tag und Uhrzeit des Matches."""
+    try:
+        start = utc_zu_lokal(aus_iso(db.match(con, sid)["start_utc"]), konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+        wann = f"vom {start:%d.%m.} um {start:%H:%M} Uhr"
+    except (AttributeError, TypeError, ValueError):
+        wann = sid
+    return (f"⚠️ Ein Match {wann} klappt nicht – ich habe es {n}-mal versucht und lasse es aus. "
+            "Deine anderen Matches laufen normal weiter.")
 
 
 def _cmd_process(args, konfig, con) -> int:
@@ -625,6 +681,41 @@ def _cmd_lernstand(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_benutzer(args, konfig, con) -> int:
+    """Mehrbenutzer (Schritt 7/8): die Instanz eines Freundes prüfen (nur nachsehen), einrichten (Datenbank, Whisper,
+    Musik, danach prüfen) bzw. mit Telegram koppeln (Einladungslink) – nur mit CLIP_INSTANZ, gestartet von
+    clip-freund-pruefen@/-einrichten@/-koppeln@ in seiner Sandbox.
+    JSON: ok, name, befunde ({pfad, grund}), hinweise, sperre ({pfad, dev, ino}), bei einrichten auch eingerichtet;
+    koppeln: ok, name, gekoppelt, hinweis (nie Code, Link oder Zahl).
+    Exit 0 ok · 1 Befund bzw. nicht gekoppelt · 2 nicht in einer Instanz (koppeln: auch ohne Bot-Token). Ohne
+    Datenbank-Verbindung von main (ohne_db): pruefen legt nichts an, einrichten öffnet seine Datenbank selbst."""
+    from . import benutzer
+
+    if konfig.instanz is None:
+        hinweis = ("pipeline benutzer läuft nur in der Instanz eines Freundes (CLIP_INSTANZ) – über "
+                   "deploy/benutzer/benutzer-anlegen.sh bzw. benutzer-pruefen.sh")
+        log.error("%s", hinweis)
+        _json({"fehler": "konfig", "hinweis": hinweis})
+        return 2
+    if args.aktion == "koppeln":
+        try:
+            ergebnis = benutzer.koppeln(konfig)
+        except KonfigFehler as e:
+            log.error("%s", e)
+            _json({"fehler": "konfig", "hinweis": str(e)})
+            return 2
+        (log.info if ergebnis["ok"] else log.error)("%s", ergebnis["hinweis"])
+        _json(ergebnis)
+        return 0 if ergebnis["ok"] else 1
+    ergebnis = benutzer.einrichten(konfig) if args.aktion == "einrichten" else benutzer.pruefen(konfig)
+    for b in ergebnis["befunde"]:
+        log.error("Befund: %s – %s", b["pfad"], b["grund"])
+    for hinweis in ergebnis["hinweise"]:
+        log.info("Hinweis: %s", hinweis)
+    _json(ergebnis)
+    return 0 if ergebnis["ok"] else 1
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -697,6 +788,17 @@ def _cmd_publikum(args, konfig, con) -> int:
     return 1 if ergebnis["fehler"] or api["fehler"] else 0
 
 
+def _ab_eins(text: str) -> int:
+    """argparse-Typ für scan --max/--versuche: ganze Zahl ab 1 (0 hieße „nichts verarbeiten“ bzw. „sofort aufgeben“)."""
+    try:
+        wert = int(text)
+    except ValueError:
+        wert = 0
+    if wert < 1:
+        raise argparse.ArgumentTypeError(f"ganze Zahl ab 1 erwartet, nicht {text!r}")
+    return wert
+
+
 def baue_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pipeline", description="Clip-Pipeline für Fortnite-Highlights")
     p.add_argument("--konfig", help="andere Konfigurationsdatei")
@@ -717,6 +819,11 @@ def baue_parser() -> argparse.ArgumentParser:
 
     s = unter.add_parser("scan", help="neue Aufnahmen und fertige Matches erfassen")
     s.add_argument("--verarbeiten", action="store_true", help="offene Matches gleich verarbeiten")
+    # Mehrbenutzer (M33–M35): Freunde laufen ohne n8n per Timer – ohne die beiden Schalter alles wie bisher
+    s.add_argument("--max", type=_ab_eins, metavar="N",
+                   help="mit --verarbeiten: je Lauf nur die N ältesten offenen Matches")
+    s.add_argument("--versuche", type=_ab_eins, metavar="N",
+                   help="mit --verarbeiten: nach N Fehlschlägen Status 'fehler' (nachholen: pipeline process ID)")
     s.set_defaults(fn=_cmd_scan, sperren=True)
 
     s = unter.add_parser("process", help="alle vier Schritte für eine Session")
@@ -909,6 +1016,14 @@ def baue_parser() -> argparse.ArgumentParser:
     s = unter.add_parser("bot", help="Telegram-Bot starten (läuft dauerhaft)")
     s.set_defaults(fn=_cmd_bot, sperren=False)
 
+    # Mehrbenutzer (Schritt 7/8): nur in der Instanz eines Freundes – die Vorlagen clip-freund-pruefen@/-einrichten@/
+    # -koppeln@
+    s = unter.add_parser("benutzer", help="Instanz eines Freundes (nur mit CLIP_INSTANZ): pruefen (Trennung, nur "
+                                          "nachsehen) | einrichten (Datenbank, Whisper, Musik, danach pruefen) | "
+                                          "koppeln (Einladungslink, wartet bis 15 min auf /start)")
+    s.add_argument("aktion", choices=["pruefen", "einrichten", "koppeln"])
+    s.set_defaults(fn=_cmd_benutzer, sperren=False, ohne_db=True)   # einrichten nimmt die Sperre selbst (nur Musik)
+
     # Lernschleife „Publikum“ (Spec §12). Unterbefehle wie bei `lager`; `holen` (TikTok-API) kommt in Stufe 4.
     s = unter.add_parser("publikum", help="Lernschleife Publikum: bewerten (Scores ab [publikum].alter_tage, "
                                                "Standard 7 – Timer clip-publikum)")
@@ -959,11 +1074,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if (code := _vorab_ablehnen(args, konfig)) is not None:
         return code
-    con = db.verbinde(konfig.datenbank)
+    # ohne_db (benutzer pruefen/einrichten): keine Verbindung vorab – sonst legte schon das Nachsehen eine Datenbank an
+    con = None if getattr(args, "ohne_db", False) else db.verbinde(konfig.datenbank)
     try:
         if args.sperren:
             warten = float(konfig.wert("sperre.warten_s", 7200))
-            with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=warten, melde=log.info):
+            with sperre(sperre_pfad(konfig), warten_s=warten, melde=log.info):  # eine Sperre für den ganzen Mini (M1)
                 if args.befehl in WECKEN:
                     konfig.pruefe_speicher(wecken=True)
                 if konfig.getrennt:
@@ -982,6 +1098,10 @@ def main(argv: list[str] | None = None) -> int:
         log.error("%s", e)
         _json({"fehler": "gesperrt", "hinweis": str(e)})
         return 4
+    except SperreFehler as e:  # M1: Sperrdatei fehlt und lässt sich nicht anlegen – ohne sie rechnet nichts
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
     except (KeyError, verarbeitung.SessionFehler, replay.ReplayFehler, MedienFehler) as e:
         log.error("%s", e)
         _json({"fehler": str(e).strip("'\"")})
@@ -992,6 +1112,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     finally:
         try:
-            con.close()
+            if con is not None:
+                con.close()
         except Exception:
             pass

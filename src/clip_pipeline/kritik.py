@@ -171,8 +171,9 @@ def _ki_heute(con: sqlite3.Connection) -> int:
 
 
 def ki_urteil(con: sqlite3.Connection, konfig: Konfig, liste: dict, video: Path, ordner: Path) -> tuple[dict | None, str | None]:
-    """(Urteil, Hinweis) – Urteil None, wenn aus, über dem Tageslimit, ohne Video oder Claude scheiterte."""
-    if not konfig.wert("regie.kritik.ki", True):
+    """(Urteil, Hinweis) – Urteil None, wenn aus, über dem Tageslimit, ohne Video oder Claude scheiterte. Aus ist sie
+    auch bei einem Freund ohne eigenen Claude-Zugang (M1) – dann kein Kontaktbogen unter der gemeinsamen Sperre."""
+    if not konfig.wert("regie.kritik.ki", True) or not claude_aufruf.ki_moeglich(konfig):
         return None, None
     if _ki_heute(con) >= int(konfig.wert("regie.kritik.ki_pro_tag", 20)):
         return None, "KI-Cutter: Tageslimit erreicht – nur Messung"

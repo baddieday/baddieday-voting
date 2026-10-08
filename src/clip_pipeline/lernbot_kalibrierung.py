@@ -20,11 +20,11 @@ log = logging.getLogger("pipeline")
 
 def baue(konfig: Konfig, sid: str) -> dict:
     """Bericht im Thread – eigene SQLite-Verbindung, gleiche Sperre wie die Pipeline."""
-    from .sperre import sperre
+    from .sperre import pfad as sperre_pfad, sperre
 
     con = db.verbinde(konfig.datenbank)
     try:
-        with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))):
+        with sperre(sperre_pfad(konfig), warten_s=float(konfig.wert("sperre.warten_s", 7200))):
             return kalibrierung.bericht(con, konfig, sid)
     finally:
         con.close()

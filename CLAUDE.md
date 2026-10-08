@@ -107,6 +107,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - Inoffizielle Einreich-API für clip-battle.de: Entwurf in PLAN.md, Umsetzung im Repo `E:\GIT\clip-battle` erst nach OK (Branch?).
 - Whisper (Untertitel + Kommentar-Merkmal): Installation von `faster-whisper` freigeben?
 - Highlight-Video: Ordner mit lizenzierter Musik anlegen.
+- Mehrbenutzer (M1): Wie viel Speicher ist auf dem vServer frei (für den Briefkasten der Freunde, Stufe 2)?
 
 ## Entscheidungen
 - 2026-09-23: Kein Medal.tv – Nvidia + SteelSeries reichen; Pipeline wählt pro Moment die Aufnahme mit bester Abdeckung.
@@ -528,3 +529,67 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     43 s 62 s); nur wenn schon 4 Szenen länger sind, bleibt es länger. Bleibt ein Short unter deiner Mindestlänge,
     steht es darunter. Nachgestellt mit 10 Abenden Vorgeschichte, dann 10× 🎬: 11 von 11 Videos mit 46–71 s, keine
     Szene in mehr als 3. N92–N99.
+- 2026-10-08 (M1, Clip-Pipeline 4.0 – Florian: „Wie kann ich Freunden das an die Hand geben, ohne dass sie einen Server
+  oder ähnliches brauchen?“ → „Telegram wie bei dir“, für dich selbst „Auch einfacher“, und „du baust es noch komplett
+  kaputt, wenn du so weiter machst. Ich wollte es simplifizieren“): **Mehrbenutzer = eine abgeschlossene Instanz je
+  Freund.** Plan: `docs/MEHRBENUTZER.md`, Annahmen M2–M23: `docs/ENTSCHEIDUNGEN.md`, „Mehrbenutzer (Clip-Pipeline 4.0)“.
+  - Je Freund ein eigener Linux-Benutzer `clip-<name>`, ein eigener Ordner `/var/lib/clip-benutzer/<name>` (Datenbank,
+    Puffer, Regie, Musik, Cache), Konfig und `.env` gehören root, genau ein eigener Lern-Bot; gestartet nur aus
+    systemd-Vorlagen mit `CLIP_INSTANZ` und einer Sandbox, die alles von dir ausblendet. Gleicher Code, gleiche Regeln.
+  - Bei dir ändert sich nichts (Konfig, Umgebung, Sperrpfad, Dienste, n8n-Vertrag). Keine Benutzer-Spalte in deiner
+    Datenbank – verworfen (336 SQL-Anweisungen); getrennt wird durch eigene Dateien, Kernel und Sandbox.
+  - Geteilt wird nur deine Rechen-Sperre (`[sperre].datei`, leer = wie bisher `<datenbank>.lock`): Freunde dürfen sie
+    nur lesen, flock wirkt trotzdem; fehlt sie und lässt sich nicht anlegen, klarer Fehler statt Ersatzsperre.
+    Mitbehoben: `/paket` im Clip-Bot rendert jetzt auch unter der Sperre. Jeder gesperrte Schritt loggt „Sperre
+    gewartet x s, gehalten y s“ (Messgrundlage vor und nach dem ersten Freund).
+  - Deine Antworten: **Weg** = Briefkasten auf dem vServer (kleiner Upload-Dienst, nicht n8n, keine Videos durch n8n),
+    der Mini holt über Tailscale ab und rechnet – kommt mit Stufe 2, Samba-Freigaben je Freund entfallen. **Speicher**
+    „wie bei dir, mit Lager“ – eigener Lager-Unterordner je Freund auf pve-big, Freigabe im Puffer nach 14 Tagen bei
+    bestätigter Kopie; ab Stufe 2, vorher wird bei Freunden nichts gelöscht. **KI** = eigener Claude-Zugang je Freund;
+    ohne ihn bleibt sie bei ihm aus, deine Anmeldung ist nie Rückfall.
+  - Kein Auto-Update, keine automatische Installation: eingeschaltet wird nur über `benutzer-anlegen.sh`, das du selbst
+    startest.
+  - Schritt 2 (Instanz-Modus): `CLIP_INSTANZ=I` lädt nur die eigenen Werte (`konfig.lade_instanz`) – Repo-Konfig plus
+    `I/instanz.toml` (wenige erlaubte Abschnitte), Zugänge nur aus `I/.env`, alle Pfade unter I, kein Lager, nichts
+    gelöscht; was nicht passt, endet mit Exit 2. KI nur mit eigenem Claude-Zugang des Freundes (Token aus `claude
+    setup-token` in `I/db/claude-token` oder `I/.env`, eigene kleine Umgebung); ohne startet claude bei ihm nie. Bei
+    dir unverändert. M24–M32.
+  - Schritt 3 (Freund-Pipeline ohne n8n): `scan --verarbeiten --max 1 --versuche 3` per Timer – je Lauf nur das
+    älteste offene Match (die Sperre ist nur kurz belegt); nach drei Fehlschlägen Status `fehler`, eine Zeile an seinen
+    Bot, die neueren kommen dran, nichts gelöscht (`pipeline process <ID>` holt es nach). Ohne die Schalter wie bisher.
+    Abend-Video: Geht Whisper nicht, misst es die Szenen ohne Sprache, und das Video kommt trotzdem (hilft auch dir –
+    vorher brach jeder Lauf ab); auf ein aufgegebenes Match wartet der Abend nicht. M33–M37.
+  - Schritt 4 (Trennung geprüft, nur Tests): Generalprobe mit dir, max und eva im selben Squad-Match – jeder in
+    einem eigenen Prozess mit echtem ffmpeg. Keiner ändert eine Datei der anderen (Fingerabdruck), jede Datenbank
+    hat nur ihr Match, alle nehmen die eine Sperre. Dazu der erste Test für den n8n-Einstieg (`deploy/n8n-lauf.sh`,
+    unverändert): nur die Vertragsbefehle kommen durch. M38–M40.
+  - Prüfung von Schritt 1–4: zwei kleine Lücken geschlossen, die vor Ort schon die Sandbox abfängt. Ein Tippfehler im
+    Sperrpfad eines Freundes legte still eine eigene Sperre an (dann rechnete er neben dir her) – jetzt muss es deine
+    Sperrdatei geben, sonst startet bei ihm nichts. Ein leeres `CLIP_INSTANZ` lief still mit deinen Werten – jetzt ein
+    Fehler. Bei dir unverändert. M41–M42.
+  - Schritt 5 (Dienste je Freund): Vorlagen in `deploy/benutzer/` – sein Lern-Bot, alle 5 min ein Match, alle 10 min
+    das Abend-Video. Jede mit derselben Sandbox: eigener Benutzer, nur sein Ordner schreibbar, von dir nur die
+    Sperrdatei (lesen) und das Startwissen; deine Datenbank, claude, Schlüssel, Puffer, Lager und andere Freunde gibt
+    es dort nicht. Ein hängender Lauf gibt die Sperre nach 2 h frei. Das Update tut nur etwas, wenn es Freunde gibt:
+    ihre Datenbanken vorher sichern (als sie selbst, kein Link), Vorlagen hinlegen – nie einschalten –, laufende
+    Freundes-Bots neu. Eingeschaltet wird nur über `benutzer-anlegen.sh` (nächster Schritt). M43–M49.
+  - Schritt 6 (Speicher für Freunde): `deploy/pve-mini/freunde-volume.sh` legt einmal ein Volume für alle Freunde an
+    (Standard 100 GB, im CT `/var/lib/clip-benutzer`, nicht auf der CT-Platte, nicht im Puffer) – CT ca. 1 min aus.
+    Die Pool-Grenze rechnet deinen Puffer voll mit und nennt sonst die Größe, die passt. Das Rückweg-Skript hängt nur
+    aus; ein neuer Lauf hängt dasselbe Volume wieder ein. Samba je Freund entfällt (Briefkasten ab Stufe 2). M50–M54.
+  - Schritt 7 (Freund anlegen): `deploy/benutzer/benutzer-anlegen.sh <name>` (erst `--probe`) – ein Befehl, wiederholbar,
+    löscht nie. Zugänge verdeckt, nur in seiner `.env`; ein Bot-Token, den du schon nutzt, wird abgelehnt. Seine Dienste
+    gehen erst an, wenn die Prüfung in seiner Sandbox grün ist. Danach `benutzer-pruefen.sh` (alles getrennt, Bot-Link),
+    `benutzer-stilllegen.sh` (aus, Daten bleiben), `benutzer-befehl.sh` (ein Befehl in seiner Sandbox). Deine eigenen
+    Rechte schärft es nur auf dein „j“ (nur chmod, Rückweg-Skript). Für Freunde: `docs/FREUNDE.md`. M55–M68.
+  - Schritt 8 (Einladungslink): Statt seine Telegram-Zahl zu suchen, tippt der Freund einen Link an und drückt Start.
+    `benutzer-anlegen.sh` zeigt dir den Link (gilt 15 min, nur einmal), wartet und trägt seine Zahl selbst ein – erst
+    dann geht sein Bot an. Der Code steht nie im Log; je Bot bleibt es bei einem Empfänger. Mitbehoben: Stilllegen hält
+    jetzt auch Schritte an, die gerade laufen. M69–M74.
+  - Schritt 9 (eigener Claude-Zugang): Der Freund tippt in seinem Bot `/claude`, bekommt einen Anmelde-Link und schickt
+    den Code zurück – der Bot löscht die Nachricht und legt das Token nur in seinen Ordner. Ein Token vom eigenen PC
+    geht auch direkt. Nach 10 min oder bei einem Fehler wird nichts gespeichert; Code und Token stehen nie im Log. Bei
+    dir gibt es `/claude` nicht. Einmal nötig: claude global auf dem Mini. M75–M83.
+  - Prüfung von Schritt 5–9: Das freiwillige Schärfen deiner Rechte fasst nur noch an, was pipeline gehört. Vorher wurde
+    eine `lokal.toml`, die root gehört (mit nano als root angelegt), nur noch für root lesbar – alle deine Dienste wären
+    beim Start abgestürzt. Jetzt bleibt sie, wie sie ist, und das Skript sagt es. M84.

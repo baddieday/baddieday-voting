@@ -566,6 +566,9 @@ timeout_s = 180
 [sperre]
 # Nur ein rechenintensiver Schritt gleichzeitig; ein zweiter wartet so lange
 warten_s = 7200
+# Sperrdatei – eine für den ganzen Mini (Mehrbenutzer M1). Leer = neben der Datenbank (<datenbank>.lock, wie bisher).
+# In der instanz.toml eines Freundes steht hier Florians Datei (nur lesbar eingebunden – flock wirkt trotzdem).
+datei = ""
 
 [highlight]
 max_clips = 12
