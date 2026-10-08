@@ -29,5 +29,12 @@ hochlädt. Bis dahin probiert Florian alles mit ein paar Aufnahmen von Hand aus.
 Nichts mehr – einfach spielen. Etwa 45 Minuten nach deinem letzten Match kommt das Video in deinen Chat. Du drückst
 nur ✅ oder ❌.
 
-**Freiwillig:** Hast du ein eigenes Claude-Abo, kann das Programm damit zusätzlich jedes Video benoten und so schneller
-lernen. Sag Florian Bescheid, er richtet es ein. Ohne geht alles genauso.
+## Claude verbinden (freiwillig)
+Hast du ein eigenes Claude-Abo, kann das Programm damit zusätzlich jedes Video benoten und so schneller lernen. Das
+kostet dein Abo, nicht das von Florian. Ohne geht alles genauso.
+1. Tipp in deinem Bot auf **/claude** – er schickt dir einen Link.
+2. Öffne ihn, melde dich mit deinem Claude-Konto an und kopier den Code, den du danach siehst.
+3. Schick dem Bot den Code. Er löscht die Nachricht gleich wieder und antwortet „✅ Claude verbunden“.
+
+Der Link gilt 10 Minuten. Klappt es nicht: nochmal /claude – oder auf deinem PC `claude setup-token` ausführen und dem
+Bot das Token schicken (fängt mit sk-ant-oat01- an).

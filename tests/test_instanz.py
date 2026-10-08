@@ -320,7 +320,7 @@ class KI(MitInstanzen):
             zeile = geschmack.lehrer_zeile(con, k)
         self.assertEqual((antwort.hinweis, antwort.gestartet, note), (claude_aufruf.KEIN_ZUGANG, False, None))
         self.assertFalse(lauf.called or prozess.called)
-        self.assertIn("KI-Note: aus (kein eigener Claude-Zugang)", zeile)
+        self.assertIn("KI-Note: aus – verbinde dein Claude mit /claude", zeile)   # Schritt 9: der Weg steht dabei
         self.assertNotIn("/tiktok", zeile)
 
     def test_mit_token_eigene_umgebung_nie_florians(self):

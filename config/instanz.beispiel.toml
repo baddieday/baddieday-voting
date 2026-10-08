@@ -32,5 +32,5 @@ sonstige = []
 # Optional: eigenes claude-Programm (absoluter Pfad,
 # nie unter /home, /root, /var/lib/clip-pipeline oder /opt/clip-regie).
 # Leer = „claude“ aus /usr/local/bin, /usr/bin oder /bin. Die KI läuft nur mit dem eigenen Claude-Zugang des Freundes
-# (CLAUDE_CODE_OAUTH_TOKEN in .env oder später per /claude im Bot) – sonst bleibt sie bei ihm aus.
+# (per /claude in seinem Bot oder CLAUDE_CODE_OAUTH_TOKEN in .env) – sonst bleibt sie bei ihm aus.
 # claude = "/usr/local/bin/claude"

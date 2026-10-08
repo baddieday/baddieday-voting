@@ -586,3 +586,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     `benutzer-anlegen.sh` zeigt dir den Link (gilt 15 min, nur einmal), wartet und trägt seine Zahl selbst ein – erst
     dann geht sein Bot an. Der Code steht nie im Log; je Bot bleibt es bei einem Empfänger. Mitbehoben: Stilllegen hält
     jetzt auch Schritte an, die gerade laufen. M69–M74.
+  - Schritt 9 (eigener Claude-Zugang): Der Freund tippt in seinem Bot `/claude`, bekommt einen Anmelde-Link und schickt
+    den Code zurück – der Bot löscht die Nachricht und legt das Token nur in seinen Ordner. Ein Token vom eigenen PC
+    geht auch direkt. Nach 10 min oder bei einem Fehler wird nichts gespeichert; Code und Token stehen nie im Log. Bei
+    dir gibt es `/claude` nicht. Einmal nötig: claude global auf dem Mini. M75–M83.

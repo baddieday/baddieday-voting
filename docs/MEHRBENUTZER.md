@@ -1,10 +1,11 @@
 # Mehrbenutzer – eine Instanz je Freund (Entscheidung M1, 08.10.2026)
 
 Ziel Stufe 1: Ein Freund bekommt auf dem Mini seine eigene, vollständig getrennte Pipeline. Zwei Benutzer arbeiten
-unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M74: `docs/ENTSCHEIDUNGEN.md`,
-„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 8 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
+unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M83: `docs/ENTSCHEIDUNGEN.md`,
+„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 9 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
 Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox, Speicher für Freunde, Freund
-anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl). Seite für Freunde: `docs/FREUNDE.md`.
+anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl, eigener Claude-Zugang per /claude). Seite für
+Freunde: `docs/FREUNDE.md`.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -54,14 +55,14 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
 - **Pfadwächter:** Jeder Datenpfad (auch die Unterordner im Puffer) muss aufgelöst in I liegen – ein Link hinaus ist
   ein Konfig-Fehler.
 - **KI nur mit eigenem Claude-Zugang** (Florian: „Eigener Claude-Zugang“): ein Langzeit-Token aus `claude setup-token`
-  im Abo des Freundes, in `I/db/claude-token` (schreibt später sein Bot per `/claude`) oder als
+  im Abo des Freundes, in `I/db/claude-token` (schreibt sein Bot per `/claude`, Schritt 9) oder als
   `CLAUDE_CODE_OAUTH_TOKEN` in `I/.env`. Es wird erst beim Aufruf gelesen (ein später verbundener Zugang wirkt ohne
   Neustart) und kommt nie in die Umgebung des Prozesses. claude startet dann mit eigener, kleiner Umgebung: Token,
   `HOME=I/cache`, `CLAUDE_CONFIG_DIR=I/cache/claude`, fester Suchpfad `/usr/local/bin:/usr/bin:/bin`, `LANG`,
   `DISABLE_AUTOUPDATER=1`. Programm: `[instanz].claude` oder `claude` aus dem festen Suchpfad – nie aus `/home`,
   `/root`, `/var/lib/clip-pipeline` oder `/opt/clip-regie`, auch nicht über einen Link. Ohne Token startet claude bei
   ihm nie; KI-Note, KI-Cutter und KI-Einschätzung werden dann gar nicht erst vorbereitet (keine Rechenzeit unter der
-  gemeinsamen Sperre). 📋 Stand sagt „KI-Note: aus (kein eigener Claude-Zugang)“ und nichts zu TikTok. Tageslimits
+  gemeinsamen Sperre). 📋 Stand sagt „KI-Note: aus – verbinde dein Claude mit /claude“ und nichts zu TikTok. Tageslimits
   gelten je Instanz (eigene Datenbank).
 
 ## Trennung – jede Schicht einzeln prüfbar
@@ -190,8 +191,8 @@ Danach (alle im CT als root, `…` = `/opt/clip-pipeline/deploy/benutzer`):
   in derselben Sandbox wie seine Dienste.
 - **Ausschalten**, Daten bleiben: `bash …/benutzer-stilllegen.sh max` (auch eine offene Einladung) – wieder an mit
   `benutzer-anlegen.sh max`.
-- **KI für ihn** (freiwillig): sein eigenes Claude-Abo – Token aus `claude setup-token` als `CLAUDE_CODE_OAUTH_TOKEN` in
-  seine `.env`, dazu claude global installiert (von dir, z. B. per npm). `benutzer-pruefen.sh` sagt, was fehlt.
+- **KI für ihn** (freiwillig): sein eigenes Claude-Abo – er tippt in seinem Bot `/claude` (unten, Schritt 9). Einmal
+  vorher von dir: claude global installiert (z. B. per npm, nicht unter `/home`). `benutzer-pruefen.sh` sagt, was fehlt.
 
 **Abnahme Stufe 1 vor Ort:** Test-Freund mit eigenem Test-Bot anlegen und eine Kopie eines deiner Abende *als er* in
 seinen Puffer legen – bei dir wird nichts verschoben oder gelöscht (deine Dateien im Puffer sind für alle lesbar):
@@ -229,6 +230,23 @@ Der Freund muss keine Zahl suchen: Er tippt einen Link an und drückt Start.
   Telegram wird nicht gefragt. Das Skript (`tests/test_deploy_benutzer.py`): Zahl über die Kopplung, Bot erst danach,
   ohne Kopplung nur der Bot aus, ein Link statt `kopplung.json` wird nicht gelesen, ein alter Link nie gezeigt.
 
+## Eigener Claude-Zugang per /claude (umgesetzt, Schritt 9)
+Der Freund verbindet sein Claude-Abo selbst – ohne Konsole und ohne dich:
+- **`/claude`** in seinem Bot startet `claude setup-token` in einem Pseudo-Terminal, mit derselben kleinen Umgebung wie
+  jeder Claude-Aufruf seiner Instanz (HOME und Claude-Ordner in `I/cache`, kein Auto-Update, nichts aus der Umgebung des
+  Bots). Den Anmelde-Link schickt der Bot ihm; seine nächste Nachricht ist der Code. Der Bot löscht sie, gibt den Code
+  ein und legt das Token nach `I/db/claude-token` (0600) – ab dem nächsten Aufruf benotet die KI seine Videos.
+- Ein Token aus `claude setup-token` auf seinem PC kann er auch direkt schicken (gespeichert, Nachricht gelöscht).
+- **Fristen:** Link 60 s, Token nach dem Code 60 s, alles 10 min. Danach, bei einem Fehler oder einem neuen `/claude`
+  wird claude beendet; gespeichert wird nichts, die Antwort nennt den Ausweg. Fehlt claude: „Florian muss Claude einmal
+  auf dem Mini installieren“. Code und Token stehen nie im Log, nie in der Datenbank, nie wieder im Chat.
+- **Bei dir** gibt es `/claude` nicht, `/tiktok` hat nur dein Bot. 📋 Stand eines Freundes ohne Zugang: „KI-Note: aus –
+  verbinde dein Claude mit /claude“.
+- Geprüft (`tests/test_claude_verbinden.py`, claude als Attrappe mit den Steuerzeichen des echten): Link → Code →
+  Token-Datei 0600 mit genau dem Token, Code-Nachricht gelöscht, nichts im Log, claude beendet; Fehlermeldung,
+  Schweigen, kein Link, Frist, claude fehlt → nichts gespeichert, claude beendet, freundliche Antwort; Token direkt;
+  dein Bot ohne `/claude`, deine Hilfe gleich. Den Link findet es auch im echten `claude setup-token` (2.1.294).
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -253,7 +271,7 @@ weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
 ## Stufen
 1. **Sichere Benutzertrennung** (dieser Plan): gemeinsame Sperre, Instanz-Modus, Freund-Pipeline ohne n8n,
    Isolationstests, Dienst-Vorlagen mit Sandbox, Freunde-Volume (ohne Samba je Freund, M12), Anlegen und Prüfen mit
-   einem Befehl, Einladungslink (alles umgesetzt).
+   einem Befehl, Einladungslink, eigener Claude-Zugang per /claude (alles umgesetzt).
 2. **Freunde liefern selbst:** Briefkasten auf dem vServer + kleines Programm für den PC, Lager je Freund mit
    Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot.
 3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.

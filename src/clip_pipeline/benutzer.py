@@ -191,7 +191,8 @@ def ki_hinweis(konfig: Konfig) -> str:
     if bereich := claude_verboten(programm):
         return f"claude liegt unter {bereich} – für Freunde nicht nutzbar (global installieren, z. B. /usr/local/bin)"
     if claude_aufruf.instanz_token(konfig) is None:
-        return "claude ist da, aber kein eigener Claude-Zugang – die KI bleibt aus (Token aus `claude setup-token`)"
+        return ("claude ist da, aber kein eigener Claude-Zugang – die KI bleibt aus (der Freund verbindet sein Claude-Abo "
+                "mit /claude in seinem Bot)")
     return "eigener Claude-Zugang: ja"
 
 

@@ -416,7 +416,7 @@ def lehrer_zeile(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str:
     Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat. Fehlt etwas, das nur du einmal tun kannst (Claude
     anmelden, TikTok verbinden), steht es hier – ohne Netz, nur aus Datenbank, .env und Token-Datei.
     Freund (M1): kein TikTok-Hinweis (in Stufe 1 holt bei ihm niemand Zahlen ab); ohne eigenen Claude-Zugang
-    „KI-Note: aus (kein eigener Claude-Zugang)“ statt des Anmelde-Hinweises für Florian."""
+    „KI-Note: aus – verbinde dein Claude mit /claude“ (Schritt 9) statt des Anmelde-Hinweises für Florian."""
     from . import autonom, claude_aufruf, publikum_adapter   # hier, nicht oben: geschmack bleibt leicht
 
     freund = konfig.instanz is not None
@@ -431,11 +431,11 @@ def lehrer_zeile(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str:
                      "hochgeladen oder den Text dabei geändert?")   # N45: der wahrscheinliche Grund
     zuschauer = ", ".join(teile) or "noch kein Video ausgewertet"
     if not claude_aufruf.ki_moeglich(konfig):
-        ki = "KI-Note: aus (kein eigener Claude-Zugang)"
+        ki = "KI-Note: aus – verbinde dein Claude mit /claude"
     else:
         stand = ki_stand(con, bis)
         if freund and stand.startswith("fehlt"):
-            stand = "fehlt – eigener Claude-Zugang klappt nicht"
+            stand = "fehlt – eigener Claude-Zugang klappt nicht, neu verbinden mit /claude"
         ki = f"KI-Note ({stand})"
     return f"🧠 Lernt aus: deinen ✅/❌ · {ki} · Zuschauern ({zuschauer})"
 
