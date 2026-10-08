@@ -70,7 +70,11 @@ nachtruhe_bis = "08:00"
 # ins Lager. Die Morgenprüfung läuft um 11:00 (deploy/systemd/clip-puffer-pruefen.timer).
 markierung = ".clip-puffer"    # liegt NUR im Puffer
 rohdaten_tage = 14             # so viele Tage Rohvideos (eingang/) hält der Puffer; die Übernahme holt so viele (25.09.)
-freigeben = false              # Stufe B5 (später, nur mit OK): bestätigte Rohdaten im Puffer löschen
+# Stufe B5 (Florian 08.10.: „Solange alles ins Lager gesynct ist, darf es nach 14 Tagen vom Mini gelöscht werden“):
+# Der tägliche Abgleich löscht nach einem fehlerfreien Lauf Rohvideos aus eingang/, die älter als rohdaten_tage sind und
+# deren Kopie im Lager bestätigt und eben zurückgelesen ist (lager.gib_frei). Der erste Lauf ist nur eine Probe.
+# Nie im Lager, nie Clips, Sessions, Exporte, Highlights oder die Datenbank. false = nichts löschen.
+freigeben = true
 warnung_frei_gb = 20           # Morgenprüfung: Meldung, wenn weniger frei
 alarm_frei_gb = 8
 # Lager auf pve-big: gemessen beim Abgleich (nur statvfs), gewarnt in der Morgenprüfung. Gelöscht wird nie etwas.

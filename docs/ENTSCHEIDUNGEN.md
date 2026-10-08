@@ -260,6 +260,7 @@ Nachrichtenflut in der Nacht, 12-h-Warnung, Match-Ende = jetzt). In B gibt es di
 2. Rohdaten (`eingang/`, `replays/`) werden im Lager nie überschrieben oder gelöscht; Konflikte werden versioniert abgelegt.
 3. Im Puffer wird in dieser Stufe nichts automatisch gelöscht (`[puffer].freigeben = false`). Freigabe bestätigter
    Rohdaten ist eine eigene spätere Stufe (B5) und braucht dein OK. 96 GB reichen für gut einen Monat.
+   → 08.10.: OK von Florian, B5 umgesetzt und ab Werk an („Nichts mehr von Hand“, Stufe 2, Annahmen N9–N15).
 4. Samba im CT blendet nur `.aktiv` aus – `veto files` vergleicht jeden Ordnernamen auf jeder Ebene, sonst verschwände
    `eingang\nvidia\highlights` still.
 5. Probleme meldet eine Morgenprüfung (09:30) höchstens einmal am Tag je Thema, nachts nichts; montags ein Lebenszeichen.
@@ -722,7 +723,7 @@ Handarbeit), 3 Pläne, 2 Richter. Jede Stufe ist für sich nutzbar:
 1. **Nichts einstellen, nichts nochmal tippen** – umgesetzt am 08.10.
 2. **Puffer gibt frei:** Rohvideos älter als 14 Tage, deren Kopie im Lager per Prüfsumme bestätigt ist (Florian 08.10.:
    „Solange alles ins Lager gesynct ist, darf es nach 14 Tagen vom Mini gelöscht werden.“). Keine Auto-Updates
-   (Florian: „Nein, ich spiele selbst ein“).
+   (Florian: „Nein, ich spiele selbst ein“). Umgesetzt am 08.10. (`lager.gib_frei`, `docs/PUFFER.md`, „B5“).
 3. **Ein Weg nach dem ✅:** 2-Wochen-Video nur im Lern-Bot, ✅ legt den TikTok-Post selbst an, eindeutige Zuordnung über
    die TikTok-API, auch Flops bekommen ihre Note, das Update richtet den Zahlen-Abruf ein, 📋 zeigt, wer lehrt.
 4. **Nachschub von selbst:** mehr Anlauf vor „zu kurz“; nie gesehene starke Szenen (Florian 08.10.: auffüllen ja –
@@ -743,3 +744,13 @@ einfachen Modus, eine vierte Geschmacks-Schraube, Auto-Update, Selbstreparatur a
 | N6 | ✅ Hochladen bleibt stehen; ein zweites ✅ schickt dasselbe Paket noch einmal |
 | N7 | Abend-Video: scheitert erst das Rendern, holt der nächste Timer-Lauf es einmal auf der CPU nach (nur einfacher Modus). Dauerhafte Fehler (Datei oder Musik fehlt, ungültige Länge) ergeben sofort eine Zeile |
 | N8 | Bekannt, selten, nicht behoben: Ein harter Absturz zwischen Rendern und Senden einer Merklisten-Fassung kann nach dem Neustart ein zweites Video ergeben; 🥱 kündigt die neue Fassung an, auch wenn danach „keine neuen Szenen“ kommt |
+
+| Nr. | Annahme (Stufe 2 – Puffer gibt frei, `lager.gib_frei`) |
+|---|---|
+| N9 | „Älter als 14 Tage“ heißt: die Aufnahme (Dateizeit) UND ihre Bestätigung im Lager. Eine spät vom PC gekommene alte Aufnahme bleibt so noch 14 Tage nach der Bestätigung im Puffer – die Pipeline braucht sie vielleicht noch |
+| N10 | Zusätzlich zur Spec wird die Lager-Kopie direkt vor dem Löschen ganz zurückgelesen (Seiten-Cache verworfen) und muss dieselbe SHA-256 haben wie bei der Bestätigung – danach ist sie die einzige Kopie. Kostet je Lauf etwa die neu freigegebene Menge (~2,6 GB je Spieltag) Lesen über NFS, während pve-big ohnehin wach ist |
+| N11 | Probe = der erste Abgleich, bei dem es etwas freizugeben gibt (nicht einfach der erste nach dem Update) – so siehst du echte Zahlen, bevor zum ersten Mal gelöscht wird. Sie kommt nur einmal (`ereignisse`, Art `puffer_probe`); Aus- und wieder Einschalten bringt keine zweite |
+| N12 | Nur Videos (`.mp4`, `.mkv`, `.mov`) aus `eingang/`, deren Lager-Kopie auch in `eingang/` des Lagers liegt; nie Ordner, Bilder, Replays, Clips, Momente, Sessions, Exporte, Highlights, Musik, Archiv, DB-Sicherungen. Zeilen in `lager`/`aufnahmen` bleiben (in der Datenbank wird nichts gelöscht) |
+| N13 | Die Zeilen (Probe, freigegeben, liegen geblieben) stehen in der Abschlussmeldung „Übertragung Puffer → Lager“ – keine eigene Nachricht. Fehlt eine Lager-Kopie oder ist sie anders, bleibt das Video liegen und die Meldung sagt es bei jedem Abgleich wieder; repariert wird nicht von selbst (das hieße ins Lager oder in die Tabelle eingreifen). Den Exit-Code des Abgleichs ändert die Freigabe nicht |
+| N14 | Freigegeben wird nur, wenn der Abgleich pve-big gebraucht hat (Tage mit neuen Aufnahmen) – an Tagen ohne neue Daten wächst der Puffer auch nicht. Der Gaming-PC kopiert Freigegebenes nicht erneut (`uebertragen.tsv`, `MaxAlterTage`); ginge `uebertragen.tsv` verloren, kämen bis zu 30 Tage alte Aufnahmen noch einmal und gingen beim nächsten Abgleich wieder raus |
+| N15 | Die Freigabe läuft unter der Lager-Sperre des Abgleichs, nicht unter der Pipeline-Sperre (sonst wartete sie auf jeden Render). Liest ein Schritt gerade ein über 14 Tage altes Rohvideo, liest er es zu Ende (Linux gibt die Datei erst nach dem Schließen frei); wer es danach sucht, behandelt es wie bisher als „nur im Lager“ (Nachschnitt, Fail, Regisseur) |

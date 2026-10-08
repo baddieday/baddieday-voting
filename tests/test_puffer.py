@@ -141,7 +141,11 @@ class Morgenpruefung(MitPuffer):
         text = self.text(f"puffer:platz:{self.tag()}")
         self.assertIn("15.0 GB frei", text)
         self.assertIn("Warnung unter 20 GB", text)
-        self.assertIn("automatisch gelöscht wird noch nichts", text)
+        self.assertIn("gibt der tägliche Abgleich selbst frei", text)  # Stufe B5 (ab Werk an)
+        self.konfig.daten["puffer"]["freigeben"] = False
+        self.assertIn("automatisch gelöscht wird nichts",
+                      puffer.status(self.con, self.konfig, self.zeit)["befunde"]["platz"])
+        self.konfig.daten["puffer"]["freigeben"] = True
         self.frei(5)
         self.assertEqual(self.pruefe(), [])  # Alarm am selben Tag: das Thema ist schon gemeldet
         self.assertIn("🚨", puffer.status(self.con, self.konfig, self.zeit)["befunde"]["platz"])

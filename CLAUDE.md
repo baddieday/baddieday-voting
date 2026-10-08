@@ -132,6 +132,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   (SHA-256 mit Zurücklesen, Rohdaten im Lager nie überschrieben). Einführung: `docs/PUFFER.md`.
 - 2026-09-25: **Nie löschen.** Rohdaten und Clips werden nirgends automatisch gelöscht (clip-aufraeumen ist aus). Wird Speicher
   knapp (Puffer, Thin-Pool des Mini, Lager auf pve-big), kommt eine Warnung per Telegram (Prüfung einmal am Tag).
+  Einzige Ausnahme seit 08.10. (Florian: Ja): Der Puffer gibt Rohvideos über 14 Tage frei, deren Kopie im Lager
+  bestätigt ist (Stufe B5, siehe 08.10.). Im Lager, bei Clips und in der Datenbank gilt „Nie löschen“ weiter.
 - 2026-09-25: **Abgleich tagsüber** (10:00, Prüfung 11:00) – pve-big wird nie nachts geweckt, sein Lüfter soll niemanden wecken.
 - 2026-09-25: Der **Puffer hält 14 Tage Rohvideos** (`[puffer].rohdaten_tage`) – der Regisseur baut seine Momente daraus.
 - 2026-09-25 (E20): Zugang für Claude über ein flüchtiges Tailnet-Gerät (Anmeldung per Link) und Tailscale SSH im check-Modus
@@ -405,3 +407,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - **Florians Antworten:** Der Puffer darf Rohvideos nach 14 Tagen löschen, wenn ihre Kopie im Lager bestätigt ist
     (ersetzt für den Puffer „Nie löschen“ vom 25.09., Stufe 2). Keine Auto-Updates. Dünne Abende mit nie gesehenen
     starken Szenen auffüllen (Stufe 4).
+  - **Stufe 2 (umgesetzt): Puffer gibt frei** (`lager.gib_frei`, `[puffer].freigeben = true`): nur am Ende eines
+    fehlerfreien Abgleichs, der das Lager erreicht hat; nur Videos aus `eingang/`, deren Aufnahme UND Bestätigung im
+    Lager älter als 14 Tage sind, die im Puffer unverändert sind und deren Lager-Kopie jetzt da, gleich groß und beim
+    Zurücklesen gleich (SHA-256) ist. Kein Link, kein fremdes Dateisystem im Pfad. Erster Lauf mit etwas zum Freigeben
+    = Probe; jede Löschung in `ereignisse` (`puffer_frei`), eine Zeile in der Abschlussmeldung. Annahmen N9–N15.
+    Kein Auto-Update (Florian: „Nein, ich spiele selbst ein“).

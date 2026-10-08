@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import big, cli, konfig, lager, material
+from clip_pipeline import big, cli, db, konfig, lager, material
 from clip_pipeline.konfig import KonfigFehler
 from clip_pipeline.sperre import sperre
 from clip_pipeline.zeit import iso, jetzt, lokal_zu_utc, utc_zu_lokal
@@ -431,6 +431,107 @@ class Abgleich(MitAbgleich):
         self.assertNotIn("TOKEN_DARF_NICHT_IN_TELEGRAM", meldungen[-1]["text"])
         self.assertIsNotNone(self.zeile("eingang/a.mp4"))
         self.assertIsNone(self.zeile("eingang/b.mp4"))
+
+
+TAG = 86400
+
+
+class Freigabe(MitAbgleich):
+    """Stufe B5 (Florian 08.10.: „Solange alles ins Lager gesynct ist, darf es nach 14 Tagen vom Mini gelöscht
+    werden“): nur alte, im Lager bestätigte Rohvideos aus eingang/, nur nach einem fehlerfreien Abgleich, der das
+    Lager erreicht hat – und der erste Lauf mit etwas zum Freigeben ist nur eine Probe."""
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["puffer"].update(freigeben=True, rohdaten_tage=14)
+
+    def gesichert_vor(self, tage: float) -> None:
+        """Ein Abgleich kopiert und bestätigt alles Offene – dann so tun, als läge das tage zurück."""
+        code, e = self.lauf("lager", "abgleich")
+        self.assertEqual(code, 0, e)
+        alt = iso(jetzt() - timedelta(days=tage))
+        self.con.execute("UPDATE lager SET bestaetigt = ?, zuerst_gesehen = ?", (alt, alt))
+
+    def abgleich(self, neu: str) -> dict:
+        """Ein Abgleich, der pve-big braucht (eine neue Aufnahme ist offen) – nur dann kommt die Freigabe dran."""
+        self.datei(self.puffer, neu, b"neu")
+        code, e = self.lauf("lager", "abgleich")
+        self.assertEqual(code, 0, e)
+        return e
+
+    def geloescht(self) -> int:
+        return self.con.execute("SELECT COUNT(*) FROM ereignisse WHERE art = ?", (lager.FREI_ART,)).fetchone()[0]
+
+    def test_erst_probe_dann_nur_alte_bestaetigte_videos(self):
+        alt_a = self.datei(self.puffer, "eingang/nvidia/a.mp4", b"a" * 2000, alter_s=20 * TAG)
+        alt_b = self.datei(self.puffer, "eingang/steelseries/b.mp4", b"b" * 3000, alter_s=20 * TAG)
+        bleiben = [self.datei(self.puffer, rel, b"x", alter_s=20 * TAG)  # kein Video oder nicht aus eingang/
+                   for rel in ("eingang/nvidia/a.png", "replays/r.replay", "sessions/s/clips/c.mp4", "highlights/h.mp4")]
+        jung = self.datei(self.puffer, "eingang/nvidia/c.mp4", b"c" * 100, alter_s=5 * TAG)  # Aufnahme erst 5 Tage alt
+        self.gesichert_vor(15)
+
+        e = self.abgleich("eingang/nvidia/neu1.mp4")  # erster Lauf mit etwas zum Freigeben: nur zählen
+        self.assertEqual((e["freigabe"]["probe"], e["freigabe"]["dateien"]), (True, 2))
+        self.assertTrue(alt_a.exists() and alt_b.exists())
+        text = self.meldungen()[-1]["text"]
+        self.assertIn("🧹 Puffer – Probe: 2 alte Rohvideos (0,0 GB) könnte ich freigeben", text)
+        self.assertIn("Gelöscht habe ich noch nichts", text)
+
+        e = self.abgleich("eingang/nvidia/neu2.mp4")  # ab dem nächsten Lauf wird freigegeben
+        self.assertEqual((e["freigabe"]["probe"], e["freigabe"]["dateien"], e["freigabe"]["bleibt"]), (False, 2, 0))
+        self.assertFalse(alt_a.exists() or alt_b.exists())
+        self.assertTrue(jung.exists() and all(p.exists() for p in bleiben))
+        self.assertTrue((self.puffer / "eingang/nvidia").is_dir())  # Ordner bleiben
+        self.assertEqual((self.lager / "eingang/nvidia/a.mp4").read_bytes(), b"a" * 2000)  # im Lager unberührt
+        self.assertEqual((self.lager / "eingang/steelseries/b.mp4").read_bytes(), b"b" * 3000)
+        arten = [z[0] for z in self.con.execute("SELECT art FROM ereignisse WHERE art LIKE 'puffer%' ORDER BY id")]
+        self.assertEqual(arten, [lager.FREI_PROBE, lager.FREI_ART, lager.FREI_ART])
+        self.assertIn("🧹 Puffer: 2 alte Rohvideos freigegeben (0,0 GB), Kopien liegen im Lager.",
+                      self.meldungen()[-1]["text"])
+
+        # spät vom PC gekommen (Aufnahme 20 Tage alt, eben erst bestätigt): bleibt noch 14 Tage im Puffer
+        spaet = self.datei(self.puffer, "eingang/nvidia/spaet.mp4", b"s" * 100, alter_s=20 * TAG)
+        e = self.abgleich("eingang/nvidia/neu3.mp4")  # nichts mehr zu tun: kein Wort dazu
+        self.assertEqual(e["freigabe"]["dateien"], 0)
+        self.assertTrue(spaet.exists() and jung.exists())
+        self.assertNotIn("🧹", self.meldungen()[-1]["text"])
+
+    def test_kopie_im_lager_fehlt_oder_anders_nichts_geloescht(self):
+        dateien = [self.datei(self.puffer, f"eingang/nvidia/{name}.mp4", name.encode() * 500, alter_s=20 * TAG)
+                   for name in ("fehlt", "kurz", "anders")]
+        self.gesichert_vor(15)
+        db.protokoll(self.con, lager.FREI_PROBE, "Probe schon gelaufen")
+        (self.lager / "eingang/nvidia/fehlt.mp4").unlink()
+        (self.lager / "eingang/nvidia/kurz.mp4").write_bytes(b"kurz" * 400)    # anders groß
+        (self.lager / "eingang/nvidia/anders.mp4").write_bytes(b"ANDERS" * 500)  # gleich groß, anderer Inhalt
+        e = self.abgleich("eingang/steelseries/neu.mp4")
+        self.assertEqual((e["ok"], e["freigabe"]["dateien"], e["freigabe"]["bleibt"]), (True, 0, 3))
+        self.assertTrue(all(p.exists() for p in dateien))
+        self.assertEqual(self.geloescht(), 0)
+        text = self.meldungen()[-1]["text"]
+        self.assertTrue(text.startswith("✅"), text)  # der Abgleich selbst war in Ordnung
+        self.assertIn("⚠️ Puffer: 3 alte Rohvideos bleiben liegen – die Kopie im Lager fehlt oder ist nicht mehr gleich",
+                      text)
+
+    def test_nicht_nach_einem_lauf_mit_fehlern_und_nie_durch_einen_link(self):
+        alt = self.datei(self.puffer, "eingang/nvidia/a.mp4", b"a" * 2000, alter_s=20 * TAG)
+        self.gesichert_vor(15)
+        db.protokoll(self.con, lager.FREI_PROBE, "Probe schon gelaufen")
+        # „Solange alles ins Lager gesynct ist“: Kam eine Datei nicht ins Lager, wird nichts freigegeben
+        self.datei(self.puffer, "eingang/steelseries/neu.mp4", b"neu")
+        with mock.patch.object(lager, "kopiere_geprueft", side_effect=PermissionError(errno.EACCES, "nein")):
+            code, e = self.lauf("lager", "abgleich")
+        self.assertEqual(code, 1, e)
+        self.assertNotIn("freigabe", e)
+        self.assertTrue(alt.exists())
+        # eingang/nvidia ist jetzt ein Link nach außerhalb des Puffers: nie verfolgt, dort wird nichts gelöscht
+        woanders = self.tmp / "woanders"
+        (self.puffer / "eingang/nvidia").rename(woanders)
+        (self.puffer / "eingang/nvidia").symlink_to(woanders, target_is_directory=True)
+        e = self.abgleich("eingang/steelseries/neu2.mp4")
+        self.assertEqual((e["freigabe"]["dateien"], e["freigabe"]["bleibt"]), (0, 0))
+        self.assertTrue((woanders / "a.mp4").exists())
+        self.assertEqual(self.geloescht(), 0)
 
 
 class Verwechslung(MitAbgleich):
