@@ -713,3 +713,33 @@ Szenen sind ok. Code: `szenen.py`, `regeln.neue_fassung`, `geschmack.waehle(ande
 | Z7 | Das andere Tempo muss die Segmentlänge um mindestens 15 % in seine Richtung ändern; es geht für diese eine Fassung auch vor dem Publikums-Modell |
 | Z8 | Beim zweiten 🥱 bleibt der Abend der des ersten Videos (`parameter.fassung.abend`) |
 | Z9 | Ein 👎 mit 🥱 bildet jetzt ein Paar im Cutter-Maßstab (Schnitt-Urteil), bisher nicht |
+
+### Nichts mehr von Hand (08.10.2026) – Plan und Annahmen bis Florian widerspricht
+Florian: „Wenn ich alles per Hand einstellen kann/muss, brauchen wir über das Ziel nicht weiter zu reden – es soll
+autonom und besser und schneller sein als mit der Hand zu schneiden.“ Bestandsaufnahme: 4 Prüfer (64 Stellen mit
+Handarbeit), 3 Pläne, 2 Richter. Jede Stufe ist für sich nutzbar:
+
+1. **Nichts einstellen, nichts nochmal tippen** – umgesetzt am 08.10.
+2. **Puffer gibt frei:** Rohvideos älter als 14 Tage, deren Kopie im Lager per Prüfsumme bestätigt ist (Florian 08.10.:
+   „Solange alles ins Lager gesynct ist, darf es nach 14 Tagen vom Mini gelöscht werden.“). Keine Auto-Updates
+   (Florian: „Nein, ich spiele selbst ein“).
+3. **Ein Weg nach dem ✅:** 2-Wochen-Video nur im Lern-Bot, ✅ legt den TikTok-Post selbst an, eindeutige Zuordnung über
+   die TikTok-API, auch Flops bekommen ihre Note, das Update richtet den Zahlen-Abruf ein, 📋 zeigt, wer lehrt.
+4. **Nachschub von selbst:** mehr Anlauf vor „zu kurz“; nie gesehene starke Szenen (Florian 08.10.: auffüllen ja –
+   höchstens die Hälfte, Anfang vom Abend, höchstens 12 Tage alt); Nachtrag bei spät eintreffendem Material; Musik lädt
+   sich selbst nach (Techno, Hardstyle, Hardcore, Phonk, Brazilian Phonk).
+5. **Lernen von den Zuschauern:** Publikum lehrt Aufbau, Tempo und Zeitlupe; ⏱️/⏳ als Grenze mit Richtung.
+
+Bewusst nicht: „stark“ nach gelernten Punkten (weicht „lieber kein Video als Füllmaterial“ auf), Technik-Tore im
+einfachen Modus, eine vierte Geschmacks-Schraube, Auto-Update, Selbstreparatur am Server.
+
+| Nr. | Annahme (Stufe 1) |
+|---|---|
+| N1 | Im einfachen Modus fest: Clips = neuester Abend, Stil = automatisch, nur starke Szenen (`einstellungen.EINFACH_FEST`, `einstellungen.fest`). Andere alte Werte (z. B. Short-Mindestlänge vom 06.10.) gelten weiter und stehen im 📋. Aus der Tabelle wird nichts gelöscht; /experte wie bisher |
+| N2 | Alte Knöpfe aus früheren ⚙️-Nachrichten zeigen im einfachen Modus nur die Übersicht und ändern nichts |
+| N3 | Der alte Schalter „Effekte aus“ zählt als Stufe „aus“. 😵 senkt eine Stufe, 🥱 hebt eine (nie über „normal“); „normal“ heißt im einfachen Modus „wie gelernt“ |
+| N4 | Merkliste `entwurf_bewertungen.folge`: Bewertung und Regel sofort, der Neubau über die 30-s-Schleife. Höchstens eine offene neue Fassung (die zum neuesten ❌; ältere werden zusammengelegt, ihre Regel gilt). Fehler: neue Versuche nach 10 und 30 min, dann ein Satz. Nach einem Neustart nur Tipps, die jünger als 2 h sind. 🎬 während eines Baus wird gemerkt (nur im Speicher) |
+| N5 | ❌ ohne Grund baut nichts neu (❌ = nicht hochladen); neu gebaut wird nach einem Grund |
+| N6 | ✅ Hochladen bleibt stehen; ein zweites ✅ schickt dasselbe Paket noch einmal |
+| N7 | Abend-Video: scheitert erst das Rendern, holt der nächste Timer-Lauf es einmal auf der CPU nach (nur einfacher Modus). Dauerhafte Fehler (Datei oder Musik fehlt, ungültige Länge) ergeben sofort eine Zeile |
+| N8 | Bekannt, selten, nicht behoben: Ein harter Absturz zwischen Rendern und Senden einer Merklisten-Fassung kann nach dem Neustart ein zweites Video ergeben; 🥱 kündigt die neue Fassung an, auch wenn danach „keine neuen Szenen“ kommt |
