@@ -129,9 +129,14 @@ zählt das nicht; `decide` und Stimmung zählen noch nicht mit, Annahme A18).
 4. Fertig: Die Tokens liegen nur in `publikum-oauth.json` neben der DB (0600), der Timer `clip-publikum` holt die
    Zahlen täglich und erneuert den Zugang selbst. Ohne Bot: `pipeline publikum anmelden` bzw. `… --code '<adresse>'`.
 Im Sandbox-Modus kann TikTok Zahlen zurückhalten – dann bleibt der Screenshot-Weg.
-Posts ohne Video-Nummer (kein Link, oder Kurzlink `vm.tiktok.com/…` aus der App) ordnet der Abruf selbst zu: eigene
-Videoliste, das Video mit passender Länge (±2 s), erstellt bis 72 h vor dem Häkchen/Link, das zeitlich nächste
-(`[publikum].zuordnung_stunden`). In der JSON-Zeile steht dann `"zugeordnet": n`; `/link` ist nur noch für Ausnahmen.
+Posts ohne Video-Nummer (im einfachen Modus immer – das Paket legt den Post an; sonst kein Link oder Kurzlink
+`vm.tiktok.com/…`) ordnet der Abruf selbst zu, **nur eindeutig** (08.10.): eigene Videoliste mit Beschreibung, ein Video
+passt, wenn es bis 72 h vor oder nach dem Post erstellt wurde (`[publikum].zuordnung_stunden`), die Länge auf ±2 s
+stimmt und seine Beschreibung nicht mit einer anderen ersten Zeile beginnt als die Caption des Pakets. Zugeordnet wird
+nur, wenn Video und Post nur zueinander passen; bei mehreren entscheidet die erste Zeile („Fortnite-Highlights: Triple
+Kill · 5 Momente“). Ohne passende erste Zeile wartet der Abruf, bis das Fenster zu ist. Sonst bleibt der Post offen –
+lieber keine Zahlen als falsche. Bei der Zuordnung wird `gepostet_utc` die Upload-Zeit (Tag 7 zählt ab dem Upload). In
+der JSON-Zeile steht `"zugeordnet": n`; `/link` ist nur noch für Ausnahmen.
 
 ### 6. Meldungen und Ruhezeit
 Nach dem täglichen Lauf (10:00) kommt höchstens **eine** Meldung am Tag, nur wenn es neue Scores gibt:

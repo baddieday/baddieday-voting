@@ -1,10 +1,12 @@
 """Zwei Integrationsfälle: echter Speicherweg und begrenzter offizieller Abruf."""
+import json
+import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from clip_pipeline import db, publikum, publikum_adapter as adapter
+from clip_pipeline import caption, db, publikum, publikum_adapter as adapter
 from clip_pipeline.konfig import Konfig
 from clip_pipeline.zeit import UTC, iso
 
@@ -14,7 +16,10 @@ class PublikumAdapter(unittest.TestCase):
         self.con = db.verbinde(":memory:")
         self.addCleanup(self.con.close)
         self.zeit = datetime(2026, 9, 29, 12, tzinfo=UTC)
-        self.konfig = Konfig({"publikum": {}, "datenbank": {"pfad": ":memory:"}}, Path("test.toml"))
+        self.konfig = Konfig({"publikum": {}, "datenbank": {"pfad": ":memory:"},
+                              "caption": {"vorlage": "templates/caption.txt"}}, Path("test.toml"))
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
         self.pid, _ = publikum.post_anlegen(self.con, art="entwurf", ziel_id=7, plattform="tiktok",
             daten={"dauer_s": 65, "format": "short", "rezept": {}, "merkmale": {}},
             zeit=self.zeit - timedelta(days=3))
@@ -59,11 +64,13 @@ class PublikumAdapter(unittest.TestCase):
         self.assertEqual(publikum.letzte_messung(self.con, self.pid)["gemessen_utc"], iso(self.zeit))
 
     def test_ohne_link_ordnet_selbst_zu(self):
-        # 30.09.: Kurzlink (vm.tiktok.com) oder gar kein Link → Zuordnung über die eigene Videoliste (Zeit + Länge)
+        # 30.09.: Kurzlink (vm.tiktok.com) oder gar kein Link → Zuordnung über die eigene Videoliste (Zeit + Länge).
+        # 08.10.: Ohne passende erste Zeile (hier: Video ohne Beschreibung) erst, wenn das 72-h-Fenster zu ist – bis
+        # dahin könnte das echte Video noch kommen. Danach zählt der Post ab dem Upload.
         pid, _ = publikum.post_anlegen(self.con, art="entwurf", ziel_id=8, plattform="tiktok",
-            daten={"dauer_s": 45, "format": "short", "rezept": {}, "merkmale": {}}, zeit=self.zeit - timedelta(days=1))
+            daten={"dauer_s": 45, "format": "short", "rezept": {}, "merkmale": {}}, zeit=self.zeit - timedelta(days=4))
         publikum.link_nachtragen(self.con, pid, "https://vm.tiktok.com/ZMabc123/")
-        gepostet = (self.zeit - timedelta(days=1)).timestamp()
+        gepostet = (self.zeit - timedelta(days=4)).timestamp()
         liste = {"data": {"videos": [{"id": "999", "create_time": gepostet - 600, "duration": 20},      # zu kurz
                                      {"id": "555", "create_time": gepostet - 3600, "duration": 45,
                                       "share_url": "https://www.tiktok.com/@t/video/555"},
@@ -77,16 +84,71 @@ class PublikumAdapter(unittest.TestCase):
                 return liste
             return self.payload if daten["filters"]["video_ids"] == ["123456789"] else werte
 
+        with patch.object(adapter, "_json", side_effect=api):                    # Fenster noch offen: warten
+            ohne = self.con.execute("SELECT * FROM posts WHERE id = ?", (pid,)).fetchall()
+            frueh = self.zeit - timedelta(days=2)
+            self.assertEqual(adapter._tiktok_zuordnen(self.con, self.konfig, "t", ohne, frueh), {})
         with patch.object(adapter, "_token", return_value="t"), patch.object(adapter, "_json", side_effect=api):
             result = adapter.abrufen(self.con, self.konfig, self.zeit)
         self.assertEqual((result["zugeordnet"], result["ohne_id"], result["gespeichert"]), (1, 0, 2))
-        self.assertEqual(self.con.execute("SELECT video_id FROM posts WHERE id = ?", (pid,)).fetchone()[0], "555")
+        self.assertEqual(tuple(publikum.post(self.con, pid)[k] for k in ("video_id", "gepostet_utc")),
+                         ("555", iso(datetime.fromtimestamp(gepostet - 3600, UTC))))
         with patch.object(adapter, "_token", return_value="t"), \
                 patch.object(adapter, "_json", side_effect=adapter.AdapterFehler("API HTTP 403")), \
                 self.assertLogs("pipeline", "WARNING"):
             self.con.execute("UPDATE posts SET video_id = NULL WHERE id = ?", (pid,))
             result = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=8))
         self.assertEqual(result["ohne_id"], 1)                                  # Liste gesperrt: kein Absturz
+
+    def entwurf_post(self, nr: int, momente: int, zeit: datetime) -> tuple[int, str]:
+        """Echter Short-Entwurf mit `momente` Szenen und sein TikTok-Post, wie ihn das Paket anlegt (ohne Link).
+        Rückgabe (post_id, Beschreibung, wie TikTok sie liefert: die Caption des Pakets, höchstens 150 Zeichen)."""
+        liste = {"dauer_s": 55.4, "musik": None, "segmente": [{"moment": f"datei:{nr}-{i}"} for i in range(momente)]}
+        pfad = Path(self.tmp.name) / f"e{nr}.json"
+        pfad.write_text(json.dumps(liste), encoding="utf-8")
+        self.con.execute("INSERT INTO entwuerfe (id, name, format, schnittliste, parameter, erstellt)"
+                         " VALUES (?, ?, 'short', ?, '{}', ?)", (nr, f"e{nr}", str(pfad), iso(zeit)))
+        pid, _ = publikum.post_anlegen(self.con, art="entwurf", ziel_id=nr, plattform="tiktok", zeit=zeit,
+                                       daten={"dauer_s": 55.4, "format": "short", "rezept": {}, "merkmale": {}})
+        return pid, caption.entwurf_caption(self.con, liste, self.konfig)[:150]
+
+    def zuordnen(self, videos: list, zeit: datetime) -> dict:
+        liste = {"data": {"videos": videos, "has_more": False}, "error": {"code": "ok"}}
+        with patch.object(adapter, "_json", return_value=liste):
+            ohne = self.con.execute("SELECT * FROM posts WHERE video_id IS NULL").fetchall()
+            return adapter._tiktok_zuordnen(self.con, self.konfig, "t", ohne, zeit)
+
+    def test_nur_eindeutige_paare_und_ab_upload(self):
+        """08.10. (richter2, Fall R2): ✅A 20:00, ✅B 21:00, gleich lang, verschiedene erste Zeile („4 Momente“ /
+        „5 Momente“). Nur A wird am nächsten Tag hochgeladen → A bekommt das Video und zählt ab dem Upload, B bleibt
+        offen (die Regeln „jüngster ✅ zuerst“ hätten das Video B gegeben) – auch, wenn danach ein gleich langes
+        Video mit ganz anderer Beschreibung kommt."""
+        abend = datetime(2026, 9, 25, 20, tzinfo=UTC)
+        a, text_a = self.entwurf_post(41, 4, abend)
+        b, _ = self.entwurf_post(42, 5, abend + timedelta(hours=1))
+        upload = abend + timedelta(hours=16)
+        video = {"id": "777", "create_time": int(upload.timestamp()), "duration": 55, "video_description": text_a}
+        self.assertEqual(self.zuordnen([video], upload + timedelta(hours=1)), {a: "777"})
+        self.assertEqual(tuple(publikum.post(self.con, a)[k] for k in ("video_id", "gepostet_utc")),
+                         ("777", iso(upload)))
+        self.assertEqual(tuple(publikum.post(self.con, b)[k] for k in ("video_id", "gepostet_utc")),
+                         (None, iso(abend + timedelta(hours=1))))
+        fremd = {"id": "778", "create_time": int((abend + timedelta(hours=30)).timestamp()), "duration": 55,
+                 "video_description": "Mein Setup 2026\n#gaming"}
+        self.assertEqual(self.zuordnen([video, fremd], abend + timedelta(days=5)), {})
+
+    def test_gleiche_erste_zeile_bleibt_offen(self):
+        """Wichtigster Fehlerfall: zwei gleich lange Posts mit gleicher erster Zeile – ob erst eins der Videos da ist
+        oder beide: lieber keine Zahlen als falsche, auch Tage später nicht (die Reihenfolge-Regeln ordneten hier
+        falsch zu)."""
+        abend = datetime(2026, 9, 25, 20, tzinfo=UTC)
+        self.entwurf_post(41, 4, abend)
+        _, text = self.entwurf_post(42, 4, abend + timedelta(hours=1))
+        videos = [{"id": str(700 + i), "create_time": int((abend + timedelta(hours=16 + i)).timestamp()),
+                   "duration": 55, "video_description": text} for i in range(2)]
+        for hochgeladen in (videos[1:], videos):
+            self.assertEqual(self.zuordnen(hochgeladen, abend + timedelta(days=5)), {})
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM posts WHERE video_id IS NULL").fetchone()[0], 2)
 
 
 if __name__ == "__main__":

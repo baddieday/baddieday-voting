@@ -14,14 +14,15 @@ import logging
 import math
 import os
 import tempfile
+import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from . import publikum
-from .zeit import aus_iso, iso, jetzt
+from . import caption, publikum
+from .zeit import UTC, aus_iso, iso, jetzt
 
 log = logging.getLogger("pipeline")
 
@@ -225,42 +226,112 @@ def importiere(con, konfig, post_id: int, antwort: dict, *, zeit: datetime | Non
                                      roh=json.dumps(werte, ensure_ascii=False, allow_nan=False))
 
 
+def _erste_zeile(text) -> str:
+    """Erste nicht leere Zeile eines Textes, für den Vergleich vereinheitlicht (NFKC, ohne Emoji-Varianten- und
+    unsichtbare Steuerzeichen, Groß-/Kleinschreibung egal, Leerraum zusammengefasst). Beispiel:
+    „Fortnite-Highlights: Triple Kill · 5 Momente⏎⏎⚔️ Wer gewinnt …“ → „fortnite-highlights: triple kill · 5 momente“.
+    Kein Text → ''."""
+    text = "".join(z for z in unicodedata.normalize("NFKC", str(text or ""))
+                   if z not in "\ufe0e\ufe0f" and unicodedata.category(z) != "Cf")
+    for zeile in text.splitlines():
+        if zeile.strip():
+            return " ".join(zeile.casefold().split())
+    return ""
+
+
+def _caption_zeile(con, konfig, post) -> str:
+    """Erste Zeile der Caption, die das Upload-Paket zu diesem Post mitgab – dieselbe Rechnung wie
+    lernbot_paket.baue_paket (caption.entwurf_caption aus der Schnittliste), vereinheitlicht wie _erste_zeile. Nur
+    Entwürfe: Die Beschreibung eines Clips kann von der KI stammen und ließe sich nicht nachbauen. Fehlt etwas
+    (Entwurf, Schnittliste, Vorlage): '' – dann gibt es keinen Beleg, nie einen Abbruch des Abrufs."""
+    if post["art"] != "entwurf" or post["entwurf_id"] is None:
+        return ""
+    try:
+        zeile = con.execute("SELECT schnittliste FROM entwuerfe WHERE id = ?", (post["entwurf_id"],)).fetchone()
+        liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
+        return _erste_zeile(caption.entwurf_caption(con, liste, konfig))
+    except Exception:  # noqa: BLE001 – ohne Caption nur kein Beleg; der Abruf der Zahlen läuft weiter
+        return ""
+
+
 def _tiktok_zuordnen(con, konfig, token: str, posts: list, zeit: datetime) -> dict[int, str]:
-    """TikTok-Posts ohne Video-Nummer (kein Link oder Kurzlink vm.tiktok.com) selbst zuordnen (30.09., Spec §7.2):
-    eigene Videoliste über /v2/video/list/ (Scope video.list), je Post das Video, das höchstens
-    [publikum].zuordnung_stunden (72) vor dem Häkchen/Link bis 30 min danach erstellt wurde und dessen Länge auf
-    ±2 s passt – das zeitlich nächste. Ein Video gehört nie zu zwei Posts. Trägt video_id (und url, falls leer) nach.
-    Rückgabe: {post_id: video_id}."""
-    fenster = timedelta(hours=float(konfig.wert("publikum.zuordnung_stunden", 72)))
-    frueheste = min(aus_iso(p["gepostet_utc"]) for p in posts) - fenster
-    videos, cursor = [], None
+    """TikTok-Posts ohne Video-Nummer (kein Link, Kurzlink vm.tiktok.com, im einfachen Modus immer – das Paket legt
+    den Post an) selbst zuordnen – nur, wenn es eindeutig ist (08.10., Stufe 3: lieber keine Zahlen als falsche).
+    Eigene Videoliste über /v2/video/list/ (Scope video.list, mit video_description: höchstens 150 Zeichen, die
+    erste Zeile reicht). Ein Video passt zu einem offenen Post, wenn es höchstens [publikum].zuordnung_stunden (72)
+    vor oder nach dem Post erstellt wurde (Häkchen/Link unter /experte kommt nach dem Hochladen, das Paket davor), die
+    Länge auf ±2 s stimmt und seine Beschreibung nicht mit einer anderen ersten Zeile beginnt als die Caption des
+    Posts. Zugeordnet wird nur ein Paar, bei dem das Video der einzige Kandidat des Posts ist und der Post der einzige
+    des Videos; bei mehreren entscheidet die erste Zeile (genau gleich = Beleg). Was danach frei ist, wird neu
+    geprüft. Sonst bleibt der Post offen, z. B. zwei gleich lange Videos mit gleicher erster Zeile.
+
+    Trägt video_id (und url, falls leer) nach und setzt gepostet_utc auf create_time des Videos – sonst zählte
+    „Tag 7“ ab dem ✅ statt ab dem Upload. Ein Video gehört nie zu zwei Posts. Rückgabe: {post_id: video_id}."""
+    fenster = float(konfig.wert("publikum.zuordnung_stunden", 72)) * 3600
+    frueheste = min(aus_iso(p["gepostet_utc"]).timestamp() for p in posts) - fenster
+    roh: dict[str, dict] = {}
+    cursor = None
     for _ in range(int(konfig.wert("publikum.zuordnung_seiten", 10))):  # je 20 Videos, neueste zuerst
         antwort = _json("https://open.tiktokapis.com/v2/video/list/?" + urlencode(
-            {"fields": "id,create_time,duration,share_url"}), token,
+            {"fields": "id,create_time,duration,share_url,video_description"}), token,
             daten={"max_count": 20, **({"cursor": cursor} if cursor else {})})
         daten = antwort.get("data") or {}
         seite = daten.get("videos") or []
-        videos += seite
+        for v in seite:   # dasselbe Video auf zwei Seiten (neuer Upload während des Blätterns) zählt einmal
+            if str(v.get("id") or ""):
+                roh.setdefault(str(v["id"]), v)
         cursor = daten.get("cursor")
         if not daten.get("has_more") or not seite or not cursor or \
-                min(float(v.get("create_time") or 0) for v in seite) < frueheste.timestamp():
+                min(float(v.get("create_time") or 0) for v in seite) < frueheste:
             break
     vergeben = {z[0] for z in con.execute("SELECT video_id FROM posts WHERE plattform = 'tiktok' AND video_id IS NOT NULL")}
+    videos = []
+    for vid, v in roh.items():
+        try:
+            if vid not in vergeben:
+                videos.append({"id": vid, "t": float(v["create_time"]), "dauer": float(v["duration"]),
+                               "url": v.get("share_url"), "zeile": _erste_zeile(v.get("video_description"))})
+        except (KeyError, TypeError, ValueError):
+            continue   # ohne Zeit oder Länge kein Kandidat
+    offen = [{"id": int(p["id"]), "t": aus_iso(p["gepostet_utc"]).timestamp(), "dauer": float(p["dauer_s"]),
+              "zeile": _caption_zeile(con, konfig, p)}
+             for p in sorted(posts, key=lambda z: (z["gepostet_utc"], z["id"]))]
+
+    def passt(p: dict, v: dict) -> bool:
+        widerspricht = p["zeile"] and v["zeile"] and not v["zeile"].startswith(p["zeile"])
+        return abs(v["t"] - p["t"]) <= fenster and abs(v["dauer"] - p["dauer"]) <= 2.0 and not widerspricht
+
+    def einziger(kandidaten: list, beleg) -> dict | None:
+        if len(kandidaten) > 1:   # Gleichstand: nur, wessen erste Zeile genau passt
+            kandidaten = [k for k in kandidaten if beleg(k)]
+        return kandidaten[0] if len(kandidaten) == 1 else None
+
+    def beleg(p: dict, v: dict) -> bool:
+        return bool(p["zeile"]) and v["zeile"] == p["zeile"]
+
     zugeordnet: dict[int, str] = {}
-    for post in sorted(posts, key=lambda z: z["gepostet_utc"]):
-        gepostet = aus_iso(post["gepostet_utc"]).timestamp()
-        passend = [v for v in videos if str(v.get("id") or "") and str(v["id"]) not in vergeben
-                   and gepostet - fenster.total_seconds() <= float(v.get("create_time") or 0) <= gepostet + 1800
-                   and abs(float(v.get("duration") or 0) - float(post["dauer_s"])) <= 2.0]
-        if not passend:
-            continue
-        video = min(passend, key=lambda v: abs(gepostet - float(v["create_time"])))
-        vid = str(video["id"])
-        con.execute("UPDATE posts SET video_id = ?, url = COALESCE(url, ?) WHERE id = ? AND video_id IS NULL",
-                    (vid, video.get("share_url"), post["id"]))
-        vergeben.add(vid)
-        zugeordnet[int(post["id"])] = vid
-        log.info("Publikum: Post #%s ist TikTok-Video %s (per Zeit und Länge zugeordnet)", post["id"], vid)
+    weiter = True
+    while weiter:
+        weiter = False
+        for p in list(offen):
+            v = einziger([v for v in videos if passt(p, v)], lambda v: beleg(p, v))
+            if v is None or einziger([q for q in offen if passt(q, v)], lambda q: beleg(q, v)) is not p:
+                continue
+            if not beleg(p, v) and zeit.timestamp() < max(p["t"], v["t"]) + fenster:
+                continue   # ohne passende erste Zeile erst, wenn kein Video und kein Post mehr dazukommen kann
+            offen.remove(p)
+            videos.remove(v)
+            weiter = True
+            if con.execute("UPDATE posts SET video_id = ?, url = COALESCE(url, ?), gepostet_utc = ? WHERE id = ?"
+                           " AND video_id IS NULL",
+                           (v["id"], v["url"], iso(datetime.fromtimestamp(v["t"], UTC)), p["id"])).rowcount != 1:
+                continue   # inzwischen per /link versorgt – dessen Video gilt
+            zugeordnet[p["id"]] = v["id"]
+            log.info("Publikum: Post #%s ist TikTok-Video %s (eindeutig per Zeit, Länge und Beschreibung)",
+                     p["id"], v["id"])
+    for p in offen:
+        if n := sum(passt(p, v) for v in videos):
+            log.info("Publikum: Post #%s bleibt offen – %s Video(s) kommen in Frage, noch nicht eindeutig", p["id"], n)
     return zugeordnet
 
 

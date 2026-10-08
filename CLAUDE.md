@@ -426,3 +426,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     dort steht „Lad es hoch – die Zahlen hole ich mir danach selbst.“ Scheitert das Paket, kein Post (der nächste
     Versuch der Merkliste legt ihn an); scheitert nur der Post, kommt das Paket nicht doppelt. Kein Post für das
     2-Wochen-Video und Querformat. /experte wie bisher. Annahmen N21–N24.
+  - **Stufe 3: Der Bot findet dein hochgeladenes Video selbst – nur eindeutig** (`publikum_adapter._tiktok_zuordnen`):
+    Kein Link und kein Achten auf den Zeitpunkt mehr (vorher zählte nur ein Upload bis 30 min nach dem Häkchen). Ein
+    Video passt zu einem offenen Post bei ±72 h und ±2 s Länge; zugeordnet wird nur, wenn beide nur zueinander passen,
+    bei mehreren entscheidet die erste Zeile der Beschreibung (die Caption des Pakets, nachgerechnet). Zusätzlich zur
+    Spec: eine andere erste Zeile schließt ein Video aus, und ohne passende erste Zeile wird erst zugeordnet, wenn das
+    Fenster zu ist. Sonst bleibt der Post offen. `gepostet_utc` wird die Upload-Zeit (Tag 7 ab dem Upload). N25–N29.
