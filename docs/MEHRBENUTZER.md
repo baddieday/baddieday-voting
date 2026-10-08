@@ -1,9 +1,9 @@
 # Mehrbenutzer – eine Instanz je Freund (Entscheidung M1, 08.10.2026)
 
 Ziel Stufe 1: Ein Freund bekommt auf dem Mini seine eigene, vollständig getrennte Pipeline. Zwei Benutzer arbeiten
-unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M32: `docs/ENTSCHEIDUNGEN.md`,
-„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 und 2 von 4 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus),
-der Rest ist Plan.
+unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M37: `docs/ENTSCHEIDUNGEN.md`,
+„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 3 von 4 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
+Freund-Pipeline ohne n8n), der Rest ist Plan.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -78,6 +78,17 @@ nur, was dem Freund gehört (`konfig.lade_instanz`). Vorlagen: `config/instanz.b
 - `/paket` im Clip-Bot rendert jetzt auch unter der Sperre (wartet nicht, sagt „gleich nochmal“).
 - Jeder gesperrte Schritt schreibt „Sperre gewartet x s, gehalten y s“ ins Log – so sieht man vor und nach dem ersten
   Freund, wie lange Schritte aufeinander warten: `journalctl -u clip-lernbot | grep "Sperre gewartet"`.
+
+## Freund-Pipeline ohne n8n (umgesetzt, Schritt 3)
+- **`scan --verarbeiten --max 1 --versuche 3`** (Timer alle 5 min): je Lauf nur das älteste offene Match, so ist die
+  gemeinsame Sperre nur kurz belegt. Scheitert ein Match dreimal, bekommt es den Status `fehler`, sein Bot sagt es
+  einmal („⚠️ Ein Match vom … klappt nicht …“), und die neueren kommen dran. Jeder Fehlschlag steht in `ereignisse`
+  (`verarbeitung_fehler`). Nichts wird gelöscht: `pipeline process <ID>` holt ein solches Match jederzeit nach.
+  Speicher offline, Konfig-Fehler oder eine belegte Datenbank zählen nie als Fehlschlag. Ohne die beiden Schalter läuft
+  `scan` genau wie bisher.
+- **Abend-Video** (`sitzungen`, Timer alle 10 min): Geht Whisper nicht (z. B. Modell lässt sich nicht laden), werden die
+  Szenen ohne Sprache gemessen, und das Video kommt trotzdem – mit Hinweis im Ergebnis; das hilft auch Florian (vorher
+  brach jeder Lauf ab). Auf ein Match mit Status `fehler` wartet der Abend nicht – bei Florian wird keins `fehler`.
 
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |

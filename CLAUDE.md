@@ -554,3 +554,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     gelöscht; was nicht passt, endet mit Exit 2. KI nur mit eigenem Claude-Zugang des Freundes (Token aus `claude
     setup-token` in `I/db/claude-token` oder `I/.env`, eigene kleine Umgebung); ohne startet claude bei ihm nie. Bei
     dir unverändert. M24–M32.
+  - Schritt 3 (Freund-Pipeline ohne n8n): `scan --verarbeiten --max 1 --versuche 3` per Timer – je Lauf nur das
+    älteste offene Match (die Sperre ist nur kurz belegt); nach drei Fehlschlägen Status `fehler`, eine Zeile an seinen
+    Bot, die neueren kommen dran, nichts gelöscht (`pipeline process <ID>` holt es nach). Ohne die Schalter wie bisher.
+    Abend-Video: Geht Whisper nicht, misst es die Szenen ohne Sprache, und das Video kommt trotzdem (hilft auch dir –
+    vorher brach jeder Lauf ab); auf ein aufgegebenes Match wartet der Abend nicht. M33–M37.
