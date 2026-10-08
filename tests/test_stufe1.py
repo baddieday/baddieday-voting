@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from clip_pipeline import einstellungen, regeln, regie, regie_lernen, sitzung
+from clip_pipeline import einstellungen, geschmack, regeln, regie, regie_lernen, sitzung
 from clip_pipeline.zeit import iso, jetzt
 
 from tests.hilfen import HAT_FFMPEG, MitSpeicher
@@ -69,6 +69,26 @@ class Regeln(MitRegieMaterial):
         einstellungen.zuruecksetzen(self.con, "regie.effekte.an")                         # ohne Schalter: wie bisher
         self.assertIsNone(regeln.stufe(self.con, self.k()))
         self.assertIn("Effekte normal", regeln.regeln_zeile(self.con, self.k()))
+
+    def test_langweilig_holt_gesenkte_effekte_zurueck(self):
+        """08.10.: 🥱 ist das Gegenpaar zu 😵 – ohne ⚙️ blieben die Effekte nach zweimal 😵 sonst für immer aus.
+        Start: alter Schalter „Effekte aus“ (MitRegieMaterial) = Stufe „aus“; je 🥱 eine Stufe, nie über „normal“."""
+        self.assertEqual(regeln.stufe(self.con, self.k()), 0)
+        self.assertIn("wieder etwas mehr Effekte: „ruhig“ statt „aus“",
+                      regeln.wende_an(self.con, self.k(), "langweilig", LISTE))
+        self.assertEqual(regeln.stufe(self.con, self.k()), 1)
+        self.assertTrue(self.k().wert("regie.effekte.an"))                                  # wieder an
+        w = {"geschmack": {"zeitlupe": "viel"}, "max_lupen": 8}
+        self.assertIn("zeitlupe", geschmack.nur_wirksame(w, w, self.k()))                 # Zeitlupe lernt wieder mit
+        self.assertIn("„normal“ statt „ruhig“", regeln.wende_an(self.con, self.k(), "langweilig", LISTE))
+        self.assertNotIn("Effekte", regeln.wende_an(self.con, self.k(), "langweilig", LISTE))   # nie über „normal“
+        self.assertEqual(regeln.stufe(self.con, self.k()), 2)
+
+    def test_langweilig_ohne_gesenkte_effekte_aendert_nichts(self):
+        self.konfig.daten["regie"]["effekte"]["an"] = True                    # ab Werk: keine Stufe, das Gelernte gilt
+        self.assertNotIn("Effekte", regeln.wende_an(self.con, self.k(), "langweilig", LISTE))
+        self.assertIsNone(regeln.stufe(self.con, self.k()))
+        self.assertNotIn(regeln.STUFE_SCHLUESSEL, einstellungen.gespeichert(self.con))     # keine neue Zeile
 
 
 class KeinVideoText(unittest.TestCase):

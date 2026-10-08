@@ -16,9 +16,9 @@
 |---|---|
 | ⏱️ Zu kurz | Shorts werden 10 Sekunden länger (höchstens 75 s) |
 | ⏳ Zu lang | Shorts werden 10 Sekunden kürzer (mindestens 30 s) |
-| 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen Szenen, die du noch nicht gesehen hast – erst vom selben Abend, dann starke von früheren Abenden. Gibt es keine, kommt kein Video. Gesperrt wird nichts. |
+| 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen Szenen, die du noch nicht gesehen hast – erst vom selben Abend, dann starke von früheren Abenden. Gibt es keine, kommt kein Video. Gesperrt wird nichts. Hast du die Effekte mit 😵 gesenkt, holt 🥱 sie eine Stufe zurück (höchstens bis normal) – das bleibt so. |
 | 🎵 Musik | Dieser Song kommt nie wieder |
-| 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus) |
+| 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus); zurück geht es mit 🥱 |
 | 🔁 Einfach neu | Andere Fassung, gleiche Regeln |
 
 Baut der Bot gerade noch ein Video, tipp den Grund kurz danach nochmal. Beim Highlight-Video heißt ❌ nur:
