@@ -11,10 +11,15 @@ Stufe 1 (07.10., Florian: „Bot macht alles … nach dem Zocken … lieber kein
 (Lern-Meldung abend:<sitzung>), gebaut wird mit deinen Regeln (regeln.anwenden: Länge, Effekte, nur starke Szenen).
 Reichen die starken Szenen nicht, kommt kein Video, sondern „kein:<sitzung>“ mit dem Grund; bei einem Fehler
 „fehler:<sitzung>“. Der Lern-Bot ersetzt die Statuszeile durch das Video bzw. schreibt sie zu diesem Satz um.
+
+08.10. (Florian: „autonom … besser und schneller als mit der Hand“): Scheitert im einfachen Modus erst das Rendern,
+ist der Abend nicht verloren – der nächste Timer-Lauf rendert den Entwurf einmal auf der CPU nach (_nachholen); erst
+wenn auch das scheitert, kommt „fehler:<sitzung>“, ohne Versprechen. Unter /experte wie bisher.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import sqlite3
@@ -66,6 +71,7 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
         stimmung.analysiere(con, konfig, claude=claude, whisper=whisper)
         entwurf_id = None
         k = einstellungen.anwenden(con, konfig)            # ⚙️ und deine Regeln gelten auch für das Abend-Video
+        experte = einstellungen.experte(con, k)
         try:  # deine 👍/👎 bis eben lehren die Moment-Formel (wie vor jedem Entwurf im Lern-Bot)
             lernen.aktualisiere(con, k)
         except Exception:  # noqa: BLE001 – das Video ist wichtiger; dann gelten die bisherigen Gewichte
@@ -82,12 +88,17 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
             entwurf.entwurf(con, k, entwurf_id)
         except regie.ZuWenigSzenen as z:   # lieber kein Video als eins mit Füllmaterial (Florian, 07.10.)
             hinweis = "; ".join(filter(None, [hinweis, str(z)]))
-            db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z, len(offen),
-                                                                 experte=einstellungen.experte(con, k)))
+            db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z, len(offen), experte=experte))
         except Exception as fehler:  # noqa: BLE001 – vermerken und dir sagen, statt alle 10 min still neu zu versuchen
-            entwurf_id = None
             hinweis = "; ".join(filter(None, [hinweis, str(fehler)]))
-            _melde_fehler(con, name, tag, fehler)
+            if entwurf_id is not None and not experte and not _dauerhaft(fehler):
+                # 08.10.: Erst das Rendern scheiterte (z. B. hängende Grafikeinheit, Stolperstein 26.09.). Die Sitzung
+                # behält ihren Entwurf, der nächste Timer-Lauf rendert ihn einmal auf der CPU (_nachholen) – vorher war
+                # der Abend nach einem einzigen Fehler verloren, und es hieß nur „Beim nächsten Abend …“
+                _logge(name, fehler, " – der nächste Lauf versucht es noch einmal auf der CPU")
+            else:
+                entwurf_id = None
+                _melde_fehler(con, name, tag, fehler, experte=experte)
         _merke(con, name, matches, ende, entwurf_id, hinweis)
         ergebnis["neu"].append({"sitzung": name, "matches": len(matches), "entwurf": entwurf_id, "hinweis": hinweis})
     return ergebnis
@@ -157,25 +168,61 @@ def _tag(konfig: Konfig, ende) -> str:
     return f"{spielabend(ende, zone, wechsel):%d.%m.}"
 
 
-def _melde_fehler(con: sqlite3.Connection, name: str, tag: str, fehler: Exception) -> None:
-    """Die Zeile für dich ohne Fachtext (07.10.: vorher stand die rohe Fehlermeldung darin) – Details ins Log."""
+def _logge(name: str, fehler: Exception, zusatz: str = "") -> None:
+    """Details ins Log (die Zeile für dich bleibt ohne Fachtext) – Unerwartetes mit Stacktrace."""
     if not isinstance(fehler, (regie.RegieFehler, MedienFehler)):
-        log.error("Abend-Video %s", name, exc_info=fehler)
+        log.error("Abend-Video %s%s", name, zusatz, exc_info=fehler)
     else:
-        log.warning("Abend-Video %s: %s", name, fehler)
-    db.lern_meldung(con, f"fehler:{name}", f"⚠️ Für deinen Abend vom {tag} kam kein Video zustande – beim Bauen ging "
-                                           "etwas schief. Beim nächsten Abend versuche ich es wieder.")
+        log.warning("Abend-Video %s: %s%s", name, fehler, zusatz)
+
+
+def _melde_fehler(con: sqlite3.Connection, name: str, tag: str, fehler: Exception, *, experte: bool = True,
+                  zweiter: bool = False) -> None:
+    """Die Zeile für dich ohne Fachtext (07.10.: vorher stand die rohe Fehlermeldung darin) – Details ins Log.
+    08.10.: im einfachen Modus ohne das leere „Beim nächsten Abend versuche ich es wieder“ – den zweiten Versuch für
+    diesen Abend macht der Bot schon selbst (zweiter: er ist gescheitert). Unter /experte der Satz wie bisher."""
+    _logge(name, fehler)
+    if experte:
+        text = (f"⚠️ Für deinen Abend vom {tag} kam kein Video zustande – beim Bauen ging etwas schief. "
+                "Beim nächsten Abend versuche ich es wieder.")
+    else:
+        text = (f"⚠️ Für deinen Abend vom {tag} kam kein Video zustande – beim Bauen ging "
+                f"{'zweimal ' if zweiter else ''}etwas schief.")
+    db.lern_meldung(con, f"fehler:{name}", text)
+
+
+def _dauerhaft(fehler: Exception) -> bool:
+    """Render-Fehler, die ein zweiter Versuch nicht behebt (08.10.): Eine Moment-Datei, die Musik oder die Schnittliste
+    fehlt, oder die geplante Länge passt nicht ins Format – dann gleich die Fehlerzeile. ffmpeg, Grafikeinheit, Platte
+    und Dateigröße dagegen können beim nächsten Mal (auf der CPU) klappen. Wie lernbot_paket.dauerhaft."""
+    if isinstance(fehler, FileNotFoundError):
+        return True
+    return isinstance(fehler, MedienFehler) and str(fehler).startswith(("Moment-Datei fehlt", "Musik fehlt",
+                                                                        "Ungültige Videolänge"))
+
+
+def _auf_cpu(konfig: Konfig) -> Konfig:
+    """Kopie der Konfig, die ohne Grafikeinheit rendert (regie.vaapi = false, entwurf.encoder -> libx264) – die
+    geladene Konfig bleibt, wie sie ist."""
+    daten = copy.deepcopy(konfig.daten)
+    daten.setdefault("regie", {})["vaapi"] = False
+    return Konfig(daten=daten, quelle=konfig.quelle)
 
 
 def _nachholen(con: sqlite3.Connection, konfig: Konfig) -> list[str]:
-    """Abend-Videos, deren Rendern abbrach (Update, Neustart, Strom): Die Sitzung kennt ihren Entwurf schon, der steht
-    aber noch auf „neu“ ohne Datei. entwurf.entwurf ist idempotent – einfach nochmal rendern, bis 12 h nach dem Abend.
-    Danach (oder bei einem echten Fehler) kommt die Fehlerzeile statt endloser Versuche alle 10 Minuten."""
+    """Abend-Videos, deren Rendern abbrach (Update, Neustart, Strom) oder im einfachen Modus einmal scheiterte
+    (verarbeite, 08.10.): Die Sitzung kennt ihren Entwurf schon, der steht aber noch auf „neu“ ohne Datei.
+    entwurf.entwurf ist idempotent – einfach nochmal rendern, bis 12 h nach dem Abend; im einfachen Modus auf der CPU,
+    denn die Grafikeinheit hängt sporadisch (Stolperstein 26.09.). Scheitert auch das (oder ist es zu spät), kommt die
+    Fehlerzeile statt endloser Versuche alle 10 Minuten – je Abend also höchstens ein zusätzlicher Render."""
     offen = con.execute("""SELECT s.name, s.entwurf_id, s.ende_utc, s.verarbeitet, s.hinweis FROM sitzungen s
                            JOIN entwuerfe e ON e.id = s.entwurf_id WHERE e.status = 'neu' AND e.datei IS NULL""").fetchall()
     if not offen:
         return []
     k = einstellungen.anwenden(con, konfig)
+    experte = einstellungen.experte(con, k)
+    if not experte:
+        k = _auf_cpu(k)
     grenze = jetzt() - timedelta(hours=12)
     nachgeholt = []
     for z in offen:
@@ -183,13 +230,14 @@ def _nachholen(con: sqlite3.Connection, konfig: Konfig) -> list[str]:
         try:
             if aus_iso(z["verarbeitet"]) < grenze:
                 raise MedienFehler("das Bauen wurde immer wieder unterbrochen")
-            log.info("Abend-Video %s: Rendern war unterbrochen – baue Entwurf #%s fertig", z["name"], z["entwurf_id"])
+            log.info("Abend-Video %s: Entwurf #%s ist noch nicht fertig – rendere ihn neu%s", z["name"],
+                     z["entwurf_id"], "" if experte else " (CPU)")
             entwurf.entwurf(con, k, z["entwurf_id"])
             nachgeholt.append(z["name"])
         except Exception as fehler:  # noqa: BLE001 – wie beim ersten Versuch: vermerken und dir sagen
             con.execute("UPDATE sitzungen SET entwurf_id = NULL, hinweis = ? WHERE name = ?",
                         ("; ".join(filter(None, [z["hinweis"], str(fehler)])), z["name"]))
-            _melde_fehler(con, z["name"], tag, fehler)
+            _melde_fehler(con, z["name"], tag, fehler, experte=experte, zweiter=True)
     return nachgeholt
 
 

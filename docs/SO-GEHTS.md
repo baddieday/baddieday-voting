@@ -4,7 +4,9 @@
 1. Du zockst. Kommt 45 Minuten lang kein neues Match dazu, gilt der Abend als vorbei (am PC musst du nichts
    einstellen), und der Lern-Bot schreibt: „🎮 Abend vom … erkannt – ich baue dein Video.“
 2. Etwas später kommt das Video. Es besteht nur aus **starken Szenen** dieses Abends: Multikills, Clutches,
-   Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann.
+   Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann. Scheitert das Fertigmachen des Videos,
+   versucht er es 10 Minuten später selbst noch einmal (etwas langsamer, dafür sicherer); klappt auch das nicht, sagt
+   es dir die Statuszeile.
 3. Gab es zu wenig starke Szenen (ein Video braucht 4 und mindestens 30 Sekunden), kommt **kein Video**. Die
    Statuszeile sagt dann, warum.
 

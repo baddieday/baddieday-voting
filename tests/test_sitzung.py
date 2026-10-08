@@ -9,7 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import cli, sitzung
+from clip_pipeline import cli, einstellungen, entwurf, sitzung
+from clip_pipeline.medien import MedienFehler
 from clip_pipeline.zeit import UTC, iso, jetzt
 
 from tests.hilfen import HAT_FFMPEG
@@ -71,6 +72,65 @@ class Sitzung(MitRegieMaterial):
         self.assertEqual(e["neu"][0]["sitzung"], "abend_m1")
         self.assertEqual(e["neu"][0]["matches"], 2)
         self.assertEqual(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["neu"], [])  # einmal
+
+    def abend_aus_m1_m2(self, name="session_2026-10-07_23-10-00"):
+        """Abend aus m1/m2 (vier starke Szenen), seit 50 min vorbei."""
+        for m in ("m1", "m2"):
+            self.con.execute("INSERT OR IGNORE INTO matches (id, replay_pfad, start_utc, ende_utc, status, erstellt, "
+                             "geaendert) VALUES (?, ?, 'x', 'x', 'verarbeitet', 'x', 'x')", (m, f"replays/{m}.replay"))
+        self.marker(name, ["m1", "m2"], jetzt() - timedelta(minutes=50))
+
+    def fehlerzeilen(self):
+        return [z["text"] for z in self.con.execute(
+            "SELECT text FROM lern_meldungen WHERE schluessel LIKE 'fehler:%' ORDER BY id")]
+
+    def test_render_panne_holt_der_naechste_lauf_nach(self):
+        """08.10. (Florian: „autonom … besser und schneller als mit der Hand“): Scheitert das Rendern einmal (z. B.
+        hängende Grafikeinheit), ist der Abend nicht verloren – der nächste Timer-Lauf rendert auf der CPU nach, ohne
+        Fehlerzeile und ohne 🎬 von Hand."""
+        self.momente_anlegen(MOMENTE[:5])                                   # alle Momente aus m1/m2
+        self.musik_anlegen(150, "episch")
+        self.abend_aus_m1_m2()
+        echt, vaapi = entwurf.entwurf, []
+
+        def rendern(con, k, entwurf_id):
+            vaapi.append(k.wert("regie.vaapi", True))
+            if len(vaapi) == 1:
+                raise MedienFehler("Entwurf x: hängt – 180 s ohne Fortschritt, abgebrochen")
+            return echt(con, k, entwurf_id)
+
+        with mock.patch.object(entwurf, "entwurf", side_effect=rendern):
+            erst = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["neu"][0]
+            self.assertEqual(self.fehlerzeilen(), [])                      # noch keine Fehlerzeile
+            dann = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
+        self.assertEqual(dann["nachgeholt"], ["session_2026-10-07_23-10-00"])
+        self.assertEqual(vaapi, [True, False])                              # der zweite Versuch auf der CPU
+        z = self.con.execute("SELECT status, datei FROM entwuerfe WHERE id = ?", (erst["entwurf"],)).fetchone()
+        self.assertEqual(z["status"], "gerendert")                          # die Sitzung hat ihr Video
+        self.assertTrue(Path(z["datei"]).is_file())
+        self.assertEqual(self.fehlerzeilen(), [])
+
+    def test_render_scheitert_zweimal_eine_fehlerzeile(self):
+        """Scheitert auch der zweite Versuch: genau eine Fehlerzeile ohne Versprechen, danach kein Versuch mehr. Fehlt
+        eine Datei, hilft kein zweiter Versuch. Unter /experte wie bisher: gleich die Zeile, kein zweiter Versuch."""
+        self.momente_anlegen(MOMENTE[:5])                                   # alle Momente aus m1/m2
+        self.musik_anlegen(150, "episch")
+        self.abend_aus_m1_m2()
+        with mock.patch.object(entwurf, "entwurf", side_effect=MedienFehler("Entwurf x fehlgeschlagen (Exit 1)")) as r:
+            for _ in range(3):
+                sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
+            self.assertEqual(r.call_count, 2)                               # höchstens ein zusätzlicher Render
+            fehler = self.fehlerzeilen()
+            self.assertEqual(len(fehler), 1)
+            self.assertTrue(fehler[0].endswith("kam kein Video zustande – beim Bauen ging zweimal etwas schief."))
+            self.assertIsNone(self.con.execute("SELECT entwurf_id FROM sitzungen").fetchone()[0])
+            einstellungen.setze(self.con, "lernbot.experte", True)
+            self.abend_aus_m1_m2("session_2026-10-08_23-10-00")
+            sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
+            self.assertEqual(r.call_count, 3)                               # /experte: ein Versuch …
+        self.assertIn("Beim nächsten Abend versuche ich es wieder.", self.fehlerzeilen()[-1])  # … und gleich die Zeile
+        self.assertTrue(sitzung._dauerhaft(MedienFehler("Moment-Datei fehlt: /srv/clips/momente/1.mp4")))
+        self.assertFalse(sitzung._dauerhaft(MedienFehler("Entwurf x: hängt – 180 s ohne Fortschritt, abgebrochen")))
 
     def test_speicher_schlaeft_kein_wecken(self):
         (self.konfig.wurzel / ".clip-speicher").unlink()
