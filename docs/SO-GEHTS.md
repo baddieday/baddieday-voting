@@ -11,7 +11,10 @@
    Statuszeile sagt dann, warum.
 
 ## Was du tust
-- **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen.
+- **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen. **Füg den Text beim
+  Hochladen unverändert ein** (Eigenes gern dahinter): An seiner ersten Zeile erkennt der Bot dein Video. Danach hakst
+  du nichts ab und schickst keinen Link: Die Zuschauerzahlen von TikTok holt sich der Bot selbst (dafür einmal /tiktok
+  verbinden). Mit eigenem Text statt seinem bekommt dieses Video keine Zahlen.
 - **❌ Nicht gut** – tipp auf einen Grund. Der Bot sagt dir sofort, was er ändert, und baut eine neue Fassung:
 
 | Grund | Was sich ändert (für immer, bis du es selbst änderst – außer bei 🥱 und 🔁) |
@@ -27,8 +30,12 @@ Du tippst nie etwas zweimal: Dein ✅ und dein Grund gelten sofort, auch wenn de
 neue Fassung bzw. das Upload-Paket merkt er sich und erledigt es, sobald er frei ist – auch nach einem Update oder
 Neustart (Tipps bis 2 Stunden alt). Gründe an zwei Videos kurz nacheinander ergeben eine neue Fassung für beide – hat
 er mit der ersten schon angefangen, kommt danach noch eine. Geht beim Bauen etwas schief, versucht er es nach 10 und
-nach 30 Minuten noch einmal; klappt es dann nicht, sagt er es dir einmal. Beim Highlight-Video heißt ❌ nur: dieses
-Video lässt er weg – deine Short-Regeln ändert es nicht.
+nach 30 Minuten noch einmal; klappt es dann nicht, sagt er es dir einmal.
+
+**Das 2-Wochen-Video** (für YouTube) kommt nur hier im Lern-Bot, oben steht „🏆 Dein 2-Wochen-Video“. ✅ heißt:
+freigegeben und hochgeladen – du bekommst eine für Telegram verkleinerte Datei und den Text, die volle Qualität liegt
+auf dem Netzlaufwerk clips im Ordner highlights. ❌ heißt nur: dieses Video lässt er weg – deine Short-Regeln ändert
+es nicht.
 
 ## Was der Bot selbst lernt
 Bei jedem Video stellt er drei Dinge selbst ein und merkt sich, was ankommt:
@@ -45,7 +52,11 @@ kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert 
 - **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend. Baut er gerade, kommt das laufende Video
   (endet eine neue Fassung ohne Video, baut er danach deins); geht es schief, versucht er es nach 10 Minuten selbst
   noch einmal.
-- **📋 Stand** – deine Regeln und was beim letzten Abend passiert ist.
+- **📋 Stand** – deine Regeln, was beim letzten Abend passiert ist und woraus er gerade lernt („🧠 Lernt aus: deinen
+  ✅/❌ · KI-Note (läuft) · Zuschauern (…)“). Steht dort „TikTok nicht verbunden – einmal /tiktok“ oder „Claude-Anmeldung
+  nötig“, fehlt ein einmaliger Schritt, den nur du machen kannst; sonst musst du nichts tun. Die Zuschauerzahlen holt
+  er jeden Tag um 10 Uhr selbst (das Update richtet das ein). Fehlen bei einem ✅-Video nach 3 Tagen noch die Zahlen,
+  steht dieselbe Zeile auch in der Zusammenfassung am Sonntag.
 - **/experte** – alle alten Knöpfe, Details und ⚙️ Einstellungen ein- oder ausschalten.
 
 Einstellen musst du nichts: Clips (neuester Spielabend), Szenen (nur starke) und Aufbau wählt der Bot selbst,
@@ -55,9 +66,13 @@ selbst fest – deine alten Werte dafür gelten nur unter /experte. Andere alte 
 gelten weiter.
 
 ## Ruhe im Chat
-Der Clip-Bot schickt keine einzelnen Szenen mehr. Er meldet sich nur bei Problemen (zum Beispiel Speicher voll) und
-mit dem Highlight-Video. Nach einem Update schreibt der Lern-Bot einmal „✅ Neue Version läuft“.
+Der Clip-Bot schickt keine einzelnen Szenen und kein 2-Wochen-Video mehr (das kommt im Lern-Bot). Er meldet sich nur
+bei Problemen – zum Beispiel Speicher voll, Kills ohne Aufnahme oder eine Übertragung mit Fehlern – und montags mit
+einem kurzen Lebenszeichen. Dass eine Übertragung glatt lief, sagt er nicht mehr. Unter /experte ist alles wie früher.
+Nach einem Update schreibt der Lern-Bot einmal „✅ Neue Version läuft“.
 
-Kommt pro Match noch „🎬 Match verarbeitet … Jetzt im Bot bewerten“? Diese Nachricht schickt n8n. Abschalten:
-in n8n den Ablauf „1 Match verarbeiten“ öffnen, den Kasten „Telegram Info“ anklicken, **D** drücken (deaktivieren),
-speichern. Die Datei `1-match-verarbeiten.json` im Repo hat das schon.
+Kommt pro Match noch „🎬 Match verarbeitet … Jetzt im Bot bewerten“ oder alle 2 Wochen „🏆 Highlight-Video fertig …
+Freigabe im Bot.“ im Clip-Bot? Diese Nachrichten schickt n8n – das 2-Wochen-Video selbst kommt im Lern-Bot. Abschalten:
+in n8n den Ablauf „1 Match verarbeiten“ bzw. „2 Highlight-Video“ öffnen, den Kasten „Telegram Info“ anklicken, **D**
+drücken (deaktivieren), speichern. Die Dateien `1-match-verarbeiten.json` und `2-highlight-video.json` im Repo haben
+das schon.

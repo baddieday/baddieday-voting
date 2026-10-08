@@ -445,10 +445,18 @@ class LernBotEinfach(MitRegieMaterial):
             self.assertEqual([c.args[3] for c in bau.call_args_list], bauten)               # 🎬: nicht „anders als“
         self.assertNotIn("knopf_nochmal", self.app.bot_data)
 
+    def zwei_wochen_video(self) -> None:
+        """Das Video ist das 2-Wochen-Video (highlight.erstelle: Zusammenschnitt mit highlights.entwurf_id)."""
+        self.con.execute("UPDATE entwuerfe SET format = 'zusammenschnitt' WHERE id = ?", (self.eid,))
+        self.con.execute("INSERT INTO highlights (name, datei, vorschau, clips, dauer, erstellt, entwurf_id, status) "
+                         "VALUES ('2026-W41', 'highlights/2026-W41.mp4', 'highlights/v.mp4', 5, '01:42', 'x', ?, "
+                         "'gesendet')", (self.eid,))
+
     def test_nicht_gut_am_highlight_video_ohne_short_regel(self):
         """07.10.: ❌ am Highlight-Video (Zusammenschnitt) – vorher „Shorts sind ab jetzt 75 s lang (vorher 180 s)“,
-        auch bei „⏳ Zu lang“, und dann wurde ein Short gebaut."""
-        self.con.execute("UPDATE entwuerfe SET format = 'zusammenschnitt' WHERE id = ?", (self.eid,))
+        auch bei „⏳ Zu lang“, und dann wurde ein Short gebaut. 08.10.: Der Clip-Bot zeigt es nicht mehr – ❌ hier
+        verwirft es auch dort (die Clips sind wieder frei)."""
+        self.zwei_wochen_video()
         q = self.klick(f"d:{self.eid}:-1")
         self.assertEqual(q.antworten, ["Verstanden – dieses Video lasse ich weg."])
         self.assertIsNone(q.bearbeitet[0]["reply_markup"])                                  # keine Gründe
@@ -456,6 +464,23 @@ class LernBotEinfach(MitRegieMaterial):
         self.assertIsNone(regeln.ziel_regel(self.con, self.konfig))
         self.assertEqual((self.aufgaben, self.bot.texte), ([], []))                         # kein neuer Short
         self.assertEqual(self.con.execute("SELECT daumen FROM entwurf_bewertungen").fetchone()[0], -1)
+        self.assertEqual(self.con.execute("SELECT status FROM highlights").fetchone()[0], "verworfen")
+
+    def test_zwei_wochen_video_nur_hier_und_hochladen(self):
+        """Stufe 3 (08.10.): Das 2-Wochen-Video kommt nur noch im Lern-Bot (mit Kopfzeile, wofür es ist); ✅ heißt
+        freigegeben und hochgeladen – der Clip-Bot erinnert nicht mehr – und bringt das Paket wie beim Short."""
+        self.zwei_wochen_video()
+        video = self.tmp / "v.mp4"
+        video.write_bytes(b"x")
+        self.con.execute("UPDATE entwuerfe SET status = 'gerendert', datei = ? WHERE id = ?", (str(video), self.eid))
+        self.assertEqual(asyncio.run(lernbot.sende_entwuerfe(self.app)), 1)
+        self.assertTrue(self.bot.videos[0]["caption"].startswith("🏆 <b>Dein 2-Wochen-Video</b>\n🎬 <b>Video #"))
+        q = self.klick(f"d:{self.eid}:1")
+        self.assertTrue(q.bearbeitet[0]["caption"].startswith("🏆 <b>Dein 2-Wochen-Video</b>\n"))   # bleibt stehen
+        h = self.con.execute("SELECT status, hochgeladen FROM highlights").fetchone()
+        self.assertEqual(h["status"], "freigegeben")
+        self.assertIsNotNone(h["hochgeladen"])
+        self.assertEqual([k.__name__ for k in self.aufgaben], ["paket_auftrag"])
 
     def test_statuszeile_wird_zu_kein_video(self):
         from clip_pipeline import db

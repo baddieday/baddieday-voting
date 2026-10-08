@@ -61,7 +61,8 @@ def _lager(con: sqlite3.Connection, konfig: Konfig, zeit: datetime) -> Befund:
     stand = lager.status(con, konfig)
     if stand["pruefung"] != "ok":
         return stand, (f"🗄️ Puffer-Prüfung fehlgeschlagen: {stand['pruefung']}\n"
-                       "So läuft kein Abgleich ins Lager. Nichts verloren – im Puffer wird nichts gelöscht.\n"
+                       "So läuft kein Abgleich ins Lager. Nichts verloren – ohne Abgleich wird im Puffer nichts "
+                       "gelöscht.\n"
                        "Nächster Schritt: Link /srv/clips und die Marken .clip-puffer/.clip-lager prüfen "
                        "(docs/PUFFER.md, R5), dann pipeline lager status")
     lauf = stand["letzter_lauf"]
@@ -104,9 +105,16 @@ def _platz(konfig: Konfig) -> Befund:
         kopf = f"💾 Puffer wird knapp: noch {frei:.1f} GB frei (Warnung unter {warnung:g} GB)."
     else:
         return stand, None
+    if konfig.wert("puffer.freigeben", False) is True:  # Stufe B5: alte Rohvideos gehen nur nach dem Abgleich raus
+        weiter = ("Nächster Schritt: pipeline lager status (ist alles im Lager?). Rohvideos über "
+                  f"{konfig.wert('puffer.rohdaten_tage', 14)} Tage löscht der tägliche Abgleich selbst vom Mini, "
+                  "sobald alles im Lager ist (Kopie geprüft) – reicht das nicht, den Puffer vergrößern "
+                  "(docs/PUFFER.md)")
+    else:
+        weiter = ("Nächster Schritt: pipeline lager status (ist alles im Lager?), dann Platz schaffen oder den Puffer "
+                  "vergrößern (docs/PUFFER.md) – automatisch gelöscht wird nichts ([puffer].freigeben = false)")
     return stand, (kopf + "\nNoch ist nichts verloren – ist der Puffer voll, bleiben neue Aufnahmen auf dem "
-                   "Gaming-PC liegen.\nNächster Schritt: pipeline lager status (ist alles im Lager?), dann Platz "
-                   "schaffen oder den Puffer vergrößern (docs/PUFFER.md) – automatisch gelöscht wird noch nichts")
+                   "Gaming-PC liegen.\n" + weiter)
 
 
 def _lager_platz(con: sqlite3.Connection, konfig: Konfig) -> Befund:

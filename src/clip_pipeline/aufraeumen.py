@@ -34,8 +34,8 @@ class Aktion:
 def pruefe_erlaubt(konfig: Konfig) -> None:
     """Verweigert (KonfigFehler), wenn aufraeumen in dieser Konfig nicht laufen darf:
       1. Getrennter Betrieb (E19): aufraeumen würde Dateien im Puffer verschieben und die Pfade in der Datenbank
-         umschreiben – der Abgleich ins Lager sähe sie danach unter neuem Namen, und im Puffer wird in dieser
-         Stufe nichts gelöscht (Freigabe erst mit B5). Gilt immer, unabhängig von [aufraeumen].aktiv.
+         umschreiben – der Abgleich ins Lager sähe sie danach unter neuem Namen. Im Puffer löscht nur der Abgleich
+         selbst (lager.gib_frei, B5: alte, im Lager bestätigte Rohvideos). Gilt immer, unabhängig von [aufraeumen].aktiv.
       2. [aufraeumen].aktiv nicht gesetzt: Standard ist aus (Entscheidung 25.09., „nie automatisch löschen“) –
          betrifft vor allem künftige Betriebsarten ohne [lager]-Abgleich (Front C: lokal/portabel/andere Spiele),
          wo Punkt 1 nicht greift und der Löschweg (papierkorb_tage) sonst unbemerkt scharf wäre."""

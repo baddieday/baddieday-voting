@@ -8,14 +8,20 @@ Anleitung als 🏠-Schritt mit einer Probe.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 from clip_pipeline import claude_aufruf, cli
 
 from tests.test_deploy_puffer import DEPLOY, KONFIG, PROJEKT, assertReihenfolge, lies_unit
 
 SYSTEMD = DEPLOY / "systemd"
+UPDATE = DEPLOY / "pve-mini" / "alles-aktualisieren.sh"
 DIENST = SYSTEMD / "clip-publikum.service"
 TIMER = SYSTEMD / "clip-publikum.timer"
 DROP_IN = SYSTEMD / "clip-lernbot.service.d" / "claude.conf"
@@ -86,6 +92,81 @@ class Units(unittest.TestCase):
         self.assertNotIn("ProtectSystem", d)  # bleibt strict aus der Haupt-Unit
         # die Haupt-Unit bleibt, wie sie ist (dort steht weiter ProtectHome=true)
         self.assertEqual(haupt["ProtectHome"], ["true"])
+
+
+class UpdateRichtetEin(unittest.TestCase):
+    """08.10. (Nichts mehr von Hand): alles-aktualisieren.sh richtet clip-publikum ein und schaltet den Timer an – wie
+    clip-sitzungen –, damit die Zuschauerzahlen ohne Schritt P3 von Hand kommen. Geprüft wird der INNEN-Teil (läuft im
+    CT unter der Sperre) gegen einen Mini-Checkout mit den Units aus dem Repo; runuser und systemctl sind Stubs, die
+    mitschreiben. Vorher installiert: nur clip-bot und clip-lernbot (Stand nach docs/SERVER.md)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Path(self._tmp.name)
+        self.prod, self.units, self.stub = self.t / "prod", self.t / "units", self.t / "stub"
+        shutil.copytree(SYSTEMD, self.prod / "deploy" / "systemd")
+        git = ["git", "-C", str(self.prod), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+               "-c", "commit.gpgsign=false"]
+        for befehl in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "Stand"]):
+            subprocess.run(git + befehl, check=True, capture_output=True)
+        self.stand = subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True,
+                                    text=True).stdout.strip()
+        self.units.mkdir()
+        for name in ("clip-bot.service", "clip-lernbot.service"):
+            shutil.copy(SYSTEMD / name, self.units / name)
+        self.stub.mkdir()
+        stubs = {"runuser": 'while [ $# -gt 0 ]; do case "$1" in -u) shift 2;; --) shift; break;; *) break;; esac; '
+                            'done\nexec "$@"',
+                 "systemctl": 'echo "systemctl $*" >> "$STUB/aufrufe"\ncase "$1" in\n'
+                              '  cat) test -f "$UNITS/$2" && cat "$UNITS/$2";;\n'
+                              '  is-enabled) [ "$2" = -q ] && shift; grep -qx "$2" "$STUB/an" 2>/dev/null;;\n'
+                              '  enable) shift; for u in "$@"; do case "$u" in -*) ;; *) echo "$u" >> "$STUB/an";; '
+                              'esac; done;;\nesac'}
+        for name, inhalt in stubs.items():
+            (self.stub / name).write_text(f"#!/bin/sh\n{inhalt}\n", encoding="utf-8")
+            (self.stub / name).chmod(0o755)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def lauf(self) -> subprocess.CompletedProcess:
+        innen = re.search(r"^INNEN='\n(.*?)^'$", UPDATE.read_text(encoding="utf-8"), flags=re.M | re.S).group(1)
+        env = {**os.environ, "PATH": f"{self.stub}:{os.environ['PATH']}", "STUB": str(self.stub),
+               "UNITS": str(self.units)}
+        # innen <PROD> <REGIE> <MIT_REGIE> <ALT_PROD> <ZIEL_PROD> <ALT_REGIE> <ZIEL_REGIE> <STEMPEL> <UNITS> <SICH>
+        return subprocess.run(["bash", "-c", innen, "innen", str(self.prod), str(self.t / "regie"), "0", self.stand,
+                               self.stand, "", "", "TEST", str(self.units), str(self.t / "sich")],
+                              capture_output=True, text=True, env=env, timeout=60)
+
+    def eingeschaltet(self) -> list[str]:
+        an = self.stub / "an"
+        return an.read_text(encoding="utf-8").split() if an.exists() else []
+
+    def test_neu_eingerichtet_und_eingeschaltet(self):
+        r = self.lauf()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for name in ("clip-publikum.service", "clip-publikum.timer"):
+            with self.subTest(name):
+                self.assertEqual((self.units / name).read_text(encoding="utf-8"),
+                                 (SYSTEMD / name).read_text(encoding="utf-8"))
+        self.assertIn("clip-publikum.timer", self.eingeschaltet())
+        self.assertIn("clip-sitzungen.timer", self.eingeschaltet())        # wie bisher
+        rueckweg = (self.t / "sich.zurueck.sh").read_text(encoding="utf-8")
+        self.assertRegex(rueckweg, r"systemctl disable --now .*clip-publikum\.timer")
+        self.assertNotIn("clip-aufraeumen", " ".join(os.listdir(self.units)))   # „Nie löschen“ bleibt aus
+        # zweiter Lauf: nichts doppelt
+        self.lauf()
+        self.assertEqual(self.eingeschaltet().count("clip-publikum.timer"), 1)
+
+    def test_von_hand_angepasster_timer_bleibt_unangetastet(self):
+        eigen = (SYSTEMD / "clip-publikum.timer").read_text(encoding="utf-8").replace("10:00", "12:00")
+        (self.units / "clip-publikum.timer").write_text(eigen, encoding="utf-8")
+        r = self.lauf()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((self.units / "clip-publikum.timer").read_text(encoding="utf-8"), eigen)
+        self.assertIn("clip-publikum.timer weicht vom Repo ab", r.stdout)
+        self.assertNotIn("clip-publikum.timer", self.eingeschaltet())      # nicht überschrieben, nicht eingeschaltet
+        self.assertIn("clip-sitzungen.timer", self.eingeschaltet())
 
 
 class Anleitung(unittest.TestCase):

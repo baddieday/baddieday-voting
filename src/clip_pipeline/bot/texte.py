@@ -255,7 +255,8 @@ def auto_text(u: dict) -> str:
 HILFE = (
     "🎮 <b>Clip-Bot</b>\n"
     "Jede neue Szene entscheide ich selbst (🤖) – du musst nichts tun. Ab Werk schicke ich dir keine einzelnen "
-    "Szenen, nur Warnungen und das Highlight-Video.\n\n"
+    "Szenen und kein 2-Wochen-Video (das kommt im Lern-Bot), nur Warnungen. Unter /experte im Lern-Bot kommt das "
+    "2-Wochen-Video auch hier.\n\n"
     "/battle – zwei freigegebene Clips, du wählst den besseren (Elo)\n"
     "/rangliste – Top 10 der aktuellen Saison\n"
     "/gewichte – was die Vorbewertung gelernt hat\n"

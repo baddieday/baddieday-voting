@@ -40,6 +40,22 @@ class Uebertragung(MitSpeicher):
         self.assertTrue(all(c.kwargs["disable_notification"] for c in senden.call_args_list))
         self.assertTrue((self.ordner / ("a" * 32 + ".json")).exists())
 
+    def test_still_einfach_nur_probleme(self):
+        """Stufe 3 (08.10.): Clip-Bot still und Lern-Bot einfach – Start und glattes Ende werden nur vermerkt (vorher
+        je Kopierlauf zwei Nachrichten), ein Lauf mit Fehlern kommt wie bisher."""
+        self.konfig.daten["bot"]["clips_zeigen"] = False
+        self.konfig.daten["auto_freigabe"]["modus"] = "an"
+        self.bericht.update(ende_utc="2026-09-30T18:00:05Z", status="fertig", videos_kopiert=2, dateien_kopiert=4)
+        self.schreibe()
+        self.bericht.update(id="b" * 32, status="fehler", videos_kopiert=1, fehler=1)
+        self.schreibe()
+        senden = mock.AsyncMock()
+        app = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                              bot=SimpleNamespace(send_message=senden))
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(app)), 1)
+        self.assertIn("mit Fehlern", senden.call_args.args[1])
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM meldungen WHERE gesendet IS NULL").fetchone()[0], 0)
+
     def test_teilerfolg_telegram_ausfall_und_kaputte_datei_verlieren_nichts(self):
         self.schreibe()
         self.assertEqual(uebertragung.hole_meldungen(self.con, self.konfig), 1)

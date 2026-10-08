@@ -32,6 +32,9 @@ Alles läuft auf dem Mini, im Puffer-Betrieb; **nichts davon weckt pve-big**. Ze
 ## So läuft es für dich
 
 ### 1. Vom Short zum Post
+- **Einfacher Modus (Standard, seit 08.10.):** ✅ Hochladen → das Paket kommt → der Bot legt den TikTok-Post selbst
+  an. Kein Häkchen, kein `/link`; welches Video es auf TikTok ist, findet der tägliche Abruf (Abschnitt 5a). Die
+  folgenden Punkte beschreiben den Weg unter `/experte`.
 - **Lern-Bot (Entwürfe):** 👍 auf einen Short → ✅ fertig → unter dem Entwurf steht „📦 Upload-Paket“. Der Bot
   rendert die Upload-Fassung (1080×1920, auf dem Mini – aus derselben Schnittliste wie der Entwurf, also mit
   denselben Effekten des Regisseurs 2.0; Kill-Titel und Zähler bleiben im unscharfen Rand, nie im Spielbild)
@@ -126,9 +129,18 @@ zählt das nicht; `decide` und Stimmung zählen noch nicht mit, Annahme A18).
 4. Fertig: Die Tokens liegen nur in `publikum-oauth.json` neben der DB (0600), der Timer `clip-publikum` holt die
    Zahlen täglich und erneuert den Zugang selbst. Ohne Bot: `pipeline publikum anmelden` bzw. `… --code '<adresse>'`.
 Im Sandbox-Modus kann TikTok Zahlen zurückhalten – dann bleibt der Screenshot-Weg.
-Posts ohne Video-Nummer (kein Link, oder Kurzlink `vm.tiktok.com/…` aus der App) ordnet der Abruf selbst zu: eigene
-Videoliste, das Video mit passender Länge (±2 s), erstellt bis 72 h vor dem Häkchen/Link, das zeitlich nächste
-(`[publikum].zuordnung_stunden`). In der JSON-Zeile steht dann `"zugeordnet": n`; `/link` ist nur noch für Ausnahmen.
+Posts ohne Video-Nummer (im einfachen Modus immer – das Paket legt den Post an; sonst kein Link oder Kurzlink
+`vm.tiktok.com/…`) ordnet der Abruf selbst zu, **nur eindeutig** (08.10.): eigene Videoliste mit Beschreibung, ein Video
+passt, wenn es bis 72 h vor oder nach dem Post erstellt wurde (`[publikum].zuordnung_stunden`), die Länge auf ±2 s
+stimmt und seine Beschreibung nicht mit einer anderen ersten Zeile beginnt als die Caption des Pakets. Zugeordnet wird
+nur, wenn Video und Post nur zueinander passen; bei mehreren entscheidet die erste Zeile („Fortnite-Highlights: Triple
+Kill · 5 Momente · 🎵 On & On“ – im einfachen Modus mit dem Song, damit zwei Videos eines Abends verschieden sind; das
+Paket speichert sie am Post, `posts.merkmale.caption_zeile`). Ohne passende erste Zeile wartet der Abruf, bis das Fenster
+zu ist. Sonst bleibt der Post offen –
+lieber keine Zahlen als falsche. Bei der Zuordnung wird `gepostet_utc` die Upload-Zeit (Tag 7 zählt ab dem Upload). In
+der JSON-Zeile steht `"zugeordnet": n`; `/link` ist nur noch für Ausnahmen.
+Bleiben die Zahlen gleich (Flop), speichert der Abruf trotzdem eine Messung am Tag (ab 20 h nach der letzten), bis der
+Post seinen Score hat – so bekommt auch ein Video, das nicht mehr wächst, an Tag 7 seine Note, ohne Screenshot (08.10.).
 
 ### 6. Meldungen und Ruhezeit
 Nach dem täglichen Lauf (10:00) kommt höchstens **eine** Meldung am Tag, nur wenn es neue Scores gibt:
@@ -329,6 +341,10 @@ des Benutzers) und warum Dienste `~/.local/bin` nicht im PATH haben.
 ### P3 · Timer clip-publikum
 
 **Was:** `clip-publikum.timer` einschalten – jeden Tag um 10:00 `pipeline publikum bewerten`.
+**Seit 08.10. von selbst:** `deploy/pve-mini/alles-aktualisieren.sh` richtet die beiden Units ein und schaltet den
+Timer an (wie `clip-sitzungen`, mit Zeile im Rückweg-Skript). Einen von dir angepassten Timer überschreibt es nicht
+und schaltet ihn nicht an. Die Schritte unten brauchst du nur, wenn du ohne das Update-Skript einspielst. Ob Zahlen
+ankommen, zeigt 📋 Stand im Lern-Bot („🧠 Lernt aus: … Zuschauern (…)“) – ohne Blick ins Journal.
 **Warum:** Der Score wird einmal je Post gesetzt, sobald er 7 Tage alt ist. Ein täglicher Lauf reicht; mehrere
 schaden nicht (nichts wird überschrieben, je Tag höchstens eine Meldung).
 **Freigabe nötig?** Ja – neuer Timer. Der Lauf ist reine Datenbank-Arbeit, weckt nie und braucht keine Sperre.
@@ -345,7 +361,8 @@ systemctl list-timers 'clip-*'
 **Prüfen:** `list-timers` zeigt clip-publikum um 10:00 (plus bis zu 10 min Zufall); `journalctl -u clip-publikum`
 nach dem ersten Lauf.
 **Rückweg:** `systemctl disable --now clip-publikum.timer` – Posts und Messungen bleiben, nur der Score kommt
-nicht mehr von selbst (von Hand geht er weiter).
+nicht mehr von selbst (von Hand geht er weiter). Das nächste `alles-aktualisieren.sh` schaltet ihn wieder ein; ohne
+TikTok-Abruf dauerhaft: `[publikum].api_abruf = false` in `lokal.toml`.
 **Was du lernst:** `Type=oneshot` (ein Lauf, dann fertig), `Persistent=true` (verpassten Lauf nachholen),
 `RandomizedDelaySec` (nicht auf die Sekunde genau), und warum Exit 1 hier rot sein soll: dann steht im Journal,
 welcher Post nicht bewertet werden konnte.
@@ -501,6 +518,7 @@ Aus: `systemctl disable --now clip-mikro.path clip-mikro.timer` (oder `[merkmale
   unten), ✅ tippen; sonst ✏️ und von Hand.
 - **… `/publikum` „noch keine Zahlen“ oder „braucht eine Messung ab Tag 3“ zeigt?** Einen Screenshot mit der
   genannten `#Nummer` schicken. Ohne Messung ab Tag 3 bleibt der Post unbewertet – auch nach Wochen noch nachholbar.
+  Mit TikTok-Verbindung kommt sie von selbst, sobald der Post sein Video hat – auch bei einem Flop (5a).
 - **… ich die Post-Nummer vergessen habe?** `/publikum` – oder den Screenshot ohne Nummer schicken und den Post per
   Knopf wählen.
 - **… der Link falsch war?** Nochmal `/link <nr> <richtiger Link>` – der neue ersetzt den alten.

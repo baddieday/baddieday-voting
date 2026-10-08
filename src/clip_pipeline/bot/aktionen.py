@@ -124,8 +124,10 @@ def ruhezeit(konfig, zeit: datetime | None = None) -> bool:
 
 
 def faellige_meldungen(con: sqlite3.Connection, konfig, zeit: datetime | None = None) -> list[sqlite3.Row]:
-    """Ungesendete Meldungen; in der Ruhezeit ohne die aus Puffer/Lager – die bleiben bis leise_bis liegen."""
-    zeilen = con.execute("SELECT id, schluessel, text FROM meldungen WHERE gesendet IS NULL ORDER BY id").fetchall()
+    """Ungesendete Meldungen; in der Ruhezeit ohne die aus Puffer/Lager – die bleiben bis leise_bis liegen.
+    routine (08.10.): Start oder glattes Ende einer Übertragung – im stillen einfachen Modus nur vermerkt."""
+    zeilen = con.execute(
+        "SELECT id, schluessel, text, routine FROM meldungen WHERE gesendet IS NULL ORDER BY id").fetchall()
     if not ruhezeit(konfig, zeit):
         return zeilen
     return [z for z in zeilen if not z["schluessel"].startswith(LEISE_MELDUNGEN)]
@@ -143,7 +145,8 @@ def highlight_outbox(con: sqlite3.Connection) -> list[sqlite3.Row]:
     return con.execute("SELECT * FROM highlights WHERE status = 'neu' ORDER BY id").fetchall()
 
 
-def highlight_gesendet(con: sqlite3.Connection, highlight_id: int, nachricht_id: int) -> None:
+def highlight_gesendet(con: sqlite3.Connection, highlight_id: int, nachricht_id: int | None) -> None:
+    """nachricht_id None (08.10.): nur vermerkt – das 2-Wochen-Video kam im Lern-Bot (bot.app._nur_probleme)."""
     con.execute(
         "UPDATE highlights SET status = 'gesendet', tg_nachricht_id = ? WHERE id = ? AND status = 'neu'",
         (nachricht_id, highlight_id),
