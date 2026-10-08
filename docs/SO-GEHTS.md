@@ -1,4 +1,4 @@
-# So geht's (Stand 07.10.2026)
+# So geht's (Stand 08.10.2026)
 
 ## Was von selbst passiert
 1. Du zockst. Kommt 45 Minuten lang kein neues Match dazu, gilt der Abend als vorbei (am PC musst du nichts
@@ -32,14 +32,17 @@ Bei jedem Video stellt er drei Dinge selbst ein und merkt sich, was ankommt:
 
 Er lernt aus deinen ✅/❌ und aus der Note einer KI, die sich jedes Video nach dem Senden anschaut (zählt ein Drittel
 so viel wie du). Dein Grund unter ❌ zählt mit: „🎵 Musik“ oder „⏱️ Zu kurz“ werden nicht dem Aufbau angelastet.
-Bei jedem zweiten Video probiert er bewusst etwas Neues (ändern: ⚙️ → 🔧 → 🧪 Ausprobieren). **Deine Regeln gehen
-immer vor.** Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert hat.
+Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen immer vor.** Sonntags ab 18 Uhr
+kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert hat.
 
 ## Knöpfe
-- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend (ändern: ⚙️ → 🎯 Clips).
+- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend.
 - **📋 Stand** – deine Regeln und was beim letzten Abend passiert ist.
-- **⚙️ Einstellungen** – Short-Länge, Szenen (nur starke oder auch Einzelkills), Effekte, Musik.
-- **/experte** – alle alten Knöpfe und Details ein- oder ausschalten.
+- **/experte** – alle alten Knöpfe, Details und ⚙️ Einstellungen ein- oder ausschalten.
+
+Einstellen musst du nichts: Clips (neuester Spielabend), Szenen (nur starke) und Aufbau wählt der Bot selbst,
+Länge, Effekte und Songs ändern nur deine Gründe unter ❌. `/einstellungen` zeigt dir, was gerade gilt.
+Was du früher unter ⚙️ eingestellt hast, bleibt gespeichert und gilt unter /experte weiter.
 
 ## Ruhe im Chat
 Der Clip-Bot schickt keine einzelnen Szenen mehr. Er meldet sich nur bei Problemen (zum Beispiel Speicher voll) und

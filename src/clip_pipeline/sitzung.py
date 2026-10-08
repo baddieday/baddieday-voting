@@ -82,7 +82,8 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
             entwurf.entwurf(con, k, entwurf_id)
         except regie.ZuWenigSzenen as z:   # lieber kein Video als eins mit Füllmaterial (Florian, 07.10.)
             hinweis = "; ".join(filter(None, [hinweis, str(z)]))
-            db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z, len(offen)))
+            db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z, len(offen),
+                                                                 experte=einstellungen.experte(con, k)))
         except Exception as fehler:  # noqa: BLE001 – vermerken und dir sagen, statt alle 10 min still neu zu versuchen
             entwurf_id = None
             hinweis = "; ".join(filter(None, [hinweis, str(fehler)]))
@@ -139,12 +140,14 @@ def _zeit(text):
         return None
 
 
-def kein_video_text(tag: str, z: regie.ZuWenigSzenen, offen: int = 0) -> str:
-    """„🎮 Abend vom 06.10.: nur 2 starke Szenen (…), ein Video braucht 4 – heute kein Video.“ + Grund/Tipp."""
+def kein_video_text(tag: str, z: regie.ZuWenigSzenen, offen: int = 0, experte: bool = True) -> str:
+    """„🎮 Abend vom 06.10.: nur 2 starke Szenen (…), ein Video braucht 4 – heute kein Video.“ + Grund/Tipp.
+    08.10.: der Tipp über ⚙️ nur im Experten-Modus; offene Matches „waren noch nicht fertig“ (vorher „kamen nie bei
+    mir an“ – sie waren da, nur nach der Wartezeit noch nicht verarbeitet)."""
     text = f"🎮 Abend vom {tag}: {z.kopf()} – heute kein Video."
     if offen:
-        text += f" {offen} Match{'' if offen == 1 else 'es'} kam{'' if offen == 1 else 'en'} nie bei mir an."
-    return f"{text} {z.tipp()}".strip()
+        text += f" {offen} Match{'' if offen == 1 else 'es'} war{'' if offen == 1 else 'en'} noch nicht fertig."
+    return f"{text} {z.tipp(experte)}".strip()
 
 
 def _tag(konfig: Konfig, ende) -> str:

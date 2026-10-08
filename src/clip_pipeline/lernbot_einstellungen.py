@@ -4,6 +4,10 @@
 gerade aktiv), „↩️ Standard“ lässt wieder die Datei gelten. Bei „🎯 Clips“ gibt es zusätzlich „📅 Match wählen“ mit den
 neuesten Matches. Alles gilt ab dem nächsten Entwurf. Die Logik steckt in einstellungen.py (ohne Telegram testbar).
 
+08.10. (Florian: „wenn ich alles per Hand einstellen muss … es soll autonom sein“): Das Menü gibt es nur noch im
+Experten-Modus. Im einfachen Modus zeigt /einstellungen nur, was gerade gilt (uebersicht) – ohne Knöpfe; Knöpfe alter
+Menü-Nachrichten ändern dort nichts mehr. Die Tabelle `einstellungen` bleibt, wie sie ist.
+
 Knöpfe (Callback-Daten ≤ 64 Byte): s:m Menü · s:o:<i> Optionen · s:w:<i>:<j> Wert wählen · s:r:<i> Standard ·
 s:l Match-Liste · s:x:<match-id> Match wählen.
 """
@@ -13,7 +17,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from . import einstellungen
+from . import einstellungen, regeln
 from .einstellungen import KATALOG, QUELLE
 from .konfig import Konfig
 from .verarbeitung import SESSION_ID
@@ -30,7 +34,26 @@ def _alle(con: sqlite3.Connection, konfig: Konfig, alle: bool | None) -> bool:
     return bool(alle) or einstellungen.experte(con, konfig)
 
 
+def uebersicht(con: sqlite3.Connection, konfig: Konfig) -> str:
+    """Einfacher Modus (08.10.): was gerade gilt – ohne Knöpfe. Clips, Szenen und Aufbau entscheidet der Bot
+    (einstellungen.EINFACH_FEST), Länge, Effekte und Songs ändern nur deine ❌-Gründe (regeln.py)."""
+    k = einstellungen.anwenden(con, konfig)
+    _, hinweis = einstellungen.quell_matches(con, k)
+    abend = "🎯 nur Spielabend "
+    zeilen = ["⚙️ Einstellen musst du nichts – das entscheide ich selbst.",
+              "🎯 Clips: dein neuester Spielabend" + (f", {hinweis.removeprefix(abend)}"
+                                                     if hinweis and hinweis.startswith(abend) else ""),
+              "🎬 Aufbau, Tempo und Zeitlupe lerne ich aus deinen ✅/❌.",
+              regeln.regeln_zeile(con, k)]
+    if (mindestens := float(k.wert("regie.short_mindestens_s", 0.0) or 0.0)) > 0 and not regeln.ziel_regel(con, k):
+        zeilen.append(f"⏱️ Shorts nie kürzer als {mindestens:.0f} s – so hast du es eingestellt.")
+    zeilen += ["Länge, Effekte und Songs änderst du mit deinem Grund unter ❌.", "🔧 Alles von Hand: /experte"]
+    return "\n".join(zeilen)
+
+
 def menue_text(con: sqlite3.Connection, konfig: Konfig, meldung: str | None = None, alle: bool | None = None) -> str:
+    if not einstellungen.experte(con, konfig):   # 08.10.: einfacher Modus – nur anzeigen, was gilt
+        return uebersicht(con, konfig)
     alle = _alle(con, konfig, alle)
     teile = [f"✓ {meldung}" if meldung else None,
              "⚙️ Einstellungen – gelten ab dem nächsten Video." if not alle else
@@ -43,13 +66,12 @@ def menue_text(con: sqlite3.Connection, konfig: Konfig, meldung: str | None = No
     _, hinweis = einstellungen.quell_matches(con, einstellungen.anwenden(con, konfig))
     if hinweis:
         teile.append(f"Gerade: {hinweis}")
-    if alle and not einstellungen.experte(con, konfig):   # sonst wundert man sich, warum „an“ nichts tut (07.10.)
-        teile.append("ℹ️ Im einfachen Modus fest aus: KI-Cutter, Selbst-Aussortieren, Vorfilter, Abendstand – "
-                     "wirken erst im Experten-Modus.")
     return "\n".join(t for t in teile if t)
 
 
 def menue_knoepfe(con: sqlite3.Connection, konfig: Konfig, alle: bool | None = None) -> list[list[tuple[str, str]]]:
+    if not einstellungen.experte(con, konfig):   # 08.10.: einfacher Modus – keine Wert-Knöpfe
+        return []
     alle = _alle(con, konfig, alle)
     reihen = [[(f"{e.titel}: {einstellungen.anzeige(e, wert, con, konfig)}", f"s:o:{i}")]
               for i, (e, wert, _h) in enumerate(einstellungen.aktuell(con, konfig))
@@ -87,6 +109,8 @@ def verarbeite_klick(con: sqlite3.Connection, konfig: Konfig, daten: str) -> tup
     unbekanntem Knopf (der Aufrufer antwortet dann „Unbekannter Knopf.“)."""
     teile = daten.split(":")
     art = teile[1] if len(teile) > 1 else ""
+    if not einstellungen.experte(con, konfig):   # 08.10.: alte Menü-Knöpfe ändern im einfachen Modus nichts mehr
+        return uebersicht(con, konfig), [], "Das entscheide ich jetzt selbst."
     if art == "m":
         return menue_text(con, konfig), menue_knoepfe(con, konfig), None
     if art == "a":   # 06.10.: alle Einstellungen (das einfache Menü zeigt nur vier)
@@ -119,6 +143,7 @@ def verarbeite_klick(con: sqlite3.Connection, konfig: Konfig, daten: str) -> tup
 # --- Telegram ------------------------------------------------------------------------------
 
 def _markup(knoepfe):
+    """Inline-Knöpfe; ohne Knöpfe (einfacher Modus) eine leere Leiste – entfernt beim Bearbeiten die alten Knöpfe."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
     return InlineKeyboardMarkup([[InlineKeyboardButton(t, callback_data=d) for t, d in reihe] for reihe in knoepfe])
@@ -126,7 +151,9 @@ def _markup(knoepfe):
 
 async def cmd_einstellungen(update, context) -> None:
     con, konfig = context.bot_data["con"], context.bot_data["konfig"]
-    await update.effective_message.reply_text(menue_text(con, konfig), reply_markup=_markup(menue_knoepfe(con, konfig)))
+    knoepfe = menue_knoepfe(con, konfig)   # einfacher Modus (08.10.): keine – nur die Übersicht
+    await update.effective_message.reply_text(menue_text(con, konfig),
+                                              reply_markup=_markup(knoepfe) if knoepfe else None)
 
 
 async def bei_klick(update, context) -> None:

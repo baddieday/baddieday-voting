@@ -91,8 +91,13 @@ class LernBot(MitRegieMaterial):
         text = lernbot.stand_kurz(self.con, self.konfig)
         self.assertTrue(text.startswith("📋 Stand\n📏 Deine Regeln: Länge automatisch"))
         self.assertIn("✅/❌ von dir: 1 (0 ✅ · 1 ❌)", text)
-        self.assertIn("⏱️ Shorts gerade 45 s", text)
+        self.assertIn("⏱️ Shorts gerade 45 s – die Länge wähle ich selbst", text)   # 08.10.: ohne „feste Länge“
         self.assertLessEqual(len(text.splitlines()), 10)
+        from clip_pipeline import einstellungen
+
+        einstellungen.setze(self.con, "regie.short_mindestens_s", 65.0)          # ⚙️ vom 06.10.: bleibt dein Wort
+        self.assertIn("⏱️ Shorts gerade 65 s – nie kürzer als 65 s", lernbot.stand_kurz(self.con, self.konfig))
+        einstellungen.zuruecksetzen(self.con, "regie.short_mindestens_s")
         antworten = []
 
         async def reply_text(text, **_):
@@ -182,10 +187,12 @@ class LernBot(MitRegieMaterial):
         self.assertIn("k:0:viral", knoepfe)
 
     def test_clip_auswahl_ein_match(self):
-        # 29.09. (⚙️ Einstellungen): nur Momente aus dem gewählten Match; der Hinweis steht vorn im Entwurf
+        # 29.09. (⚙️ Einstellungen): nur Momente aus dem gewählten Match; der Hinweis steht vorn im Entwurf.
+        # 08.10.: von Hand nur noch unter /experte – im einfachen Modus nimmt der Bot immer den neuesten Abend
         from clip_pipeline import einstellungen
         from clip_pipeline.zeit import iso, jetzt
 
+        self.konfig.daten.setdefault("lernbot", {})["experte"] = True
         # Genug Material innerhalb des gewählten Matches für einen zulässigen Short;
         # die beiden fremden Momente dürfen trotz ihrer vorhandenen Dateien nicht hineinkommen.
         self.momente_anlegen([(stimmung, serie, kills, "m2" if i < 6 else match)
@@ -305,11 +312,13 @@ class LernBot(MitRegieMaterial):
             eid = lernbot.baue_entwurf(self.konfig, "short")
         self.assertTrue(eid)                                                # Entwurf kommt trotzdem
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 3)
-        # 27.09.: der Fehler steht als erster Hinweis in der Schnittliste – der Bot zeigt ihn (vorher nur im Log)
+        # 27.09.: der Fehler steht vorn in der Schnittliste – der Bot zeigt ihn (vorher nur im Log). 08.10.: im
+        # einfachen Modus steht die Clip-Auswahl (immer der neueste Abend) davor – „quelle“ aus der Datei gilt dort nicht
         zeile = self.con.execute("SELECT schnittliste FROM entwuerfe WHERE id = ?", (eid,)).fetchone()
         with open(zeile["schnittliste"], encoding="utf-8") as f:
             hinweise = json.load(f)["hinweise"]
-        self.assertTrue(hinweise[0].startswith("Stimmung nachziehen fehlgeschlagen: RuntimeError: Whisper kaputt"), hinweise)
+        self.assertTrue(any(h.startswith("Stimmung nachziehen fehlgeschlagen: RuntimeError: Whisper kaputt")
+                            for h in hinweise[:2]), hinweise)
 
     def test_blick_auf_leerlauf_haelt_die_schleife_nicht_auf(self):
         import threading
@@ -435,7 +444,8 @@ class EntwurfText(unittest.TestCase):
                           f"g:{eid}:mehr", f"x:{eid}:"])
         self.assertEqual(len([k for r in lernbot.knoepfe_gruende(eid, ["action"], kurz=True) for k in r]), 10)  # alle 9 + ✅
         self.assertEqual(lernbot.knoepfe_kurzbefehle(), [[("🎬 Neues Video", "k:0:short")],
-                                                          [("📋 Stand", "k:0:stand"), ("⚙️ Einstellungen", "k:0:einstellungen")]])
+                                                          [("📋 Stand", "k:0:stand")]])   # 08.10.: kein ⚙️ mehr
+        self.assertNotIn("⚙️", lernbot.HILFE)
         self.assertEqual(len([k for r in lernbot.knoepfe_kurzbefehle(experte=True) for k in r]), 9)
         liste = {"format": "short", "dauer_s": 47.0, "stimmung": "episch", "bogen": [1, 3, 2],
                  "segmente": [{"moment": "a", "bewertet": 2}, {"moment": "b", "bewertet": 0}],

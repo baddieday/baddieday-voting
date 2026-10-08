@@ -34,6 +34,7 @@ class Regeln(MitRegieMaterial):
         return einstellungen.anwenden(self.con, self.konfig)
 
     def test_jeder_grund_wirkt_sofort_und_sichtbar(self):
+        self.konfig.daten["regie"]["effekte"]["an"] = True    # wie ab Werk – „aus“ zählt seit 08.10. als Stufe „aus“
         self.assertIn("55 s lang (vorher 45 s)", regeln.wende_an(self.con, self.k(), "kurz", LISTE))
         self.assertIn("65 s lang (vorher 55 s)", regeln.wende_an(self.con, self.k(), "kurz", LISTE))  # wirkt jedes Mal
         self.assertIn("55 s lang (vorher 65 s)", regeln.wende_an(self.con, self.k(), "lang", LISTE))
@@ -54,6 +55,36 @@ class Regeln(MitRegieMaterial):
         einstellungen.setze(self.con, regeln.ZIEL_SCHLUESSEL, 75.0)
         self.assertIn("geht bei Shorts nicht", regeln.wende_an(self.con, self.k(), "kurz", LISTE))
         self.assertEqual(regeln.ziel_regel(self.con, self.konfig), 75.0)
+
+    def test_alter_schalter_effekte_aus_ist_stufe_aus(self):
+        """08.10.: „✨ Effekte aus“ (⚙️ vom 06.10.) ohne Stufe ist Stufe „aus“ – vorher stand im 📋 Stand „Effekte
+        normal“, und „😵 Zu hektisch“ schaltete die Effekte wieder EIN."""
+        self.konfig.daten["regie"]["effekte"]["an"] = True                                # Datei: an (ab Werk)
+        einstellungen.setze(self.con, "regie.effekte.an", False)                          # alter ⚙️-Schalter
+        self.assertEqual(regeln.stufe(self.con, self.k()), 0)
+        self.assertIn("Effekte aus", regeln.regeln_zeile(self.con, self.k()))
+        self.assertIn("schon auf „aus“", regeln.wende_an(self.con, self.k(), "hektisch", LISTE))
+        self.assertFalse(self.k().wert("regie.effekte.an"))                                # bleibt aus
+        einstellungen.zuruecksetzen(self.con, regeln.STUFE_SCHLUESSEL)
+        einstellungen.zuruecksetzen(self.con, "regie.effekte.an")                         # ohne Schalter: wie bisher
+        self.assertIsNone(regeln.stufe(self.con, self.k()))
+        self.assertIn("Effekte normal", regeln.regeln_zeile(self.con, self.k()))
+
+
+class KeinVideoText(unittest.TestCase):
+    def test_ohne_einstellungs_tipp_im_einfachen_modus(self):
+        """08.10.: Im einfachen Modus kein „⚙️ → …“ mehr (umstellen kannst du dort nichts); unter /experte wie bisher."""
+        z = regie.ZuWenigSzenen(2, 4, 6)                                      # mit Einzelkills ginge es
+        einfach = sitzung.kein_video_text("06.10.", z, offen=1, experte=False)
+        self.assertNotIn("⚙️", einfach)
+        self.assertIn("1 Match war noch nicht fertig.", einfach)              # vorher „kam nie bei mir an“
+        self.assertIn("⚙️ → 🎯 Szenen", sitzung.kein_video_text("06.10.", z, experte=True))
+        self.assertEqual(z.satz(experte=False), "🎬 Kein Video: nur 2 starke Szenen (Multikill, Victory, Clutch oder "
+                                                "Endkampf), ein Video braucht 4.")         # 🎬 Neues Video
+        kurz = regie.ZuKurz(20.0, 30.0, 4, 3, nur_starke=True)                 # Lern-Bot: Clips des Abends angeschaut
+        kurz.quelle = "🎯 nur Spielabend 06.10. (3 Matches)"
+        self.assertEqual(kurz.tipp(experte=False), "Angeschaut habe ich: Spielabend 06.10. (3 Matches).")
+        self.assertIn("Andere Auswahl: ⚙️ → 🎯 Clips.", kurz.satz())                   # Experte: wie bisher
 
 
 @unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")

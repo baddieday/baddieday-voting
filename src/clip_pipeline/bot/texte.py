@@ -255,14 +255,14 @@ def auto_text(u: dict) -> str:
 HILFE = (
     "🎮 <b>Clip-Bot</b>\n"
     "Jede neue Szene entscheide ich selbst (🤖) – du musst nichts tun. Ab Werk schicke ich dir keine einzelnen "
-    "Szenen, nur Warnungen und das Highlight-Video (umstellen: /einstellungen → 🔧 → 📨 Clip-Bot).\n\n"
+    "Szenen, nur Warnungen und das Highlight-Video.\n\n"
     "/battle – zwei freigegebene Clips, du wählst den besseren (Elo)\n"
     "/rangliste – Top 10 der aktuellen Saison\n"
     "/gewichte – was die Vorbewertung gelernt hat\n"
     "/offen – unentschiedene Clips erneut zeigen\n"
     "/auto – was die Automatik entscheidet und wie genau sie ist\n"
     "/clip &lt;nr&gt; – einen Clip erneut schicken (zum Umdrehen)\n"
-    "/einstellungen – ⚙️ Werte per Knopf umstellen\n"
+    "/einstellungen – was gerade gilt (von Hand umstellen nur mit /experte im Lern-Bot)\n"
     "/uploads – freigegebene Highlight-Videos, die noch nicht hochgeladen sind\n"
     "/status – Überblick"
 )

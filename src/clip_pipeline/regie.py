@@ -214,22 +214,26 @@ class ZuWenigSzenen(RegieFehler):
     def kopf(self) -> str:
         return f"{_szenen(self.stark)} (Multikill, Victory, Clutch oder Endkampf), ein Video braucht {self.mindestens}"
 
-    def _auswahl_tipp(self) -> str:
+    def _auswahl_tipp(self, experte: bool = True) -> str:
         """Welche Clips angeschaut wurden (07.10.: 🎯 Clips steht im einfachen ⚙️ – vorher „⚙️ → 🔧 → 🎯 Clips“ und
-        der Rat, auf „alle Clips“ zu stellen, obwohl der neueste Abend der Standard ist)."""
+        der Rat, auf „alle Clips“ zu stellen, obwohl der neueste Abend der Standard ist). Einfacher Modus (08.10.):
+        nur, was angeschaut wurde – umstellen kannst du dort nichts, das entscheidet der Bot."""
         if not self.quelle:
             return ""
+        if not experte:
+            return f"Angeschaut habe ich: {self.quelle.removeprefix('🎯 nur ')}."
         return f"Angeschaut habe ich nur: {self.quelle.removeprefix('🎯 nur ')}. Andere Auswahl: ⚙️ → 🎯 Clips."
 
-    def tipp(self) -> str:
-        """Was helfen würde – nur, wenn es wirklich hilft (sonst leer)."""
+    def tipp(self, experte: bool = True) -> str:
+        """Was helfen würde – nur, wenn es wirklich hilft (sonst leer). Die Wege über ⚙️ nur im Experten-Modus
+        (08.10., Florian: „wenn ich alles per Hand einstellen muss …“)."""
         if self.gesamt >= self.mindestens:
-            return "Mit Einzelkills ginge es: ⚙️ → 🎯 Szenen → „auch Einzelkills“."
-        return self._auswahl_tipp()
+            return "Mit Einzelkills ginge es: ⚙️ → 🎯 Szenen → „auch Einzelkills“." if experte else ""
+        return self._auswahl_tipp(experte)
 
-    def satz(self) -> str:
+    def satz(self, experte: bool = True) -> str:
         """Die Zeile für dich im Lern-Bot."""
-        return f"🎬 Kein Video: {self.kopf()}. {self.tipp()}".strip()
+        return f"🎬 Kein Video: {self.kopf()}. {self.tipp(experte)}".strip()
 
 
 class KeineNeuenSzenen(ZuWenigSzenen):
@@ -243,10 +247,10 @@ class KeineNeuenSzenen(ZuWenigSzenen):
     def kopf(self) -> str:
         return f"{_szenen(self.stark, 'neue')} als Ersatz"
 
-    def tipp(self) -> str:
+    def tipp(self, experte: bool = True) -> str:
         return ""
 
-    def satz(self) -> str:
+    def satz(self, experte: bool = True) -> str:
         if self.stark:
             anfang = (f"Ich habe nur {self.stark} neue Szene{'n' if self.stark != 1 else ''} als Ersatz – für ein ganzes "
                       "Video reicht das nicht")
@@ -270,10 +274,10 @@ class ZuKurz(ZuWenigSzenen):
         return (f"die {'starken ' if self.nur_starke else ''}Szenen ergeben nur {self.sekunden:.0f} s, ein Video braucht "
                 f"mindestens {self.mindest_s:.0f} s")
 
-    def tipp(self) -> str:
+    def tipp(self, experte: bool = True) -> str:
         if self.nur_starke and self.gesamt > self.stark:
-            return "Mit Einzelkills könnte es reichen: ⚙️ → 🎯 Szenen → „auch Einzelkills“."
-        return self._auswahl_tipp()
+            return "Mit Einzelkills könnte es reichen: ⚙️ → 🎯 Szenen → „auch Einzelkills“." if experte else ""
+        return self._auswahl_tipp(experte)
 
 
 def ist_stark(gruppe: int, victory: bool, clip_mk: dict | None, mk: dict) -> bool:

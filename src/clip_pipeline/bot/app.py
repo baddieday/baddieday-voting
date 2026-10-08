@@ -357,11 +357,13 @@ async def cmd_clip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/auto: Stand der Auto-Freigabe (Modus, Stufen, letzte 7 Tage, Korrekturen) mit Knopf ⚙️ Einstellungen."""
+    """/auto: Stand der Auto-Freigabe (Modus, Stufen, letzte 7 Tage, Korrekturen) mit Knopf ⚙️ Einstellungen – den
+    gibt es seit 08.10. nur im Experten-Modus (im einfachen entscheidet der Bot, ein Menü gibt es dort nicht)."""
     con, konfig, _ = _daten(context)
     u = auto_freigabe.ueberblick(con, einstellungen.anwenden(con, konfig))
+    knopf = [[("⚙️ Einstellungen", "s:m")]] if einstellungen.experte(con, konfig) else None
     await update.effective_message.reply_text(texte.auto_text(u), parse_mode=ParseMode.HTML,
-                                              reply_markup=_markup([[("⚙️ Einstellungen", "s:m")]]))
+                                              reply_markup=_markup(knopf))
 
 
 async def sende_battle(context: ContextTypes.DEFAULT_TYPE) -> None:

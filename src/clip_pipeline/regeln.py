@@ -66,7 +66,11 @@ def sperre(con: sqlite3.Connection, art: str, schluessel: list[str], grund: str)
 # --- Wirksame Werte -------------------------------------------------------------------------------------------
 
 def _gesetzt(con: sqlite3.Connection, konfig: Konfig, schluessel: str):
-    """Wert aus dem Bot (⚙️/❌) oder aus der Datei – None, wenn keiner gesetzt ist (dann gilt das Gelernte)."""
+    """Wert aus dem Bot (⚙️/❌) oder aus der Datei – None, wenn keiner gesetzt ist (dann gilt das Gelernte).
+    Was der einfache Modus festlegt (einstellungen.EINFACH_FEST), gilt dort vor einer alten ⚙️-Zeile (08.10.)."""
+    ist_fest, wert = einstellungen.fest(con, konfig, schluessel)
+    if ist_fest:
+        return wert
     bot = einstellungen.gespeichert(con)
     return bot[schluessel] if schluessel in bot else konfig.wert(schluessel, None)
 
@@ -78,9 +82,13 @@ def ziel_regel(con: sqlite3.Connection, konfig: Konfig) -> float | None:
 
 
 def stufe(con: sqlite3.Connection, konfig: Konfig) -> int | None:
-    """Deine Effekt-Stufe 0–3, None = nie gesetzt (dann gilt das Gelernte)."""
+    """Deine Effekt-Stufe 0–3, None = nie gesetzt (dann gilt das Gelernte).
+    08.10.: der alte Schalter „✨ Effekte aus“ (regie.effekte.an = false, ⚙️ vom 06.10. oder Datei) ohne Stufe zählt
+    als Stufe „aus“ – vorher hieß es im 📋 Stand „Effekte normal“, und „😵 Zu hektisch“ schaltete sie wieder EIN."""
     wert = _gesetzt(con, konfig, STUFE_SCHLUESSEL)
-    return int(wert) if wert is not None else None
+    if wert is not None:
+        return int(wert)
+    return 0 if _gesetzt(con, konfig, "regie.effekte.an") is False else None
 
 
 def nur_starke(con: sqlite3.Connection, konfig: Konfig) -> bool:

@@ -75,9 +75,15 @@ class Geschmack(MitSpeicher):
                   "seg_min_faktor": 1.25, "max_lupen": 8}
         wahl = geschmack.nur_wirksame(vorher, {**vorher, "seg_min_faktor": 1.4}, self.konfig)
         self.assertEqual((wahl.get("tempo"), wahl["experiment"], wahl["aufbau"]), (None, None, "kino"))
-        einstellungen.setze(self.con, "regie.stil", "kino")                     # ⚙️ fester Stil geht vor
+        # 08.10.: ein alter fester Stil aus ⚙️ friert das Aufbau-Lernen im einfachen Modus nicht mehr ein
         p, _ = regie_lernen.aktuelle(self.con, einstellungen.anwenden(self.con, self.konfig), "short")
-        self.assertEqual(p["stil"], "kino")
+        fest = next(s for s in ("kino", "story") if s != p["stil"])
+        einstellungen.setze(self.con, "regie.stil", fest)
+        self.assertEqual(regie_lernen.aktuelle(self.con, einstellungen.anwenden(self.con, self.konfig), "short")[0]
+                         ["stil"], p["stil"])
+        einstellungen.setze(self.con, "lernbot.experte", True)                   # /experte: der feste Stil geht vor
+        p, _ = regie_lernen.aktuelle(self.con, einstellungen.anwenden(self.con, self.konfig), "short")
+        self.assertEqual(p["stil"], fest)
 
     def test_wochenbericht_sonntags_einmal(self):
         heute = datetime.now(timezone.utc)
@@ -86,6 +92,8 @@ class Geschmack(MitSpeicher):
         self.entwurf({"aufbau": "story", "tempo": "ruhig", "zeitlupe": "viel"}, daumen=1,
                      erstellt=abend - timedelta(hours=1))
         self.assertTrue(geschmack.wochenbericht(self.con, self.konfig, abend))
+        text = self.con.execute("SELECT text FROM lern_meldungen WHERE schluessel LIKE 'woche:%'").fetchone()[0]
+        self.assertIn("ich probiere weiter selbst aus", text)                   # 08.10.: keine Bitte um mehr ✅/❌
         self.assertFalse(geschmack.wochenbericht(self.con, self.konfig, abend))  # je Woche einmal
         self.assertFalse(geschmack.wochenbericht(self.con, self.konfig, sonntag.replace(hour=8)))   # vormittags nie
 

@@ -41,16 +41,13 @@ FORMAT_NAMEN = {"short": "Short", "zusammenschnitt": "Zusammenschnitt", "viral":
                 "twist": "😅 Viral-Video mit Twist", "highlight": "⚡ Viral-Video (Highlights)", "fail": "💀 Fail-Video"}
 ENTWURF_ZIELE = (*regie.FORMATE, *viral.KNOEPFE)   # was /entwurf und die Knöpfe bauen können
 
-# Einfache Hilfe (06.10., Florian: „das wird alles zu kompliziert“) – die volle unter /experte
+# Einfache Hilfe (06.10., Florian: „das wird alles zu kompliziert“) – die volle unter /experte. 08.10. (Florian: „wenn
+# ich alles per Hand einstellen muss …“): ohne ⚙️ – du tippst nur ✅ oder ❌ mit Grund, alles andere entscheidet der Bot.
 HILFE = """<b>So geht's</b>
-🎮 Nach dem Zocken baue ich dein Video von selbst – nur aus den starken Szenen des Abends.
+🎮 Nach dem Zocken kommt dein Video von selbst – aus den starken Szenen des Abends.
 ✅ <b>Hochladen</b> – du bekommst Video und Text zum Hochladen.
-❌ <b>Nicht gut</b> – tipp auf den Grund, ich baue sofort neu. Länge, Musik und Effekte merke ich mir.
-🎬 <b>Neues Video</b> – jederzeit von Hand.
-⚙️ <b>Einstellungen</b> – Clips, Short-Länge, Szenen, Effekte, Musik.
-📋 <b>Stand</b> – deine Regeln und was zuletzt passiert ist.
-🎵 Musik: Audiodatei mit Quellenangabe als Bildunterschrift schicken.
-🔧 /experte – alle Befehle und Details ein- oder ausschalten."""
+❌ <b>Nicht gut</b> – tipp auf den Grund, ich baue neu. Alles andere entscheide ich selbst.
+🔧 Alles von Hand: /experte"""
 
 HILFE_EXPERTE = """<b>Autonomes Lernen des Regisseurs</b>
 Veröffentlichte Videos und ihre Publikumszahlen verbessern die nächsten Entwürfe automatisch.
@@ -74,8 +71,8 @@ Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 KURZBEFEHLE = {"🎬 Short": "short", "🎞️ Zusammenschnitt": "zusammenschnitt", "🧠 Lernstand": "lernstand",
                "📋 Stand": "stand", "📊 Publikum": "publikum", "🎵 Musik": "musik", "⚙️ Einstellungen": "einstellungen",
                "🔥 Viral-Video": "viral", "🔎 Warum?": "warum", "🎬 Neues Video": "short"}
-# 06.10.: einfach = drei Knöpfe; alles Weitere im Experten-Modus (/experte)
-KURZ_REIHEN = [["🎬 Neues Video"], ["📋 Stand", "⚙️ Einstellungen"]]
+# 06.10.: einfach = drei Knöpfe; alles Weitere im Experten-Modus (/experte). 08.10.: ohne ⚙️ – der Bot entscheidet
+KURZ_REIHEN = [["🎬 Neues Video"], ["📋 Stand"]]
 EXPERTE_REIHEN = [["🔥 Viral-Video"], ["🎬 Short", "🎞️ Zusammenschnitt"], ["🧠 Lernstand", "📋 Stand"],
                   ["📊 Publikum", "🎵 Musik"], ["⚙️ Einstellungen", "🔎 Warum?"]]
 # Die vier Gründe, die im Experten-Modus mit knoepfe_gruende(kurz=True) zuerst stehen; „➕ mehr“ zeigt alle neun
@@ -336,11 +333,13 @@ def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
     gut = sum(1 for z in zeilen if z["daumen"] > 0)
     teile = ["📋 Stand", regeln.regeln_zeile(con, konfig),
              f"✅/❌ von dir: {len(zeilen)} ({gut} ✅ · {len(zeilen) - gut} ❌)"]
-    if not regeln.ziel_regel(con, konfig):
+    if not regeln.ziel_regel(con, konfig):   # 08.10.: ohne „macht daraus eine feste Länge“ – die Länge wählt der Bot
         p, _ = regie_lernen.aktuelle(con, konfig, "short")
         fmt = regie_lernen.format_regeln(konfig, "short")[0]
         ziel = regie_lernen.ziel_dauer(fmt, p["dauer_faktor"], ziel_s=p.get("ziel_dauer_s"))
-        teile.append(f"⏱️ Shorts gerade {ziel:.0f} s (automatisch – „⏱️ Zu kurz“ unter ❌ macht daraus eine feste Länge)")
+        mindestens = float(konfig.wert("regie.short_mindestens_s", 0.0) or 0.0)   # ⚙️ vom 06.10.: bleibt dein Wort
+        teile.append(f"⏱️ Shorts gerade {ziel:.0f} s – " + (f"nie kürzer als {mindestens:.0f} s, wie du es eingestellt "
+                                                           "hast" if mindestens > 0 else "die Länge wähle ich selbst"))
     if abend := letzter_abend_zeile(con, konfig):
         teile.append(abend)
     if zeile := geschmack.stand_zeile(con):   # Aufbau, Tempo, Zeitlupe (Stufe 2)
@@ -510,8 +509,9 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
                 if isinstance(fehler, regie.ZuWenigSzenen):
                     fehler.quelle = quell_hinweis
                     raise
-                raise regie.RegieFehler(f"{fehler} – {quell_hinweis}. Andere Auswahl: ⚙️ → 🎯 Clips.") \
-                    from fehler
+                # 08.10.: der Weg über ⚙️ nur im Experten-Modus – im einfachen wählt der Bot die Clips selbst
+                tipp = " Andere Auswahl: ⚙️ → 🎯 Clips." if einstellungen.experte(con, konfig) else ""
+                raise regie.RegieFehler(f"{fehler} – {quell_hinweis}.{tipp}") from fehler
             t3 = time.monotonic()
             entwurf.entwurf(con, konfig, e["entwurf"])
             try:  # Cutter-Kritik (30.09.): der Bot benotet sich selbst – ein Fehler kostet nie den Entwurf
@@ -817,8 +817,8 @@ async def cmd_experte(update, context) -> None:
     an = not experte_an(con, konfig)
     einstellungen.setze(con, "lernbot.experte", an)
     await update.effective_message.reply_text("🔧 Experten-Modus an – alle Knöpfe, Gründe und Details." if an else
-                                              "🔧 Experten-Modus aus – einfache Ansicht mit 🎬 Neues Video, "
-                                              "✅/❌ und den wichtigsten Einstellungen.")
+                                              "🔧 Experten-Modus aus – du tippst nur noch ✅ oder ❌, alles andere "
+                                              "entscheide ich selbst.")
     await cmd_hilfe(update, context)
 
 
@@ -874,10 +874,13 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
         con = app.bot_data["con"]
         konfig = einstellungen.anwenden(con, app.bot_data["konfig"])   # ⚙️ Vorfilter usw. (29.09.)
         wach = await asyncio.to_thread(speicher_da, konfig)
-        if ansage or not wach:   # nach ❌ hat die Bestätigung schon „ich baue neu“ gesagt
+        # 08.10.: im Puffer-Betrieb ([lager] gesetzt) ist der Speicher der Puffer auf dem Mini – dort schläft kein
+        # pve-big, und geweckt wird auch nichts (einfacher Modus; /experte wie bisher)
+        schlaeft = not wach and not (einfach and konfig.getrennt)
+        if ansage or schlaeft:   # nach ❌ hat die Bestätigung schon „ich baue neu“ gesagt
             text = ((f"🎬 Baue ein {FORMAT_NAMEN[fmt]} …" if fmt in viral.KNOEPFE else
                      f"🎬 Baue einen {FORMAT_NAMEN[fmt]} …") if ansage else "")
-            text += "" if wach else " 💤 pve-big schläft – ich wecke ihn (bis zu 3 min)."
+            text += " 💤 pve-big schläft – ich wecke ihn (bis zu 3 min)." if schlaeft else ""
             await app.bot.send_message(chat, text.strip(), reply_markup=ohne_tastatur())
         ist_viral = fmt in viral.KNOEPFE
         versuche_max = max(1, int(konfig.wert("viral.versuche_max" if ist_viral else "lernbot.auto_versuche_max", 3)))
@@ -904,7 +907,7 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
         log.info("Entwurf #%s gesendet in %.0f s", eid, time.monotonic() - t)
         return eid
     except regie.ZuWenigSzenen as z:   # Stufe 1: lieber kein Video als eins mit Füllmaterial (🥱: als dasselbe)
-        await app.bot.send_message(chat, z.satz())
+        await app.bot.send_message(chat, z.satz(experte=not einfach))   # 08.10.: ⚙️-Tipps nur unter /experte
         return None
     except Exception as e:  # dir kurz sagen, was los ist – Details ins Log
         log.exception("Entwurf fehlgeschlagen")
