@@ -969,6 +969,11 @@ esac
 """)
         anlegen(self.prod / ".env", 0o644, f"TELEGRAM_BOT_TOKEN={FLORIAN_CLIP}\nLEARN_BOT_TOKEN={FLORIAN_LERN}\n")
         anlegen(self.prod / "config/lokal.toml", 0o644, '[speicher]\nhost = "192.0.2.51"\n')
+        # Wie auf dem Mini (SERVER.md): Ordner, Sperre, Datenbank, claude und .env gehören pipeline. Die lokal.toml hat
+        # root mit nano angelegt (PUFFER.md R5) – root:root 0644, pipeline liest sie über die Rechte für alle.
+        (self.stub / "besitzer").write_text("".join(f"{p} pipeline:pipeline\n" for p in (
+            self.florian, self.sperre, self.florian / "pipeline.db", self.florian / "claude", self.prod / ".env")),
+            encoding="utf-8")
         shutil.copytree(DEPLOY / "systemd", self.prod / "deploy/systemd")
         self.units = t / "etc/systemd/system"
         self.units.mkdir(parents=True)
@@ -1094,12 +1099,17 @@ esac
         self.assertIn("Telegram: verbunden (Name in Telegram: Max)", r.stdout)
         self.assertIn("Alles getrennt", r.stdout)
         self.assertNichtsVerraten(r.stdout, r.stderr, aufrufe)
-        # deine Rechte geschärft (j), Sperrdatei für alle lesbar, Rückweg liegt bereit
+        # deine Rechte geschärft (j) – nur, was pipeline gehört; Sperrdatei für alle lesbar, Rückweg liegt bereit
         for pfad, modus in ((self.florian, 0o711), (self.florian / "pipeline.db", 0o600),
-                            (self.florian / "claude", 0o700), (self.prod / ".env", 0o600),
-                            (self.prod / "config/lokal.toml", 0o600), (self.sperre, 0o644)):
+                            (self.florian / "claude", 0o700), (self.prod / ".env", 0o600), (self.sperre, 0o644)):
             self.assertEqual(stat.S_IMODE(pfad.stat().st_mode), modus, pfad)
+        # Die lokal.toml gehört root: Mit 0600 könnte pipeline sie nicht mehr lesen, und alle deine Dienste stürzten beim
+        # Laden der Konfig ab. Sie bleibt für alle lesbar, das Skript sagt es (M84).
+        lokal = self.prod / "config/lokal.toml"
+        self.assertEqual(stat.S_IMODE(lokal.stat().st_mode), 0o644)
+        self.assertIn(f"{lokal} gehört root, nicht pipeline – bleibt 644", r.stdout)
         rueckweg = next((self.t / "root/benutzer-rechte").glob("zurueck-*.sh"))
+        self.assertNotIn("lokal.toml", rueckweg.read_text(encoding="utf-8"))
 
         # Zweiter Lauf: nichts gefragt außer dem j, keine einzige Änderung
         self.neu()
@@ -1120,7 +1130,7 @@ esac
         r = subprocess.run(["bash", str(rueckweg)], capture_output=True, text=True, env=self.env, timeout=60)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         for pfad, modus in ((self.florian, 0o755), (self.florian / "pipeline.db", 0o644),
-                            (self.prod / ".env", 0o644), (self.sperre, 0o644)):
+                            (self.prod / ".env", 0o644), (lokal, 0o644), (self.sperre, 0o644)):
             self.assertEqual(stat.S_IMODE(pfad.stat().st_mode), modus, pfad)
 
     def test_ohne_kopplung_bleibt_nur_der_bot_aus(self):

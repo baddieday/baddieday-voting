@@ -181,7 +181,8 @@ Was das Skript tut – passt etwas nicht, bricht es vor der ersten Änderung ab;
   (ohne Verbindung bleibt nur sein Bot aus);
 - prüft zum Schluss alles und bietet an, deine eigenen Rechte zu schärfen (j/N, nur `chmod`: dein Ordner nur noch
   passierbar; Datenbank, claude, Schlüssel, `.env` und `lokal.toml` nur für dich; Rückweg unter `/root/benutzer-rechte/`).
-  Deine Dienste laufen als pipeline und merken davon nichts.
+  Nur, was pipeline gehört – deine Dienste laufen als pipeline und merken davon nichts. Was root gehört (z. B. eine mit
+  nano angelegte `lokal.toml`), bleibt mit Hinweis, wie es ist; sonst könnten deine Dienste es nicht mehr lesen (M84).
 
 Danach (alle im CT als root, `…` = `/opt/clip-pipeline/deploy/benutzer`):
 - **Prüfen**, ändert nichts: `bash …/benutzer-pruefen.sh max` – Rechte, dieselbe Sperrdatei (in seiner Sandbox Gerät

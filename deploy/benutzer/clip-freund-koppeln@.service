@@ -5,8 +5,8 @@
 # Telegram-Zahl nach <Ordner>/db/kopplung.json (0600) und antwortet „Verbunden“. Falscher oder alter Code, Gruppen,
 # andere Nachrichten: nichts gespeichert. Nach der Frist Exit 1.
 # Je Bot nur ein Empfänger: läuft nur, solange keine Telegram-Zahl in <Ordner>/.env steht – ohne sie holt sein Bot nie
-# Nachrichten ab. Gestartet nur von benutzer-anlegen.sh (systemctl start --no-block, kein Timer, nie eingeschaltet); das
-# trägt danach die Zahl in seine .env ein und schaltet erst dann seinen Bot ein.
+# Nachrichten ab. Gestartet nur von benutzer-anlegen.sh (systemctl start im Hintergrund, kein Timer, nie eingeschaltet);
+# das trägt danach die Zahl in seine .env ein und schaltet erst dann seinen Bot ein.
 # Installiert: alles-aktualisieren.sh legt die Vorlage nur auf die Platte, sobald es einen Freund gibt.
 # Log ansehen: journalctl -u clip-freund-koppeln@<name> -n 30
 [Unit]

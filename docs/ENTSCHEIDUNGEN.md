@@ -1071,3 +1071,11 @@ Florian: „Eigener Claude-Zugang“. Der Freund verbindet sein Claude-Abo selbs
 | M81 | Ein Token in einer Textnachricht (z. B. aus `claude setup-token` auf seinem PC) wird jederzeit gespeichert, die Nachricht gelöscht und eine laufende Anmeldung beendet – nur vom Freund selbst, wie alles in seinem Bot |
 | M82 | Code, Token und Link nie im Log (nur was passiert und die Art eines Fehlers – Fehlermeldungen können Zugänge enthalten), nie in der Datenbank, nie zurück in den Chat; die Ausgabe von claude bleibt nur im Speicher der Anmeldung und wird mit ihrem Ende verworfen. Im Bot eines Freundes steht der Logger `telegram` fest auf INFO (bei DEBUG schrieb er jede Nachricht ins Log) |
 | M83 | Texte: 📋 „KI-Note: aus – verbinde dein Claude mit /claude“ (ersetzt den Satz aus M31), bei einem Token, das nicht mehr klappt, „… neu verbinden mit /claude“; die Hilfe des Freundes hat eine `/claude`-Zeile (einfach angehängt, im Experten-Modus statt der `/tiktok`-Zeile); `benutzer-pruefen.sh` nennt `/claude` statt `claude setup-token` |
+
+### Prüfung von Schritt 5–9 (08.10.2026) – Annahmen bis Florian widerspricht
+Ein blockierender Befund im freiwilligen Zusatz von `benutzer-anlegen.sh`, behoben; dazu ein veralteter Kommentar in
+`clip-freund-koppeln@` (Start im Hintergrund statt `--no-block`, M74). Tests: `tests/test_deploy_benutzer.py`.
+
+| Nr. | Annahme (bis Florian widerspricht) |
+|---|---|
+| M84 | Florians Rechte schärfen (M65) nur an dem, was `pipeline` gehört: Alle seine Dienste laufen als pipeline, an den Rechten des Besitzers ändert sich nichts – sie merken also wirklich nichts. Gehört etwas root (z. B. eine `lokal.toml`, die root mit nano angelegt hat, PUFFER.md R5), bleibt es mit einem Hinweis, wie es ist. Vorher wurde sie root:root 0600; pipeline konnte sie nicht mehr lesen, und alle Dienste Florians wären beim Laden der Konfig abgestürzt (beide Bots, Timer, n8n-Schritte ohne JSON-Zeile), bis er das Rückweg-Skript gefunden hätte. Kein `chgrp` (änderte, wem seine Dateien gehören), keine Prüfung danach (die Regel schließt den Fall aus). Ein Freund sieht die Datei in seiner Sandbox ohnehin nicht |

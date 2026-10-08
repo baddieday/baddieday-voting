@@ -590,3 +590,6 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     den Code zurück – der Bot löscht die Nachricht und legt das Token nur in seinen Ordner. Ein Token vom eigenen PC
     geht auch direkt. Nach 10 min oder bei einem Fehler wird nichts gespeichert; Code und Token stehen nie im Log. Bei
     dir gibt es `/claude` nicht. Einmal nötig: claude global auf dem Mini. M75–M83.
+  - Prüfung von Schritt 5–9: Das freiwillige Schärfen deiner Rechte fasst nur noch an, was pipeline gehört. Vorher wurde
+    eine `lokal.toml`, die root gehört (mit nano als root angelegt), nur noch für root lesbar – alle deine Dienste wären
+    beim Start abgestürzt. Jetzt bleibt sie, wie sie ist, und das Skript sagt es. M84.

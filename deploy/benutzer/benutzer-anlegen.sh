@@ -7,7 +7,7 @@
 #   3 Benutzer, Ordner, Konfig · 4 deine Sperrdatei für alle lesbar · 5 Dienst-Vorlagen · 6 Vorab-Prüfung
 #   7 Einrichten in seiner Sandbox (Datenbank, Whisper-Modell, Musik) · 8 Telegram: Einladungslink, er drückt Start
 #   9 Einschalten · 10 Prüfung und Bot-Link
-#   Zusatz (j/N): deine eigenen Rechte schärfen – nur chmod, mit Rückweg-Skript
+#   Zusatz (j/N): deine eigenen Rechte schärfen – nur chmod, nur was pipeline gehört, mit Rückweg-Skript
 # Wiederholbar: Fertiges wird übersprungen, gefragt wird nur, was fehlt. Gelöscht wird nichts. Zugänge stehen nur in
 # <Ordner>/.env (root:clip-<name>, 0640) – nie im Log, nie auf dem Bildschirm, nie auf einer Befehlszeile.
 # Ausschalten (Daten bleiben): bash benutzer-stilllegen.sh <name>
@@ -401,16 +401,21 @@ elif ! bash "$HIER/benutzer-pruefen.sh" "$NAME" < /dev/null; then
 fi
 
 sag "Zusatz: deine eigenen Dateien auch außerhalb der Sandbox schützen (nur chmod, mit Rückweg-Skript)"
-# Deine Dienste laufen als pipeline und merken davon nichts. Der Ordner bleibt für andere passierbar (zur Sperrdatei),
-# alles darin außer der Sperrdatei nur noch für dich; dazu deine .env und lokal.toml. /srv (Puffer, Lager) bleibt, wie es
-# ist – dort sieht ein Freund in seiner Sandbox ohnehin nichts.
+# Der Ordner bleibt für andere passierbar (zur Sperrdatei), alles darin außer der Sperrdatei nur noch für dich; dazu deine
+# .env und lokal.toml. Nur, was pipeline gehört: Deine Dienste laufen alle als pipeline, und an den Rechten des Besitzers
+# ändert sich nichts – sie merken davon nichts. Was root gehört (z. B. eine lokal.toml, als root mit nano angelegt), lesen
+# sie über die Rechte für alle – das bleibt, wie es ist (M84). /srv (Puffer, Lager) bleibt ebenso – dort sieht ein Freund
+# in seiner Sandbox ohnehin nichts.
 SCHAERFEN=()
 schaerfe() {
-  local alt neu
+  local wer alt neu
   [ -e "$1" ] && [ ! -L "$1" ] || return 0
-  alt="$(stat -c %a "$1")"
+  read -r wer alt <<< "$(stand "$1")"
+  [[ "$alt" =~ ^[0-7]+$ ]] || return 0
   neu="$(printf '%o' $(( 8#$alt & ~8#$2 )))"
-  [ "$neu" = "$alt" ] || SCHAERFEN+=("$neu $alt $1")
+  [ "$neu" != "$alt" ] || return 0
+  if [ "${wer%%:*}" = pipeline ]; then SCHAERFEN+=("$neu $alt $1")
+  else echo "   ℹ️  $1 gehört ${wer%%:*}, nicht pipeline – bleibt $alt, sonst könnten deine Dienste sie nicht mehr lesen"; fi
 }
 schaerfe "$FLORIAN_DIR" 066
 for p in "$FLORIAN_DIR"/* "$FLORIAN_DIR"/.[!.]*; do
