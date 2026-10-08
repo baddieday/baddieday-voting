@@ -298,7 +298,9 @@ def _lies_toml(pfad: Path) -> dict:
 
 
 def lade(pfad: Path | str | None = None) -> Konfig:
-    if os.environ.get("CLIP_INSTANZ", "").strip():   # Freund (M1) – ohne die Variable (Florian) alles wie bisher
+    # Freund (M1) – ohne die Variable (Florian) alles wie bisher. Gesetzt, aber leer, ist ein KonfigFehler, nie still
+    # Florians Konfig mit seiner .env (M42).
+    if "CLIP_INSTANZ" in os.environ:
         return lade_instanz(os.environ["CLIP_INSTANZ"], pfad)
     lade_env(PROJEKT / ".env")
     pfad = Path(pfad or os.environ.get("CLIP_KONFIG") or STANDARD_KONFIG)
@@ -489,6 +491,9 @@ def _erzwinge(daten: dict, eigen: dict, inst: Path, name: str, toml: Path) -> No
     if not os.path.isabs(datei.strip()) or liegt_in(datei.strip(), inst):
         raise KonfigFehler(f"{toml}: [sperre].datei {datei!r} muss ein absoluter Pfad außerhalb der Instanz sein – "
                            "sonst rechnete die Instanz neben Florian her")
+    if not os.path.isfile(datei.strip()):   # M41: sonst legte sperre.oeffne bei einem Tippfehler still eine eigene an
+        raise KonfigFehler(f"{toml}: [sperre].datei {datei!r} fehlt oder ist nicht erreichbar – einzutragen ist "
+                           "Florians Sperrdatei, eine eigene legt eine Instanz nie an")
     warten = sperre.get("warten_s")
     if "warten_s" not in eigen.get("sperre", {}):
         sperre["warten_s"] = INSTANZ_WARTEN_S

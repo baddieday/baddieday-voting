@@ -32,7 +32,8 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
 
 ## Konfig im Instanz-Modus (`CLIP_INSTANZ=I`, umgesetzt in Schritt 2)
 `konfig.lade()` schaut zuerst nach `CLIP_INSTANZ`. Ohne die Variable (Florian) läuft alles wie bisher; mit ihr gilt
-nur, was dem Freund gehört (`konfig.lade_instanz`). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` (unten).
+nur, was dem Freund gehört (`konfig.lade_instanz`). Gesetzt, aber leer, ist ein Konfig-Fehler (Exit 2) – nie still
+Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` (unten).
 - **Ordner:** absoluter Pfad, Name aus a-z, 0-9, - (2–27 Zeichen), die Marke `I/.clip-benutzer` nennt genau diesen
   Namen. I darf sich nicht mit Florians Bereichen überschneiden (`/var/lib/clip-pipeline`, `/srv`, `/opt/clip-regie`,
   Code-Ordner).
@@ -45,7 +46,8 @@ nur, was dem Freund gehört (`konfig.lade_instanz`). Vorlagen: `config/instanz.b
 - **Erzwungen:** `I/db/pipeline.db`, Puffer `I/daten`, `I/regie`, `I/musik`, `I/material`, `I/sfx`, Zustand von
   pve-big in `I/db`; kein Host, keine MAC, kein SSH (auch kein Schlüssel); Freigeben im Puffer und Aufräumen aus;
   Lager-Pfad `I/kein-lager` (darf es nicht geben – jeder Lager-Zugriff scheitert sicher, Puffer-Betrieb ohne Lager).
-- **Sperre:** `[sperre].datei` ist Pflicht, absolut und außerhalb von I. Fehlt `warten_s`, wartet ein Freund 900 s.
+- **Sperre:** `[sperre].datei` ist Pflicht, absolut, außerhalb von I und muss es schon geben (Florians Datei – eine
+  Instanz legt nie eine eigene an, auch nicht bei einem Tippfehler, M41). Fehlt `warten_s`, wartet ein Freund 900 s.
 - **Pfadwächter:** Jeder Datenpfad (auch die Unterordner im Puffer) muss aufgelöst in I liegen – ein Link hinaus ist
   ein Konfig-Fehler.
 - **KI nur mit eigenem Claude-Zugang** (Florian: „Eigener Claude-Zugang“): ein Langzeit-Token aus `claude setup-token`

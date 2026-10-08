@@ -563,3 +563,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     einem eigenen Prozess mit echtem ffmpeg. Keiner ändert eine Datei der anderen (Fingerabdruck), jede Datenbank
     hat nur ihr Match, alle nehmen die eine Sperre. Dazu der erste Test für den n8n-Einstieg (`deploy/n8n-lauf.sh`,
     unverändert): nur die Vertragsbefehle kommen durch. M38–M40.
+  - Prüfung von Schritt 1–4: zwei kleine Lücken geschlossen, die vor Ort schon die Sandbox abfängt. Ein Tippfehler im
+    Sperrpfad eines Freundes legte still eine eigene Sperre an (dann rechnete er neben dir her) – jetzt muss es deine
+    Sperrdatei geben, sonst startet bei ihm nichts. Ein leeres `CLIP_INSTANZ` lief still mit deinen Werten – jetzt ein
+    Fehler. Bei dir unverändert. M41–M42.

@@ -9,6 +9,7 @@ alle Zugangswerte sind künstliche Test-Werte.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -185,7 +186,10 @@ class Manipulation(MitInstanzen):
                 self.schreibe_toml(f'[sperre]\ndatei = "{self.sperrdatei}"\n{zusatz}\n')
                 with self.assertRaisesRegex(KonfigFehler, "nicht erlaubt"):
                     self.lade(self.max)
-        shutil.copy(PROJEKT / "config" / "instanz.beispiel.toml", self.max / "instanz.toml")   # die Vorlage passt
+        # die Vorlage passt – mit Florians Sperrdatei aus dem Temp-Ordner (es muss sie geben, M41)
+        vorlage = (PROJEKT / "config" / "instanz.beispiel.toml").read_text(encoding="utf-8")
+        self.assertIn('datei = "/var/lib/clip-pipeline/pipeline.lock"', vorlage)
+        self.schreibe_toml(vorlage.replace("/var/lib/clip-pipeline/pipeline.lock", str(self.sperrdatei)))
         k = self.lade(self.max)
         self.assertEqual((k.wert("schnitt.encoder"), k.wert("sperre.warten_s"), k.wert("zeit.zeitzone")),
                          ("h264_vaapi", 900, "Europe/Berlin"))
@@ -199,6 +203,19 @@ class Manipulation(MitInstanzen):
             code = cli.main(["--konfig", "config/pipeline.toml", "scan"])
         self.assertEqual(code, 2)
         self.assertIn("--konfig", json.loads(ausgabe.getvalue().strip().splitlines()[-1])["fehler"])
+
+    def test_leeres_clip_instanz_ist_ein_fehler_nie_florians_konfig(self):
+        """Gesetzt, aber leer (z. B. ein Fehler in einer Vorlage): früher lief das still mit Florians .env und
+        Datenbank (Prüfung S2, M42). Jetzt Exit 2 mit Klartext, Florians .env wird nie gelesen."""
+        for wert in ("", "   "):
+            with self.subTest(wert=repr(wert)):
+                ausgabe = io.StringIO()
+                with mock.patch.dict(os.environ, {"CLIP_INSTANZ": wert}), \
+                        mock.patch.object(konfig_mod, "lade_env", side_effect=AssertionError("Florians .env")), \
+                        contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
+                    code = cli.main(["scan"])
+                self.assertEqual(code, 2)
+                self.assertIn("CLIP_INSTANZ", json.loads(ausgabe.getvalue().strip().splitlines()[-1])["fehler"])
 
     def test_ordner_marke_und_sperre_werden_geprueft(self):
         (self.max / ".clip-benutzer").write_text("eva\n")
@@ -216,6 +233,19 @@ class Manipulation(MitInstanzen):
             self.schreibe_toml(f"[sperre]\n{zeile}\n")
             with self.subTest(sperre=zeile), self.assertRaisesRegex(KonfigFehler, muster):
                 self.lade(self.max)
+
+    def test_sperre_mit_tippfehler_ergibt_nie_eine_eigene(self):
+        """Florian rechnet gerade. Ein Tippfehler im Sperrpfad legte früher still eine eigene Sperre an, und der Freund
+        rechnete daneben her (Prüfung S1, M41). Jetzt Exit 2 mit Klartext, nirgends eine neue Sperrdatei."""
+        self.schreibe_toml(f'[sperre]\ndatei = "{self.sperrdatei.with_name("pipline.lock")}"\nwarten_s = 0\n')
+        ausgabe = io.StringIO()
+        with open(self.sperrdatei) as florian:
+            fcntl.flock(florian, fcntl.LOCK_EX)
+            with als_instanz(self.max), contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
+                code = cli.main(["scan"])
+        self.assertEqual(code, 2)
+        self.assertIn("[sperre].datei", json.loads(ausgabe.getvalue().strip().splitlines()[-1])["fehler"])
+        self.assertEqual(sorted(self.tmp.rglob("*.lock")), [self.sperrdatei])
 
     def test_pfadwaechter_link_hinaus_und_vorhandenes_lager(self):
         aussen = self.tmp / "aussen"
