@@ -567,3 +567,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Sperrpfad eines Freundes legte still eine eigene Sperre an (dann rechnete er neben dir her) – jetzt muss es deine
     Sperrdatei geben, sonst startet bei ihm nichts. Ein leeres `CLIP_INSTANZ` lief still mit deinen Werten – jetzt ein
     Fehler. Bei dir unverändert. M41–M42.
+  - Schritt 5 (Dienste je Freund): Vorlagen in `deploy/benutzer/` – sein Lern-Bot, alle 5 min ein Match, alle 10 min
+    das Abend-Video. Jede mit derselben Sandbox: eigener Benutzer, nur sein Ordner schreibbar, von dir nur die
+    Sperrdatei (lesen) und das Startwissen; deine Datenbank, claude, Schlüssel, Puffer, Lager und andere Freunde gibt
+    es dort nicht. Ein hängender Lauf gibt die Sperre nach 2 h frei. Das Update tut nur etwas, wenn es Freunde gibt:
+    ihre Datenbanken vorher sichern (als sie selbst, kein Link), Vorlagen hinlegen – nie einschalten –, laufende
+    Freundes-Bots neu. Eingeschaltet wird nur über `benutzer-anlegen.sh` (nächster Schritt). M43–M49.

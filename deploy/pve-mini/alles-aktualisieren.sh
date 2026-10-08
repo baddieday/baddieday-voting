@@ -8,6 +8,8 @@
 #      /opt/clip-pipeline → main, /opt/clip-regie → neuester Stand, neue Dienste (clip-mikro, clip-sitzungen,
 #      clip-publikum), Bots neu starten
 #   4. Probe: Dienste laufen, Datenbank antwortet; Rückweg liegt als Skript bereit
+#   Nur mit Freunden (Mehrbenutzer, docs/MEHRBENUTZER.md): vor dem Umstellen ihre Datenbanken sichern, ihre
+#   Dienst-Vorlagen auf die Platte legen (nie einschalten), laufende Freundes-Bots neu starten. Ohne Freunde: nichts.
 # Weckt pve-big nie, löscht nichts, fasst .env und lokal.toml nicht an. Beliebig oft wiederholbar.
 # Optional:  … | NCS_GENRES=hart bash      (Musik nachladen: techno, hardcore, electronic-rock, dance-rock, midtempo-bass)
 #            … | WARTEN_MIN=30 bash        (länger auf ein laufendes Render warten, Standard 10)
@@ -131,6 +133,55 @@ p() { runuser -u pipeline -- env GIT_TERMINAL_PROMPT=0 "$@"; }
   echo "systemctl restart clip-bot clip-lernbot 2>/dev/null; echo zurück auf $ALT_PROD"
 } > "$SICH.zurueck.sh"
 
+# Freunde (Mehrbenutzer): eine Instanz ist ein Ordner unter /var/lib/clip-benutzer, dessen Marke .clip-benutzer genau
+# seinen Namen nennt, mit Benutzer clip-<name> (lost+found & Co. zählen nicht). Ohne Freunde tut dieser Teil nichts.
+BENUTZER=${BENUTZER_DIR:-/var/lib/clip-benutzer}   # BENUTZER_DIR setzen nur Tests
+instanzen=()
+for ordner in "$BENUTZER"/*; do
+  name=${ordner##*/}; marke="$ordner/.clip-benutzer"
+  [ -d "$ordner" ] && [ ! -L "$ordner" ] && [[ $name =~ ^[a-z][a-z0-9-]{1,26}$ ]] || continue
+  [ -f "$marke" ] && [ ! -L "$marke" ] && [ "$(head -c 64 "$marke" | tr -d "[:space:]")" = "$name" ] || continue
+  if getent passwd "clip-$name" >/dev/null; then instanzen+=("$name")
+  else echo "ℹ️  $ordner: Benutzer clip-$name fehlt – übersprungen"; fi
+done
+# Vor dem Umstellen jede Freundes-Datenbank sichern: als clip-<name> (er liest nur seine eigenen Dateien), nur echte
+# Dateien (root folgt hier keinem Link des Freundes), neben seiner Datenbank, nie gelöscht. Klappt es bei einem nicht,
+# steht es hier – umgestellt wird trotzdem (dein Update hängt nie an einem Freund; neue Spalten kommen nur dazu).
+for name in "${instanzen[@]}"; do
+  dbo="$BENUTZER/$name/db"; db="$dbo/pipeline.db"; ziel="$dbo/vor-update-$STEMPEL.db"
+  if [ -L "$dbo" ] || [ -L "$db" ]; then
+    echo "⚠️  Sicherung von $name übersprungen – Link statt Datenbank"; continue
+  fi
+  [ -f "$db" ] || { echo "ℹ️  $name: noch keine Datenbank"; continue; }
+  groesse=$(stat -c %s "$db"); frei=$(df --output=avail -B1 "$dbo" | tail -n 1 | tr -d " ")
+  if [ "${frei:-0}" -le $(( ${groesse:-0} * 2 + 50000000 )) ]; then
+    echo "⚠️  $name: zu wenig Platz für die Sicherung – seine Datenbank bleibt ohne Kopie"; continue
+  fi
+  if runuser -u "clip-$name" -- python3 -I - "$db" "$ziel" <<"PY"
+import os, sqlite3, stat, sys
+from urllib.parse import quote
+db, ziel = sys.argv[1], sys.argv[2]
+for teil in (db, db + "-wal", db + "-shm", db + "-journal"):
+    try:
+        if not stat.S_ISREG(os.lstat(teil).st_mode):
+            sys.exit(teil + ": keine normale Datei (Link?)")
+    except FileNotFoundError:
+        pass
+if os.path.lexists(ziel):
+    sys.exit(ziel + " gibt es schon")
+quelle = sqlite3.connect("file:" + quote(db) + "?nofollow=1", uri=True, timeout=60)
+kopie = sqlite3.connect(ziel)
+quelle.backup(kopie)
+kopie.close()
+quelle.close()
+PY
+  then echo "Datenbank von $name → $ziel"
+  else echo "⚠️  Sicherung von $name fehlgeschlagen – seine Datenbank bleibt ohne Kopie"; fi
+done
+if [ "${#instanzen[@]}" -gt 0 ]; then
+  echo "systemctl try-restart \"clip-freund-bot@*.service\" 2>/dev/null" >> "$SICH.zurueck.sh"
+fi
+
 # Eigene Änderungen an versionierten Dateien beiseitelegen (git stash – nichts geht verloren)
 beiseite() {
   if [ -n "$(p git -C "$1" status --porcelain --untracked-files=no)" ]; then
@@ -216,6 +267,32 @@ done
 for d in clip-bot clip-lernbot; do
   systemctl cat "$d" >/dev/null 2>&1 && systemctl restart "$d"
 done
+
+# Freunde: ihre Dienst-Vorlagen (deploy/benutzer) wie die übrigen Dienste übernehmen, wenn du sie nicht selbst angepasst
+# hast – aber NIE einschalten (das macht nur benutzer-anlegen.sh). Danach laufende Freundes-Bots neu, wie deine Bots.
+if [ "${#instanzen[@]}" -gt 0 ]; then
+  vorlage_neu=0
+  for quelle in "$PROD"/deploy/benutzer/clip-freund-*@.service "$PROD"/deploy/benutzer/clip-freund-*@.timer; do
+    [ -f "$quelle" ] || continue
+    name="$(basename "$quelle")"; ziel="$UNITS/$name"
+    soll="$(cat "$quelle")"; alt="$(p git -C "$PROD" show "$ALT_PROD:deploy/benutzer/$name" 2>/dev/null)"
+    if [ ! -e "$ziel" ]; then
+      printf "%s\n" "$soll" > "$ziel"; vorlage_neu=1; echo "Vorlage neu (nicht eingeschaltet): $name"
+    elif [ "$(cat "$ziel")" != "$soll" ]; then
+      if [ -n "$alt" ] && [ "$(cat "$ziel")" = "$alt" ]; then
+        printf "%s\n" "$soll" > "$ziel"; vorlage_neu=1; echo "Vorlage aktualisiert: $name"
+      else
+        echo "ℹ️  $name weicht vom Repo ab (von dir angepasst?) – nicht überschrieben. Vergleich: diff $ziel $quelle"
+      fi
+    fi
+  done
+  if [ "$vorlage_neu" = 1 ]; then systemctl daemon-reload; fi
+  bots=()
+  while read -r einheit _; do
+    case "$einheit" in clip-freund-bot@*.service) bots+=("$einheit");; esac
+  done < <(systemctl list-units --plain --no-legend --state=running "clip-freund-bot@*.service" 2>/dev/null)
+  if [ "${#bots[@]}" -gt 0 ]; then systemctl restart "${bots[@]}" && echo "Freundes-Bots neu: ${bots[*]}"; fi
+fi
 exit 0
 '
 

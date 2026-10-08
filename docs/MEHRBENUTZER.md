@@ -1,9 +1,10 @@
 # Mehrbenutzer – eine Instanz je Freund (Entscheidung M1, 08.10.2026)
 
 Ziel Stufe 1: Ein Freund bekommt auf dem Mini seine eigene, vollständig getrennte Pipeline. Zwei Benutzer arbeiten
-unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M40: `docs/ENTSCHEIDUNGEN.md`,
-„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 4 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
-Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft), der Rest (Dienste, Volume, Anlegen, Einladung) ist Plan.
+unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M49: `docs/ENTSCHEIDUNGEN.md`,
+„Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 5 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
+Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox), der Rest (Volume, Anlegen,
+Einladung) ist Plan.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -18,7 +19,7 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
   - `clip-freund-bot@` – sein Lern-Bot
   - `clip-freund-scan@` + Timer – alle 5 min `scan --verarbeiten --max 1 --versuche 3`
   - `clip-freund-abend@` + Timer – alle 10 min `sitzungen` (Abend-Video; KI nur mit eigenem Claude-Zugang)
-  - `clip-freund-einrichten@`, `clip-freund-pruefen@` – einmalig
+  - `clip-freund-einrichten@`, `clip-freund-pruefen@` – einmalig (kommen mit dem Anlege-Skript)
 - **Gemeinsam:** nur Florians Sperrdatei `/var/lib/clip-pipeline/pipeline.lock`, dazu Prozessor, Grafikchip und Netz.
 
 ## Ordner (I = `/var/lib/clip-benutzer/<name>`)
@@ -103,7 +104,27 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
   `--konfig`, ein vorangestelltes `CLIP_INSTANZ=`, `scan`, ein Zusatzwort, eine ungültige Session-ID oder ein
   angehängter Shell-Befehl werden mit „Aufruf nicht erlaubt“ (Exit 2) abgewiesen, ohne dass die Pipeline startet.
 - Nicht im Test: Lesen über Benutzergrenzen (alle Läufe als derselbe Benutzer) – das sichern eigene Benutzer und
-  Sandbox (PR 5/7), geprüft vor Ort.
+  Sandbox (Schritt 5, nachgebaut im Kernel), geprüft vor Ort (PR 7).
+
+## Dienste je Freund (umgesetzt, Schritt 5)
+- **Vorlagen** in `deploy/benutzer/`: `clip-freund-bot@` (sein Lern-Bot), `clip-freund-scan@` + Timer (alle 5 min ein
+  Match), `clip-freund-abend@` + Timer (alle 10 min Abend-Video). `%i` ist der Name. Beide Timer-Dienste: Exit 3/4 kein
+  Fehler (4 = Sperre belegt), nach 2 h ohne Ende abgebrochen – dann ist die gemeinsame Sperre wieder frei.
+- **Sandbox** – derselbe Block in jeder Vorlage (ein Test wacht darüber): Benutzer `clip-<name>`, `CLIP_INSTANZ=I`,
+  HOME und Caches in `I/cache`, keine Zugänge über systemd. Alles nur lesbar, `/home` und `/root` gibt es nicht. Leere,
+  schreibgeschützte Ordner über `/srv`, `/var/lib/clip-pipeline`, `/var/lib/clip-benutzer` und
+  `/opt/clip-pipeline/config`; eingebunden werden nur I (schreibbar), die Sperrdatei und `pipeline.toml` (nur lesen).
+  `/opt/clip-pipeline/.env` und `/opt/clip-regie` sind gesperrt. Halber Vorrang beim Prozessor, höchstens 3 GB.
+  Fehlt die Sperrdatei, startet der Dienst gar nicht.
+- **Eingeschaltet** wird nur über `benutzer-anlegen.sh <name>` (nächster Schritt) – nie vom Update, nie von Hand.
+- **Update** (`alles-aktualisieren.sh`), nur wenn es einen Freund gibt (Ordner mit Marke und Benutzer `clip-<name>`):
+  vor dem Umstellen jede Freundes-Datenbank als `clip-<name>` nach `I/db/vor-update-<Zeit>.db` (nie gelöscht, nur echte
+  Dateien, kein Link), danach die Vorlagen wie die übrigen Dienste (von Hand geänderte bleiben) und die laufenden
+  Freundes-Bots neu. Scheitert eine Sicherung, sagt es das und stellt trotzdem um. Ohne Freunde: genau wie bisher.
+- **Geprüft** (`tests/test_deploy_benutzer.py`): Vorlagen-Inhalt und `systemd-analyze verify`; Kernel-Nachbau als root
+  (eine fremde uid sieht in Florians Ordner nur die Sperrdatei, schreiben darf sie sie nicht, die Sperre wirkt in beide
+  Richtungen, der eigene Ordner bleibt schreibbar); das Update mit Attrappen (gesichert, nicht eingeschaltet, Bot neu,
+  ohne Freunde keine Änderung, Link statt Datenbank wird nicht kopiert).
 
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
@@ -118,8 +139,9 @@ weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
 
 ## Migration
 - Keine Daten werden bewegt, das Schema bleibt. Ohne `CLIP_INSTANZ` und ohne `[sperre].datei` läuft alles wie bisher.
-- Das Update sichert zusätzlich jede Instanz-Datenbank, legt die Vorlagen nur auf die Platte (schaltet sie nie ein) und
-  startet laufende Freundes-Bots neu. Florian spielt alles selbst ein; kein Auto-Update.
+- Gibt es Freunde, sichert das Update zusätzlich jede Instanz-Datenbank, legt die Vorlagen nur auf die Platte (schaltet
+  sie nie ein) und startet laufende Freundes-Bots neu (umgesetzt, Schritt 5). Florian spielt alles selbst ein; kein
+  Auto-Update.
 
 ## Schnittstellen
 - **n8n-Vertrag:** unverändert, nur für Florian. Freunde laufen ohne n8n über Timer.

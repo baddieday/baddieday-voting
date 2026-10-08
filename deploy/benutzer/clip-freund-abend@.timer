@@ -1,0 +1,11 @@
+# Alle 10 Minuten: Abend eines Freundes vorbei? Dann sein Abend-Video (clip-freund-abend@<name>.service).
+# Arbeitet nur in seinem eigenen Ordner, weckt pve-big nie. Eingeschaltet nur über benutzer-anlegen.sh <name>.
+[Unit]
+Description=Clip-Pipeline: Abend von %i alle 10 Minuten prüfen (Freund)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target
