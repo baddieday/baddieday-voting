@@ -135,6 +135,48 @@ def hochgeladen(con: sqlite3.Connection, highlight_id: int) -> sqlite3.Row | Non
     return con.execute("SELECT * FROM highlights WHERE id = ?", (highlight_id,)).fetchone()
 
 
+def zu_entwurf(con: sqlite3.Connection, entwurf_id: int) -> sqlite3.Row | None:
+    """Das Highlight-Video (2-Wochen-Video), das zu diesem Entwurf des Lern-Bots gehört – None, wenn keins."""
+    return con.execute("SELECT * FROM highlights WHERE entwurf_id = ? ORDER BY id DESC LIMIT 1",
+                       (entwurf_id,)).fetchone()
+
+
+def entscheide_entwurf(con: sqlite3.Connection, entwurf_id: int, freigeben: bool) -> sqlite3.Row | None:
+    """Dein ✅/❌ am 2-Wochen-Video im Lern-Bot (einfacher Modus, Stufe 3, 08.10. – der Clip-Bot zeigt es dort nicht
+    mehr): ✅ = freigegeben UND hochgeladen (keine Erinnerung), ❌ = verworfen (die Clips sind wieder frei). Wie im
+    Clip-Bot gilt die erste Entscheidung. None = der Entwurf gehört zu keinem Highlight-Video."""
+    h = zu_entwurf(con, entwurf_id)
+    if h is None:
+        return None
+    entscheide(con, h["id"], freigeben)
+    return hochgeladen(con, h["id"]) if freigeben else zu_entwurf(con, entwurf_id)
+
+
+def upload_fassung(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int) -> dict | None:
+    """Telegram-Fassung des 2-Wochen-Videos (Stufe 3, 08.10.): die fertige Datei (crf 20) auf [vorschau].max_mb
+    verkleinert, 1080 Pixel kurze Seite – statt die Szenen neu zu schneiden wie entwurf.upload_fassung. Deren
+    Rohvideos gibt der Puffer nach 14 Tagen frei (Stufe 2), und das 2-Wochen-Video reicht 14 Tage zurück: Ein ✅ ein,
+    zwei Tage später endete sonst mit „Moment-Datei fehlt“. Idempotent über entwuerfe.upload_pfad, Ziel wie
+    entwurf.upload_ziel. None = kein 2-Wochen-Video, nicht im getrennten Betrieb oder die fertige Datei fehlt – dann
+    gilt der normale Weg. Die Pipeline-Sperre holt der Aufrufer."""
+    from . import entwurf  # hier, nicht oben: wie in erstelle
+
+    h = zu_entwurf(con, entwurf_id)
+    if h is None or not konfig.getrennt:
+        return None
+    konfig.pruefe_getrennt(mit_lager=False)   # nur in den Puffer schreiben, nie ins Lager auf pve-big
+    voll = konfig.absolut(h["datei"])
+    if not voll.is_file():
+        return None
+    zeile = con.execute("SELECT * FROM entwuerfe WHERE id = ?", (entwurf_id,)).fetchone()
+    if zeile["upload_pfad"] and Path(zeile["upload_pfad"]).is_file():
+        return {"entwurf": entwurf_id, "datei": zeile["upload_pfad"], "uebersprungen": True}
+    ziel = entwurf.upload_ziel(konfig, zeile)
+    vorschau(voll, ziel, max_bytes=int(float(konfig.wert("vorschau.max_mb", 48)) * 1_000_000), kurze_seite=1080)
+    con.execute("UPDATE entwuerfe SET upload_pfad = ? WHERE id = ?", (str(ziel), entwurf_id))
+    return {"entwurf": entwurf_id, "datei": str(ziel), "uebersprungen": False}
+
+
 def _mmss(sekunden: float) -> str:
     s = int(round(sekunden))
     return f"{s // 60:02d}:{s % 60:02d}"

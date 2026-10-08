@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import big, entwurf, konfig, publikum, regie_lernen
+from clip_pipeline import big, entwurf, highlight, konfig, publikum, regie_lernen
 from clip_pipeline import sperre as sperre_modul
 from clip_pipeline.sperre import sperre
 from clip_pipeline.zeit import UTC, iso
@@ -262,6 +262,40 @@ class Paket(MitLernPaket):
         zeile = self.con.execute("SELECT upload_pfad FROM entwuerfe WHERE id = ?", (eid,)).fetchone()
         self.assertTrue(zeile["upload_pfad"].endswith("_upload.mp4"))
         self.assertEqual(self.posts(), [])                          # das Paket allein ist noch kein Post
+
+    def test_zwei_wochen_video_einfach_volle_qualitaet_statt_checkliste(self):
+        """Stufe 3 (08.10.): Das Paket fürs 2-Wochen-Video kommt aus der fertigen Datei (seine ältesten Szenen gibt der
+        Puffer nach 14 Tagen frei) und ist für Telegram verkleinert – statt TikTok-Häkchen (es geht auf YouTube, kein
+        Post) die Zeile, wo die volle Qualität liegt. Unter /experte wie bisher mit Checkliste."""
+        eid = self.entwurf_anlegen(fmt="zusammenschnitt")
+        voll = self.konfig.ordner("highlights") / "2026-W41.mp4"
+        voll.write_bytes(b"volle-qualitaet")
+        self.con.execute("INSERT INTO highlights (name, datei, vorschau, clips, dauer, erstellt, entwurf_id) VALUES "
+                         "('2026-W41', 'highlights/2026-W41.mp4', 'highlights/v.mp4', 5, '01:30', 'x', ?)", (eid,))
+        liste = json.loads((self.tmp / "regie" / "zusammenschnitt-test-1.json").read_text(encoding="utf-8"))
+        Path(liste["segmente"][1]["datei"]).unlink()                    # eine Szene hat der Puffer schon freigegeben
+        verkleinert = []
+
+        def vorschau(quelle, ziel, **kw):
+            verkleinert.append((quelle, kw["kurze_seite"]))
+            ziel.parent.mkdir(parents=True, exist_ok=True)
+            ziel.write_bytes(b"telegram-fassung")
+            return 16
+
+        self.konfig.daten["lernbot"]["experte"] = False
+        with mock.patch.object(highlight, "vorschau", side_effect=vorschau):
+            self.assertEqual(asyncio.run(lernbot_paket.sende_paket(self.app, eid)), "gesendet")
+        self.assertEqual((verkleinert, self.renders), ([(voll, 1080)], []))   # keine Szene neu geschnitten
+        self.assertEqual(self.bot.dokumente[0]["inhalt"], b"telegram-fassung")
+        self.assertEqual(self.bot.dokumente[0]["caption"], f"📦 Video #{eid}")          # nicht „in voller Qualität“
+        letzte = self.bot.nachrichten[-1]
+        self.assertEqual(letzte["text"], "💾 Volle Qualität: Netzlaufwerk clips → Ordner highlights → 2026-W41.mp4 "
+                                         "(die Datei oben ist für Telegram verkleinert).")
+        self.assertIsNone(letzte.get("reply_markup"))
+        self.assertEqual(self.posts(), [])
+        self.konfig.daten["lernbot"]["experte"] = True
+        asyncio.run(lernbot_paket.sende_paket(self.app, eid))
+        self.assertEqual(knopf_daten(self.bot.nachrichten[-1]["reply_markup"]), [f"pt:{eid}:t"])
 
     def test_zweites_paket_rendert_nicht_neu(self):
         eid = self.entwurf_anlegen()

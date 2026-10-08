@@ -413,3 +413,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Zurücklesen gleich (SHA-256) ist. Kein Link, kein fremdes Dateisystem im Pfad. Erster Lauf mit etwas zum Freigeben
     = Probe; jede Löschung in `ereignisse` (`puffer_frei`), eine Zeile in der Abschlussmeldung. Annahmen N9–N15.
     Kein Auto-Update (Florian: „Nein, ich spiele selbst ein“).
+  - **Stufe 3: 2-Wochen-Video nur im Lern-Bot, Clip-Bot wirklich still** (Clip-Bot still UND einfacher Modus,
+    `bot.app._nur_probleme`): Das Highlight-Video schickt nur noch der Lern-Bot („🏆 Dein 2-Wochen-Video“); ✅ dort =
+    freigegeben und hochgeladen (Paket aus der fertigen Datei – Stufe 2 gibt seine ältesten Szenen schon frei –, ohne
+    TikTok-Häkchen, dafür „Volle Qualität: Netzlaufwerk clips → Ordner highlights“), ❌ = verworfen. Keine Erinnerung
+    ans Hochladen. Start und glattes Ende einer Übertragung werden nur vermerkt (`meldungen.routine`, setzt der
+    Schreiber); Fehler, Abbrüche, Probe, liegen gebliebene Videos und Warnungen kommen weiter. /experte wie bisher.
+    Annahmen N16–N20.

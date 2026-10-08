@@ -427,7 +427,10 @@ def _melde(con: sqlite3.Connection, konfig: Konfig, e: dict, abbruch_melden: boo
 
 
 def _melde_uebertragungsende(con: sqlite3.Connection, lauf: int, e: dict, verwechslung: bool) -> None:
-    """Ein Abschluss je angefangenem Lauf, auch nach Teilfehler oder Abbruch; keine rohen Fehlertexte im Chat."""
+    """Ein Abschluss je angefangenem Lauf, auch nach Teilfehler oder Abbruch; keine rohen Fehlertexte im Chat.
+    Routine (Stufe 3, 08.10. – der stille Clip-Bot vermerkt sie im einfachen Modus nur) ist er nur, wenn es nichts zu
+    wissen gibt: kein Fehler, kein Abbruch, keine zusätzlich gesicherte Fassung und nichts Meldenswertes aus der
+    Freigabe (_freigabe_meldenswert). Eine glatte Freigabe steht dann nur im Protokoll (ereignisse, puffer_frei)."""
     status = "abgebrochen" if e.get("abbruch") else "mit Fehlern beendet" if e["fehler"] else "abgeschlossen"
     symbol = "✅" if e["ok"] else "⚠️"
     teile = [f"{symbol} Übertragung Puffer → Lager {status}.",
@@ -444,7 +447,8 @@ def _melde_uebertragungsende(con: sqlite3.Connection, lauf: int, e: dict, verwec
                      + ("Puffer-/Lager-Zuordnung und .clip-puffer/.clip-lager prüfen; " if verwechslung else "")
                      + "Details: pipeline lager status")
     teile += _freigabe_zeilen(e.get("freigabe"))
-    db.meldung(con, f"uebertragung:lager:{lauf}:ende", "\n".join(teile))
+    routine = e["ok"] and not e["versioniert"] and not _freigabe_meldenswert(e.get("freigabe"))
+    db.meldung(con, f"uebertragung:lager:{lauf}:ende", "\n".join(teile), routine=routine)
 
 
 # --- Puffer freigeben (Stufe B5, Florian 08.10.) -------------------------------------------------
@@ -677,6 +681,14 @@ def _zahl_gb(gb: float) -> str:
     return f"{gb:.1f}".replace(".", ",")
 
 
+def _freigabe_meldenswert(f: dict | None) -> bool:
+    """Das sollst du auch bei stillem Clip-Bot sehen (08.10.): die einmalige Probe vor dem ersten Löschen (N11), liegen
+    gebliebene Videos (Kopie im Lager fehlt oder ist anders) und Fehler beim Freigeben."""
+    if not f:
+        return False
+    return bool((f.get("probe") and f.get("dateien")) or f.get("bleibt") or f.get("fehler") or f.get("abbruch"))
+
+
 def _freigabe_zeilen(f: dict | None) -> list[str]:
     """Zeilen für die Abschlussmeldung des Abgleichs (Stufe B5) – nichts, wenn es nichts zu sagen gibt."""
     if not f:
@@ -743,7 +755,7 @@ def abgleich(con: sqlite3.Connection, konfig: Konfig, probelauf: bool = False) -
                      " (Nachtruhe, pve-big läuft schon)" if ruhe else "")
             db.meldung(con, f"uebertragung:lager:{lauf}:start",
                        f"🗄️ Übertragung Puffer → Lager gestartet.\n"
-                       f"{e['offen']} Dateien werden geprüft und bei Bedarf übertragen.")
+                       f"{e['offen']} Dateien werden geprüft und bei Bedarf übertragen.", routine=True)
             gestartet = True
             with _wach(konfig, "lager", f"Lager-Abgleich ({e['offen']} Dateien)", wecken=not ruhe):
                 e["lager_gebraucht"] = True

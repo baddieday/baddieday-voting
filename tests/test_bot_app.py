@@ -136,6 +136,44 @@ class BotApp(MitSpeicher):
         self.assertEqual(self.con.execute("SELECT status FROM highlights").fetchone()[0], "gesendet")
         self.assertEqual(asyncio.run(bot_app.sende_outbox(fake)), 0)  # nicht doppelt
 
+    def test_still_einfach_highlight_nur_im_lernbot(self):
+        """Stufe 3 (08.10.): Clip-Bot still und Lern-Bot einfach – das 2-Wochen-Video kommt nur im Lern-Bot (dort
+        entscheidet dein ✅/❌), keine Erinnerung ans Hochladen. Unter /experte wie bisher: hier mit ✅/🗑️ und
+        Erinnerung."""
+        self.konfig.daten["bot"]["clips_zeigen"] = False
+        self.konfig.daten["auto_freigabe"]["modus"] = "an"
+        (self.konfig.ordner("highlights") / "h.vorschau.mp4").write_bytes(b"video")
+        gesendet = []
+
+        async def send_video(**kwargs):
+            gesendet.append(kwargs)
+            return SimpleNamespace(message_id=9, video=None)
+
+        async def send_message(chat, text, **_):
+            gesendet.append(text)
+
+        fake = SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                               bot=SimpleNamespace(send_video=send_video, send_message=send_message))
+        neu = ("INSERT INTO highlights (name, datei, vorschau, clips, dauer, erstellt, entwurf_id) VALUES "
+               "(?, 'highlights/h.mp4', 'highlights/h.vorschau.mp4', 5, '02:10', 'x', ?)")
+        self.con.execute(neu, ("2026-W41", 7))
+        self.con.execute(neu, ("2026-W39", 5))   # vor zwei Tagen freigegeben, nicht hochgeladen → Erinnerung fällig
+        self.con.execute("UPDATE highlights SET status = 'freigegeben', entschieden = ? WHERE name = '2026-W39'",
+                         (iso(datetime.now(UTC) - timedelta(days=2)),))
+        self.assertEqual(asyncio.run(bot_app.sende_outbox(fake)), 1)
+        self.assertFalse(asyncio.run(bot_app.erinnere(fake)))
+        self.assertEqual(gesendet, [])                                                    # nichts im Clip-Bot
+        zeile = self.con.execute("SELECT status, tg_nachricht_id FROM highlights WHERE name = '2026-W41'").fetchone()
+        self.assertEqual(tuple(zeile), ("gesendet", None))                                # nur vermerkt
+
+        self.konfig.daten["lernbot"]["experte"] = True                                    # /experte: wie bisher
+        self.con.execute(neu, ("2026-W43", 9))
+        self.assertEqual(asyncio.run(bot_app.sende_outbox(fake)), 1)
+        knoepfe = [b.callback_data for reihe in gesendet[0]["reply_markup"].inline_keyboard for b in reihe]
+        self.assertEqual(knoepfe, ["hf:3", "hv:3"])
+        self.assertTrue(asyncio.run(bot_app.erinnere(fake)))
+        self.assertIn("2026-W39", gesendet[1])
+
     def test_puffer_und_lager_warten_die_ruhezeit_ab(self):
         db.meldung(self.con, "puffer:platz:2026-09-25", "💾 Puffer wird knapp")
         db.meldung(self.con, "ohne_video:s1", "⚠️ 2 Kills ohne Aufnahme")

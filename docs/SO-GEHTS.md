@@ -27,8 +27,12 @@ Du tippst nie etwas zweimal: Dein ✅ und dein Grund gelten sofort, auch wenn de
 neue Fassung bzw. das Upload-Paket merkt er sich und erledigt es, sobald er frei ist – auch nach einem Update oder
 Neustart (Tipps bis 2 Stunden alt). Gründe an zwei Videos kurz nacheinander ergeben eine neue Fassung für beide – hat
 er mit der ersten schon angefangen, kommt danach noch eine. Geht beim Bauen etwas schief, versucht er es nach 10 und
-nach 30 Minuten noch einmal; klappt es dann nicht, sagt er es dir einmal. Beim Highlight-Video heißt ❌ nur: dieses
-Video lässt er weg – deine Short-Regeln ändert es nicht.
+nach 30 Minuten noch einmal; klappt es dann nicht, sagt er es dir einmal.
+
+**Das 2-Wochen-Video** (für YouTube) kommt nur hier im Lern-Bot, oben steht „🏆 Dein 2-Wochen-Video“. ✅ heißt:
+freigegeben und hochgeladen – du bekommst eine für Telegram verkleinerte Datei und den Text, die volle Qualität liegt
+auf dem Netzlaufwerk clips im Ordner highlights. ❌ heißt nur: dieses Video lässt er weg – deine Short-Regeln ändert
+es nicht.
 
 ## Was der Bot selbst lernt
 Bei jedem Video stellt er drei Dinge selbst ein und merkt sich, was ankommt:
@@ -55,8 +59,10 @@ selbst fest – deine alten Werte dafür gelten nur unter /experte. Andere alte 
 gelten weiter.
 
 ## Ruhe im Chat
-Der Clip-Bot schickt keine einzelnen Szenen mehr. Er meldet sich nur bei Problemen (zum Beispiel Speicher voll) und
-mit dem Highlight-Video. Nach einem Update schreibt der Lern-Bot einmal „✅ Neue Version läuft“.
+Der Clip-Bot schickt keine einzelnen Szenen und kein 2-Wochen-Video mehr (das kommt im Lern-Bot). Er meldet sich nur
+bei Problemen – zum Beispiel Speicher voll, Kills ohne Aufnahme oder eine Übertragung mit Fehlern – und montags mit
+einem kurzen Lebenszeichen. Dass eine Übertragung glatt lief, sagt er nicht mehr. Unter /experte ist alles wie früher.
+Nach einem Update schreibt der Lern-Bot einmal „✅ Neue Version läuft“.
 
 Kommt pro Match noch „🎬 Match verarbeitet … Jetzt im Bot bewerten“? Diese Nachricht schickt n8n. Abschalten:
 in n8n den Ablauf „1 Match verarbeiten“ öffnen, den Kasten „Telegram Info“ anklicken, **D** drücken (deaktivieren),

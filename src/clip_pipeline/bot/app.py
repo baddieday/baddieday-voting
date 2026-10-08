@@ -85,7 +85,9 @@ def _upload_text(con, clip_id: int, stand: dict[str, bool]) -> str:
 
 async def sende_meldungen(app: Application) -> int:
     """Kurze Hinweise (z. B. Kills ohne Aufnahme) – brauchen keinen Speicher, gehen also immer.
-    Meldungen aus Puffer/Lager (Morgenprüfung, Abgleich) warten die Ruhezeit ab ([telegram].leise_von/leise_bis)."""
+    Meldungen aus Puffer/Lager (Morgenprüfung, Abgleich) warten die Ruhezeit ab ([telegram].leise_von/leise_bis).
+    Stufe 3 (08.10.): Routine (Start und glattes Ende einer Übertragung, meldungen.routine) wird im stillen einfachen
+    Modus nur als gesendet vermerkt (_nur_probleme) – Fehler, Abbrüche und Warnungen kommen immer."""
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     try:
         uebertragung.hole_meldungen(con, konfig)
@@ -93,7 +95,14 @@ async def sende_meldungen(app: Application) -> int:
         # Ein kaputter/unzugänglicher PC-Bericht darf die übrige Outbox nicht blockieren.
         log.exception("Übertragungsberichte konnten nicht eingelesen werden")
     gesendet = 0
+    ruhig = None   # erst ausrechnen, wenn eine Routine-Meldung ansteht
     for m in aktionen.faellige_meldungen(con, konfig):
+        if m["routine"]:
+            if ruhig is None:
+                ruhig = _nur_probleme(con, konfig)
+            if ruhig:
+                con.execute("UPDATE meldungen SET gesendet = ? WHERE id = ?", (iso(jetzt()), m["id"]))
+                continue
         optionen = {"disable_notification": aktionen.ruhezeit(konfig)} if m["schluessel"].startswith("uebertragung:") else {}
         if m["schluessel"].startswith(AUTO_MELDUNGEN):  # Zusammenfassungen der Auto-Freigabe immer ohne Ton
             optionen = {"disable_notification": True}
@@ -178,7 +187,14 @@ async def sende_outbox(app: Application) -> int:
         aktionen.als_gesendet(con, z["id"], nachricht.message_id, nachricht.video.file_id if nachricht.video else None,
                               vorschlag)
         gesendet += 1
+    nur_lernbot = bool(highlights) and _nur_probleme(con, konfig)
     for h in highlights:
+        if nur_lernbot and h["entwurf_id"] is not None:
+            # Stufe 3 (08.10.): Das 2-Wochen-Video schickt nur noch der Lern-Bot (sein Entwurf), dein ✅/❌ dort
+            # entscheidet (highlight.entscheide_entwurf). Ohne Entwurf (Altbestand) sähest du es nie – dann wie bisher.
+            aktionen.highlight_gesendet(con, h["id"], None)
+            gesendet += 1
+            continue
         pfad = konfig.absolut(h["vorschau"]) if h["vorschau"] else None
         if pfad is None or not pfad.is_file():
             log.warning("Vorschau für Highlight %s fehlt: %s", h["name"], pfad)
@@ -198,6 +214,19 @@ def _still(k) -> bool:
     """Clip-Bot still (Stufe 1, 07.10.) – nur, wenn die Auto-Freigabe wirklich selbst entscheidet. Bei „probe“ oder
     „aus“ entscheidest du; ohne Nachricht bekäme ein Clip nie eine Entscheidung (keine Battles, kein Highlight)."""
     return not k.wert("bot.clips_zeigen", False) and auto_freigabe.werte(k)["modus"] == "an"
+
+
+def _nur_probleme(con, konfig: Konfig) -> bool:
+    """Stufe 3 (08.10., „der Clip-Bot meldet sich nur bei Problemen“): Clip-Bot still (_still) UND Lern-Bot im
+    einfachen Modus. Dann kommt das 2-Wochen-Video nur im Lern-Bot, es gibt keine Erinnerung ans Hochladen, und Start
+    und glattes Ende einer Übertragung werden nur vermerkt. Fehler, Abbrüche und Warnungen kommen weiter. Unter
+    /experte bleibt alles wie vorher – im Zweifel (Lesefehler) auch: lieber eine Nachricht zu viel als eine zu wenig."""
+    try:
+        k = einstellungen.anwenden(con, konfig)
+        return _still(k) and not einstellungen.experte(con, k)
+    except Exception:  # noqa: BLE001
+        log.exception("Ruhe im Clip-Bot nicht bestimmt – diese Runde wie bisher")
+        return False
 
 
 async def automat_lauf(app: Application) -> int:
@@ -237,7 +266,9 @@ async def automat_lauf(app: Application) -> int:
 
 async def erinnere(app: Application) -> bool:
     """Erinnert an Highlight-Videos, die seit über erinnerung_h freigegeben, aber noch nicht hochgeladen sind –
-    höchstens einmal je erinnerung_h. Einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.)."""
+    höchstens einmal je erinnerung_h. Einzelne Momente werden nicht hochgeladen (Entscheidung 26.09.).
+    Stufe 3 (08.10.): im stillen einfachen Modus aus – dort heißt ✅ im Lern-Bot schon „hochgeladen“ (/uploads zeigt
+    ältere offene Videos weiter)."""
     con, konfig, chat = app.bot_data["con"], app.bot_data["konfig"], app.bot_data["erlaubt"]
     stunden = float(konfig.wert("veroeffentlichung.erinnerung_h", 24))
     grenze = jetzt() - timedelta(hours=stunden)
@@ -245,7 +276,7 @@ async def erinnere(app: Application) -> bool:
     if letzte and aus_iso(letzte["zeit"]) > grenze:
         return False
     videos = [h for h in aktionen.offene_highlight_videos(con) if h["entschieden"] and aus_iso(h["entschieden"]) < grenze]
-    if not videos:
+    if not videos or _nur_probleme(con, konfig):
         return False
     await app.bot.send_message(chat, "⏰ " + texte.offene_uploads_text(videos), parse_mode=ParseMode.HTML)
     db.protokoll(con, "erinnerung", f"{len(videos)} Highlight-Video(s) nicht hochgeladen")

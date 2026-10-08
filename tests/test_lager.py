@@ -72,6 +72,10 @@ class MitAbgleich(MitLager):
     def meldungen(self) -> list:
         return self.con.execute("SELECT schluessel, text FROM meldungen ORDER BY id").fetchall()
 
+    def routine(self) -> list:
+        """meldungen.routine je Meldung (08.10.): 1 = der stille Clip-Bot vermerkt sie im einfachen Modus nur."""
+        return [z[0] for z in self.con.execute("SELECT routine FROM meldungen ORDER BY id")]
+
     def lager_inhalt(self) -> set[str]:
         return {p.relative_to(self.lager).as_posix() for p in self.lager.rglob("*") if p.is_file()}
 
@@ -147,6 +151,7 @@ class Abgleich(MitAbgleich):
                          [f"uebertragung:lager:{lauf['id']}:start", f"uebertragung:lager:{lauf['id']}:ende"])
         self.assertEqual(e["videos_uebertragen"], 1)
         self.assertIn("Neu erfolgreich übertragene Videos: 1", self.meldungen()[-1]["text"])
+        self.assertEqual(self.routine(), [1, 1])      # Start und glattes Ende: der stille Clip-Bot vermerkt sie nur
         # Rohdaten im Puffer unverändert (nur gelesen)
         self.assertEqual((self.puffer / "eingang/nvidia/a.mp4").read_bytes(), dateien["eingang/nvidia/a.mp4"])
 
@@ -476,6 +481,7 @@ class Freigabe(MitAbgleich):
         text = self.meldungen()[-1]["text"]
         self.assertIn("🧹 Puffer – Probe: 2 alte Rohvideos (0,0 GB) könnte ich freigeben", text)
         self.assertIn("Gelöscht habe ich noch nichts", text)
+        self.assertIsNone(self.routine()[-1])         # die Probe kommt auch bei stillem Clip-Bot (N11)
 
         e = self.abgleich("eingang/nvidia/neu2.mp4")  # ab dem nächsten Lauf wird freigegeben
         self.assertEqual((e["freigabe"]["probe"], e["freigabe"]["dateien"], e["freigabe"]["bleibt"]), (False, 2, 0))
@@ -488,6 +494,7 @@ class Freigabe(MitAbgleich):
         self.assertEqual(arten, [lager.FREI_PROBE, lager.FREI_ART, lager.FREI_ART])
         self.assertIn("🧹 Puffer: 2 alte Rohvideos freigegeben (0,0 GB), Kopien liegen im Lager.",
                       self.meldungen()[-1]["text"])
+        self.assertEqual(self.routine()[-1], 1)       # glatte Freigabe: steht im Protokoll, keine Nachricht nötig
 
         # spät vom PC gekommen (Aufnahme 20 Tage alt, eben erst bestätigt): bleibt noch 14 Tage im Puffer
         spaet = self.datei(self.puffer, "eingang/nvidia/spaet.mp4", b"s" * 100, alter_s=20 * TAG)
@@ -512,6 +519,7 @@ class Freigabe(MitAbgleich):
         self.assertTrue(text.startswith("✅"), text)  # der Abgleich selbst war in Ordnung
         self.assertIn("⚠️ Puffer: 3 alte Rohvideos bleiben liegen – die Kopie im Lager fehlt oder ist nicht mehr gleich",
                       text)
+        self.assertIsNone(self.routine()[-1])         # kommt auch bei stillem Clip-Bot
 
     def test_nicht_nach_einem_lauf_mit_fehlern_und_nie_durch_einen_link(self):
         alt = self.datei(self.puffer, "eingang/nvidia/a.mp4", b"a" * 2000, alter_s=20 * TAG)

@@ -619,6 +619,12 @@ Replays und Bilder zählen nicht als Videos; bereits vorhandene Dateien werden n
 Bei Fehlern oder Abbruch nennt die Abschlussmeldung die erfolgreiche Teilmenge. Leere Timerläufe, Probeläufe
 und wegen Nachtruhe aufgeschobene Abgleiche erzeugen keine Start-/Endmeldungen.
 
+**Seit 08.10. (Stufe 3) ab Werk still:** Ist der Clip-Bot still und der Lern-Bot im einfachen Modus, kommen Start und
+glattes Ende nicht mehr – sie stehen nur in der Tabelle `meldungen` (Spalte `routine`, als gesendet vermerkt). Es
+kommen weiter: Fehler, Abbrüche, eine zusätzlich gesicherte Fassung, die einmalige Probe vor dem ersten Freigeben und
+liegen gebliebene Videos. Eine glatte Freigabe steht im Protokoll (`ereignisse`, Art `puffer_frei`). Unter /experte
+kommt alles wie vorher.
+
 Zum Aktivieren den Pipeline-Code im CT und `windows/Uebertragung.ps1` im von der Windows-Aufgabe verwendeten
 Checkout aktualisieren und den vorhandenen `clip-bot` neu starten. Die vorhandene Bot-Konfiguration genügt;
 keine weiteren Tokens, Dienste oder n8n-Änderungen sind nötig. Der Bot prüft seine Outbox standardmäßig alle

@@ -29,8 +29,8 @@ from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 
-from . import (autonom, big, db, einstellungen, entwurf, erwartung, geschmack, kriterien, kritik, lernen, massstab,
-               musik, regeln, regie, regie_lernen, stile, stimmung, viral)
+from . import (autonom, big, db, einstellungen, entwurf, erwartung, geschmack, highlight, kriterien, kritik, lernen,
+               massstab, musik, regeln, regie, regie_lernen, stile, stimmung, viral)
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
@@ -661,6 +661,8 @@ async def _sende_entwuerfe(app) -> int:
         abend = _abend_zu(con, z["id"])
         if abend is not None:   # das Abend-Video (Stufe 1): wofür es ist, steht ganz oben
             text = (f"🎮 <b>Dein Abend vom {_tag(abend['ende_utc'], konfig)}</b>\n" + text)[:1000]
+        elif not experte and highlight.zu_entwurf(con, z["id"]) is not None:   # Stufe 3: kommt nur noch hier
+            text = ("🏆 <b>Dein 2-Wochen-Video</b>\n" + text)[:1000]
         with pfad.open("rb") as datei:
             nachricht = await app.bot.send_video(
                 chat_id=chat, video=datei, caption=text, parse_mode="HTML",
@@ -1287,11 +1289,22 @@ async def bei_klick(update, context) -> None:
         await asyncio.to_thread(massstab_nachziehen, context.bot_data["konfig"])
 
 
+def _highlight_entscheiden(con: sqlite3.Connection, eid: int, freigeben: bool) -> None:
+    """Stufe 3 (08.10.): Im einfachen Modus zeigt nur noch der Lern-Bot das 2-Wochen-Video – dein ✅/❌ entscheidet es
+    (highlight.entscheide_entwurf; nichts, wenn das Video keins ist). Ein Fehler hier hält Bewertung, Paket und
+    Merkliste nicht auf – nur ins Log."""
+    try:
+        highlight.entscheide_entwurf(con, eid, freigeben)
+    except Exception:  # noqa: BLE001
+        log.exception("2-Wochen-Video zu Video #%s nicht entschieden", eid)
+
+
 async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: int, extra: str) -> None:
     """Einfacher Modus (Stufe 1, 07.10.): ✅ → 👍 und Upload-Paket. ❌ → 👎 und sechs Gründe. Ein Grund → feste Regel
     (regeln.wende_an), ein Satz, was sich ändert, und die neue Fassung aus denselben Matches – kein „✅ fertig“ mehr.
     07.10. (Florian: „fehlerhafte Texte“): ✅ bleibt stehen. ❌ an einem Nicht-Short (Highlight-Video) wendet keine
-    Short-Regel an und baut keinen Short.
+    Short-Regel an und baut keinen Short. 08.10. (Stufe 3): Am 2-Wochen-Video heißt ✅ freigegeben und hochgeladen,
+    ❌ verworfen – der Clip-Bot zeigt es im einfachen Modus nicht mehr (_highlight_entscheiden).
     08.10. (Merkliste, Florian tippt nie etwas zweimal): ✅ und jeder Grund wirken sofort – Bewertung und Regel sind
     reine Datenbank-Arbeit –, auch während der Bot baut oder packt. Paket und neue Fassung merkt er sich
     (folge_merken) und startet sie, sobald er frei ist (folge_starten): kein „tipp gleich nochmal“ mehr."""
@@ -1329,6 +1342,7 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
                       "Verstanden – dein Upload-Paket kommt nach dem, das ich gerade packe." if packt else
                       "✅ Super – dein Upload-Paket kommt gleich.")
         bewertung = regie_lernen.bewerte(con, eid, daumen=1)   # zählt sofort, auch während der Bot packt
+        _highlight_entscheiden(con, eid, True)   # 2-Wochen-Video: freigegeben und hochgeladen (Stufe 3)
         if grund is None:
             folge_merken(con, eid, "paket")
             await folge_starten(app, nur="paket")   # frei: gleich los (paket_arbeitet wird dabei gesetzt)
@@ -1336,6 +1350,7 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
         return
     if zeile["format"] != "short":   # Highlight-Video: keine Short-Regel, kein neuer Short
         await antwort("Verstanden – dieses Video lasse ich weg.")
+        _highlight_entscheiden(con, eid, False)   # Stufe 3: verworfen, seine Clips sind wieder frei
         await caption(regie_lernen.bewerte(con, eid, daumen=-1), None)
         return
     if aktion == "d":

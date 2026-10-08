@@ -59,3 +59,39 @@ class Highlight(MitSpeicher):
 
     def test_ohne_clips(self):
         self.assertEqual(highlight.erstelle(self.con, self.konfig, "leer", 14)["clips"], 0)
+
+    def test_entscheiden_im_lernbot(self):
+        """Stufe 3 (08.10.): ✅ am Entwurf im Lern-Bot = freigegeben und hochgeladen; die erste Entscheidung gilt.
+        Gehört der Entwurf zu keinem Highlight-Video: None, nichts geändert."""
+        self.con.execute("INSERT INTO highlights (name, datei, vorschau, clips, dauer, erstellt, entwurf_id, status) "
+                         "VALUES ('2026-W41', 'highlights/h.mp4', 'highlights/v.mp4', 5, '01:42', 'x', 7, 'gesendet')")
+        h = highlight.entscheide_entwurf(self.con, 7, True)
+        self.assertEqual(h["status"], "freigegeben")
+        self.assertIsNotNone(h["hochgeladen"])
+        self.assertEqual(highlight.entscheide_entwurf(self.con, 7, False)["status"], "freigegeben")
+        self.assertIsNone(highlight.entscheide_entwurf(self.con, 8, False))
+
+    def test_upload_fassung_aus_der_fertigen_datei(self):
+        """Stufe 3 (08.10.): Die Telegram-Fassung des 2-Wochen-Videos entsteht aus der fertigen Datei (seine Szenen gibt
+        der Puffer nach 14 Tagen frei). Fehlt die fertige Datei: None – dann gilt der normale Weg."""
+        (self.konfig.wurzel / ".clip-puffer").touch()                     # getrennter Betrieb (E19)
+        self.konfig.daten["lager"]["wurzel"] = str(self.tmp / "lager")
+        self.konfig.daten["publikum"]["upload_ordner"] = "export"
+        eid = self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, dauer_s, erstellt) "
+                               "VALUES ('highlight-2026-W41', 'zusammenschnitt', 'x.json', '{}', 90, 'x')").lastrowid
+        self.con.execute("INSERT INTO highlights (name, datei, vorschau, clips, dauer, erstellt, entwurf_id) VALUES "
+                         "('2026-W41', 'highlights/2026-W41.mp4', 'highlights/v.mp4', 5, '01:30', 'x', ?)", (eid,))
+        self.assertIsNone(highlight.upload_fassung(self.con, self.konfig, eid))       # fertige Datei fehlt
+        (self.konfig.ordner("highlights") / "2026-W41.mp4").write_bytes(b"voll")
+
+        def verkleinere(_quelle, ziel, **_kw):
+            ziel.parent.mkdir(parents=True, exist_ok=True)
+            ziel.write_bytes(b"klein")
+
+        with mock.patch.object(highlight, "vorschau", side_effect=verkleinere) as v:
+            e = highlight.upload_fassung(self.con, self.konfig, eid)
+            self.assertTrue(highlight.upload_fassung(self.con, self.konfig, eid)["uebersprungen"])   # idempotent
+        self.assertEqual(v.call_count, 1)
+        self.assertEqual(v.call_args.kwargs["kurze_seite"], 1080)
+        self.assertTrue(e["datei"].endswith("export/highlight-2026-W41/highlight-2026-W41_upload.mp4"))
+        self.assertEqual(self.con.execute("SELECT upload_pfad FROM entwuerfe").fetchone()[0], e["datei"])

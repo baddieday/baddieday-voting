@@ -291,7 +291,8 @@ format = "short"
 
 [bot]
 # Clip-Bot (07.10.): false = still – jede Szene wird wie bisher (Auto-Freigabe) entschieden, aber nicht mehr geschickt;
-# es kommen nur Warnungen (Speicher, Kills ohne Aufnahme) und Highlight-Videos. true = jede Szene als Video wie früher.
+# es kommen nur Warnungen (Speicher, Kills ohne Aufnahme, Übertragungsfehler). Das Highlight-Video kommt im einfachen
+# Modus nur im Lern-Bot (08.10.), unter /experte auch hier. true = jede Szene als Video wie früher.
 clips_zeigen = false
 
 [geschmack]

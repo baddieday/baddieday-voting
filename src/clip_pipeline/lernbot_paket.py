@@ -16,6 +16,8 @@ Regeln (Annahmen A5, A26, A27 – docs/ENTSCHEIDUNGEN.md, „Annahmen im Sprint 
     Das Paket veröffentlicht selbst nichts; die Entscheidung für den tatsächlichen Upload bleibt bei dir.
   - Die Checkliste nennt nur die Post-Plattformen ([publikum].plattformen); clip-battle.de bekommt für Entwürfe
     keinen Punkt (Florian 25.09., Rückfrage R5 in docs/ENTSCHEIDUNGEN.md: keine clip-battle.de-Checkliste).
+  - Das 2-Wochen-Video (highlights.entwurf_id) bekommt im einfachen Modus keine Checkliste und keinen Post, sondern
+    die Zeile, wo die volle Qualität liegt (volle_qualitaet; Stufe 3, 08.10.).
   - Der Stand je Plattform liegt in `posts` (veroeffentlichungen bleibt Clip-Sache), nachgesehen mit
     publikum.post_zu – kein eigenes SQL gegen posts.
   - Links erkennt bot.aktionen.plattform_aus_url (nur https, bekannte Domains) – dieselbe Regel wie im Clip-Bot.
@@ -48,9 +50,9 @@ import re
 import sqlite3
 from datetime import datetime
 from html import escape
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from . import caption, db, entwurf, lernbot, publikum
+from . import caption, db, entwurf, highlight, lernbot, publikum
 from .bot import aktionen
 from .konfig import Konfig, KonfigFehler
 from .medien import MedienFehler
@@ -154,6 +156,16 @@ def _checkliste_text(entwurf_id: int, stand: dict[str, bool], einfach: bool = Fa
     return "\n".join(zeilen)
 
 
+def volle_qualitaet(h: sqlite3.Row) -> str:
+    """Wo das 2-Wochen-Video in voller Qualität liegt (Stufe 3, 08.10.): Das Paket ist für Telegram auf 48 MB
+    verkleinert ([vorschau].max_mb), die Datei aus highlight.erstelle (crf 20) liegt im Puffer. highlights.datei ist
+    relativ zur Speicher-Wurzel = Freigabe clips (deploy/mini/smb-puffer.conf). Beispiel: „highlights/2026-W41.mp4“
+    → „💾 Volle Qualität: Netzlaufwerk clips → Ordner highlights → 2026-W41.mp4 …“."""
+    *ordner, name = PurePosixPath(h["datei"]).parts
+    weg = " → ".join(["Netzlaufwerk clips", *(f"Ordner {o}" for o in ordner), name])
+    return f"💾 Volle Qualität: {weg} (die Datei oben ist für Telegram verkleinert)."
+
+
 def haken_setzen(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, plattform: str,
                  zeit: datetime | None = None) -> tuple[str, int | None]:
     """Häkchen: legt den Post an (ohne Link), in einer Transaktion (db.transaktion). Rückgabe (Antworttext,
@@ -218,7 +230,8 @@ def link_speichern(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, url
 
 def baue_paket(konfig: Konfig, entwurf_id: int) -> dict:
     """Läuft im Thread: eigene DB-Verbindung (db.verbinde), Sperre holen, Upload-Fassung rendern
-    (entwurf.upload_fassung, idempotent) und Caption bauen (caption.entwurf_caption(con, liste, konfig)).
+    (entwurf.upload_fassung, idempotent; das 2-Wochen-Video aus seiner fertigen Datei, highlight.upload_fassung) und
+    Caption bauen (caption.entwurf_caption(con, liste, konfig)).
     Rückgabe {"datei": Pfad, "caption": Text, "dateiname": "clip-battle_e41.mp4"}.
     MedienFehler/KonfigFehler/sperre.Gesperrt gehen an den Aufrufer (sende_paket sagt es dir im Bot). Weckt nie.
 
@@ -233,7 +246,9 @@ def baue_paket(konfig: Konfig, entwurf_id: int) -> dict:
         text = caption.entwurf_caption(con, liste, konfig)
         # Rendern ist ein rechenintensiver Schritt: dieselbe Sperre wie Pipeline und Entwürfe (nur einer gleichzeitig)
         with sperre(konfig.datenbank.with_suffix(".lock"), warten_s=float(konfig.wert("sperre.warten_s", 7200))):
-            ergebnis = entwurf.upload_fassung(con, konfig, entwurf_id)
+            # 2-Wochen-Video (08.10.): aus der fertigen Datei – seine ältesten Szenen gibt der Puffer schon frei
+            ergebnis = (highlight.upload_fassung(con, konfig, entwurf_id)
+                        or entwurf.upload_fassung(con, konfig, entwurf_id))
     finally:
         con.close()
     return {"datei": ergebnis["datei"], "caption": text, "dateiname": f"clip-battle_e{entwurf_id}.mp4"}
@@ -269,8 +284,11 @@ async def sende_paket(app, entwurf_id: int, auftrag: dict | None = None) -> str:
     einfach = not lernbot.experte_an(con, konfig)
     nochmal = "" if einfach else " Drück 📦 später noch einmal."
     try:
+        # Stufe 3 (08.10.): das 2-Wochen-Video – für Telegram verkleinert, also nicht „in voller Qualität“
+        zwei_wochen = highlight.zu_entwurf(con, entwurf_id) if einfach else None
+        voll = "" if zwei_wochen is not None else " in voller Qualität"
         if auftrag is None or not auftrag.get("versuche"):
-            await app.bot.send_message(chat, f"📦 Ich mache Video #{entwurf_id} in voller Qualität fertig … Das dauert "
+            await app.bot.send_message(chat, f"📦 Ich mache Video #{entwurf_id}{voll} fertig … Das dauert "
                                              "ein paar Minuten." if einfach else
                                        f"📦 Baue das Upload-Paket für Entwurf #{entwurf_id} (1080×1920) … "
                                        "Rendert gerade ein Entwurf, warte ich auf ihn.")
@@ -293,10 +311,15 @@ async def sende_paket(app, entwurf_id: int, auftrag: dict | None = None) -> str:
             # Als Datei (nicht als Video): Telegram komprimiert Dateien nicht neu, du lädst genau diese Fassung hoch.
             # Zeitgrenzen wie beim Clip-Bot-Paket: bis 48 MB hochladen dauert, 300 s Lesen/Schreiben, 30 s Verbinden
             await app.bot.send_document(chat, document=datei, filename=paket["dateiname"],
-                                        caption=f"📦 Video #{entwurf_id} in voller Qualität" if einfach else
+                                        caption=f"📦 Video #{entwurf_id}{voll}" if einfach else
                                         f"📦 Entwurf #{entwurf_id} – Upload-Fassung",
                                         read_timeout=300, write_timeout=300, connect_timeout=30)
         await app.bot.send_message(chat, f"<pre>{escape(paket['caption'])}</pre>", parse_mode="HTML")
+        if zwei_wochen is not None:
+            # Dein ✅ hieß schon „hochgeladen“ (highlight.entscheide_entwurf) – kein Häkchen und kein TikTok-Post: es
+            # geht auf YouTube, das noch nicht gemessen wird. Dafür, wo die volle Qualität liegt.
+            await app.bot.send_message(chat, volle_qualitaet(zwei_wochen))
+            return "gesendet"
         stand = checkliste_stand(con, konfig, entwurf_id)
         knoepfe = knoepfe_checkliste(entwurf_id, stand)
         await app.bot.send_message(chat, _checkliste_text(entwurf_id, stand, einfach), parse_mode="HTML",
