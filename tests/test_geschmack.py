@@ -39,6 +39,19 @@ class Geschmack(MitSpeicher):
                              "VALUES (?, 70, 70, ?, '{}', ?)", (eid, ki, iso(jetzt())))
         return eid
 
+    def zuschauer(self, eid, y=None):
+        """Post eines hochgeladenen Videos (legt ✅ an); mit y die Zuschauer-Note (−1 … 1) wie nach dem Abruf."""
+        zeit = iso(jetzt())
+        self.con.execute("""INSERT INTO posts (art, ziel, entwurf_id, plattform, gepostet_utc, dauer_s, rezept, merkmale,
+                                               erstellt) VALUES ('entwurf', ?, ?, 'tiktok', ?, 45, '{}', '{}', ?)
+                            ON CONFLICT (plattform, ziel) DO NOTHING""", (f"entwurf:{eid}", eid, zeit, zeit))
+        if y is not None:
+            pid = self.con.execute("SELECT id FROM posts WHERE ziel = ?", (f"entwurf:{eid}",)).fetchone()[0]
+            mid = self.con.execute("INSERT INTO publikum_messungen (post_id, gemessen_utc, quelle, views, erstellt) "
+                                   "VALUES (?, ?, 'api', 500, ?)", (pid, zeit, zeit)).lastrowid
+            self.con.execute("INSERT INTO audience_ergebnisse (post_id, messung_id, input_hash, score, confidence, "
+                             "teile, aktualisiert) VALUES (?, ?, 'h', ?, 0.8, '{}', ?)", (pid, mid, y, zeit))
+
     def test_lernt_aus_daumen_und_ki_und_gruende_grenzen_ein(self):
         gut = {"aufbau": "steigerung", "tempo": "ruhig", "zeitlupe": "wenig"}
         schlecht = {"aufbau": "kino", "tempo": "schnell", "zeitlupe": "viel"}
@@ -66,6 +79,33 @@ class Geschmack(MitSpeicher):
         self.assertIn("👍 Kommt gut an: Aufbau „Steigerung“ (4 von 4 ✅)", text)
         self.assertIn("Aufbau „Kino“ (0 von 4 ✅)", text)
         self.assertIsNone(geschmack.wochen_text(self.con, self.konfig, datetime(2020, 1, 1, tzinfo=timezone.utc)))
+
+    def test_zuschauer_lehren_aufbau_tempo_und_zeitlupe(self):
+        """Stufe 5 (08.10., Florian: „keine 100 oder 1000 Videos bewerten“): ohne einen einzigen Daumen lernt der Bot
+        aus den Zuschauer-Noten – jede Schraube, die im Video wirkte, zählt doppelt."""
+        self.konfig.daten.setdefault("geschmack", {})["mut"] = 0.0
+        erzaehlt = {"aufbau": "story", "tempo": "ruhig", "zeitlupe": "viel"}
+        gut = [self.entwurf(erzaehlt) for _ in range(4)]
+        rest = [self.entwurf({"aufbau": a, "tempo": "schnell", "zeitlupe": "wenig"})
+                for a in ("montage", "steigerung", "kino") for _ in range(2)]
+        vorher = geschmack.statistik(self.con)
+        for eid in gut + rest:                     # hochgeladen, aber noch ohne Zahlen: alles wie vor Stufe 5
+            self.zuschauer(eid)
+        self.assertEqual(geschmack.statistik(self.con), vorher)
+        self.assertNotIn("👀", geschmack.wochen_text(self.con, self.konfig))
+        for eid in gut:
+            self.zuschauer(eid, 0.8)
+        for eid in rest:
+            self.zuschauer(eid, -0.8)
+        stat = geschmack.statistik(self.con)
+        story = stat["aufbau"]["story"]
+        self.assertEqual((story["n"], story["zuschauer"], story["ja"] + story["nein"]), (8.0, 4, 0))
+        self.assertAlmostEqual(story["s"], 8 * 0.9)                          # Treffer (y + 1)/2 = 0,9 je Video
+        self.assertAlmostEqual(stat["tempo"]["schnell"]["s"], 12 * 0.1)
+        wahl = geschmack.waehle(self.con, self.konfig)
+        self.assertEqual({k: wahl[k] for k in geschmack.KNOEPFE}, erzaehlt)
+        self.assertIn("👀 Bei den Zuschauern kommt gut an: Aufbau „erzählt“ (4 Videos) · ruhige Schnitte (4 Videos) · "
+                      "viel Zeitlupe (4 Videos)", geschmack.wochen_text(self.con, self.konfig))
 
     def test_einfacher_modus_nutzt_geschmack_und_regeln_gehen_vor(self):
         k = einstellungen.anwenden(self.con, self.konfig)                       # einfacher Modus: geschmack an

@@ -114,7 +114,8 @@ KATALOG: tuple[Einstellung, ...] = (
 EINFACH = (QUELLE, "regie.short_ziel_s", "regie.szenen", "regie.effekt_stufe", "musik.genres_bevorzugt")
 # Einfacher Modus (07.10.): was ihn ausmacht – ohne Experten-Modus gelten diese Werte, egal was in Datei oder Bot steht.
 # KI-Cutter und Selbst-Aussortieren machten Entwürfe langsam und unvorhersehbar, der Abendstand war eine Nachricht zu
-# viel. Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌; die KI urteilt erst nach dem Senden mit.
+# viel. Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌ (seit 08.10. auch aus den Zuschauern); die
+# KI urteilt erst nach dem Senden mit.
 # 08.10. (Florian: „wenn ich alles per Hand einstellen muss … es soll autonom sein“): auch Clip-Auswahl, Stil und
 # Szenen entscheidet der Bot – alte ⚙️-Zeilen vom 29.09.–07.10. (z. B. ein fester Stil, der das Aufbau-Lernen
 # einfror) bleiben in der Tabelle und gelten unter /experte weiter, bremsen den einfachen Modus aber nicht mehr.

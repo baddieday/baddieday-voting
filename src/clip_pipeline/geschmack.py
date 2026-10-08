@@ -10,6 +10,9 @@ Der Bot stellt bei jedem Short drei Schrauben selbst ein und merkt sich, was ank
 Lehrer (je Video und Schraube, Beta-Verteilung je Wahl):
   - dein ✅ = Treffer, ❌ = Fehlschlag (Gewicht 1). Dein Grund grenzt ein: ⏱️/⏳/🎵 haben mit den Schrauben nichts zu
     tun (die regeln deine festen Regeln), 😵/🎆/💥 betreffen nur Tempo und Zeitlupe, 🥱 oder ❌ ohne Grund alle drei.
+  - die Zuschauer (Stufe 5, 08.10., Florian: „keine 100 oder 1000 Videos bewerten“): je hochgeladenem Video mit
+    Zuschauer-Note y (−1 … 1, audience_ergebnisse; TikTok und YouTube zusammen als ein Video, massstab._publikum)
+    zählt jede Schraube, die im Video wirkte, doppelt – Treffer (y + 1)/2, wie stile.statistik im Experten-Modus.
   - die KI-Note des fertigen Videos (0–100, kritik.py) mit einem Drittel Gewicht (wie regie_lernen.KI_STAERKE).
 Alte Bewertungen zählen sofort für den Aufbau (der Stil steht schon in den Parametern alter Entwürfe).
 
@@ -21,7 +24,8 @@ Reihenfolge (Montage und Kino haben beide den Bogen) und das andere Tempo, das s
 (einstellungen.EINFACH_FEST, 08.10.). Deine Regeln (regeln.anwenden) kommen danach – sie gehen immer vor.
 
 Die KI schaut sich jedes gesendete Video danach im Hintergrund an (ki_nachtragen, Lern-Bot-Schleife) – das Video
-kommt dadurch nicht später. Sonntags ab 18 Uhr fasst wochen_text die Woche zusammen (Lern-Meldung woche:<JJJJ-Www>).
+kommt dadurch nicht später. Sonntags ab 18 Uhr fasst wochen_text die Woche zusammen (Lern-Meldung woche:<JJJJ-Www>),
+mit einer Zeile, was bei den Zuschauern ankommt (zuschauer_zeile).
 Wer gerade lehrt – deine ✅/❌, die KI-Note, die Zuschauer – sagt lehrer_zeile (08.10.): in 📋 Stand immer, im
 Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat.
 """
@@ -50,6 +54,7 @@ NAMEN = {("aufbau", "montage"): "Aufbau „schnelle Montage“", ("aufbau", "sto
 TEMPO = {"schnell": 0.8, "ruhig": 1.25}
 ZEITLUPEN = {"viel": 8, "wenig": 2}
 KI_GEWICHT = 0.34                                  # wie regie_lernen.KI_STAERKE: die KI zählt ein Drittel von dir
+ZUSCHAUER_GEWICHT = 2.0                            # je Video mit Zuschauer-Note – wie stile.statistik (Experten-Modus)
 NICHT_GESCHMACK = {"kurz", "lang", "musik"}        # dafür gibt es feste Regeln – die Schrauben sind unschuldig
 EFFEKT_GRUENDE = {"hektisch", "effekte_viel", "action"}
 MUT_STANDARD = 0.5
@@ -62,7 +67,10 @@ def _wahl_aus(parameter_json: str | None) -> dict:
     except (TypeError, ValueError):
         return {}
     wahl = dict(p.get("geschmack") or {})
-    if "aufbau" not in wahl and p.get("stil") in KNOEPFE["aufbau"]:   # alte Entwürfe: nur der Stil ist bekannt
+    # Alte Entwürfe: nur der Stil ist bekannt. Greift auch, wenn das Publikums-Modell nur einen Feinwert des Aufbaus
+    # nachsteuerte (Musikpegel, Hektik, Einstieg …, nur_wirksame) – Reihenfolge und Bildgröße blieben die des Stils;
+    # sonst lernte niemand mehr den Aufbau, sobald das Publikums-Modell Zahlen hat (N77)
+    if "aufbau" not in wahl and p.get("stil") in KNOEPFE["aufbau"]:
         wahl["aufbau"] = p["stil"]
     return {k: v for k, v in wahl.items() if k in KNOEPFE and v in KNOEPFE[k]}
 
@@ -103,15 +111,30 @@ def beobachtungen(con: sqlite3.Connection, fmt: str = "short", seit: str | None 
 
 
 def statistik(con: sqlite3.Connection, fmt: str = "short") -> dict[str, dict[str, dict]]:
-    """{Schraube: {Wahl: {"n": Gewicht, "s": Treffer-Gewicht, "ja": ✅, "nein": ❌}}} über alle Entwürfe."""
-    stat = {k: {o: {"n": 0.0, "s": 0.0, "ja": 0, "nein": 0} for o in opt} for k, opt in KNOEPFE.items()}
-    for b in beobachtungen(con, fmt):
+    """{Schraube: {Wahl: {"n": Gewicht, "s": Treffer-Gewicht, "ja": ✅, "nein": ❌, "zuschauer": Videos mit
+    Zuschauer-Note, "zuschauer_s": Summe ihrer Treffer (y + 1)/2}}} über alle Entwürfe – aus deinen ✅/❌, den Zuschauern
+    (ZUSCHAUER_GEWICHT je Video, Stufe 5) und der KI-Note. Ohne Zuschauer-Noten genau wie vor Stufe 5."""
+    from . import massstab   # hier, nicht oben (wie stile.statistik): geschmack bleibt leicht, massstab lädt numpy
+
+    stat = {k: {o: {"n": 0.0, "s": 0.0, "ja": 0, "nein": 0, "zuschauer": 0, "zuschauer_s": 0.0} for o in opt}
+            for k, opt in KNOEPFE.items()}
+    alle = beobachtungen(con, fmt)
+    zuschauer = massstab._publikum(con, {b["id"]: None for b in alle})
+    for b in alle:
         if b["daumen"] in (1, -1):
             for knopf in _schuld(b["daumen"], b["gruende"]) & set(b["wahl"]):
                 w = stat[knopf][b["wahl"][knopf]]
                 w["n"] += 1.0
                 w["s"] += 1.0 if b["daumen"] > 0 else 0.0
                 w["ja" if b["daumen"] > 0 else "nein"] += 1
+        if (z := zuschauer.get(b["id"])) is not None:   # keine Gründe: jede Schraube, die im Video wirkte
+            treffer = max(0.0, min(1.0, (float(z["y"]) + 1) / 2))
+            for knopf, wahl in b["wahl"].items():
+                w = stat[knopf][wahl]
+                w["n"] += ZUSCHAUER_GEWICHT
+                w["s"] += ZUSCHAUER_GEWICHT * treffer
+                w["zuschauer"] += 1
+                w["zuschauer_s"] += treffer
         if b["ki"] is not None:
             for knopf, wahl in b["wahl"].items():
                 w = stat[knopf][wahl]
@@ -258,6 +281,29 @@ def _bewertet(w: dict) -> str:
     return f" ({w['ja']} von {gesamt} ✅)" if gesamt else ""
 
 
+def _videos(n: int) -> str:
+    return f"{n} Video{'s' if n != 1 else ''}"
+
+
+def zuschauer_zeile(stat: dict[str, dict[str, dict]]) -> str | None:
+    """„👀 Bei den Zuschauern kommt gut an: Aufbau „erzählt“ (3 Videos) · ruhige Schnitte (2 Videos)“ – nur aus den
+    Zuschauer-Noten, mit derselben Schwelle wie „👍 Kommt gut an“ (Anteil ab 0,6 bei Gewicht 2: ein Video ab Note
+    +0,4, viele ab +0,2). Mit Noten, aber ohne Favoriten: „noch kein klarer Favorit“; ganz ohne Noten: None."""
+    gemessen = max(sum(w["zuschauer"] for w in opt.values()) for opt in stat.values())
+    if not gemessen:
+        return None
+
+    def anteil(w: dict) -> float:
+        return _anteil({"s": ZUSCHAUER_GEWICHT * w["zuschauer_s"], "n": ZUSCHAUER_GEWICHT * w["zuschauer"]})
+
+    gut = sorted(((k, o, w) for k, opt in stat.items() for o, w in opt.items() if w["zuschauer"] and anteil(w) >= 0.6),
+                 key=lambda x: -anteil(x[2]))[:3]
+    if not gut:
+        return f"👀 Bei den Zuschauern noch kein klarer Favorit ({_videos(gemessen)} ausgewertet)."
+    return "👀 Bei den Zuschauern kommt gut an: " + " · ".join(f"{NAMEN[(k, o)]} ({_videos(w['zuschauer'])})"
+                                                             for k, o, w in gut)
+
+
 def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None:
     """„🧠 Deine Woche …“ – None, wenn in den letzten 7 Tagen kein Video kam (dann Ruhe)."""
     bis = bis or jetzt()
@@ -286,6 +332,8 @@ def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None
         zeilen.append("👎 Kommt weniger an: " + " · ".join(NAMEN[(k, o)] + _bewertet(w) for k, o, w in schlecht))
     if not gut and not schlecht:
         zeilen.append("🤔 Noch kein klares Bild – ich probiere weiter selbst aus.")   # 08.10.: keine Bitte an dich
+    if zuschauer := zuschauer_zeile(stat):   # Stufe 5: was die Zuschauer mögen, lehrt die drei Schrauben mit
+        zeilen.append(zuschauer)
     neu = sum(1 for z in woche if ((json.loads(z["parameter"] or "{}") or {}).get("geschmack") or {}).get("experiment"))
     if neu:
         zeilen.append(f"🧪 {neu}× bewusst etwas Neues ausprobiert.")

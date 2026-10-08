@@ -56,10 +56,12 @@ Bei jedem Video stellt er drei Dinge selbst ein und merkt sich, was ankommt:
 - **Tempo:** schnelle oder ruhige Schnitte
 - **Zeitlupe:** viel oder wenig
 
-Er lernt aus deinen ✅/❌ und aus der Note einer KI, die sich jedes Video nach dem Senden anschaut (zählt ein Drittel
-so viel wie du). Dein Grund unter ❌ zählt mit: „🎵 Musik“ oder „⏱️ Zu kurz“ werden nicht dem Aufbau angelastet.
-Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen immer vor.** Sonntags ab 18 Uhr
-kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert hat.
+Er lernt aus deinen ✅/❌, aus den **Zuschauerzahlen** deiner hochgeladenen Videos (jedes zählt doppelt so viel wie
+ein ✅/❌ von dir – du musst dafür nichts tun außer hochladen) und aus der Note einer KI, die sich jedes Video nach dem
+Senden anschaut (zählt ein Drittel so viel wie du). Dein Grund unter ❌ zählt mit: „🎵 Musik“ oder „⏱️ Zu kurz“
+werden nicht dem Aufbau angelastet. Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen
+immer vor.** Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was bei den
+Zuschauern ankommt („👀 …“), was er probiert hat.
 
 ## Knöpfe
 - **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend, nur mit Szenen, die du noch nicht gesehen

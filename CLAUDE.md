@@ -489,3 +489,12 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Laden), Fehler nur ins Log, kein Chat. Abweichung vom Plan: gezählt werden nur deine Genres – live hat NCS nur 9
     Techno- und 4 Hardcore-Titel, und Titel anderer Genres hielten die Gesamtzahl über 16, Hardstyle und Phonk kämen
     nie. /experte wie bisher (Musik von Hand); gelöscht wird nichts. N71–N74.
+  - **Stufe 5: Zuschauer lehren Aufbau, Tempo und Zeitlupe** (`geschmack.statistik`, Florian: „keine 100 oder 1000
+    Videos bewerten“, „mach doch endlich ein Video das sich immer wieder verbessert“): Im einfachen Modus sind die
+    Zuschauer jetzt der dritte Lehrer neben deinem ✅/❌ (Gewicht 1) und der KI-Note (0,34) – vorher lernten die drei
+    Schrauben dort gar nicht vom Publikum. Jedes hochgeladene Video mit Zuschauer-Note zählt für jede Schraube, die
+    darin wirkte, doppelt (Treffer (y + 1)/2, wie `stile.statistik` unter /experte). Nachgestellt (Publikum mag
+    „erzählt“): Anteil „erzählt“ in den Videos 31–60 von 24 auf 56 %, Zuschauer-Note im Schnitt +0,01 → +0,34. Der
+    Wochenbericht sagt „👀 Bei den Zuschauern kommt gut an: …“. Verstellt das Publikums-Modell nur Feinwerte des Aufbaus,
+    zählt der Aufbau trotzdem (sonst lernte ihn niemand mehr). Ohne Zuschauer-Noten alles wie bisher; /experte
+    unverändert. N75–N78.

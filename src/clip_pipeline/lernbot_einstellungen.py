@@ -45,7 +45,7 @@ def uebersicht(con: sqlite3.Connection, konfig: Konfig, clip_bot: bool = False) 
     zeilen = ["⚙️ Einstellen musst du nichts – das entscheide ich selbst.",
               "🎯 Clips: dein neuester Spielabend" + (f", {hinweis.removeprefix(abend)}"
                                                      if hinweis and hinweis.startswith(abend) else ""),
-              "🎬 Aufbau, Tempo und Zeitlupe lerne ich aus deinen ✅/❌.",
+              "🎬 Aufbau, Tempo und Zeitlupe lerne ich aus deinen ✅/❌ und den Zuschauerzahlen.",   # Stufe 5, 08.10.
               "🎵 Musik: Techno, Hardstyle, Hardcore und Phonk – neue Songs hole ich mir selbst.",   # Stufe 4, 08.10.
               regeln.regeln_zeile(con, k)]
     if (mindestens := float(k.wert("regie.short_mindestens_s", 0.0) or 0.0)) > 0 and not regeln.ziel_regel(con, k):

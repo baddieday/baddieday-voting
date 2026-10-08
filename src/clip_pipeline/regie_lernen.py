@@ -160,7 +160,8 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None, an
         from . import autonom, geschmack, stile
 
         # Schnittstil (30.09.) zuerst: relativ auf das Gelernte; das Publikumsmodell darf danach nachsteuern.
-        # Einfacher Modus (07.10.): Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌ und der KI-Note
+        # Einfacher Modus (07.10.): Aufbau, Tempo und Zeitlupe lernt geschmack.py aus deinen ✅/❌, der KI-Note und
+        # (Stufe 5, 08.10.) den Zuschauern
         p = geschmack.anwenden(con, konfig, fmt, p, anders=anders) if einfach else stile.anwenden(con, konfig, fmt, p)
         vorher = dict(p)
         p, ziel = autonom.plan_parameter(con, konfig, fmt, p, ziel)

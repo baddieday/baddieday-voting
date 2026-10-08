@@ -296,7 +296,8 @@ format = "short"
 clips_zeigen = false
 
 [geschmack]
-# Lernen im einfachen Modus (07.10., geschmack.py): Aufbau, Tempo und Zeitlupe aus deinen ✅/❌ und der KI-Note.
+# Lernen im einfachen Modus (07.10., geschmack.py): Aufbau, Tempo und Zeitlupe aus deinen ✅/❌, den Zuschauerzahlen
+# (seit 08.10., je Video doppelt) und der KI-Note.
 # mut = wie oft ein Video bewusst etwas Neues probiert: 0.15 vorsichtig · 0.33 ausgewogen · 0.5 mutig
 mut = 0.5
 
