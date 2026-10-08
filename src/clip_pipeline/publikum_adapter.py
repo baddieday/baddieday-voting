@@ -203,12 +203,23 @@ def normalisiere(plattform: str, antwort: dict) -> dict:
     return ergebnis
 
 
+# Gleiche Zahlen wie bei der letzten API-Messung zählen wieder als Messung, wenn die mindestens so alt ist (08.10.,
+# Stufe 3 „Auch Flops bekommen ihre Zuschauer-Note“). 20 statt 24 h: Der tägliche Abruf (clip-publikum.timer, 10:00)
+# streut bis zu 10 min, zwei Läufe liegen also auch einmal 23 h 50 min auseinander.
+GLEICHE_ZAHLEN_NACH = timedelta(hours=20)
+
+
 def importiere(con, konfig, post_id: int, antwort: dict, *, zeit: datetime | None = None) -> int | None:
     """Eindeutig zugeordnete API-/Exportdaten speichern und automatisch lernen.
 
-    Idempotenter Replay desselben Exports schreibt keine zweite Messung.
+    Gleiche Zahlen wie bei der letzten API-Messung schreiben keine zweite Messung (auch nicht ein zweiter Import
+    desselben Exports) – außer der Post hat noch keinen Score und die letzte Messung ist mindestens
+    GLEICHE_ZAHLEN_NACH (20 h) alt. Sonst bekam ein Video, dessen Zahlen ab Tag 2 stehen bleiben (der typische Flop),
+    nie eine Messung ab Tag 3 und damit nie einen Score; jetzt hat es eine je Tag und an Tag 7 seinen Score. Nach dem
+    Score nicht mehr: Er wird nie überschrieben, und jede gespeicherte Messung lässt autonom alles neu durchrechnen.
     Die Post-Plattform stammt aus der DB, nicht aus frei mitgelieferten Daten.
     """
+    zeit = zeit or jetzt()
     post = publikum.post(con, post_id)
     if post is None:
         raise ValueError(f"Post #{post_id} gibt es nicht")
@@ -217,8 +228,9 @@ def importiere(con, konfig, post_id: int, antwort: dict, *, zeit: datetime | Non
         return None
     letzte = con.execute("SELECT * FROM publikum_messungen WHERE post_id=? AND quelle='api'"
                          " ORDER BY gemessen_utc DESC,id DESC LIMIT 1", (post_id,)).fetchone()
-    if letzte is not None and all(letzte[f] == werte.get(f) for f in publikum.MESSFELDER):
-        if json.loads(letzte["metriken"] or "{}") == werte.get("metriken", {}):
+    if letzte is not None and all(letzte[f] == werte.get(f) for f in publikum.MESSFELDER) \
+            and json.loads(letzte["metriken"] or "{}") == werte.get("metriken", {}):
+        if post["bewertet_utc"] is not None or zeit - aus_iso(letzte["gemessen_utc"]) < GLEICHE_ZAHLEN_NACH:
             return None
     # API-Zähler dürfen von der Plattform korrigiert werden. Keine manuelle
     # Rückfrage wie bei OCR; vorangehende Messungen bleiben trotzdem erhalten.

@@ -137,6 +137,8 @@ nur, wenn Video und Post nur zueinander passen; bei mehreren entscheidet die ers
 Kill · 5 Momente“). Ohne passende erste Zeile wartet der Abruf, bis das Fenster zu ist. Sonst bleibt der Post offen –
 lieber keine Zahlen als falsche. Bei der Zuordnung wird `gepostet_utc` die Upload-Zeit (Tag 7 zählt ab dem Upload). In
 der JSON-Zeile steht `"zugeordnet": n`; `/link` ist nur noch für Ausnahmen.
+Bleiben die Zahlen gleich (Flop), speichert der Abruf trotzdem eine Messung am Tag (ab 20 h nach der letzten), bis der
+Post seinen Score hat – so bekommt auch ein Video, das nicht mehr wächst, an Tag 7 seine Note, ohne Screenshot (08.10.).
 
 ### 6. Meldungen und Ruhezeit
 Nach dem täglichen Lauf (10:00) kommt höchstens **eine** Meldung am Tag, nur wenn es neue Scores gibt:
@@ -509,6 +511,7 @@ Aus: `systemctl disable --now clip-mikro.path clip-mikro.timer` (oder `[merkmale
   unten), ✅ tippen; sonst ✏️ und von Hand.
 - **… `/publikum` „noch keine Zahlen“ oder „braucht eine Messung ab Tag 3“ zeigt?** Einen Screenshot mit der
   genannten `#Nummer` schicken. Ohne Messung ab Tag 3 bleibt der Post unbewertet – auch nach Wochen noch nachholbar.
+  Mit TikTok-Verbindung kommt sie von selbst, sobald der Post sein Video hat – auch bei einem Flop (5a).
 - **… ich die Post-Nummer vergessen habe?** `/publikum` – oder den Screenshot ohne Nummer schicken und den Post per
   Knopf wählen.
 - **… der Link falsch war?** Nochmal `/link <nr> <richtiger Link>` – der neue ersetzt den alten.

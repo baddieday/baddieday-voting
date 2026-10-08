@@ -63,6 +63,37 @@ class PublikumAdapter(unittest.TestCase):
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM publikum_messungen").fetchone()[0], 1)
         self.assertEqual(publikum.letzte_messung(self.con, self.pid)["gemessen_utc"], iso(self.zeit))
 
+    def test_flop_bekommt_score_an_tag_7(self):
+        """08.10. (Stufe 3, Flop): Views 180, 200, danach täglich unverändert 200. Vorher speicherte der Abruf nur Tag 1
+        und 2 – nie ein Score. Jetzt zählen gleiche Zahlen einmal am Tag (der Timer streut: 10:00 bzw. 10:10), bis der
+        Score steht; danach nicht mehr."""
+        self.konfig.daten["publikum"].update(
+            alter_tage=7, mindest_alter_tage=3, fenster=20,
+            gewichte={"wiedergabe": 0.5, "engagement": 0.3, "reichweite": 0.2},
+            mad_minimum={"wiedergabe": 0.05, "engagement": 0.005, "reichweite": 0.1})
+        gepostet = self.zeit - timedelta(days=3)                                 # der Post aus setUp
+        laeufe = [gepostet + timedelta(days=t, minutes=10 * (t % 2)) for t in range(1, 10)]
+        for t, lauf in enumerate(laeufe, start=1):
+            antwort = {"data": {"videos": [{"id": "123456789", "view_count": 180 if t == 1 else 200,
+                                            "like_count": 9, "comment_count": 1, "share_count": 0}]}}
+            with patch.object(adapter, "_token", return_value="t"), \
+                    patch.object(adapter, "_json", return_value=antwort):
+                adapter.abrufen(self.con, self.konfig, lauf)
+            publikum.bewerte_alle(self.con, self.konfig, lauf)
+        gemessen = [z[0] for z in self.con.execute("SELECT gemessen_utc FROM publikum_messungen ORDER BY gemessen_utc")]
+        self.assertEqual(gemessen, [iso(lauf) for lauf in laeufe[:7]])           # Tag 1–7, nach dem Score keine mehr
+        post = publikum.post(self.con, self.pid)
+        self.assertEqual((post["score"], post["bewertet_utc"]), (0.0, iso(laeufe[6])))   # 0: Basis zu klein
+
+    def test_gleiche_zahlen_am_selben_tag_nur_einmal(self):
+        """Wichtigster Fehlerfall: zwei Abrufe am selben Tag (10:00, 18:00) mit gleichen Zahlen → eine Messung."""
+        with patch.object(adapter, "_token", return_value="t"), \
+                patch.object(adapter, "_json", return_value=self.payload):
+            erst = adapter.abrufen(self.con, self.konfig, self.zeit)
+            dann = adapter.abrufen(self.con, self.konfig, self.zeit + timedelta(hours=8))
+        self.assertEqual((erst["gespeichert"], dann["gespeichert"], dann["unveraendert"]), (1, 0, 1))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM publikum_messungen").fetchone()[0], 1)
+
     def test_ohne_link_ordnet_selbst_zu(self):
         # 30.09.: Kurzlink (vm.tiktok.com) oder gar kein Link → Zuordnung über die eigene Videoliste (Zeit + Länge).
         # 08.10.: Ohne passende erste Zeile (hier: Video ohne Beschreibung) erst, wenn das 72-h-Fenster zu ist – bis

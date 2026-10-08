@@ -432,3 +432,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     bei mehreren entscheidet die erste Zeile der Beschreibung (die Caption des Pakets, nachgerechnet). Zusätzlich zur
     Spec: eine andere erste Zeile schließt ein Video aus, und ohne passende erste Zeile wird erst zugeordnet, wenn das
     Fenster zu ist. Sonst bleibt der Post offen. `gepostet_utc` wird die Upload-Zeit (Tag 7 ab dem Upload). N25–N29.
+  - **Stufe 3: Auch Flops bekommen ihre Zuschauer-Note** (`publikum_adapter.importiere`): Gleiche Zahlen wie beim
+    letzten Abruf zählen nach 20 h wieder als Messung (der Timer streut bis 10 min), am selben Tag bleibt es bei einer.
+    Vorher bekam ein Video, das ab Tag 2 nicht mehr wächst, nie eine Messung ab Tag 3 und damit nie einen Score – nur
+    per Screenshot. Abweichend von der Spec nur, bis der Post seinen Score hat (der wird nie überschrieben, und jede
+    Messung lässt `autonom` alles neu rechnen – ohne Grenze fast 5 min je Lauf). N30–N32.
