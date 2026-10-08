@@ -322,6 +322,7 @@ class LernBotEinfach(MitRegieMaterial):
             self.assertEqual(self.schleife(3), 1)
         self.assertEqual(bau.call_count, 1)                                                 # genau eine neue Fassung
         self.assertEqual(bau.call_args.args[2], {"m1", "m2"})                              # aus denselben Matches
+        self.assertEqual(bau.call_args.args[4], self.eid)       # 08.10.: ersetzt das Video, darf seine Szenen nehmen
         self.assertEqual(lernbot.folge_zu(self.con, self.eid)["ergebnis"], "gesendet")
         self.assertFalse(self.app.bot_data["arbeitet"])
 

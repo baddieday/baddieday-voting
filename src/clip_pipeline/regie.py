@@ -27,6 +27,9 @@ Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der K
                  Szenen, oder auch mit mehr Anlauf zu kurz), kommen nie gezeigte starke Szenen früherer Abende dazu
                  (höchstens 12 Tage alt, nachschub_matches) – nach dem Abend, nie mehr als vom Abend (nachschub_darf),
                  nie vorn (abend_vorn). Dieselben Grenzen gelten für die 🥱-Fassung.
+                 Jede Szene nur in einem Video (08.10., einfacher Modus): Was du in einem Video gesehen hast, ist kein
+                 Kandidat mehr (szenen.verbraucht) – das ersetzt dort Abzug, Cooldown und Frische-Quote. Eine neue
+                 Fassung nach ❌ darf die Szenen des Videos nehmen, das sie ersetzt (p["ersetzt"]).
   2. Bogen       Einstieg = zweitstärkster Moment (Hook), dann steigend, bei ~60 % eine Atempause
                  (lustig/chill), der stärkste zum Schluss. Keine gleiche Stimmung / kein gleiches Match
                  zweimal hintereinander, wenn es sich vermeiden lässt.
@@ -222,14 +225,17 @@ def _szenen(n: int, art: str = "starke") -> str:
 
 class ZuWenigSzenen(RegieFehler):
     """Stufe 1 (07.10., Florian: „lieber kein Video“): weniger starke Szenen als ein Short braucht – kein Video mit
-    Füllmaterial, sondern eine klare Zeile für dich."""
+    Füllmaterial, sondern eine klare Zeile für dich.
+    schon (08.10., „Jede Szene nur in einem Video“, einfacher Modus): starke Szenen des Abends, die du schon in einem
+    Video gesehen hast – stark zählt dann nur die neuen. Mit schon sagt der Satz „Kein neues Video …“."""
 
-    def __init__(self, stark: int, mindestens: int, gesamt: int):
-        self.stark, self.mindestens, self.gesamt = stark, mindestens, gesamt
+    def __init__(self, stark: int, mindestens: int, gesamt: int, schon: int = 0):
+        self.stark, self.mindestens, self.gesamt, self.schon = stark, mindestens, gesamt, schon
         self.quelle: str | None = None   # „🎯 nur Match …“, wenn deine Clip-Auswahl (⚙️) das Material eingeengt hat
         # Stufe 4 (08.10.): nie gezeigte starke Szenen früherer Abende, die in Frage kamen (None = nicht geprüft)
         self.frueher: int | None = None
-        super().__init__(f"{_szenen(stark)}, ein Video braucht {mindestens}")
+        # Mit schon die Zeile für dich auch als Text der Ausnahme – 📋 zeigt sie beim letzten Abend (sitzungen.hinweis)
+        super().__init__(self.kopf() if schon else f"{_szenen(stark)}, ein Video braucht {mindestens}")
 
     def _frueher_satz(self) -> str:
         """Warum auch der Nachschub nicht reichte (Stufe 4) – ehrlich, welche Grenze es war: keine, zu wenige oder
@@ -244,6 +250,11 @@ class ZuWenigSzenen(RegieFehler):
         return "Von früheren Abenden nehme ich höchstens so viele Szenen dazu, wie der Abend selbst hat."
 
     def kopf(self) -> str:
+        if self.schon:   # 08.10.: nichts Neues – was du einmal gesehen hast, kommt nie wieder
+            if not self.stark:
+                return "die starken Szenen dieses Abends habe ich dir alle schon gezeigt"
+            neu = "ist nur 1 starke Szene" if self.stark == 1 else f"sind nur {self.stark} starke Szenen"
+            return f"neu für dich {neu} ({self.schon} kennst du schon), ein Video braucht {self.mindestens}"
         return f"{_szenen(self.stark)} (Multikill, Victory, Clutch oder Endkampf), ein Video braucht {self.mindestens}"
 
     def _auswahl_tipp(self, experte: bool = True) -> str:
@@ -259,14 +270,18 @@ class ZuWenigSzenen(RegieFehler):
     def tipp(self, experte: bool = True) -> str:
         """Was helfen würde – nur, wenn es wirklich hilft (sonst leer). Die Wege über ⚙️ nur im Experten-Modus
         (08.10., Florian: „wenn ich alles per Hand einstellen muss …“). Im einfachen Modus dazu, warum auch frühere
-        Abende nicht reichten (Stufe 4)."""
+        Abende nicht reichten (Stufe 4). Kennst du die starken Szenen schon (schon): kein Tipp zum Umstellen – neue
+        Szenen bringt erst das nächste Spiel."""
+        if self.schon:
+            return " ".join(filter(None, [self._auswahl_tipp(experte), self._frueher_satz() if self.stark else "",
+                                          "Sobald du wieder spielst, kommt ein neues."]))
         if self.gesamt >= self.mindestens:
             return "Mit Einzelkills ginge es: ⚙️ → 🎯 Szenen → „auch Einzelkills“." if experte else self._frueher_satz()
         return " ".join(filter(None, [self._auswahl_tipp(experte), self._frueher_satz()]))
 
     def satz(self, experte: bool = True) -> str:
-        """Die Zeile für dich im Lern-Bot."""
-        return f"🎬 Kein Video: {self.kopf()}. {self.tipp(experte)}".strip()
+        """Die Zeile für dich im Lern-Bot – „Kein neues Video“, wenn du die starken Szenen schon kennst (08.10.)."""
+        return f"🎬 Kein {'neues ' if self.schon else ''}Video: {self.kopf()}. {self.tipp(experte)}".strip()
 
 
 class KeineNeuenSzenen(ZuWenigSzenen):
@@ -1262,7 +1277,13 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     oder bleibt das Video auch mit mehr Anlauf zu kurz (zu_kurz), kommen nie gezeigte starke Szenen früherer Abende
     dazu (nachschub_matches: höchstens 12 Tage alt) – nach allen Szenen vom Abend, nie mehr als vom Abend, nie vorn.
     Gilt fürs Abend-Video, 🎬 und die neue Fassung nach ❌; /experte und eine Match-Wahl dort bleiben exakt.
-    nachschub: None = selbst entscheiden; True/False legt es fest (der zweite Plan erbt die Entscheidung)."""
+    nachschub: None = selbst entscheiden; True/False legt es fest (der zweite Plan erbt die Entscheidung).
+    Jede Szene nur in einem Video (08.10., Florian: „keiner will die Szene 50 oder 100 mal sehen“) – einfacher Modus,
+    Short ohne 🔥 Viral: Szenen aus Videos, die du gesehen hast oder die gleich kommen (szenen.verbraucht, je Szene),
+    sind keine Kandidaten mehr – egal wie gut bewertet; sie ersetzt dort Abzug, Cooldown und Frische-Quote (frueher
+    leer). Reicht das Neue nicht: Nachschub, mehr Anlauf, sonst ZuWenigSzenen mit schon („Kein neues Video …“).
+    p["ersetzt"] (neue Fassung nach ❌, lernbot.baue_entwurf): die Szenen dieser Videos darf sie wieder nehmen; bei 🥱
+    bleibt der Ersatz echt neu (fassung_kandidaten mit allem Gesehenen). 2-Wochen-Video und /experte wie bisher."""
     if fmt_name not in FORMATE:
         raise RegieFehler(f"Unbekanntes Format {fmt_name!r}")
     viral = None
@@ -1278,7 +1299,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     p = {**PARAMETER, **(parameter or {})}
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
     fx, fx_hinweise = effekte.einstellungen(konfig)
-    frueher = gezeigte_momente(con)
+    # Stufe 4 (08.10.): einfacher Modus wie bei mehr_anlauf (regie.geschmack aus einstellungen.EINFACH_FEST)
+    einfach = fmt_name == "short" and viral is None and bool(konfig.wert("regie.geschmack", False))
+    # Jede Szene nur in einem Video (08.10.): im einfachen Modus ersetzt diese Regel Abzug, Cooldown und Frische-Quote –
+    # jeder Kandidat ist ungesehen, und der Cooldown holte sonst verbrauchte Szenen zurück („Cooldown aufgehoben“)
+    frueher = [] if einfach else gezeigte_momente(con)
     # Gewichte einmal holen und durchreichen (Leitplanke 7); die Kill-Tabelle ist dieselbe wie im Clip-Bot
     _version, gewichte = lernen.aktuelle(con, konfig)
     if "historischer_anteil" in (p.get("autonom") or {}):
@@ -1292,6 +1317,13 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     # 🥱 (07.10.): neue Fassung des abgelehnten Videos – Szenen aus dem Abend UND früheren Abenden (fassung_kandidaten)
     fassung = p.get("fassung") if viral is None and isinstance(p.get("fassung"), dict) else None
     idx = szenen.index(con)   # dieselbe Spielszene unter mehreren Schlüsseln (Clip, Nvidia, SteelSeries)
+    gesehen: set[str] = set()      # einfacher Modus: Momente aus Videos, die du gesehen hast oder die gleich kommen
+    verbraucht: set[str] = set()   # … je Szene, ohne die Szenen der Videos, die diese neue Fassung ersetzt
+    if einfach:
+        gesehen = szenen.verbraucht(con)
+        ersetzt = [i for i in (p.get("ersetzt") or []) if isinstance(i, int)]   # lernbot: Fassung nach ❌
+        verbraucht = (szenen.erweitert(gesehen, idx)
+                      - szenen.erweitert(szenen.momente_der_entwuerfe(con, ersetzt), idx))
     alle, bericht = kandidaten_mit_bericht(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle, konfig=konfig,
                                            nur_matches=None if fassung else nur_matches,
                                            fails=viral.FAILS[variante] if viral else "ohne", szenen_idx=idx)
@@ -1299,28 +1331,31 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         hinweise.append(f"{bericht['ohne_datei']} Momente ohne Datei übersprungen"
                         + (f" ({bericht['ersetzt']} weitere: Bot-Clip statt Moment-Datei)" if bericht["ersetzt"] else ""))
     pflicht: list[Kandidat] = []
-    # Stufe 4 (08.10.): einfacher Modus wie bei mehr_anlauf (regie.geschmack aus einstellungen.EINFACH_FEST)
-    einfach = fmt_name == "short" and viral is None and bool(konfig.wert("regie.geschmack", False))
     nachschub_moeglich = einfach and fassung is None and bool(nur_matches) and bool(p.get("nur_starke"))
     pool: list[Kandidat] = []   # nie gezeigte starke Szenen früherer Abende (Kandidat.nachschub)
+    schon = 0                   # starke Szenen, die du schon in einem Video gesehen hast (für „Kein neues Video“)
     if fassung is not None:
         frueher_ok = nachschub_matches(con, konfig, fassung.get("abend") or []) if einfach else None
-        alle, pflicht = fassung_kandidaten(alle, fassung, idx, szenen.jemals_gezeigt(con), fmt, frueher_ok)
+        # 🥱: Ersatz nur aus Szenen, die du nie gesehen hast – auch nicht aus Vorgänger-Fassungen („gegen neue“)
+        alle, pflicht = fassung_kandidaten(alle, fassung, idx, gesehen if einfach else szenen.jemals_gezeigt(con), fmt,
+                                           frueher_ok)
         p["max_je_match"] = max(int(p["max_je_match"]), momente_grenzen(fmt)[1])   # oft nur ein Match am Abend
     else:
+        if einfach:   # Jede Szene nur in einem Video (08.10.): Verbrauchtes nie wieder – egal wie gut bewertet
+            schon = len(szenen.eine_je_szene([k for k in alle if k.stark and k.schluessel in verbraucht], idx))
+            alle = [k for k in alle if k.schluessel not in verbraucht]
         alle = szenen.eine_je_szene(alle, idx)   # nie dieselbe Szene zweimal (vor dem Zählen der starken)
         if nachschub_moeglich:
-            gezeigt = szenen.erweitert(szenen.jemals_gezeigt(con), idx)
             if erlaubt := nachschub_matches(con, konfig, nur_matches):
                 frueher_alle, _ = kandidaten_mit_bericht(con, p, frueher, gewichte=gewichte, kill_tabelle=kill_tabelle,
                                                          konfig=konfig, nur_matches=erlaubt, szenen_idx=idx)
-                # nie Einzelkills, nie Fails, nie schon gezeigt (je Szene), nur mit Match – wie im 🥱-Weg
+                # nie Einzelkills, nie Fails, nie verbraucht (je Szene), nur mit Match – wie im 🥱-Weg
                 pool = [k for k in szenen.eine_je_szene(frueher_alle, idx)
-                        if k.stark and not k.fail and k.match_id and k.schluessel not in gezeigt]
+                        if k.stark and not k.fail and k.match_id and k.schluessel not in verbraucht]
                 for k in pool:
                     k.nachschub = True
             if nachschub is None:   # Reichen die ungesehenen starken Szenen des Abends nicht für ein Video?
-                ungesehen = sum(1 for k in alle if k.stark and k.schluessel not in gezeigt)
+                ungesehen = sum(1 for k in alle if k.stark)   # verbrauchte sind oben schon raus
                 nachschub = bool(pool) and ungesehen < momente_grenzen(fmt)[0]
             if nachschub and pool:
                 alle = [*alle, *pool]
@@ -1332,7 +1367,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         vom_abend = sum(1 for k in stark if not k.nachschub)
         # Stufe 4: Nachschub höchstens so viele wie Szenen vom Abend (höchstens die Hälfte des Videos)
         if vom_abend + min(len(stark) - vom_abend, vom_abend) < momente_grenzen(fmt)[0]:
-            fehler = ZuWenigSzenen(vom_abend, momente_grenzen(fmt)[0], szenen_gesamt)
+            fehler = ZuWenigSzenen(vom_abend, momente_grenzen(fmt)[0], szenen_gesamt, schon)
             fehler.frueher = len(pool) if nachschub_moeglich else None
             raise fehler
         alle = stark
@@ -1486,7 +1521,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             fehler = KeineNeuenSzenen(neue, momente_grenzen(fmt)[0])
             fehler.frueher = len(frueher_kandidaten)
             raise fehler
-        raise ZuWenigSzenen(sum(1 for k in reihe if not k.nachschub), momente_grenzen(fmt)[0], szenen_gesamt)
+        raise ZuWenigSzenen(sum(1 for k in reihe if not k.nachschub), momente_grenzen(fmt)[0], szenen_gesamt, schon)
     # Stufe 4 (08.10.): Zu kurz? Erst einmal mit mehr Anlauf aus denselben Szenen neu planen – kein Füllmaterial; reicht
     # auch das nicht, mit Nachschub früherer Abende (hatte der Abend genug ungesehene starke Szenen, war er noch nicht
     # dabei). Nur im einfachen Modus (regie.geschmack aus einstellungen.EINFACH_FEST, wie regie_lernen.aktuelle);
@@ -1532,7 +1567,10 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         hinweise.append(f"nur {len(reihe)} Momente (Ziel mindestens {momente_grenzen(fmt)[0]}) – zu wenig passendes Material")
     # Gezählt werden Momente, nicht Segmente (ein Moment mit Jump-Cut hat mehrere Teile, der Hook wiederholt einen)
     momente = [s for s in segmente if s.get("teil", 1) == 1 and s.get("rolle") != "hook"]
-    neu = sum(1 for s in momente if s["gezeigt"] == 0)
+    # Einfacher Modus (08.10.): neu = noch nie gesehen; „schon gezeigt“ kann dann nur eine Szene des Videos sein, das
+    # diese Fassung ersetzt. Sonst wie bisher: in keinem der letzten Entwürfe
+    gesehen_szenen = szenen.erweitert(gesehen, idx)
+    neu = sum(1 for s in momente if (s["moment"] not in gesehen_szenen if einfach else s["gezeigt"] == 0))
     if frueher and len(alle) < 3 * len(momente):
         hinweise.append(f"nur {len(alle)} Momente zur Auswahl – für mehr Abwechslung mehr Clips analysieren")
 

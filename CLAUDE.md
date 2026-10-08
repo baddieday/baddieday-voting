@@ -473,3 +473,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     zu „🎮 Nachtrag: Abend vom …“ und geht mit dem Video; reicht es wieder nicht, bleibt es still. Nachgestellt
     (Prüfer s5, s5b, PC früh aus): vorher für immer „kein Video“, jetzt je ein Video; nach einer Pause weitergespielt:
     vorher Video mitten im Spielen, jetzt danach. N60–N65.
+  - **Stufe 4: Jede Szene nur in einem Video** (Florian 08.10.: „keiner will die Szene 50 oder 100 mal sehen … auch
+    wenn es gute Bewertungen hat“; `szenen.verbraucht`, `regie.erstelle`): Im einfachen Modus kommt eine Szene, die in
+    einem Video war, das du gesehen hast (oder das gerade zu dir unterwegs ist), in kein neues Video mehr – egal wie gut
+    bewertet. Das ersetzt dort Abzug, Cooldown und Frische-Quote (der Cooldown holte sie zurück, sobald Frisches fehlte).
+    Reicht das Neue nicht: Nachschub und mehr Anlauf, sonst „🎬 Kein neues Video … Sobald du wieder spielst, kommt ein
+    neues.“ Eine neue Fassung nach ❌ ersetzt ihr Video und darf dessen Szenen (und die seiner Vorgänger) wieder nehmen
+    – nach ⏱️ bleiben sie, neue kommen dazu; bei 🥱 bleibt der Ersatz echt neu. 2-Wochen-Video, /experte, 🔥 Viral und
+    Lernen unverändert; gelöscht wird nichts. Ändert N55 (🎬 schnitt den Abend neu) und N58. N66–N70.

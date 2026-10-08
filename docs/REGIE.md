@@ -143,6 +143,13 @@ Simulation damit: **83 verschiedene** Momente in 20 Shorts statt 18 – und die 
 (je 5× in 20 Shorts). Der Entwurf zeigt die Bilanz („Auswahl aus 120 Momenten · 14 im Cooldown“), `/lernstand`
 die Regeln. Einstellbar in `[regie.vorgaben]`.
 
+**Einfacher Modus seit 08.10.: Jede Szene nur in einem Video** (Florian: „keiner will die Szene 50 oder 100 mal
+sehen … auch wenn es gute Bewertungen hat“). Was in einem Video war, das du gesehen hast oder das gleich zu dir kommt,
+ist kein Kandidat mehr (`szenen.verbraucht`, je Szene) – egal wie viele Punkte es hat. Das ersetzt dort Abzug, Cooldown
+und Frische-Quote: Der Cooldown holte gesehene Szenen sonst zurück, sobald das frische Material nicht reichte. Eine
+neue Fassung nach ❌ ersetzt ihr Video und darf dessen Szenen wieder nehmen (`parameter.ersetzt`). /experte,
+2-Wochen-Video und 🔥 Viral wie oben.
+
 Fehlt die Datei eines Moments (z. B. eine gelöschte Kopie), nimmt der Regisseur seit 27.09. den Bot-Clip
 (gleicher Inhalt; nicht nach einem Nachschnitt) statt den Moment still wegzulassen – und zählt, was fehlt
 („… · 2 ohne Datei“, Hinweis „N Momente ohne Datei übersprungen“). Scheitert das Nachziehen der Stimmung vor

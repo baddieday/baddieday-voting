@@ -385,11 +385,17 @@ class Nachschub(MitRegieMaterial):
         self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, erstellt) VALUES "
                          "(?, 'short', ?, '{}', 'gesendet', 'x')", (f"gesendet{n}", str(pfad)))
 
-    def short(self, experte: bool = False) -> dict:
+    def short(self, experte: bool = False, matches=("a1",), **extra) -> dict:
+        """Short aus diesen Matches wie im Lern-Bot (deine Regeln, einfacher Modus); extra kommt in die Parameter."""
         self.konfig.daten["lernbot"]["experte"] = experte
         k = einstellungen.anwenden(self.con, self.konfig)
         p = regeln.anwenden(self.con, k, "short", regie_lernen.aktuelle(self.con, k, "short")[0])
-        return lies(regie.erstelle(self.con, k, "short", parameter=p, nur_matches={"a1"}))
+        return lies(regie.erstelle(self.con, k, "short", parameter={**p, **extra}, nur_matches=set(matches)))
+
+    def zeigen(self, liste: dict) -> int:
+        """Dieses Video ist bei dir angekommen – seine Nummer."""
+        self.con.execute("UPDATE entwuerfe SET status = 'gesendet' WHERE name = ?", (liste["name"],))
+        return self.con.execute("SELECT id FROM entwuerfe WHERE name = ?", (liste["name"],)).fetchone()[0]
 
     @staticmethod
     def reihe(liste: dict) -> list[str]:
@@ -425,17 +431,61 @@ class Nachschub(MitRegieMaterial):
         self.assertNotIn("⚙️", satz)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], vorher)   # kein Video
 
-    def test_neues_video_nach_dem_abend_bringt_neue_szenen(self):
-        self.momente_anlegen([(s, 3, [5.0, 7.0, 9.0], "a1") for s in ("episch", "spannend") * 2]
-                             + [(s, 2, [6.0, 8.0], "o1") for s in ("episch", "spannend", "episch")])
-        abend = self.short()
-        self.assertEqual(abend["auswahl"]["nachschub"], [])     # der Abend reicht: nur seine Szenen
-        self.gesendet(self.reihe(abend))
-        neu = self.short()                                       # 🎬: vorher dieselben 4 Szenen noch einmal
-        frueher = neu["auswahl"]["nachschub"]
-        self.assertTrue(frueher and set(frueher) <= {"datei:5", "datei:6", "datei:7"})
-        self.assertNotIn(self.reihe(neu)[0], frueher)
-        self.assertLessEqual(2 * len(frueher), len(self.reihe(neu)))
+    # Jede Szene nur in einem Video (08.10.): o1 = Abend 1 (vor 5 Tagen): 7 starke (datei:1 mit den meisten Punkten) und
+    # ein Einzelkill (8); b1 = Abend 2 (vor 2 Tagen): 3 starke (9–11), ein Einzelkill; a1 = Abend 3: eine starke (13)
+    DREI_ABENDE = [("episch", 4, [6.0, 8.0, 10.0, 12.5], "o1"), ("episch", 3, [5.0, 7.0, 9.0], "o1"),
+                   ("spannend", 3, [5.0, 7.0, 9.0], "o1"), ("episch", 2, [7.0, 9.5], "o1"),
+                   ("spannend", 2, [6.0, 10.0], "o1"), ("episch", 2, [6.0, 8.0], "o1"),
+                   ("spannend", 2, [7.0, 9.5], "o1"), ("spannend", 1, [8.0], "o1"),
+                   ("episch", 2, [7.0, 9.5], "b1"), ("spannend", 2, [6.0, 10.0], "b1"), ("episch", 2, [6.0, 8.0], "b1"),
+                   ("spannend", 1, [8.0], "b1"), ("episch", 2, [6.0, 8.0], "a1"), ("spannend", 1, [11.0], "a1")]
+
+    def drei_abende(self) -> None:
+        start = iso(jetzt() - timedelta(days=2))
+        self.con.execute("INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, status, erstellt, geaendert) "
+                         "VALUES ('b1', 'replays/b1.replay', ?, ?, 'verarbeitet', 'x', 'x')", (start, start))
+        self.momente_anlegen(self.DREI_ABENDE)
+
+    def test_jede_szene_nur_in_einem_video(self):
+        """08.10. (Florian: „keiner will die Szene 50 oder 100 mal sehen … auch wenn es gute Bewertungen hat“): Was
+        einmal in einem Video war, kommt nie wieder – auch nicht die Szene mit den meisten Punkten, wenn sonst nichts
+        reicht; dann Nachschub nie gesehener Szenen oder kein Video. Vorher schnitt 🎬 nach dem Abend-Video dieselben
+        Szenen neu (N55)."""
+        self.drei_abende()
+        v1 = self.short(matches=("o1",))                           # Abend 1
+        eins = set(self.reihe(v1))
+        self.assertIn("datei:1", eins)
+        self.zeigen(v1)
+        with self.assertRaises(regie.ZuWenigSzenen) as fehler:     # 🎬 danach: vom Abend ist kaum noch etwas neu
+            self.short(matches=("o1",))
+        self.assertEqual(fehler.exception.schon, len(eins))
+        satz = fehler.exception.satz(experte=False)
+        self.assertTrue(satz.startswith("🎬 Kein neues Video: neu für dich ist nur 1 starke Szene"), satz)
+        self.assertTrue(satz.endswith("Sobald du wieder spielst, kommt ein neues."), satz)
+        self.assertNotIn("⚙️", satz)
+        v2 = self.short(matches=("b1",))                           # Abend 2: seine 3 + eine nie gesehene von früher
+        zwei = set(self.reihe(v2))
+        self.assertEqual(eins & zwei, set())
+        self.assertEqual(zwei, {"datei:9", "datei:10", "datei:11", "datei:4"})
+        self.assertEqual(v2["auswahl"]["nachschub"], ["datei:4"])
+        self.zeigen(v2)
+        with self.assertRaises(regie.ZuWenigSzenen) as fehler:     # Abend 3: eine starke – lieber kein Video als
+            self.short(matches=("a1",))                              # die guten Szenen von Video 1 noch einmal
+        self.assertEqual((fehler.exception.stark, fehler.exception.schon), (1, 0))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 2)
+
+    def test_neue_fassung_darf_ihre_szenen_wieder_nehmen(self):
+        """Wichtigster Fehlerfall: Die neue Fassung nach ❌ ⏱️ ersetzt ihr Video – sie behält dessen Szenen und legt eine
+        neue nach, statt mit „kein Video“ zu enden (ihre Szenen sind ja schon gesehen)."""
+        self.drei_abende()
+        v1 = self.short(matches=("o1",))
+        eid = self.zeigen(v1)
+        with self.assertRaises(regie.ZuWenigSzenen):               # ohne „ersetzt“ wäre alles verbraucht
+            self.short(matches=("o1",))
+        fassung = self.short(matches=("o1",), ersetzt=[eid], ziel_dauer_s=55.0)   # ⏱️: Ziel 45 → 55 s
+        self.assertTrue(set(self.reihe(v1)) < set(self.reihe(fassung)), (self.reihe(v1), self.reihe(fassung)))
+        self.assertGreater(fassung["dauer_s"], v1["dauer_s"])
+        self.assertEqual((fassung["auswahl"]["neu"], fassung["auswahl"]["schon_gezeigt"]), (1, len(self.reihe(v1))))
 
 
 class Auswahl(unittest.TestCase):

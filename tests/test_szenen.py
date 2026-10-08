@@ -52,6 +52,32 @@ class Szene(MitSpeicher):
         self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx)], ["clip:1", "clip:2", "datei:3"])
         self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx, {"datei:1"})], ["datei:1", "datei:3"])
 
+    def test_verbraucht_und_ersetzt_kette(self):
+        """08.10. (Jede Szene nur in einem Video): verbraucht sind die Szenen aus Videos, die du gesehen hast oder die
+        gleich kommen (fertig gerendert, ein Abend-Video, das der Timer nachrendert) – nicht aus still aussortierten oder
+        gescheiterten. Eine Fassung ersetzt ihr Video samt dessen Vorgängern."""
+        def video(momente, status, *, verworfen=None, parameter="{}"):
+            pfad = self.tmp / f"v{self.con.execute('SELECT COUNT(*) FROM entwuerfe').fetchone()[0]}.json"
+            pfad.write_text(json.dumps({"segmente": [{"moment": m} for m in momente]}), encoding="utf-8")
+            return self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, erstellt, "
+                                    "auto_verworfen) VALUES (?, 'short', ?, ?, ?, 'x', ?)",
+                                    (pfad.stem, str(pfad), parameter, status, verworfen)).lastrowid
+
+        video(["clip:1"], "gesendet")
+        video(["clip:2"], "gerendert")                          # gleich bei dir
+        video(["clip:3"], "neu")                                # Rendern gescheitert: nie gesehen
+        abend = video(["clip:4"], "neu")                        # Abend-Video, das der Timer nachholt
+        self.con.execute("INSERT INTO sitzungen (name, matches, entwurf_id, verarbeitet) VALUES ('s', '[]', ?, 'x')",
+                         (abend,))
+        video(["clip:5"], "gerendert", verworfen="Tor")         # still aussortiert
+        self.assertEqual(szenen.verbraucht(self.con), {"clip:1", "clip:2", "clip:4"})
+        alt = video(["clip:6"], "bewertet")
+        fassung = video(["clip:7"], "bewertet", parameter=json.dumps({"ersetzt": [alt]}))
+        self.assertEqual(szenen.ersetzt_kette(self.con, fassung), [fassung, alt])
+        self.assertEqual(szenen.momente_der_entwuerfe(self.con, [fassung, alt]), {"clip:6", "clip:7"})
+        kaputt = video([], "bewertet", parameter="kein json")
+        self.assertEqual(szenen.ersetzt_kette(self.con, kaputt), [kaputt])
+
     def test_fassung_zweite_aufnahme_ohne_match(self):
         # Eine lautere Nvidia-Aufnahme (ohne Match) darf ihren Clip nicht als Ersatz verdrängen, und eine behaltene
         # SteelSeries-Aufnahme zählt zum Match ihres Clips (Abend) – sonst käme der frühere Abend zu früh dran
@@ -128,6 +154,7 @@ class Langweilig(MitRegieMaterial):
         self.assertIn("2 schwächeren tausche ich gegen neue", satz)
         self.assertNotIn("nie wieder", satz)
         v2 = self.liste(eid2)
+        self.assertEqual(v2["parameter"]["ersetzt"], [eid1])               # 08.10.: ersetzt v1, darf seine Szenen
         m2 = {m for m, _ in regeln._momente(v2)}
         self.assertTrue(set(gut) <= m2, (gut, m2))                          # die stärkere Hälfte bleibt
         self.assertFalse(set(schwach) & m2)                                 # die schwächere fehlt in dieser Fassung

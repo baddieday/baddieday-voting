@@ -12,6 +12,10 @@ Kill-Serie genau einen Clip an (nur der Puffer überlappt, bis 4,5 s, vorbewertu
 Matches können sich nicht überlappen (CI 07.10.: Testclips mit gleicher Uhrzeit schrumpften sonst einen Short auf eine
 Szene). Doppelt sind also Aufnahmen ohne Clip (datei:…) gegenüber Clips oder einander.
 Fail-Momente (nur 🔥 Viral) bleiben draußen, damit Viral unverändert bleibt.
+
+Jede Szene nur in einem Video (08.10., einfacher Modus): verbraucht() sind die Szenen aller Videos, die du gesehen hast
+oder die gleich zu dir kommen – sie kommen in kein neues Video mehr. Ausnahme: Eine neue Fassung nach ❌ ersetzt ihr
+Video (ersetzt_kette) und darf dessen Szenen wieder nehmen. Nichts wird gelöscht; alles folgt aus den Entwürfen.
 """
 
 from __future__ import annotations
@@ -104,3 +108,39 @@ def jemals_gezeigt(con: sqlite3.Connection) -> set[str]:
                          "AND status IN ('gesendet', 'bewertet')"):
         gezeigt |= momente_der_liste(z["schnittliste"])
     return gezeigt
+
+
+def verbraucht(con: sqlite3.Connection) -> set[str]:
+    """Jede Szene nur in einem Video (08.10., Florian: „keiner will die Szene 50 oder 100 mal sehen“): Momente aus
+    Videos, die du gesehen hast (wie jemals_gezeigt) – und aus solchen, die gerade zu dir unterwegs sind: fertig
+    gerendert, aber noch nicht verschickt, oder ein Abend-Video, dessen Rendern der Timer nachholt (sitzung._nachholen).
+    Sonst nähme ein 🎬, das auf die Pipeline-Sperre wartete, dieselben Szenen wie das Abend-Video, das gleich danach
+    kommt. Roh, ohne die anderen Schlüssel derselben Szene (dafür erweitert)."""
+    gesehen: set[str] = set()
+    for z in con.execute("""SELECT schnittliste FROM entwuerfe WHERE auto_verworfen IS NULL
+                              AND (status IN ('gerendert', 'gesendet', 'bewertet')
+                                   OR id IN (SELECT entwurf_id FROM sitzungen WHERE entwurf_id IS NOT NULL))"""):
+        gesehen |= momente_der_liste(z["schnittliste"])
+    return gesehen
+
+
+def momente_der_entwuerfe(con: sqlite3.Connection, ids: Iterable[int]) -> set[str]:
+    """Momente dieser Entwürfe (aus ihren Schnittlisten; fehlt eine, zählt sie leer)."""
+    ids = sorted({int(i) for i in ids})
+    momente: set[str] = set()
+    if ids:
+        for z in con.execute(f"SELECT schnittliste FROM entwuerfe WHERE id IN ({','.join('?' for _ in ids)})", ids):
+            momente |= momente_der_liste(z["schnittliste"])
+    return momente
+
+
+def ersetzt_kette(con: sqlite3.Connection, entwurf_id: int) -> list[int]:
+    """Die Videos, die eine neue Fassung von Video entwurf_id ersetzt: dieses und alle, die es selbst schon ersetzt hat
+    (Parameter „ersetzt“ der Fassung). Ihre Szenen darf die Fassung wieder nehmen. Beispiel: #5 war die Fassung von #3
+    → eine Fassung von #5 ersetzt [5, 3]."""
+    z = con.execute("SELECT parameter FROM entwuerfe WHERE id = ?", (int(entwurf_id),)).fetchone()
+    try:
+        alt = (json.loads(z["parameter"] or "{}").get("ersetzt") or []) if z is not None else []
+    except (ValueError, TypeError, AttributeError):
+        alt = []   # kaputte Parameter: dann ersetzt sie nur dieses Video
+    return [int(entwurf_id), *(i for i in alt if isinstance(i, int) and i != int(entwurf_id))]

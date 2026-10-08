@@ -6,7 +6,8 @@
 2. Etwas später kommt das Video. Es besteht nur aus **starken Szenen** dieses Abends (reicht er nicht: Punkt 3):
    Multikills, Clutches, Kills im Endkampf, Victory Royale. Die Statuszeile verschwindet dann. Scheitert das
    Fertigmachen des Videos, versucht er es 10 Minuten später selbst noch einmal (etwas langsamer, dafür sicherer);
-   klappt auch das nicht, sagt es dir die Statuszeile.
+   klappt auch das nicht, sagt es dir die Statuszeile. **Jede Szene kommt nur in einem Video:** Was du einmal gesehen
+   hast, kommt in kein neues Video mehr – auch nicht die besten Szenen (nur das 2-Wochen-Video blickt zurück).
 3. Sind die starken Szenen zusammen zu kurz, zeigt der Bot von jeder etwas mehr – ein paar Sekunden mehr davor und
    danach. Hat der Abend zu wenige (ein Video braucht 4 und mindestens 30 Sekunden), nimmt er starke Szenen der
    letzten Tage dazu, die du noch nie gesehen hast – höchstens die Hälfte, der Anfang ist immer vom Abend. Im Video
@@ -33,6 +34,8 @@
 | 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus); zurück geht es mit 🥱 |
 | 🔁 Einfach neu | Andere Fassung, gleiche Regeln |
 
+Die neue Fassung ersetzt das Video: Seine Szenen darf sie wieder nehmen – nach ⏱️ bleiben sie, und neue kommen dazu.
+
 Du tippst nie etwas zweimal: Dein ✅ und dein Grund gelten sofort, auch wenn der Bot gerade baut oder packt. Die
 neue Fassung bzw. das Upload-Paket merkt er sich und erledigt es, sobald er frei ist – auch nach einem Update oder
 Neustart (Tipps bis 2 Stunden alt). Gründe an zwei Videos kurz nacheinander ergeben eine neue Fassung für beide – hat
@@ -56,8 +59,9 @@ Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen im
 kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert hat.
 
 ## Knöpfe
-- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend; kennst du dessen Szenen schon, kommen bis zur
-  Hälfte starke Szenen früherer Abende dazu, die du noch nicht gesehen hast. Baut er gerade, kommt das laufende Video
+- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend, nur mit Szenen, die du noch nicht gesehen
+  hast (bis zur Hälfte auch starke früherer Abende). Kennst du die starken Szenen schon alle, kommt „Kein neues
+  Video“ – sobald du wieder spielst, kommt ein neues. Baut er gerade, kommt das laufende Video
   (endet eine neue Fassung ohne Video, baut er danach deins); geht es schief, versucht er es nach 10 Minuten selbst
   noch einmal.
 - **📋 Stand** – deine Regeln, was beim letzten Abend passiert ist und woraus er gerade lernt („🧠 Lernt aus: deinen
