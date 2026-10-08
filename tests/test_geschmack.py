@@ -29,7 +29,8 @@ class Geschmack(MitSpeicher):
                                   VALUES (?, 'short', '/x.json', ?, 'gesendet', '/x.mp4', ?)""",
                                (f"e{self.n}", json.dumps(p), iso(erstellt or jetzt()))).lastrowid
         if daumen is not None:
-            self.con.execute("INSERT INTO entwurf_bewertungen VALUES (?, ?, ?, ?, ?)",
+            self.con.execute("INSERT INTO entwurf_bewertungen (entwurf_id, daumen, gruende, erstellt, geaendert) "
+                             "VALUES (?, ?, ?, ?, ?)",
                              (eid, daumen, json.dumps(list(gruende)), iso(jetzt()), iso(jetzt())))
         if ki is not None:
             self.con.execute("INSERT INTO kritiken (entwurf_id, score, regel_score, ki_score, details, erstellt) "

@@ -574,7 +574,8 @@ async def bei_fehler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None
 
 def baue_app(konfig: Konfig, token: str, erlaubt: int) -> Application:
     app = Application.builder().token(token).post_init(_nach_start).post_stop(_vor_ende).build()
-    app.bot_data.update(con=db.verbinde(konfig.datenbank), konfig=konfig, erlaubt=erlaubt)
+    # clip_bot: die gemeinsame ⚙️-Übersicht (lernbot_einstellungen) verweist hier auf /experte im Lern-Bot
+    app.bot_data.update(con=db.verbinde(konfig.datenbank), konfig=konfig, erlaubt=erlaubt, clip_bot=True)
     nur_ich = filters.User(user_id=erlaubt)
     for name, funktion in (
         ("start", cmd_hilfe), ("hilfe", cmd_hilfe), ("help", cmd_hilfe), ("status", cmd_status),

@@ -34,9 +34,10 @@ def _alle(con: sqlite3.Connection, konfig: Konfig, alle: bool | None) -> bool:
     return bool(alle) or einstellungen.experte(con, konfig)
 
 
-def uebersicht(con: sqlite3.Connection, konfig: Konfig) -> str:
+def uebersicht(con: sqlite3.Connection, konfig: Konfig, clip_bot: bool = False) -> str:
     """Einfacher Modus (08.10.): was gerade gilt – ohne Knöpfe. Clips, Szenen und Aufbau entscheidet der Bot
-    (einstellungen.EINFACH_FEST), Länge, Effekte und Songs ändern nur deine ❌-Gründe (regeln.py)."""
+    (einstellungen.EINFACH_FEST), Länge, Effekte und Songs ändern nur deine ❌-Gründe (regeln.py). clip_bot: der
+    Clip-Bot kennt /experte nicht – dort zeigt die letzte Zeile auf den Lern-Bot (Prüfung 08.10.)."""
     k = einstellungen.anwenden(con, konfig)
     _, hinweis = einstellungen.quell_matches(con, k)
     abend = "🎯 nur Spielabend "
@@ -47,13 +48,15 @@ def uebersicht(con: sqlite3.Connection, konfig: Konfig) -> str:
               regeln.regeln_zeile(con, k)]
     if (mindestens := float(k.wert("regie.short_mindestens_s", 0.0) or 0.0)) > 0 and not regeln.ziel_regel(con, k):
         zeilen.append(f"⏱️ Shorts nie kürzer als {mindestens:.0f} s – so hast du es eingestellt.")
-    zeilen += ["Länge, Effekte und Songs änderst du mit deinem Grund unter ❌.", "🔧 Alles von Hand: /experte"]
+    zeilen += ["Länge, Effekte und Songs änderst du mit deinem Grund unter ❌.",
+               "🔧 Alles von Hand: /experte im Lern-Bot" if clip_bot else "🔧 Alles von Hand: /experte"]
     return "\n".join(zeilen)
 
 
-def menue_text(con: sqlite3.Connection, konfig: Konfig, meldung: str | None = None, alle: bool | None = None) -> str:
+def menue_text(con: sqlite3.Connection, konfig: Konfig, meldung: str | None = None, alle: bool | None = None,
+               clip_bot: bool = False) -> str:
     if not einstellungen.experte(con, konfig):   # 08.10.: einfacher Modus – nur anzeigen, was gilt
-        return uebersicht(con, konfig)
+        return uebersicht(con, konfig, clip_bot)
     alle = _alle(con, konfig, alle)
     teile = [f"✓ {meldung}" if meldung else None,
              "⚙️ Einstellungen – gelten ab dem nächsten Video." if not alle else
@@ -104,13 +107,14 @@ def match_knoepfe(con: sqlite3.Connection, konfig: Konfig) -> list[list[tuple[st
     return reihen + [[("⬅️ zurück", f"s:o:{i}")]]
 
 
-def verarbeite_klick(con: sqlite3.Connection, konfig: Konfig, daten: str) -> tuple[str, list, str | None]:
+def verarbeite_klick(con: sqlite3.Connection, konfig: Konfig, daten: str,
+                     clip_bot: bool = False) -> tuple[str, list, str | None]:
     """(Text, Knöpfe, kurze Antwort) für einen Knopf s:… – ändert bei s:w/s:r/s:x die Einstellung. ValueError bei
     unbekanntem Knopf (der Aufrufer antwortet dann „Unbekannter Knopf.“)."""
     teile = daten.split(":")
     art = teile[1] if len(teile) > 1 else ""
     if not einstellungen.experte(con, konfig):   # 08.10.: alte Menü-Knöpfe ändern im einfachen Modus nichts mehr
-        return uebersicht(con, konfig), [], "Das entscheide ich jetzt selbst."
+        return uebersicht(con, konfig, clip_bot), [], "Das entscheide ich jetzt selbst."
     if art == "m":
         return menue_text(con, konfig), menue_knoepfe(con, konfig), None
     if art == "a":   # 06.10.: alle Einstellungen (das einfache Menü zeigt nur vier)
@@ -152,7 +156,7 @@ def _markup(knoepfe):
 async def cmd_einstellungen(update, context) -> None:
     con, konfig = context.bot_data["con"], context.bot_data["konfig"]
     knoepfe = menue_knoepfe(con, konfig)   # einfacher Modus (08.10.): keine – nur die Übersicht
-    await update.effective_message.reply_text(menue_text(con, konfig),
+    await update.effective_message.reply_text(menue_text(con, konfig, clip_bot=bool(context.bot_data.get("clip_bot"))),
                                               reply_markup=_markup(knoepfe) if knoepfe else None)
 
 
@@ -163,7 +167,7 @@ async def bei_klick(update, context) -> None:
         return
     con, konfig = context.bot_data["con"], context.bot_data["konfig"]
     try:
-        text, knoepfe, antwort = verarbeite_klick(con, konfig, query.data or "")
+        text, knoepfe, antwort = verarbeite_klick(con, konfig, query.data or "", bool(context.bot_data.get("clip_bot")))
     except ValueError:
         await query.answer("Unbekannter Knopf.")
         return

@@ -25,9 +25,10 @@
 
 Du tippst nie etwas zweimal: Dein ✅ und dein Grund gelten sofort, auch wenn der Bot gerade baut oder packt. Die
 neue Fassung bzw. das Upload-Paket merkt er sich und erledigt es, sobald er frei ist – auch nach einem Update oder
-Neustart (Tipps bis 2 Stunden alt). Gründe an zwei Videos kurz nacheinander ergeben eine neue Fassung für beide. Geht
-beim Bauen etwas schief, versucht er es nach 10 und nach 30 Minuten noch einmal; klappt es dann nicht, sagt er es
-dir einmal. Beim Highlight-Video heißt ❌ nur: dieses Video lässt er weg – deine Short-Regeln ändert es nicht.
+Neustart (Tipps bis 2 Stunden alt). Gründe an zwei Videos kurz nacheinander ergeben eine neue Fassung für beide – hat
+er mit der ersten schon angefangen, kommt danach noch eine. Geht beim Bauen etwas schief, versucht er es nach 10 und
+nach 30 Minuten noch einmal; klappt es dann nicht, sagt er es dir einmal. Beim Highlight-Video heißt ❌ nur: dieses
+Video lässt er weg – deine Short-Regeln ändert es nicht.
 
 ## Was der Bot selbst lernt
 Bei jedem Video stellt er drei Dinge selbst ein und merkt sich, was ankommt:
@@ -41,14 +42,17 @@ Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen im
 kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert hat.
 
 ## Knöpfe
-- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend. Baut er gerade, kommt das laufende Video;
-  geht es schief, versucht er es nach 10 Minuten selbst noch einmal.
+- **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend. Baut er gerade, kommt das laufende Video
+  (endet eine neue Fassung ohne Video, baut er danach deins); geht es schief, versucht er es nach 10 Minuten selbst
+  noch einmal.
 - **📋 Stand** – deine Regeln und was beim letzten Abend passiert ist.
 - **/experte** – alle alten Knöpfe, Details und ⚙️ Einstellungen ein- oder ausschalten.
 
 Einstellen musst du nichts: Clips (neuester Spielabend), Szenen (nur starke) und Aufbau wählt der Bot selbst,
 Länge, Effekte und Songs ändern nur deine Gründe unter ❌. `/einstellungen` zeigt dir, was gerade gilt.
-Was du früher unter ⚙️ eingestellt hast, bleibt gespeichert und gilt unter /experte weiter.
+Was du früher unter ⚙️ eingestellt hast, bleibt gespeichert. Clips, Szenen und Aufbau legt der Bot im einfachen Modus
+selbst fest – deine alten Werte dafür gelten nur unter /experte. Andere alte Werte (z. B. eine Short-Mindestlänge)
+gelten weiter.
 
 ## Ruhe im Chat
 Der Clip-Bot schickt keine einzelnen Szenen mehr. Er meldet sich nur bei Problemen (zum Beispiel Speicher voll) und

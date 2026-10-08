@@ -366,6 +366,9 @@ def letzter_abend_zeile(con: sqlite3.Connection, konfig: Konfig) -> str | None:
         return None
     tag = _tag(z["ende_utc"], konfig)
     if z["entwurf_id"]:
+        e = con.execute("SELECT status, datei FROM entwuerfe WHERE id = ?", (z["entwurf_id"],)).fetchone()
+        if e is not None and e["status"] == "neu" and not e["datei"]:   # rendert noch bzw. holt eine Panne nach
+            return f"🎮 Letzter Abend: {tag} → Video kommt noch"         # (Prüfung 08.10.: vorher schon „Video #N“)
         return f"🎮 Letzter Abend: {tag} → Video #{z['entwurf_id']}"
     # 07.10.: ohne Match-Nummern und Fehlertext – der Grund ist der letzte Teil des Hinweises (sitzung.verarbeite)
     if con.execute("SELECT 1 FROM lern_meldungen WHERE schluessel = ?", (f"fehler:{z['name']}",)).fetchone():
@@ -876,7 +879,9 @@ async def folge_starten(app, nur: str | None = None) -> int:
     if not nur and nochmal and time.monotonic() >= nochmal["faellig"] and not bd.get("arbeitet"):
         del bd["knopf_nochmal"]
         bd["arbeitet"] = True
-        app.create_task(neuer_entwurf(app, nochmal["fmt"], ansage=False, herkunft="nochmal"))
+        # vorgemerkt: dein 🎬 während einer Fassung, die ohne Video endete – ein erster Versuch (mit Wiederholung)
+        app.create_task(neuer_entwurf(app, nochmal["fmt"], ansage=False,
+                                      herkunft="vorgemerkt" if nochmal.get("vorgemerkt") else "nochmal"))
         gestartet += 1
     return gestartet
 
@@ -896,6 +901,8 @@ async def fassung_auftrag(app, entwurf_id: int, folge: dict) -> str:
         ergebnis = None
     finally:
         app.bot_data.pop("fassung_fuer", None)
+    if ergebnis == "gesendet" and (app.bot_data.get("knopf_nochmal") or {}).get("vorgemerkt"):
+        del app.bot_data["knopf_nochmal"]   # dein 🎬 während der Fassung: sie ist dein Video (sonst: folge_starten)
     if ergebnis is not None:
         folge_erledigt(con, entwurf_id, folge, ergebnis)
         return ergebnis
@@ -1034,11 +1041,12 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
     anders_als (❌ → 🥱): siehe baue_entwurf – gilt für jeden Versuch.
 
     herkunft (08.10., Merkliste): "knopf" – 🎬, /entwurf, nach ✅ fertig; baut der Bot schon, sagt er es und das
-    laufende Video kommt. "auftrag" (neue Fassung aus der Merkliste) und "nochmal" (das einmal wiederholte 🎬):
-    arbeitet hat folge_starten schon gesetzt. Ein Fehler geht bei "auftrag" an fassung_auftrag (der plant den nächsten
-    Versuch); ein gescheitertes 🎬 im einfachen Modus wiederholt die Schleife einmal nach 10 min, danach ein Satz
-    ohne Aufforderung. Ist das Video gebaut und nur das Senden scheitert, schickt es die Schleife (sende_wenn_frei) –
-    kein zweites Video.
+    laufende Video kommt (ist das eine neue Fassung aus der Merkliste, merkt er sich dein 🎬 für den Fall, dass sie
+    ohne Video endet). "auftrag" (neue Fassung aus der Merkliste), "nochmal" (das einmal wiederholte 🎬) und
+    "vorgemerkt" (dein 🎬 nach einer Fassung ohne Video): arbeitet hat folge_starten schon gesetzt. Ein Fehler geht bei
+    "auftrag" an fassung_auftrag (der plant den nächsten Versuch); ein gescheitertes 🎬 im einfachen Modus wiederholt
+    die Schleife einmal nach 10 min, danach ein Satz ohne Aufforderung. Ist das Video gebaut und nur das Senden
+    scheitert, schickt es die Schleife (sende_wenn_frei) – kein zweites Video.
 
     [lernbot].auto_schwelle > 0 (B5): baut bis zu auto_versuche_max Entwürfe, verwirft dabei jeden mit zu
     niedriger Erwartung still (pruefe_auto_verwerfen, kein Foto an dich) und zeigt dir nur den ersten, der die
@@ -1048,6 +1056,11 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
     einfach = not experte_an(app.bot_data["con"], app.bot_data["konfig"])
     if herkunft == "knopf":
         if app.bot_data.get("arbeitet"):
+            if einfach and app.bot_data.get("fassung_fuer") is not None:
+                # Prüfung 08.10.: 🎬 während einer neuen Fassung aus der Merkliste. Kommt sie, ist sie dein Video;
+                # endet sie ohne Video (keine neuen Szenen, Fehler), baut die Schleife dein 🎬 gleich danach –
+                # vorher ging der Tipp verloren (fassung_auftrag, folge_starten)
+                app.bot_data["knopf_nochmal"] = {"fmt": fmt, "faellig": 0.0, "vorgemerkt": True}
             await app.bot.send_message(chat, "⏳ Ich baue gerade schon ein Video – es kommt gleich." if einfach else
                                        "⏳ Ich baue gerade schon einen Entwurf.")
             return None
@@ -1103,7 +1116,7 @@ async def neuer_entwurf(app, fmt: str, nur_matches: set[str] | None = None, ansa
         grund = " – der Speicher ist nicht erreichbar und wird jetzt nicht geweckt" if isinstance(e, SpeicherOffline) else ""
         if not einfach:
             text = f"⚠️ Entwurf fehlgeschlagen: {str(e)[:300]}"
-        elif herkunft == "knopf":   # 08.10.: statt „Tipp später nochmal“ versucht er es selbst noch einmal
+        elif herkunft in ("knopf", "vorgemerkt"):   # 08.10.: statt „Tipp später nochmal“ versucht er es selbst nochmal
             app.bot_data["knopf_nochmal"] = {"fmt": fmt, "faellig": time.monotonic() + 60 * KNOPF_NOCHMAL_MIN}
             text = (f"⚠️ Das Video ließ sich gerade nicht bauen{grund}. Ich versuche es in {KNOPF_NOCHMAL_MIN} Minuten "
                     "noch einmal.")
@@ -1289,6 +1302,15 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
     liste = regeln.liste_aus(zeile)
     vorher = folge_zu(con, eid)
 
+    async def antwort(text: str | None) -> None:
+        """Der Hinweis am Knopf ist Beiwerk (Prüfung 08.10.): Lehnt Telegram ihn ab – Klick erst nach einem Neustart
+        verarbeitet („query is too old“), Netz hängt –, zählt dein Tipp trotzdem. Vorher brach der Handler hier ab:
+        keine Regel, kein Auftrag, kein ✅, und der nächste Tipp hieß „Schon erledigt“."""
+        try:
+            await query.answer(text)
+        except Exception as fehler:  # noqa: BLE001 – nur ins Log
+            log.info("Knopf-Hinweis #%s nicht angekommen: %s: %s", eid, type(fehler).__name__, str(fehler)[:120])
+
     async def caption(bewertung, knoepfe) -> None:
         try:
             await query.edit_message_caption(caption=entwurf_text(zeile, liste, bewertung, kurz=True), parse_mode="HTML",
@@ -1299,13 +1321,13 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
 
     if aktion == "d" and extra == "1":
         if vorher and vorher["art"] == "paket" and not vorher.get("erledigt"):   # Doppeltipp: nicht zweimal packen
-            await query.answer("✔️ Schon vorgemerkt – dein Upload-Paket kommt.")
+            await antwort("✔️ Schon vorgemerkt – dein Upload-Paket kommt.")
             return
         grund = lernbot_paket.paket_erlaubt(con, eid)
         packt = bool(context.bot_data.get("paket_arbeitet"))
-        await query.answer(grund[:200] if grund is not None else
-                           "Verstanden – dein Upload-Paket kommt nach dem, das ich gerade packe." if packt else
-                           "✅ Super – dein Upload-Paket kommt gleich.")
+        await antwort(grund[:200] if grund is not None else
+                      "Verstanden – dein Upload-Paket kommt nach dem, das ich gerade packe." if packt else
+                      "✅ Super – dein Upload-Paket kommt gleich.")
         bewertung = regie_lernen.bewerte(con, eid, daumen=1)   # zählt sofort, auch während der Bot packt
         if grund is None:
             folge_merken(con, eid, "paket")
@@ -1313,25 +1335,25 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
         await caption(bewertung, [knoepfe_einfach(eid)[0][:1]] if grund is None else None)
         return
     if zeile["format"] != "short":   # Highlight-Video: keine Short-Regel, kein neuer Short
-        await query.answer("Verstanden – dieses Video lasse ich weg.")
+        await antwort("Verstanden – dieses Video lasse ich weg.")
         await caption(regie_lernen.bewerte(con, eid, daumen=-1), None)
         return
     if aktion == "d":
-        await query.answer("Was passt nicht? Ein Tipp genügt.")
+        await antwort("Was passt nicht? Ein Tipp genügt.")
         await caption(regie_lernen.bewerte(con, eid, daumen=-1), knoepfe_regeln(eid))
         return
     if aktion != "g" or (extra != "neu" and extra not in regie_lernen.GRUENDE):
-        await query.answer("Unbekannter Knopf.")
+        await antwort("Unbekannter Knopf.")
         return
     erledigt = context.bot_data.setdefault("regel_erledigt", set())
     if eid in erledigt or (vorher and vorher["art"] == "fassung"):   # Doppeltipp (auch nach einem Neustart):
-        await query.answer("✔️ Schon erledigt." if vorher and vorher.get("erledigt") else   # Regel nur einmal
-                           "✔️ Schon erledigt – die neue Fassung kommt.")
+        await antwort("✔️ Schon erledigt." if vorher and vorher.get("erledigt") else   # Regel nur einmal
+                      "✔️ Schon erledigt – die neue Fassung kommt.")
         return
     erledigt.add(eid)
     baut = bool(context.bot_data.get("arbeitet"))
-    await query.answer("Verstanden – kommt nach dem Video, an dem ich gerade baue." if baut else
-                       "Verstanden – die neue Fassung kommt.")
+    await antwort("Verstanden – kommt nach dem Video, an dem ich gerade baue." if baut else
+                  "Verstanden – die neue Fassung kommt.")
     if extra == "neu":
         bewertung = (con.execute("SELECT * FROM entwurf_bewertungen WHERE entwurf_id = ?", (eid,)).fetchone()
                      or regie_lernen.bewerte(con, eid, daumen=-1))
@@ -1348,8 +1370,9 @@ async def _klick_einfach(query, context, zeile: sqlite3.Row, aktion: str, eid: i
         text += " Die neue Fassung kommt nach dem Video, an dem ich gerade baue."
     elif extra not in ("neu", "langweilig"):   # 🔁 und 🥱 sagen schon selbst, dass neu gebaut wird
         text += " Ich baue dir jetzt eine neue Fassung."
-    if zusammen:   # zwei Gründe kurz nacheinander: eine neue Fassung für beide (07.10.: nicht zwei Videos auf einmal)
-        text += f" Eine neue Fassung für {'beide' if len(zusammen) == 1 else f'alle {len(zusammen) + 1}'} Tipps."
+    if zusammen:   # Gründe kurz nacheinander: eine neue Fassung für alle (07.10.: nicht zwei Videos auf einmal).
+        # Prüfung 08.10.: ohne Zahl – jeder Tipp legt nur den zuletzt offenen zusammen, „beide“ stimmte ab drei nicht
+        text += " Deine Tipps von eben kommen zusammen in eine Fassung."
     await app.bot.send_message(chat, text)
 
 

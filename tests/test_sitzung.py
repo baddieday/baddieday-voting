@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import cli, einstellungen, entwurf, sitzung
+from clip_pipeline import cli, einstellungen, entwurf, lernbot, sitzung
 from clip_pipeline.medien import MedienFehler
 from clip_pipeline.zeit import UTC, iso, jetzt
 
@@ -102,6 +102,7 @@ class Sitzung(MitRegieMaterial):
         with mock.patch.object(entwurf, "entwurf", side_effect=rendern):
             erst = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["neu"][0]
             self.assertEqual(self.fehlerzeilen(), [])                      # noch keine Fehlerzeile
+            self.assertTrue(lernbot.letzter_abend_zeile(self.con, self.konfig).endswith("→ Video kommt noch"))  # 📋
             dann = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
         self.assertEqual(dann["nachgeholt"], ["session_2026-10-07_23-10-00"])
         self.assertEqual(vaapi, [True, False])                              # der zweite Versuch auf der CPU
@@ -109,6 +110,7 @@ class Sitzung(MitRegieMaterial):
         self.assertEqual(z["status"], "gerendert")                          # die Sitzung hat ihr Video
         self.assertTrue(Path(z["datei"]).is_file())
         self.assertEqual(self.fehlerzeilen(), [])
+        self.assertTrue(lernbot.letzter_abend_zeile(self.con, self.konfig).endswith(f"→ Video #{erst['entwurf']}"))
 
     def test_render_scheitert_zweimal_eine_fehlerzeile(self):
         """Scheitert auch der zweite Versuch: genau eine Fehlerzeile ohne Versprechen, danach kein Versuch mehr. Fehlt

@@ -110,6 +110,7 @@ class Einstellungen(MitRegieMaterial):
         text = lernbot_einstellungen.menue_text(self.con, self.konfig)
         self.assertIn("🎯 Clips: dein neuester Spielabend, 28.09. (2 Matches)", text)
         self.assertIn("/experte", text)
+        self.assertIn("/experte im Lern-Bot", lernbot_einstellungen.menue_text(self.con, self.konfig, clip_bot=True))
         self.assertEqual(lernbot_einstellungen.menue_knoepfe(self.con, self.konfig), [])  # keine Wert-Knöpfe
         self.assertEqual(lernbot_einstellungen.verarbeite_klick(self.con, self.konfig, "s:w:0:0")[1:],
                          ([], "Das entscheide ich jetzt selbst."))                       # alter Knopf: ändert nichts

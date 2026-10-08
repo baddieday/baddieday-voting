@@ -42,6 +42,7 @@ class BotApp(MitSpeicher):
         klick = next(h for h in app.handlers[0] if isinstance(h, CallbackQueryHandler)
                      and (h.pattern is None or h.pattern.match("s:m")))
         self.assertIs(klick.callback, lernbot_einstellungen.bei_klick)
+        self.assertTrue(app.bot_data["clip_bot"])            # ⚙️-Übersicht: „/experte im Lern-Bot“ (08.10.)
         app.bot_data["con"].close()
 
     def test_zusammenfassung_je_match_einmal_und_ohne_ton(self):

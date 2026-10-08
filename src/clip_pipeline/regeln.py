@@ -103,6 +103,10 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict
     if fmt == "short" and (ziel := ziel_regel(con, konfig)):
         p["ziel_dauer_s"] = max(ZIEL_GRENZEN[0], min(ZIEL_GRENZEN[1], ziel))
     s = stufe(con, konfig)
+    if s == STANDARD_STUFE and not einstellungen.experte(con, konfig):
+        # Prüfung 08.10.: „normal“ heißt im einfachen Modus „wie gelernt“ (wie ohne Stufe) – sonst galt nach 😵 😵 🥱 🥱
+        # überall Hektik 1,0, und der gelernte Anteil des Aufbaus (Montage 1,2, Story 0,7 …) war eingefroren
+        s = None
     if s in STUFE_WERTE:   # „ruhig“ nie wilder als gelernt, „wild“ nie ruhiger – sonst wirkte der Tipp verkehrt herum
         hektik, staerke = STUFE_WERTE[s]
         wahl = min if s < STANDARD_STUFE else max if s > STANDARD_STUFE else (lambda _gelernt, regel: regel)

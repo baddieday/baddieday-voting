@@ -86,6 +86,10 @@ class Regeln(MitRegieMaterial):
         self.assertIn("„normal“ statt „ruhig“", regeln.wende_an(self.con, self.k(), "langweilig", LISTE))
         self.assertNotIn("Effekte", regeln.wende_an(self.con, self.k(), "langweilig", LISTE))   # nie über „normal“
         self.assertEqual(regeln.stufe(self.con, self.k()), 2)
+        gelernt = {"effekt_hektik": 1.2}                                                   # z. B. Aufbau „Montage“
+        self.assertEqual(regeln.anwenden(self.con, self.k(), "short", gelernt)["effekt_hektik"], 1.2)   # wie gelernt
+        einstellungen.setze(self.con, "lernbot.experte", True)                              # /experte: wie bisher fest
+        self.assertEqual(regeln.anwenden(self.con, self.k(), "short", gelernt)["effekt_hektik"], 1.0)
 
     def test_langweilig_ohne_gesenkte_effekte_aendert_nichts(self):
         self.konfig.daten["regie"]["effekte"]["an"] = True                    # ab Werk: keine Stufe, das Gelernte gilt
@@ -181,10 +185,14 @@ class Abend(MitRegieMaterial):
 
 
 class FakeBot:
+    """Telegram als Attrappe. asyncio.sleep(0) gibt wie ein echter Aufruf an die Event-Loop ab – sonst liefe ein
+    asyncio.gather zweier Klicks streng nacheinander (Prüfung 08.10.)."""
+
     def __init__(self):
         self.texte, self.bearbeitet, self.geloescht, self.videos = [], [], [], []
 
     async def send_message(self, chat, text, **kw):
+        await asyncio.sleep(0)
         self.texte.append(text)
         return SimpleNamespace(message_id=500 + len(self.texte))
 
@@ -205,9 +213,11 @@ class FakeQuery:
         self.antworten, self.bearbeitet = [], []
 
     async def answer(self, text=None):
+        await asyncio.sleep(0)   # wie FakeBot: echt verschachtelt
         self.antworten.append(text)
 
     async def edit_message_caption(self, **kw):
+        await asyncio.sleep(0)
         self.bearbeitet.append(kw)
 
 
@@ -328,7 +338,7 @@ class LernBotEinfach(MitRegieMaterial):
 
         asyncio.run(beide())
         self.assertEqual((regeln.ziel_regel(self.con, self.konfig), regeln.gesperrt(self.con, "track")), (55.0, {"4"}))
-        self.assertIn("Eine neue Fassung für beide Tipps.", self.bot.texte[-1])
+        self.assertIn("Deine Tipps von eben kommen zusammen in eine Fassung.", self.bot.texte[-1])
         with mock.patch.object(lernbot, "baue_entwurf", return_value=77) as bau:
             self.schleife(3)
         self.assertEqual(bau.call_count, 1)
@@ -402,6 +412,38 @@ class LernBotEinfach(MitRegieMaterial):
         self.assertEqual(bau.call_count, 2)
         self.assertEqual(self.bot.texte[-1], "⚠️ Das Video ließ sich auch im zweiten Versuch nicht bauen.")
         self.assertFalse(any("Tipp" in t for t in self.bot.texte))
+
+    def test_knopf_hinweis_scheitert_tipp_zaehlt_trotzdem(self):
+        """Prüfung 08.10.: Lehnt Telegram den Hinweis am Knopf ab (Klick erst nach einem Neustart verarbeitet, Netz
+        hängt), zählt dein Tipp trotzdem. Vorher brach alles ab: keine Regel, kein Auftrag, kein ✅ – und der nächste
+        Tipp auf den Grund hieß „Schon erledigt – die neue Fassung kommt“, ohne dass je eine kam."""
+        from telegram.error import TimedOut
+
+        zweites = self.zweites_video()
+        self.klick(f"d:{self.eid}:-1")
+        with mock.patch.object(FakeQuery, "answer", side_effect=TimedOut()):
+            self.klick(f"g:{self.eid}:kurz")
+            self.klick(f"d:{zweites}:1")
+        self.assertEqual(regeln.ziel_regel(self.con, self.konfig), 55.0)
+        self.assertEqual(lernbot.folge_zu(self.con, self.eid)["art"], "fassung")
+        self.assertEqual((lernbot.folge_zu(self.con, zweites)["art"], self.con.execute(
+            "SELECT daumen FROM entwurf_bewertungen WHERE entwurf_id = ?", (zweites,)).fetchone()[0]), ("paket", 1))
+
+    def test_neues_video_waehrend_einer_fassung_geht_nicht_verloren(self):
+        """Prüfung 08.10.: 🎬 während einer neuen Fassung – kommt sie, ist sie dein Video (kein zweites); endet sie ohne
+        Video (keine neuen Szenen), baut der Bot dein 🎬 gleich danach. Vorher kam „es kommt gleich“ und dann nichts."""
+        zweites = self.zweites_video()
+        for eid, fassung, bauten in ((self.eid, 77, [self.eid]),                           # Fassung kommt
+                                     (zweites, regie.KeineNeuenSzenen(0, 4), [zweites, None])):   # ohne Video
+            self.klick(f"d:{eid}:-1")
+            self.klick(f"g:{eid}:langweilig")
+            asyncio.run(lernbot.folge_starten(self.app))                                     # die Fassung läuft …
+            asyncio.run(lernbot.neuer_entwurf(self.app, "short"))                            # … und du tippst 🎬
+            self.assertEqual(self.bot.texte[-1], "⏳ Ich baue gerade schon ein Video – es kommt gleich.")
+            with mock.patch.object(lernbot, "baue_entwurf", side_effect=[fassung, 78]) as bau:
+                self.schleife(3)
+            self.assertEqual([c.args[3] for c in bau.call_args_list], bauten)               # 🎬: nicht „anders als“
+        self.assertNotIn("knopf_nochmal", self.app.bot_data)
 
     def test_nicht_gut_am_highlight_video_ohne_short_regel(self):
         """07.10.: ❌ am Highlight-Video (Zusammenschnitt) – vorher „Shorts sind ab jetzt 75 s lang (vorher 180 s)“,
