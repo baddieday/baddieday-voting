@@ -72,6 +72,11 @@ Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = 
   Dance-Rock und Midtempo Bass von NCS (Metal gibt es dort nicht). Diese Genres bekommen bei der Musikwahl
   `[musik].genre_bonus` = 1,5 dazu und schlagen so die alten EDM-Titel. Beim Einspielen gleich mit:
   `NCS_GENRES=hart NCS_ANZAHL=40` vor `bash` in der Einspiel-Zeile.
+- **Musik füllt sich selbst auf** (08.10., einfacher Modus): Vorrang haben nur noch Techno, Hardstyle, Hardcore, Phonk
+  und Brazilian Phonk (`einstellungen.DEINE_GENRES`, auch im 2-Wochen-Video). Sind davon weniger als 16 Titel frei
+  (🎵-Sperren zählen ab), lädt `pipeline sitzungen` tagsüber (10–17 Uhr, einmal am Tag) bis zu 10 neue von NCS
+  (`musik.nachschub`, Merker `ereignisse` Art `musik_nachschub`). Von Hand weiter:
+  `pipeline musik ncs --genre hardstyle,phonk,brazilian-phonk`.
 - Journal: „Entwurf #n gebaut in 95 s: Sperre 0 s · Stimmung 50 s (10 Clips) · Schnitt 4 s · Render 41 s“ zeigt,
   wo die Wartezeit nach ✅ fertig bleibt.
 - **Telegram über IPv4** (`[lernbot].nur_ipv4 = true`, 27.09.): Über IPv6 blieb die Warteabfrage auf dem Mini hängen,

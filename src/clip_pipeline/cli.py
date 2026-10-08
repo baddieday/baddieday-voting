@@ -845,7 +845,7 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--stimmung", choices=["episch", "spannend", "lustig", "frustriert", "chill"], default="episch")
     s.add_argument("--anzahl", type=int, default=3)
     s.add_argument("--genre", help="NCS-Genres, Komma-getrennt (techno, hardcore, electronic-rock, dance-rock, "
-                                   "midtempo-bass, phonk) oder „hart“ = alle außer phonk")
+                                   "midtempo-bass, phonk, hardstyle, brazilian-phonk) oder „hart“ = die ersten fünf")
     s.set_defaults(fn=_cmd_musik, sperren=False)
 
     s = unter.add_parser("compose", help="Regisseur: Schnittliste mit Bogen, Musik, Schnitten auf dem Beat")

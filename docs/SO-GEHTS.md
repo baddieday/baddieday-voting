@@ -17,6 +17,9 @@
    nach einer Pause weiterspielst –, baut der Bot das Video bis zu 24 Stunden später selbst nach (frühestens 45
    Minuten nach deinem letzten Match). Die Statuszeile wird dann zu „🎮 Nachtrag: Abend vom …“, und das Video kommt
    wie sonst. Tippen musst du dafür nichts; reicht es immer noch nicht, bleibt es still.
+5. **Musik:** Techno, Hardstyle, Hardcore und Phonk haben Vorrang. Werden die Songs knapp – auch durch dein 🎵 –,
+   holt der Bot tagsüber selbst neue (von NoCopyrightSounds, die Quellenangabe steht im Text zum Hochladen).
+   Besorgen musst du keine; eigene Songs kannst du weiter mit Quellenangabe als Bildunterschrift schicken.
 
 ## Was du tust
 - **✅ Hochladen** – du bekommst das Video in voller Qualität und den Text zum Hochladen. **Füg den Text beim
@@ -30,7 +33,7 @@
 | ⏱️ Zu kurz | Shorts werden 10 Sekunden länger (höchstens 75 s) |
 | ⏳ Zu lang | Shorts werden 10 Sekunden kürzer (mindestens 30 s) |
 | 🥱 Langweilig | Nur die neue Fassung: anders geschnitten (anderer Aufbau, anderes Tempo, anderer Song). Die bessere Hälfte der Szenen bleibt, die schwächere tauscht er gegen Szenen, die du noch nicht gesehen hast – erst vom selben Abend, dann starke von früheren Abenden (höchstens die Hälfte des Videos). Gibt es keine, kommt kein Video. Gesperrt wird nichts. Hast du die Effekte mit 😵 gesenkt, holt 🥱 sie eine Stufe zurück (höchstens bis normal) – das bleibt so. |
-| 🎵 Musik | Dieser Song kommt nie wieder |
+| 🎵 Musik | Dieser Song kommt nie wieder – neue Songs holt der Bot selbst |
 | 😵 Zu hektisch | Effekte eine Stufe ruhiger (wild → normal → ruhig → aus); zurück geht es mit 🥱 |
 | 🔁 Einfach neu | Andere Fassung, gleiche Regeln |
 
@@ -71,10 +74,10 @@ kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was er probiert 
   steht dieselbe Zeile auch in der Zusammenfassung am Sonntag.
 - **/experte** – alle alten Knöpfe, Details und ⚙️ Einstellungen ein- oder ausschalten.
 
-Einstellen musst du nichts: Clips (neuester Spielabend), Szenen (nur starke) und Aufbau wählt der Bot selbst,
-Länge, Effekte und Songs ändern nur deine Gründe unter ❌. `/einstellungen` zeigt dir, was gerade gilt.
-Was du früher unter ⚙️ eingestellt hast, bleibt gespeichert. Clips, Szenen und Aufbau legt der Bot im einfachen Modus
-selbst fest – deine alten Werte dafür gelten nur unter /experte. Andere alte Werte (z. B. eine Short-Mindestlänge)
+Einstellen musst du nichts: Clips (neuester Spielabend), Szenen (nur starke), Aufbau und Musik-Richtung wählt der
+Bot selbst, Länge, Effekte und einzelne Songs ändern nur deine Gründe unter ❌. `/einstellungen` zeigt dir, was gerade gilt.
+Was du früher unter ⚙️ eingestellt hast, bleibt gespeichert. Clips, Szenen, Aufbau und Musik-Richtung legt der Bot im
+einfachen Modus selbst fest – deine alten Werte dafür gelten nur unter /experte. Andere alte Werte (z. B. eine Short-Mindestlänge)
 gelten weiter.
 
 ## Ruhe im Chat

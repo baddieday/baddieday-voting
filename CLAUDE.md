@@ -481,3 +481,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     neues.“ Eine neue Fassung nach ❌ ersetzt ihr Video und darf dessen Szenen (und die seiner Vorgänger) wieder nehmen
     – nach ⏱️ bleiben sie, neue kommen dazu; bei 🥱 bleibt der Ersatz echt neu. 2-Wochen-Video, /experte, 🔥 Viral und
     Lernen unverändert; gelöscht wird nichts. Ändert N55 (🎬 schnitt den Abend neu) und N58. N66–N70.
+  - **Stufe 4: Musik füllt sich selbst auf** (Florian 07.10.: „Techno/Hardstyle und Phonk“, „viel mehr Musik“;
+    `musik.nachschub`, `einstellungen.DEINE_GENRES`): Im einfachen Modus haben nur noch deine Genres Vorrang bei der
+    Musikwahl – Techno, Hardstyle, Hardcore, Phonk, Brazilian Phonk (auch im 2-Wochen-Video; Rock nicht mehr, alte Titel
+    bleiben). Sind davon weniger als 16 Songs frei (🎵-Sperren zählen ab), lädt `pipeline sitzungen` am Ende eines
+    Laufs selbst bis zu 10 NCS-Titel mit Quellenangabe nach – nur 10–17 Uhr, höchstens einmal am Tag (Merker vor dem
+    Laden), Fehler nur ins Log, kein Chat. Abweichung vom Plan: gezählt werden nur deine Genres – live hat NCS nur 9
+    Techno- und 4 Hardcore-Titel, und Titel anderer Genres hielten die Gesamtzahl über 16, Hardstyle und Phonk kämen
+    nie. /experte wie bisher (Musik von Hand); gelöscht wird nichts. N71–N74.

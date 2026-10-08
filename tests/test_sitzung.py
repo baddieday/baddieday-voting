@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import cli, einstellungen, entwurf, lernbot, regie, sitzung
+from clip_pipeline import cli, einstellungen, entwurf, lernbot, musik, regie, sitzung
 from clip_pipeline.medien import MedienFehler
 from clip_pipeline.zeit import UTC, iso, jetzt
 
@@ -133,6 +133,24 @@ class Sitzung(MitRegieMaterial):
         self.assertIn("Beim nächsten Abend versuche ich es wieder.", self.fehlerzeilen()[-1])  # … und gleich die Zeile
         self.assertTrue(sitzung._dauerhaft(MedienFehler("Moment-Datei fehlt: /srv/clips/momente/1.mp4")))
         self.assertFalse(sitzung._dauerhaft(MedienFehler("Entwurf x: hängt – 180 s ohne Fortschritt, abgebrochen")))
+
+    def test_musik_nachschub_ohne_netz_nur_ins_log(self):
+        """Stufe 4 (08.10.): Am Ende des Laufs lädt der Bot tagsüber selbst Songs deiner Genres nach. Ist NCS nicht
+        erreichbar, steht es nur im Log – das Abend-Video kommt trotzdem, und der nächste Lauf (10 min später) fragt
+        nicht gleich wieder."""
+        self.momente_anlegen(MOMENTE[:5])                                   # alle Momente aus m1/m2
+        self.musik_anlegen(150, "episch")                                   # ohne Genre: zählt nicht als deins
+        self.abend_aus_m1_m2()
+        mittag = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)                   # 12:00 in Berlin
+        with mock.patch.object(musik, "jetzt", return_value=mittag), \
+                mock.patch.object(musik, "ncs_suche", side_effect=OSError("ncs.io nicht erreichbar")) as suche, \
+                self.assertLogs("pipeline", "WARNING") as logs:
+            e = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
+            self.assertIsNone(sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)["musik"])
+        self.assertEqual((e["musik"], suche.call_count), (0, 1))            # einmal versucht, nichts geladen
+        self.assertTrue(any("NCS nicht erreichbar" in z for z in logs.output))
+        datei = self.con.execute("SELECT datei FROM entwuerfe WHERE id = ?", (e["neu"][0]["entwurf"],)).fetchone()[0]
+        self.assertTrue(Path(datei).is_file())                              # das Abend-Video ist da
 
     def test_duenner_abend_fuellt_mit_nie_gezeigten_starken_auf(self):
         """Stufe 4 (08.10., Florian: „Ja, auffüllen“): Ein Abend mit nur 2 starken Szenen bekommt trotzdem sein Video –

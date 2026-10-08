@@ -1,4 +1,5 @@
-"""Musik: Tempo, Beats und Energie messen, Titel mit Quellenangabe verwalten, NCS-Titel laden.
+"""Musik: Tempo, Beats und Energie messen, Titel mit Quellenangabe verwalten, NCS-Titel laden – im einfachen Modus
+auch von selbst, wenn die Songs deiner Genres zur Neige gehen (nachschub, Stufe 4, 08.10.).
 
 Analyse ohne große Bibliothek (nur numpy), damit jeder Schritt nachvollziehbar bleibt:
   1. ffmpeg dekodiert zu Mono, 22 050 Hz
@@ -21,13 +22,14 @@ import shutil
 import sqlite3
 import subprocess
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
 from .konfig import Konfig
 from .medien import MedienFehler
-from .zeit import iso, jetzt
+from .zeit import im_zeitfenster, iso, jetzt, lokal_zu_utc, utc_zu_lokal
 
 log = logging.getLogger("pipeline")
 SR = 22050
@@ -280,8 +282,11 @@ def ncs_suche(stimmung_id: int | None = None, *, genre_id: int | None = None, se
 # NCS-Genre-Filter (IDs aus der Suche auf ncs.io, Stand 27.09.) und die Stimmung, als die ein Titel startet.
 # Florian 27.09.: „eher Richtung Techno/Industrial oder Rock/Metal, kein EDM“ – Metal führt NCS nicht, Electronic
 # Rock kommt dem am nächsten; Midtempo Bass ist die dunkle, industrielle Ecke.
+# 08.10. (Florian 07.10.: „Techno/Hardstyle und Phonk“): Hardstyle (9, startet episch wie die Multikills) und Brazilian
+# Phonk (26, spannend) dazu – live geprüft: 45 bzw. 28 Titel; Phonk hat 32, Techno nur 9, Hardcore nur 4.
 NCS_GENRES = {"techno": (80, "spannend"), "hardcore": (82, "frustriert"), "electronic-rock": (83, "episch"),
-              "dance-rock": (38, "episch"), "midtempo-bass": (22, "spannend"), "phonk": (16, "frustriert")}
+              "dance-rock": (38, "episch"), "midtempo-bass": (22, "spannend"), "phonk": (16, "frustriert"),
+              "hardstyle": (9, "episch"), "brazilian-phonk": (26, "spannend")}
 HART = ["techno", "hardcore", "electronic-rock", "dance-rock", "midtempo-bass"]
 
 
@@ -299,7 +304,8 @@ def ncs_genre_titel(genre: str, seiten: int = 5) -> list[dict]:
 
 def ncs_genres_laden(con: sqlite3.Connection, konfig: Konfig, genres: list[str], anzahl: int = 40) -> list[sqlite3.Row]:
     """Lädt bis zu `anzahl` neue NCS-Titel aus diesen Genres, abwechselnd je Genre (gemischt statt 13× Rock am
-    Stück), und merkt sich das Genre am Titel. Ein Titel, der nicht lädt, wird übersprungen (Log), nicht der Rest."""
+    Stück), und merkt sich das Genre am Titel. Ein Titel, der nicht lädt, wird übersprungen (Log), nicht der Rest –
+    seit 08.10. auch, wenn ffmpeg ihn nicht lesen kann (sonst hielte ein kaputter Titel den Nachschub jeden Tag an)."""
     unbekannt = [g for g in genres if g not in NCS_GENRES]
     if unbekannt:
         raise ValueError(f"Unbekannte Genres {unbekannt} – bekannt: {', '.join(NCS_GENRES)}")
@@ -323,7 +329,7 @@ def ncs_genres_laden(con: sqlite3.Connection, konfig: Konfig, genres: list[str],
             datei.write_bytes(_hole(t["url"], timeout=120))
             track = hinzufuegen(con, konfig, datei, titel=t["titel"], kuenstler=t["kuenstler"],
                                 quelle=ncs_quelle(t["slug"], t["kuenstler"], t["titel"]), stimmung=NCS_GENRES[genre][1])
-        except (OSError, ValueError) as fehler:
+        except (OSError, ValueError, MedienFehler) as fehler:
             log.warning("NCS %s – %s übersprungen: %s", t["kuenstler"], t["titel"], fehler)
             continue
         finally:
@@ -373,4 +379,65 @@ def ncs_laden(con: sqlite3.Connection, konfig: Konfig, stimmung: str, anzahl: in
             finally:
                 datei.unlink(missing_ok=True)
             vorhanden.add((t["kuenstler"], t["titel"]))
+    return neu
+
+
+# --- Nachschub von selbst (Stufe 4, 08.10.) ---------------------------------------------
+
+NACHSCHUB_ART = "musik_nachschub"        # ereignisse.art: Merker „heute versucht“ – steht VOR dem Laden
+NACHSCHUB_FENSTER = ("10:00", "17:00")   # Ortszeit: tagsüber – nach dem Zocken rendert der Mini die Abend-Videos
+NACHSCHUB_JE_TAG = 10                    # höchstens so viele neue Titel am Tag
+
+
+def frei_je_genre(con: sqlite3.Connection, genres: list[str]) -> dict[str, int]:
+    """Freie Titel je Genre: mit Beats und nicht per 🎵 gesperrt – gezählt wie regeln._songs_frei."""
+    frei = dict.fromkeys(genres, 0)
+    if genres:
+        platz = ",".join("?" for _ in genres)
+        for genre, n in con.execute(
+                f"""SELECT genre, COUNT(*) FROM tracks WHERE beats IS NOT NULL AND genre IN ({platz})
+                      AND CAST(id AS TEXT) NOT IN (SELECT schluessel FROM sperren WHERE art = 'track')
+                    GROUP BY genre""", genres):
+            frei[genre] = n
+    return frei
+
+
+def nachschub(con: sqlite3.Connection, konfig: Konfig, mindestens: int = 16,
+              zeit: datetime | None = None) -> list[sqlite3.Row] | None:
+    """Musik füllt sich selbst auf (Florian 07.10.: „Techno/Hardstyle und Phonk“, „viel mehr Musik“; 08.10.: nichts
+    mehr von Hand). Sind von deinen Genres ([musik].genres_bevorzugt – im einfachen Modus einstellungen.DEINE_GENRES)
+    weniger als `mindestens` Titel frei (2 × Rotation; was du per 🎵 gesperrt hast, zählt nicht), lädt der Bot neue
+    NCS-Titel mit Quellenangabe je Titel (.lizenz.txt) nach – höchstens einmal am Tag, nur 10–17 Uhr, höchstens 10,
+    die knappsten Genres zuerst. Gezählt werden nur deine Genres: Titel anderer Genres (z. B. Rock aus `musik ncs
+    --genre hart` vom 27.09., bis zu 40) hielten die Zahl sonst über 16, und Hardstyle und Phonk kämen nie.
+    Der Merker steht VOR dem Laden in `ereignisse`: Ist NCS nicht erreichbar oder hat nichts Neues, fragt der nächste
+    Timer-Lauf nicht gleich wieder (Prüfer r1_musik_gate: sonst alle 10 min 12 Abrufe unter der Pipeline-Sperre).
+    Alte Titel und 🎵-Sperren bleiben; welcher Titel ins Video kommt, entscheidet weiter regie.waehle_musik.
+    Rückgabe: None = nicht nötig oder nicht jetzt; sonst die neuen Titel (leer = versucht, nichts Neues)."""
+    genres = [g for g in konfig.wert("musik.genres_bevorzugt", []) or [] if g in NCS_GENRES]
+    frei = frei_je_genre(con, genres)
+    if not genres or sum(frei.values()) >= mindestens:
+        return None
+    zeit = zeit or jetzt()
+    zone = str(konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+    if not im_zeitfenster(zeit, *NACHSCHUB_FENSTER, zone):
+        return None
+    heute = lokal_zu_utc(datetime.combine(utc_zu_lokal(zeit, zone).date(), datetime.min.time()), zone)
+    if con.execute("SELECT 1 FROM ereignisse WHERE art = ? AND zeit >= ?", (NACHSCHUB_ART, iso(heute))).fetchone():
+        return None
+    bestand = ", ".join(f"{g} {n}" for g, n in frei.items())
+    con.execute("INSERT INTO ereignisse (zeit, art, text) VALUES (?, ?, ?)",
+                (iso(zeit), NACHSCHUB_ART, f"{sum(frei.values())} frei ({bestand}) – bis zu {NACHSCHUB_JE_TAG} neue"))
+    log.info("Musik: nur %d Songs deiner Genres frei (%s) – ich lade bis zu %d neue von NCS",
+             sum(frei.values()), bestand, NACHSCHUB_JE_TAG)
+    try:
+        neu = ncs_genres_laden(con, konfig, sorted(genres, key=lambda g: frei[g]), anzahl=NACHSCHUB_JE_TAG)
+    except OSError as fehler:   # ncs.io nicht erreichbar: alte Titel bleiben, morgen ein neuer Versuch
+        log.warning("Musik: NCS nicht erreichbar – nächster Versuch morgen (%s)", fehler)
+        return []
+    je_genre: dict[str, int] = {}
+    for t in neu:
+        je_genre[t["genre"]] = je_genre.get(t["genre"], 0) + 1
+    log.info("Musik: %d neue Titel von NCS%s", len(neu),
+             f" ({', '.join(f'{g} {n}' for g, n in je_genre.items())})" if neu else " – nichts Neues in deinen Genres")
     return neu

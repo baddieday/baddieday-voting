@@ -1,13 +1,15 @@
-"""Musik: Tempo/Beats an Klick-Spuren mit bekanntem Tempo, Quellenangabe Pflicht, NCS-Seite auslesen."""
+"""Musik: Tempo/Beats an Klick-Spuren mit bekanntem Tempo, Quellenangabe Pflicht, NCS-Seite auslesen, Nachschub."""
 
 import subprocess
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
 import numpy as np
 
-from clip_pipeline import musik
+from clip_pipeline import einstellungen, musik
+from clip_pipeline.zeit import UTC
 
 from tests.hilfen import HAT_FFMPEG, MitSpeicher
 
@@ -78,3 +80,40 @@ class Analyse(MitSpeicher):
         lizenz = (self.tmp / "musik" / "KDH_ Tatsunoshin - Fly High.lizenz.txt").read_text()
         self.assertEqual(lizenz.count("NoCopyrightSounds"), 1)
         self.assertIn("ncs.io/flyhigh", lizenz)
+
+
+@unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
+class Nachschub(MitSpeicher):
+    """Stufe 4 (08.10., Florian: „Techno/Hardstyle und Phonk“, nichts von Hand): Gehen die Songs deiner Genres zur
+    Neige, lädt der Bot selbst NCS-Titel nach – mit Quellenangabe, einmal am Tag, nur 10–17 Uhr."""
+
+    def test_drei_freie_titel_einmal_zehn_neue_mit_quellenangabe(self):
+        self.konfig.daten["musik"].update(ordner=str(self.tmp / "musik"), genres_bevorzugt=einstellungen.DEINE_GENRES)
+        for i in range(4):   # 4 Techno-Titel, einer davon per 🎵 gesperrt → 3 frei
+            self.con.execute("INSERT INTO tracks (datei, titel, kuenstler, quelle, sha256, beats, genre, erstellt) "
+                             "VALUES (?, ?, 'Alt', 'NCS', ?, '[]', 'techno', 'x')",
+                             (f"t{i}.mp3", f"Techno {i}", f"s{i}"))
+        self.con.execute("INSERT INTO sperren (art, schluessel, grund, erstellt) VALUES ('track', '1', 'musik', 'x')")
+        ton = klicks(self.tmp / "ton.wav", 150).read_bytes()
+        gesucht = []
+
+        def suche(stimmung_id=None, *, genre_id=None, seite=1):
+            gesucht.append(genre_id)
+            return [{"slug": f"g{genre_id}t{i}", "kuenstler": f"K{genre_id}", "titel": f"Titel {i}",
+                     "url": f"https://ncsmusic.s3.example/{genre_id}/{i}.mp3"} for i in range(4)] if seite == 1 else []
+
+        um = lambda stunde: datetime(2026, 10, 8, stunde, tzinfo=UTC)  # noqa: E731 – UTC, in Berlin 2 h später
+        with mock.patch.object(musik, "ncs_suche", side_effect=suche), \
+                mock.patch.object(musik, "_hole", side_effect=lambda url, timeout=30: ton + url.encode()):  # je Titel
+            self.assertIsNone(musik.nachschub(self.con, self.konfig, zeit=um(7)))     # 09:00: noch nicht
+            neu = musik.nachschub(self.con, self.konfig, zeit=um(9))                  # 11:00
+            abrufe = len(gesucht)
+            self.assertIsNone(musik.nachschub(self.con, self.konfig, zeit=um(13)))    # 15:00: heute schon versucht
+        self.assertEqual(len(gesucht), abrufe)                                        # … ohne neue Anfrage
+        self.assertEqual(len(neu), 10)
+        self.assertEqual([t["genre"] for t in neu[:5]], ["hardstyle", "hardcore", "phonk", "brazilian-phonk", "techno"])
+        for t in neu:                                                                 # Lizenz je Titel
+            self.assertIn("Music provided by NoCopyrightSounds", t["quelle"])
+            lizenz = self.tmp / "musik" / (Path(t["datei"]).stem + ".lizenz.txt")
+            self.assertEqual(lizenz.read_text(encoding="utf-8").strip(), t["quelle"])
+        self.assertEqual(sum(musik.frei_je_genre(self.con, einstellungen.DEINE_GENRES).values()), 13)

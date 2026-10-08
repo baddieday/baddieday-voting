@@ -21,6 +21,8 @@ noch, wenn auch das nicht reicht – der Satz sagt dann, warum.
 Stufe 4, Nachtrag (08.10.): Kommt für den neuesten Abend ohne Video danach noch etwas an (Clip-Dateien, Matches, die
 n8n erst später fertig hat, ein Match, das der PC erst beim nächsten Start schickt), baut der Timer das Video bis
 NACHTRAG_H nach dem Abend selbst nach (_nachtrag) – vorher blieb es für immer bei „kein Video“. Nur einfacher Modus.
+Stufe 4, Musik (08.10.): Am Ende jedes Laufs lädt der Bot tagsüber selbst NCS-Titel deiner Genres nach, wenn sie zur
+Neige gehen (_musik → musik.nachschub) – keine Musik mehr von Hand. Nur einfacher Modus.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ import sqlite3
 from datetime import timedelta
 from pathlib import Path
 
-from . import db, einstellungen, entwurf, fail, lernen, material, regeln, regie, regie_lernen, stimmung
+from . import db, einstellungen, entwurf, fail, lernen, material, musik, regeln, regie, regie_lernen, stimmung
 from .konfig import Konfig
 from .medien import MedienFehler
 from .verarbeitung import SESSION_ID
@@ -102,7 +104,26 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
             ergebnis["nachtrag"] = _nachtrag(con, konfig, claude=claude, whisper=whisper)
         except Exception:  # noqa: BLE001 – der Nachtrag ist Zugabe; die neuen Abende oben sind schon erledigt
             log.exception("Nachtrag eines Abends ohne Video")
+    ergebnis["musik"] = _musik(con, konfig)   # zuletzt: die Videos dieses Laufs sind schon gebaut
     return ergebnis
+
+
+def _musik(con: sqlite3.Connection, konfig: Konfig) -> int | None:
+    """Stufe 4 (08.10., Florian: „Techno/Hardstyle und Phonk“, nichts mehr von Hand): Gehen die Songs deiner Genres
+    zur Neige (auch durch deine 🎵-Sperren), lädt der Bot selbst neue NCS-Titel mit Quellenangabe nach (musik.nachschub:
+    weniger als 2 × Rotation = 16 frei, höchstens einmal am Tag, 10–17 Uhr, höchstens 10). Unter der Pipeline-Sperre
+    dieses Laufs; tagsüber kollidiert das nicht mit dem Rendern nach dem Zocken. Fehler nur ins Log – alte Titel und
+    🎵-Sperren bleiben. Nur im einfachen Modus (/experte wie bisher: Musik von Hand).
+    Rückgabe: Zahl neuer Titel (0 = versucht, nichts Neues), None = nicht nötig, nicht jetzt oder /experte."""
+    try:
+        k = einstellungen.anwenden(con, konfig)
+        if einstellungen.experte(con, k):
+            return None
+        neu = musik.nachschub(con, k, mindestens=2 * regeln.MUSIK_ROTATION)
+    except Exception:  # noqa: BLE001 – Zugabe; vor dem Laden steht der Merker gegen dauerndes Neuladen schon
+        log.exception("Musik-Nachschub")
+        return None
+    return None if neu is None else len(neu)
 
 
 def _lerne(con: sqlite3.Connection, k: Konfig) -> None:

@@ -3,6 +3,7 @@
 import json
 import subprocess
 from pathlib import Path
+from unittest import mock
 
 from clip_pipeline import musik
 from clip_pipeline.zeit import iso, jetzt
@@ -71,6 +72,11 @@ class MitRegieMaterial(MitSpeicher):
         self.konfig.daten.setdefault("regie", {})["ordner"] = str(self.tmp / "regie")
         # Bestandstests prüfen den Schnitt ohne Effekte (Regisseur 2.0); Effekt-Tests schalten sie selbst ein
         self.konfig.daten["regie"].setdefault("effekte", {})["an"] = False
+        # Stufe 4 (08.10.): sitzung.verarbeite lädt tagsüber selbst Musik von NCS – Tests gehen nie ins Netz (wer NCS
+        # braucht, fälscht musik.ncs_suche bzw. musik._hole selbst)
+        netz = mock.patch.object(musik, "_hole", side_effect=OSError("kein Netz in Tests"))
+        netz.start()
+        self.addCleanup(netz.stop)
 
     def momente_anlegen(self, momente=MOMENTE, *, video_mit_ton: int = 2, farbig: bool = False) -> list[int]:
         ids = []
