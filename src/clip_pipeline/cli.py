@@ -5,7 +5,7 @@
    fail --session ID | --nachziehen [--tage 14], scan --verarbeiten [--max N] [--versuche N] für Freunde ohne n8n,
    benutzer pruefen|einrichten|koppeln und briefkasten abholen|status nur in der Instanz eines Freundes,
    laufzeiten [--tage 7] – nur lesen: wie lange Rechenaufträge warten und rechnen,
-   erfolg – nur lesen: Ziele getrennt und belegter Strategievergleich aus den festen Wochenzahlen)
+   erfolg – nur lesen: Ziele getrennt, belegter Strategievergleich aus den festen Wochenzahlen und die Regie-Liga)
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -701,10 +701,12 @@ def _cmd_laufzeiten(args, konfig, con) -> int:
 
 def _cmd_erfolg(args, konfig, con) -> int:
     """Mehrbenutzer, Stufe 4 (M155–M164): nur lesen – Ziele mit Status und die m = 9 festen Vergleiche aus den
-    eingefrorenen Wochenzahlen (erfolg.py). Text ohne Fachbegriffe nach stderr, eine JSON-Zeile nach stdout. Keine
-    Sperre, weckt nie, nicht über n8n erreichbar; ein Freund: bash deploy/benutzer/benutzer-befehl.sh <name> erfolg.
-    Exit 0 · 2 bei kaputten [erfolg.gewichte] bzw. [publikum]-Werten."""
-    from . import erfolg
+    eingefrorenen Wochenzahlen (erfolg.py). Stufe 5 (M185): dazu der Abschnitt „Regie-Liga“ (liga.py) und der
+    JSON-Schlüssel liga. Text ohne Fachbegriffe nach stderr, eine JSON-Zeile nach stdout. Keine Sperre, weckt nie, nicht
+    über n8n erreichbar; ein Freund: bash deploy/benutzer/benutzer-befehl.sh <name> erfolg.
+    Exit 0 · 2 bei kaputten [erfolg.gewichte] bzw. [publikum]-Werten. Ein Fehler der Liga steht als liga.fehler und im
+    Log – die übrige Ausgabe und der Exit bleiben."""
+    from . import erfolg, liga
 
     try:
         bericht = erfolg.auswertung(con, konfig)
@@ -712,8 +714,15 @@ def _cmd_erfolg(args, konfig, con) -> int:
         log.error("%s", e)
         _json({"fehler": "konfig", "hinweis": str(e)})
         return 2
-    print(erfolg.text(bericht), file=sys.stderr)
-    _json(bericht)
+    try:
+        stand = liga.stand(con, konfig)
+        liga_text = liga.text(stand)
+    except Exception as e:  # noqa: BLE001 – die Liga ist ein Zusatz: ihr Fehler kostet den Bericht nie
+        log.exception("Regie-Liga nicht gerechnet")
+        stand = {"fehler": f"{type(e).__name__}: {e}"}
+        liga_text = "🥇 Regie-Liga: nicht gerechnet – der Fehler steht im Log."
+    print(f"{erfolg.text(bericht)}\n\n{liga_text}", file=sys.stderr)
+    _json({**bericht, "liga": stand})
     return 0
 
 
@@ -1066,7 +1075,8 @@ def baue_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=_cmd_laufzeiten, sperren=False)   # nur lesen: keine Rechen-Sperre, nicht in WECKEN
 
     s = unter.add_parser("erfolg", help="Erfolg ehrlich messen: Zuschauer, Follower und Webseite getrennt, belegter "
-                                        "Vergleich der Strategien aus den festen Wochenzahlen (nur lesen, weckt nie)")
+                                        "Vergleich der Strategien aus den festen Wochenzahlen und die Regie-Liga "
+                                        "(bester Aufbau nur mit Beleg; nur lesen, weckt nie)")
     s.set_defaults(fn=_cmd_erfolg, sperren=False)   # nur lesen: keine Rechen-Sperre, nicht in WECKEN, nicht für n8n
 
     s = unter.add_parser("warum", help="Sieht alles gleich aus? Material, Wiederholung, Lernen der Moment-Formel")

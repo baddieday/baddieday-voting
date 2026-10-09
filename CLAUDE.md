@@ -123,6 +123,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   als Wochenwert (einmal neu zustimmen)? (4) Passt Zuschauer 0,5 · Follower 0,2 · Webseite 0,3 zu „clip-battle.de
   bewerben ist das Hauptziel“? (5) Wie viele Shorts lädst du pro Woche wirklich hoch (danach richtet sich, wann der
   erste Vergleich kommt)?
+- Stufe 5 (M178, M169): (1) Soll Humor/Überraschung (Twist mit 1–2 lustigen Szenen) als fünfter Aufbau in den einfachen
+  Modus? Dann kämen Fail-Szenen in „🎬 Neues Video“, und die Liga würde langsamer – ohne Antwort bleibt es bei vier.
+  (2) Sollen die Zuschauerzahlen deiner Freunde abgeholt werden? Bis dahin bleibt ihre Liga leer.
 
 ## Entscheidungen
 - 2026-09-23: Kein Medal.tv – Nvidia + SteelSeries reichen; Pipeline wählt pro Moment die Aufnahme mit bester Abdeckung.
@@ -727,3 +730,16 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     „noch ohne Wochenzahlen“. Bei dir und im Sonntagsbericht ändert sich nichts. M175. Dazu: „🎯 Wähle ich gerade öfter“
     nennt je Schraube nur die Wahl, die echt vorn liegt (vorher bei lauter ✅ „viel Zeitlupe“ und „wenig Zeitlupe“
     beide), und ein Test sichert, dass ohne echten Unterschied nie „belegt“ erscheint. M176–M177.
+- 2026-10-09 (Stufe 5 Mehrbenutzer, „Regie-Liga“ – Plan aus zwei Entwürfen, drei Schritte; Abnahme: „Benutzer können
+  nachvollziehen, was das System ausprobiert und tatsächlich gelernt hat“): **Bester Aufbau nur mit Beleg.** Erfahrung
+  zählt nur Videos mit fertigen Zuschauerzahlen, nie Zeit, Tippen, ✅/❌ oder KI-Note; bis zur ersten Krönung wählt der
+  Bot genau wie heute. Annahmen ab M178: `docs/ENTSCHEIDUNGEN.md`, „Mehrbenutzer“.
+  - Schritt 1 (Liga rechnen, nur nachsehen, `docs/PUBLIKUM.md` Abschnitt 8): `pipeline erfolg` hat jetzt den Abschnitt
+    „Regie-Liga“ (JSON `liga`) – kein neuer Befehl, keine Tabelle, nichts gespeichert. Sonntags um 18 Uhr wird
+    entschieden: Ein Aufbau wird bester Aufbau, wenn er an zwei Sonntagen nacheinander belegt besser ankommt als die
+    anderen; ablösen kann ihn nur einer, der ihn direkt schlägt, und nur mit Videos ab der Krönung. Dazu Erfahrung und
+    Level je Aufbau, Tempo, Zeitlupe und Länge, Liga-Level (sammelt · vergleicht · bester Aufbau belegt), Vertrauen in
+    Worten, das nächste Ziel und was in 7 Tagen ausprobiert wurde. Nachgestellt mit dem echten Code: ohne echten
+    Unterschied eine falsche Krönung in 1,2 % der Jahre, doppelte Reaktionen im Median nach 17 Wochen gekrönt; 2 Jahre
+    Geschichte in 0,15 s. Der erfolg-Teil bleibt Zeichen für Zeichen gleich; Bericht, 📋, Videos und n8n unverändert.
+    M178–M186.

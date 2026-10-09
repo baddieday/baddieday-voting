@@ -30,6 +30,10 @@ Vergleich (M159–M161): fest m = 9 je Plattform – Aufbau 4 × eine gegen den 
 Plattform und Auswertung. „Belegt“ nur fürs Gesamtziel und nur, wenn das Intervall die 0 nicht enthält; die Teilziele
 stehen nur beschreibend daneben (n und Median je Seite). Wortwahl: „kommt besser an“ (ein Zusammenhang, kein Beweis der
 Ursache) und „sehr wahrscheinlich kein Zufall“ statt einer Prozentzahl.
+
+Für die Regie-Liga (Stufe 5, liga.py): Jede Einheit trägt gepostet, fertig (bewertet_utc) und ihre Familie; paarweise
+vergleicht zwei Seiten mit denselben Konstanten, groesste_gruppe ist die Gruppenwahl von auswertung. auswertung, text und
+zeile_einfach geben dadurch Zeichen für Zeichen dasselbe aus wie vorher.
 """
 
 from __future__ import annotations
@@ -57,6 +61,7 @@ VERGLEICHE = (("aufbau", "montage"), ("aufbau", "story"), ("aufbau", "steigerung
               ("tempo", "schnell"), ("zeitlupe", "viel"), ("laenge", "kurz"), ("laenge", "mittel"), ("laenge", "lang"))
 M = 9
 ALPHA = 0.01                    # Irrtum je Plattform und Auswertung, auf die m Vergleiche verteilt
+P_QUANTIL = 1 - ALPHA / (2 * M)  # zweiseitig je Vergleich – auch für paarweise (Liga), nie gelockert
 MINDESTENS = 8                  # Videos je Seite
 LAENGE_TOLERANZ = 0.15          # Ø-Länge beider Seiten höchstens 15 % auseinander
 MESSALTER_TAGE = (4.0, 10.0)    # nur Wochenzahlen aus diesem Alter sind vergleichbar
@@ -156,29 +161,45 @@ def welch(a: list[float], b: list[float], p: float) -> tuple[float, float, float
     return d, d - t * se, d + t * se
 
 
-def vergleiche(einheiten: list[dict]) -> list[dict]:
+def paarweise(a: list[dict], b: list[dict], laenge: bool = True) -> dict:
+    """Ein Vergleich zweier Seiten im Gesamtziel – dieselben Konstanten wie vergleiche (P_QUANTIL, je Seite mindestens
+    MINDESTENS Videos, Ø-Länge höchstens LAENGE_TOLERANZ auseinander; laenge=False nur beim Merkmal Länge selbst).
+    {"n": [a, b], "status"} und je nach Status "fehlen" (was beiden Seiten zusammen fehlt), "laenge_s" oder
+    "unterschied", "von", "bis" (Mittelwert a − b mit Grenzen). Die Liga (Stufe 5) vergleicht damit einen
+    Herausforderer direkt mit dem besten Aufbau."""
+    befund: dict = {"n": [len(a), len(b)]}
+    la, lb = (statistics.fmean(e["dauer"] for e in seite) if seite else 0.0 for seite in (a, b))
+    if len(a) < MINDESTENS or len(b) < MINDESTENS:
+        befund.update(status=ZU_WENIG, fehlen=max(0, MINDESTENS - len(a)) + max(0, MINDESTENS - len(b)))
+    elif laenge and max(la, lb) > (1 + LAENGE_TOLERANZ) * min(la, lb):
+        befund.update(status=NICHT_VERGLEICHBAR, laenge_s=[round(la, 1), round(lb, 1)])
+    elif (ergebnis := welch([e["werte"]["gesamt"] for e in a], [e["werte"]["gesamt"] for e in b], P_QUANTIL)) is None:
+        befund.update(status=KEIN_UNTERSCHIED)
+    else:
+        d, unten, oben = ergebnis
+        befund.update(status=BESSER if unten > 0 else SCHLECHTER if oben < 0 else KEIN_UNTERSCHIED,
+                      unterschied=round(d, 3), von=round(unten, 3), bis=round(oben, 3))
+    return befund
+
+
+def vergleiche(einheiten: list[dict], merkmale: tuple[str, ...] | None = None, teilziele: bool = True) -> list[dict]:
     """Die m = 9 festen Vergleiche über Einheiten mit denselben gemessenen Zielen. Je Vergleich: Merkmal, Wahl,
-    Gegenseite („rest“ oder die andere Wahl), n je Seite und das Urteil; gerechnet: Unterschied der Mittelwerte im
-    Gesamtziel mit Grenzen; zu wenig: wie viele Videos mindestens fehlen. Dazu je Teilziel n und Median je Seite."""
-    p = 1 - ALPHA / (2 * M)
+    Gegenseite („rest“ oder die andere Wahl), n je Seite und das Urteil (paarweise); gerechnet: Unterschied der
+    Mittelwerte im Gesamtziel mit Grenzen; zu wenig: wie viele Videos mindestens fehlen. Dazu je Teilziel n und Median
+    je Seite. Die Liga (je Stichtag) rechnet nur merkmale=("aufbau",) ohne Teilziele – die Konstanten, auch m = 9,
+    bleiben dieselben, das Urteil also auch."""
     befunde = []
     for merkmal, wahl in VERGLEICHE:
+        if merkmale is not None and merkmal not in merkmale:
+            continue
         a = [e for e in einheiten if e["merkmale"].get(merkmal) == wahl]
         b = [e for e in einheiten if e["merkmale"].get(merkmal) not in (None, wahl)]
         optionen = geschmack.KNOEPFE.get(merkmal, ())
         gegen = next(o for o in optionen if o != wahl) if len(optionen) == 2 else "rest"
-        befund: dict = {"merkmal": merkmal, "wahl": wahl, "gegen": gegen, "n": [len(a), len(b)]}
-        la, lb = (statistics.fmean(e["dauer"] for e in seite) if seite else 0.0 for seite in (a, b))
-        if len(a) < MINDESTENS or len(b) < MINDESTENS:
-            befund.update(status=ZU_WENIG, fehlen=max(0, MINDESTENS - len(a)) + max(0, MINDESTENS - len(b)))
-        elif merkmal != "laenge" and max(la, lb) > (1 + LAENGE_TOLERANZ) * min(la, lb):
-            befund.update(status=NICHT_VERGLEICHBAR, laenge_s=[round(la, 1), round(lb, 1)])
-        elif (ergebnis := welch([e["werte"]["gesamt"] for e in a], [e["werte"]["gesamt"] for e in b], p)) is None:
-            befund.update(status=KEIN_UNTERSCHIED)
-        else:
-            d, unten, oben = ergebnis
-            befund.update(status=BESSER if unten > 0 else SCHLECHTER if oben < 0 else KEIN_UNTERSCHIED,
-                          unterschied=round(d, 3), von=round(unten, 3), bis=round(oben, 3))
+        befund: dict = {"merkmal": merkmal, "wahl": wahl, "gegen": gegen, **paarweise(a, b, merkmal != "laenge")}
+        if not teilziele:
+            befunde.append(befund)
+            continue
         teile = {}
         for teil in (*TEILE, "follower", "webseite"):
             wa, wb = ([e["werte"][teil] for e in seite if e["werte"][teil] is not None] for seite in (a, b))
@@ -299,7 +320,8 @@ def _einheit(z: sqlite3.Row, teile: dict, konfig: Konfig, w: dict[str, float], f
     werte["gesamt"] = sum(w[ziel] * werte[ziel] for ziel in abdeckung) / summe if summe > 0 else None
     dauer = float(z["dauer_s"])
     return {"post": int(z["id"]), "dauer": dauer, "abdeckung": abdeckung, "werte": werte, "status": status,
-            "merkmale": {**geschmack._wahl_aus(z["parameter"]), "laenge": laenge_band(dauer)}}
+            "merkmale": {**geschmack._wahl_aus(z["parameter"]), "laenge": laenge_band(dauer)},
+            "gepostet": z["gepostet_utc"], "fertig": z["bewertet_utc"]}   # Liga: hochgeladen · Wochen-Note fest seit
 
 
 def _ziel_status(einheiten: list[dict], ziel: str, plattform: str) -> dict:
@@ -333,8 +355,11 @@ def _zuschauer_status(n: int, weg: Counter, wartet: int, plattform: str, abruf: 
 def einheiten(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None,
               w: dict[str, float] | None = None) -> dict[str, dict]:
     """Je Plattform (eingerichtete zuerst, dazu jede mit Posts): {"einheiten": [Einheit …], "wartet": n,
-    "weg": Counter(Grund → Anzahl)}. Eine Einheit: {"post", "dauer", "abdeckung" (gemessene Ziele mit Gewicht > 0),
-    "werte" (gesamt, zuschauer, Teilziele, follower, webseite – None = nicht gemessen), "status", "merkmale"}.
+    "weg": Counter(Grund → Anzahl), "fassungen": [Einheit …]}. Eine Einheit: {"post", "dauer", "abdeckung" (gemessene
+    Ziele mit Gewicht > 0), "werte" (gesamt, zuschauer, Teilziele, follower, webseite – None = nicht gemessen),
+    "status", "merkmale", "gepostet", "fertig" (bewertet_utc), "familie"}. "fassungen": weitere Fassungen mit eigener
+    fertiger Wochen-Note – sie zählen hier nie, die Liga nimmt eine davon nur an einem Stichtag, an dem die frühere
+    noch keine fertige Wochen-Note hatte (wie dieser Aufruf damals).
     Nur lesen; zeit (Standard jetzt): bis wann ein Post ohne Wochenzahlen „wartet“."""
     zeit = zeit or jetzt()
     w = w or gewichte(konfig)
@@ -356,7 +381,7 @@ def einheiten(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = N
     eingerichtet = publikum.post_plattformen(konfig)
     namen = [p for p in publikum.PLATTFORMEN if p in eingerichtet or any(z["plattform"] == p for z in zeilen)]
     namen += sorted({z["plattform"] for z in zeilen} - set(namen))
-    roh = {p: {"einheiten": [], "wartet": 0, "weg": Counter()} for p in namen}
+    roh = {p: {"einheiten": [], "wartet": 0, "weg": Counter(), "fassungen": []} for p in namen}
     familien: set[tuple[str, int]] = set()
     for z in zeilen:
         pl = roh[z["plattform"]]
@@ -370,14 +395,35 @@ def einheiten(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = N
         familie = (z["plattform"], min([int(z["entwurf_id"]), *szenen._ersetzt(z["parameter"])]))
         if familie in familien:
             pl["weg"][FASSUNG] += 1
+            if (fassung := _einheit(z, teile[z["id"]], konfig, w, follower))["werte"]["gesamt"] is not None:
+                pl["fassungen"].append({**fassung, "familie": familie[1]})
             continue
         einheit = _einheit(z, teile[z["id"]], konfig, w, follower)
         if einheit["werte"]["gesamt"] is None:
             pl["weg"][OHNE_GEWICHT] += 1
             continue
         familien.add(familie)
-        pl["einheiten"].append(einheit)
+        pl["einheiten"].append({**einheit, "familie": familie[1]})
     return roh
+
+
+def groesste_gruppe(einheiten: list[dict]) -> tuple[tuple, list[dict]]:
+    """Die größte Gruppe mit denselben gemessenen Zielen (gleich groß: mehr Ziele, dann der Name) – nur darin wird
+    verglichen (M157). ((), []) ohne Einheiten. Für auswertung und die Liga (je Stichtag)."""
+    gruppen: dict[tuple, list] = {}
+    for e in einheiten:
+        gruppen.setdefault(e["abdeckung"], []).append(e)
+    return max(gruppen.items(), key=lambda kv: (len(kv[1]), len(kv[0]), kv[0])) if gruppen else ((), [])
+
+
+def abruf_hinweis(konfig: Konfig) -> str | None:
+    """Wer holt die Zuschauerzahlen ab? FREUND_OHNE_ABRUF (Instanz eines Freundes, M169), TIKTOK_FEHLT (TikTok
+    eingerichtet, aber nicht verbunden) oder None – ohne Netz, wie geschmack.lehrer_zeile."""
+    if konfig.instanz is not None:
+        return FREUND_OHNE_ABRUF
+    if "tiktok" in publikum.post_plattformen(konfig) and not publikum_adapter.tiktok_verbunden(konfig):
+        return TIKTOK_FEHLT
+    return None
 
 
 def auswertung(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None) -> dict:
@@ -388,16 +434,11 @@ def auswertung(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = 
     w = gewichte(konfig)
     roh = einheiten(con, konfig, zeit, w)
     freund = konfig.instanz is not None
-    abruf = FREUND_OHNE_ABRUF if freund else (TIKTOK_FEHLT if "tiktok" in publikum.post_plattformen(konfig)
-                                              and not publikum_adapter.tiktok_verbunden(konfig) else None)
+    abruf = abruf_hinweis(konfig)
     plattformen = {}
     for name, pl in roh.items():
         alle = pl["einheiten"]
-        gruppen: dict[tuple, list] = {}
-        for e in alle:
-            gruppen.setdefault(e["abdeckung"], []).append(e)
-        abdeckung, gruppe = max(gruppen.items(), key=lambda kv: (len(kv[1]), len(kv[0]), kv[0])) if gruppen else \
-            ((), [])
+        abdeckung, gruppe = groesste_gruppe(alle)
         plattformen[name] = {
             "einheiten": len(alle), "wartet": pl["wartet"], "nicht_gezaehlt": dict(sorted(pl["weg"].items())),
             "ziele": {"zuschauer": _zuschauer_status(len(alle), pl["weg"], pl["wartet"], name, abruf),
