@@ -635,3 +635,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Lager eine Zeile, wenn sein letzter Lager-Lauf nicht ging oder er seit 8 Tagen nicht ins Lager kam (nächster Schritt
     `benutzer-pruefen.sh <name>`). Hineingeschaut wird nie, nur der freie Platz gemessen. Ohne Freunde-Volume ist die
     Morgenprüfung Zeichen für Zeichen wie vorher. M105, M131–M134.
+  - Prüfung: Auf einem vServer mit älterem SSH (Ubuntu 20.04, Debian 11) wäre kein Upload eines Freundes fertig
+    geworden – das Umbenennen nach dem Hochladen wurde abgewiesen, obwohl alle Proben grün waren. Das PC-Programm
+    benennt jetzt auf die alte Art um, die jede Version kennt und die nie überschreibt; mit echtem SSH 8.2 und 9.6
+    nachgestellt. Die Mindestversion auf dem vServer bleibt 8. M135.

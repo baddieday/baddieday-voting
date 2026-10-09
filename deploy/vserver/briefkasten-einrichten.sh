@@ -156,6 +156,8 @@ VERSION="$("$SSHD" -V 2>&1 | grep -oE 'OpenSSH_[0-9]+\.[0-9]+' | head -n 1 || tr
 [[ "$VERSION" =~ ^OpenSSH_([0-9]+)\.([0-9]+)$ ]] || abbruch "die Version von $SSHD ließ sich nicht lesen – bitte melden."
 HAUPT="${BASH_REMATCH[1]}"
 NEBEN="${BASH_REMATCH[2]}"
+# Ab 8 – auch 8.0–8.5: Dort bietet der Briefkasten posix-rename trotz Erlaubnisliste an (und verweigert es); das
+# PC-Programm benennt deshalb immer mit "rename -l" um, das jede Version kennt (M135, mit echtem 8.2p1 geprüft).
 [ "$HAUPT" -ge 8 ] || abbruch "$VERSION ist zu alt (mindestens OpenSSH 8) – erst: apt update && apt upgrade"
 STRAFEN=0
 if [ "$HAUPT" -gt 9 ] || { [ "$HAUPT" = 9 ] && [ "$NEBEN" -ge 8 ]; }; then STRAFEN=1; fi

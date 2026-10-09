@@ -1,8 +1,8 @@
 """sftp-Attrappe für die Briefkasten-Tests (Mehrbenutzer, Stufe 2): spielt `sftp -b` gegen einen Ordner wie der
 Briefkasten auf dem vServer (chroot je Benutzer, internal-sftp -d /fach) – in seinen zwei Profilen:
   - Abholen (der Mini, Schlüssel aus <chroot>/.schluessel): nur lesen (ls, df, get, reget).
-  - Hochladen (der PC des Freundes, Schlüssel aus <chroot>/.schluessel_pc): ls, df, put, reput, rename – nicht lesen,
-    nicht löschen, keine Ordner, kein fertiges Ziel überschreiben, nicht an die Marke, nur in die vier Unterordner.
+  - Hochladen (der PC des Freundes, Schlüssel aus <chroot>/.schluessel_pc): ls, df, put, reput, rename [-l] – nicht
+    lesen, nicht löschen, keine Ordner, kein fertiges Ziel überschreiben, nicht an die Marke, nur in die vier Unterordner.
 
 Aufruf wie das echte sftp: sftp -F <datei|none> -b <-|datei> -P <port> [-l kbit] -o … <benutzer>@<host>. Werte von -o
 dürfen in Anführungszeichen stehen (IdentityFile="C:/mit Leerzeichen/pc"), wie bei ssh. Lokale Pfade gelten ab dem
@@ -20,6 +20,8 @@ Umgebung:
                            (Exit 255); was bis dahin kam, bleibt liegen
   SFTP_ATTRAPPE_AUS        "1" = vServer nicht erreichbar (Exit 255 wie „ssh: connect …“)
   SFTP_ATTRAPPE_DF         "groesse belegt frei" in KiB statt der Werte des Ordners
+  SFTP_ATTRAPPE_ALT        "1" = Briefkasten mit OpenSSH vor 8.6 (Ubuntu 20.04, Debian 11): `rename` ohne -l scheitert
+                           mit „Permission denied“, `rename -l` geht (wie echt mit 8.2p1 nachgestellt, M135)
   SFTP_ATTRAPPE_PROTOKOLL  Datei: je Aufruf eine JSON-Zeile (argv, Arbeitsordner, Profil, Befehle, Exit) – für Aufrufer,
                            die die Tests nicht am Modul aufzeichnen können (das PC-Programm in PowerShell). Der Abholer
                            setzt sie nicht: Er begrenzt die Größe jeder Datei, die sftp schreibt (RLIMIT_FSIZE).
@@ -213,10 +215,18 @@ class Sitzung:
             os.close(fd)
 
     def benenne_um(self, args: list[str]) -> None:
-        """rename ohne posix-rename: ein vorhandenes Ziel bleibt („Failure“), nichts außerhalb der Unterordner."""
+        """rename auf die alte Art (SSH2_FXP_RENAME): ein vorhandenes Ziel bleibt („Failure“), nichts außerhalb der
+        Unterordner. `rename -l` erzwingt sie; ohne -l nimmt sftp posix-rename, wenn der Server es anbietet – ab OpenSSH
+        8.6 bietet der Briefkasten es nicht an (dann ist es dasselbe), davor (SFTP_ATTRAPPE_ALT=1) bietet er es trotz
+        Erlaubnisliste an und verweigert es dann mit „Permission denied“ (Befund B1, M135)."""
+        klassisch = args[:1] == ["-l"]
+        if klassisch:
+            args = args[1:]
         if len(args) != 2:
-            raise Fehler("Aufruf: rename alt neu")
+            raise Fehler("Aufruf: rename [-l] alt neu")
         alt, neu = self.anzeige(args[0]), self.anzeige(args[1])
+        if not klassisch and os.environ.get("SFTP_ATTRAPPE_ALT") == "1":
+            raise Fehler(f'remote rename "{alt}" to "{neu}": Permission denied')
         try:
             quelle, ziel = self._darf_schreiben(args[0]), self._darf_schreiben(args[1])
         except Fehler:

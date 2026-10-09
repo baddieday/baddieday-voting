@@ -39,6 +39,10 @@ $OHNE_REPLAY_H = 24
 $ABEND_VORBEI_MIN = 45
 $ABEND_PAUSE_H = 2
 $STATUS_MIN = 10
+# Umbenennen immer auf die alte Art (rename -l): Sie überschreibt nie ein fertiges Ziel und geht mit jedem Briefkasten.
+# Ohne -l nimmt sftp posix-rename, sobald der Server es anbietet - OpenSSH vor 8.6 (Ubuntu 20.04, Debian 11) bietet es
+# trotz Erlaubnisliste an und verweigert es dann: Keine Datei würde fertig, obwohl -Probe grün ist (M135).
+$UMBENENNEN = 'rename -l'
 $FORTNITE = 'FortniteClient-Win64-Shipping'
 $NVIDIA = '^(?<spiel>.+?) (?<datum>\d{4}\.\d{2}\.\d{2}) - (?<zeit>\d{2}\.\d{2}\.\d{2})\.(?<zaehler>\d+)(?:\.(?!DVR\.)(?<ereignis>[^.]+))?(?<dvr>\.DVR)?\.mp4$'
 $STEELSERIES = '^(?<spiel>.+?)__(?<datum>\d{4}-\d{2}-\d{2})__(?<zeit>\d{2}-\d{2}-\d{2})[^.]*\.mp4$'
@@ -345,7 +349,7 @@ function Schreibe-Lieferschein([string]$name, [long]$groesse, [string]$sha, [dat
 function Lieferschein-Hoch([string]$o, [string]$n) {
     # Lieferschein über .teil und Umbenennen (ein halber Lieferschein wird beim nächsten Mal einfach neu geschrieben)
     $befehle = @("put ""lieferschein.json"" ""$o/$n.lieferschein.teil""",
-                 "rename ""$o/$n.lieferschein.teil"" ""$o/$n.lieferschein""")
+                 "$UMBENENNEN ""$o/$n.lieferschein.teil"" ""$o/$n.lieferschein""")
     return Sftp-Aufruf $befehle $ablage 0 300
 }
 
@@ -380,7 +384,7 @@ function Lade-Hoch($e) {
         if ($namen.Contains("$n.teil") -and $script:teile[$teilSchluessel] -eq $e.schluessel) { $befehl = 'reput' }
         Notiere $teilDatei "$teilSchluessel`t$($e.schluessel)"
         $script:teile[$teilSchluessel] = $e.schluessel
-        $befehle = @("$befehl ""$n"" ""$o/$n.teil""", "rename ""$o/$n.teil"" ""$o/$n""")
+        $befehle = @("$befehl ""$n"" ""$o/$n.teil""", "$UMBENENNEN ""$o/$n.teil"" ""$o/$n""")
         Log "lade hoch ($befehl, $([Math]::Round($e.datei.Length / 1MB, 1)) MB$(if ($script:kbit) { ", höchstens $($script:kbit) kbit/s" })): $o/$n"
         Strom-Halten $true
         $r = Sftp-Aufruf $befehle $e.verzeichnis $script:kbit 0 -Beobachten
@@ -501,10 +505,10 @@ function Sende-Abend($oben) {
         Schreibe-Lieferschein $name $info.Length ((Get-FileHash -LiteralPath $datei -Algorithm SHA256).Hash.ToLowerInvariant()) $info.LastWriteTimeUtc
         $befehle = @()
         if (-not $namen.Contains($name)) {
-            $befehle += @("put ""abend.json"" ""sitzungen/$name.teil""", "rename ""sitzungen/$name.teil"" ""sitzungen/$name""")
+            $befehle += @("put ""abend.json"" ""sitzungen/$name.teil""", "$UMBENENNEN ""sitzungen/$name.teil"" ""sitzungen/$name""")
         }
         $befehle += @("put ""lieferschein.json"" ""sitzungen/$name.lieferschein.teil""",
-                      "rename ""sitzungen/$name.lieferschein.teil"" ""sitzungen/$name.lieferschein""")
+                      "$UMBENENNEN ""sitzungen/$name.lieferschein.teil"" ""sitzungen/$name.lieferschein""")
         $r = Sftp-Aufruf $befehle $ablage 0 300
         if ($r.code -ne 0) { Fehler-Merken "Abend-Datei $name`: $(Letzte $r.fehler)"; return $false }
         [void]$namen.Add($name)

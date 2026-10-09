@@ -102,9 +102,11 @@ im CT als root, mit Kopien deiner Aufnahmen eines Abends:
    ```
 3. Hochladen wie sein PC (öffentliche Adresse; je Datei erst `.teil`, dann umbenennen, dann der Lieferschein):
    `sftp -P 2222 -i /root/bk-test-pc -o UserKnownHostsFile=/var/lib/clip-benutzer/test/briefkasten/known_hosts_pc bk-test@<öffentlich>`,
-   dann z. B. `put a.mp4 videos/a.mp4.teil`, `rename videos/a.mp4.teil videos/a.mp4`,
-   `put a.mp4.lieferschein videos/a.mp4.lieferschein.teil`, `rename videos/a.mp4.lieferschein.teil videos/a.mp4.lieferschein`
-   – ebenso das Replay nach `replays/` und zuletzt die Abend-Datei nach `sitzungen/`.
+   dann z. B. `put a.mp4 videos/a.mp4.teil`, `rename -l videos/a.mp4.teil videos/a.mp4`,
+   `put a.mp4.lieferschein videos/a.mp4.lieferschein.teil`, `rename -l videos/a.mp4.lieferschein.teil videos/a.mp4.lieferschein`
+   – ebenso das Replay nach `replays/` und zuletzt die Abend-Datei nach `sitzungen/`. Das `-l` gehört dazu (wie im
+   PC-Programm): Ohne nimmt sftp eine neuere Art des Umbenennens, die ein Briefkasten mit OpenSSH vor 8.6 (Ubuntu 20.04,
+   Debian 11) abweist („Permission denied“, M135).
    Erwartet abgewiesen: `get videos/a.mp4 x`, `rm videos/a.mp4` („Permission denied“).
 4. Erwartet: Binnen 2 min holt der Mini ab (`journalctl -u clip-freund-abholen@test -n 20`), dann rechnet sein Match,
    und das Abend-Video kommt **nur in seinem Bot**. Dein nächster n8n-Lauf läuft wie immer.

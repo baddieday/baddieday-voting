@@ -12,10 +12,11 @@ Drei Teile:
   Abholen nur im Block „Match LocalAddress“ mit -R und eigener Schlüsseldatei. Der normale SSH-Zugang bleibt unberührt.
 - Echter sshd (nur als root mit Mount- und Netz-Namensraum und einem sshd – installiert oder über BRIEFKASTEN_SSHD –,
   sonst übersprungen, wie der Kernel-Nachbau in test_deploy_benutzer): Die Skripte richten in einem privaten
-  Namensraum zwei Fächer ein, dann gilt: Der PC-Schlüssel lädt hoch (put, reput, rename), liest, löscht und legt keine
-  Ordner an, überschreibt per rename nichts und kommt nicht an die Marke; der Mini-Schlüssel liest nur, nur über die
-  Tailnet-Adresse und nur von der Adresse des Mini; max kommt nicht in das Fach von eva; nicht eingehängt heißt
-  „Permission denied“, voll heißt „Failure“; gesperrt kommt niemand herein; sshd -t und briefkasten-pruefen.sh sind grün.
+  Namensraum zwei Fächer ein, dann gilt: Der PC-Schlüssel lädt hoch (put, reput, rename -l wie das PC-Programm), liest,
+  löscht und legt keine Ordner an, überschreibt per rename nichts und kommt nicht an die Marke; der Mini-Schlüssel liest
+  nur, nur über die Tailnet-Adresse und nur von der Adresse des Mini; max kommt nicht in das Fach von eva; nicht
+  eingehängt heißt „Permission denied“, voll heißt „Failure“; gesperrt kommt niemand herein; sshd -t und
+  briefkasten-pruefen.sh sind grün. Gleich grün mit einem ausgepackten OpenSSH 8.2p1 (BRIEFKASTEN_SSHD, M135).
 """
 
 from __future__ import annotations
@@ -669,11 +670,12 @@ head -c 300000 /dev/urandom > "$N"; head -c 100000 "$N" > halb.mp4
 head -c 10000000 /dev/urandom > gross.mp4
 echo '{"name": "x"}' > liefer.json
 F=/srv/briefkasten/fach
+# rename -l wie das PC-Programm (M135): das alte Umbenennen, das nie überschreibt – auch mit OpenSSH vor 8.6
 fall pc_hoch max-pc bk-max "$PUBLIC" "$PUBLIC" "put halb.mp4 \"videos/$N.teil\"
 reput \"$N\" \"videos/$N.teil\"
-rename \"videos/$N.teil\" \"videos/$N\"
+rename -l \"videos/$N.teil\" \"videos/$N\"
 put liefer.json \"videos/$N.lieferschein.teil\"
-rename \"videos/$N.lieferschein.teil\" \"videos/$N.lieferschein\"
+rename -l \"videos/$N.lieferschein.teil\" \"videos/$N.lieferschein\"
 put liefer.json status/pc-status.json
 ls -1 videos
 df"
@@ -682,7 +684,7 @@ fall pc_lesen max-pc bk-max "$PUBLIC" "$PUBLIC" "get \"videos/$N\" zurueck.mp4"
 fall pc_loeschen max-pc bk-max "$PUBLIC" "$PUBLIC" "rm \"videos/$N\""
 fall pc_mkdir max-pc bk-max "$PUBLIC" "$PUBLIC" "mkdir videos/neu"
 fall pc_ueberschreiben max-pc bk-max "$PUBLIC" "$PUBLIC" "put liefer.json videos/b.teil
-rename videos/b.teil \"videos/$N\""
+rename -l videos/b.teil \"videos/$N\""
 fall pc_marke max-pc bk-max "$PUBLIC" "$PUBLIC" "put liefer.json .clip-briefkasten"
 fall pc_marke_weg max-pc bk-max "$PUBLIC" "$PUBLIC" "rm .clip-briefkasten"
 fall pc_wurzel max-pc bk-max "$PUBLIC" "$PUBLIC" "ls -1 -a /

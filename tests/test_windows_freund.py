@@ -1,6 +1,6 @@
 """Mehrbenutzer, Stufe 2, Schritt 4: das PC-Programm der Freunde (windows/Freund-Hochladen.ps1, Freund-Einrichten.ps1)
 unter PowerShell 7 gegen die sftp-Attrappe (tests/sftp_attrappe.py, Upload-Profil wie der Briefkasten: put, reput,
-rename – nicht lesen, nicht löschen, kein Ziel überschreiben). Der Programmpfad steht in der freund.psd1 (Sftp), die
+rename -l – nicht lesen, nicht löschen, kein Ziel überschreiben). Der Programmpfad steht in der freund.psd1 (Sftp), die
 Uhr und „Fortnite läuft“ kommen über Testhaken: Get-Date und Get-Process werden vor dem Aufruf als globale Funktionen
 überschrieben (wie in test_windows_helfer). Echte Windows PowerShell 5.1 und Win32-sftp.exe laufen hier nicht – das
 prüft Florian einmal vor Ort mit -Probe; BOM und 5.1-Syntax prüft Stolperdraht51 (test_windows_helfer) für alle
@@ -11,7 +11,9 @@ Geprüft wird:
     umbenannt, dann der Lieferschein (Größe, SHA-256, Zeit vom PC); nach 45 min Testuhr genau eine Abend-Datei mit
     ende_utc = Ende des letzten Matches; lokal wird nichts gelöscht oder geändert.
   - Wichtigster Fehlerfall: Abbruch mitten im Upload – der nächste Lauf setzt per reput fort, die Datei kommt heil an,
-    nichts doppelt; dazu: noch offene oder zu junge Dateien werden nicht geladen (und ihr Replay wartet).
+    nichts doppelt; dazu: noch offene oder zu junge Dateien werden nicht geladen (und ihr Replay wartet); ein
+    Briefkasten mit OpenSSH vor 8.6 (bietet posix-rename an und verweigert es) nimmt trotzdem alles an, weil das
+    Programm mit rename -l umbenennt (M135).
   - Übersprungen (bleibt auf dem PC, steht im Status): Aufnahme ohne Replay, Name mit [ ], größer als das halbe Fach.
   - Drossel: läuft Fortnite, lädt sftp mit -l 2000; mit 0 gar nicht.
   - Autorisierung: Das Programm benutzt nur ls, df, put, reput, rename; die Attrappe verweigert dem PC-Schlüssel
@@ -232,6 +234,34 @@ class Fehlerfall(MitPc):
         self.assertEqual(lauf.returncode, 0, lauf.stdout + lauf.stderr)
         self.assertEqual(self.im_fach(), ["status/pc-status.json"])      # nichts geladen – auch das Replay nicht
         self.assertEqual({o["quelle"]: o["anzahl"] for o in self.status()["offen"]}, {"videos": 2, "replays": 1})
+
+    def test_briefkasten_vor_openssh_8_6_nimmt_trotzdem_alles_an(self):
+        # Befund B1 (M135): OpenSSH vor 8.6 bietet posix-rename trotz Erlaubnisliste an und verweigert es dann – mit
+        # rename ohne -l bliebe jede Datei als .teil liegen (Exit 1 in jedem Lauf), obwohl -Probe grün ist
+        self.datei(self.videos / VIDEO_A, os.urandom(50_000), 1300)
+        self.datei(self.demos / REPLAY, b"replay" * 100, 1000)
+        for vorher in ("", uhr_plus(50)):                                 # 50 min später: die Abend-Datei
+            lauf = self.lauf(vorher, SFTP_ATTRAPPE_ALT="1")
+            self.assertEqual(lauf.returncode, 0, lauf.stdout + lauf.stderr)
+        name = f"session_{MATCH}.json"
+        self.assertEqual(self.im_fach(), sorted([f"videos/{VIDEO_A}", f"videos/{VIDEO_A}.lieferschein", f"replays/{REPLAY}",
+                                                 f"replays/{REPLAY}.lieferschein", f"sitzungen/{name}",
+                                                 f"sitzungen/{name}.lieferschein", "status/pc-status.json"]))
+        umbenannt = [b for b in self.befehle() if b.split()[0] == "rename"]
+        self.assertEqual(len(umbenannt), 6)                               # je Datei und Lieferschein, alle mit -l
+        self.assertEqual([b for b in umbenannt if not b.startswith("rename -l ")], [])
+
+        # Gegenprobe: Ohne -l verweigert dieser Briefkasten das Umbenennen – so sah der Fehler aus
+        (self.tmp / "x").write_text("x")
+        stapel = self.tmp / "stapel"
+        stapel.write_text('put x "videos/x.teil"\nrename "videos/x.teil" "videos/x"\n')
+        r = subprocess.run([str(self.sftp), "-F", "none", "-b", str(stapel), "-P", "2222", "-o", "IdentitiesOnly=yes",
+                            "-o", f'IdentityFile="{self.install / "pc"}"', "-o", "StrictHostKeyChecking=yes",
+                            "bk-max@vserver.example.org"], capture_output=True, text=True, cwd=self.tmp,
+                           env={**os.environ, "SFTP_ATTRAPPE_WURZEL": str(self.vserver), "SFTP_ATTRAPPE_ALT": "1"})
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn('remote rename "/fach/videos/x.teil" to "/fach/videos/x": Permission denied', r.stderr)
+        self.assertTrue((self.fach / "videos" / "x.teil").is_file())
 
 
 @unittest.skipIf(PWSH is None, "pwsh fehlt")

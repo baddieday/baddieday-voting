@@ -620,7 +620,7 @@ class EchterSshd(unittest.TestCase):
                 {"name": name, "groesse": len(inhalt), "sha256": hashlib.sha256(inhalt).hexdigest(),
                  "mtime_ms": cls.pc_ms, "utc_offset_min": 120}), encoding="utf-8")
             for n in (name, f"{name}.lieferschein"):
-                batch += [f'put "{ordner}/{n}" "{ordner}/{n}.teil"', f'rename "{ordner}/{n}.teil" "{ordner}/{n}"']
+                batch += [f'put "{ordner}/{n}" "{ordner}/{n}.teil"', f'rename -l "{ordner}/{n}.teil" "{ordner}/{n}"']
         (w / "pc" / "status.json").write_text('{"version": "echt"}', encoding="utf-8")
         batch.append('put "status.json" "status/pc-status.json"')
         (w / "pc.batch").write_text("\n".join(batch) + "\n", encoding="utf-8")
