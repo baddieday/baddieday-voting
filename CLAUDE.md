@@ -644,3 +644,15 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Abend-Datei und Lieferschein ab, kam für den Abend nie ein Video (jetzt wird die Datei neu geschrieben); ein
     absichtlich verschachtelter Lieferschein blockierte das Abholen dieses Freundes für immer (jetzt ungültig, nach 3
     Versuchen aufgegeben). M136–M138.
+- 2026-10-09 (Stufe 3 Mehrbenutzer, „Hybrider Render-Manager“ – Plan aus zwei Entwürfen, vier Schritte): Der Mini
+  bleibt der einzige Rechner für dich und die Freunde – Stufe 3 misst zuerst, sichert gegen Ausfälle ab und gibt dir an
+  der Sperre Vorrang; ein zweiter Rechner oder die Cloud kommt erst nach einem Messbefund (Annahmen ab M139:
+  `docs/ENTSCHEIDUNGEN.md`, „Mehrbenutzer“).
+  - Schritt 1 (Laufzeiten messen): Jeder Rechenauftrag unter der Sperre schreibt danach eine Zeile in die eigene
+    Datenbank – wie lange er gewartet und gerechnet hat und ob er geklappt hat (beim Lern-Bot-Bau auch Stimmung, Schnitt
+    und Rendern einzeln); jedes gerenderte Video merkt sich Rechenzeit, ob die Grafikeinheit auf den Prozessor
+    zurückfiel und wie groß das Material war. `pipeline laufzeiten [--tage 7]` (Freund: `benutzer-befehl.sh <name>
+    laufzeiten`) fasst das zusammen: typische und längste Zeiten je Auftrag, Rendern je Grafikeinheit/Prozessor (ältere
+    Videos aus Dateizeiten), ✅ → Upload, Abend → Video und wie oft du ✅ tippst – nur lesen, weckt nie. Am Auftrag
+    ändert sich nichts: n8n-Vertrag, Exit-Codes, JSON-Zeile und offene Transaktionen bleiben, ein Schreibfehler steht
+    nur im Log. M139–M142.

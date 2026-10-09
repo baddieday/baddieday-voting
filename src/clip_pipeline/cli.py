@@ -3,7 +3,8 @@
   prepare|analyze|decide|render --session ID     highlight --id ID --tage 14
   (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe],
    fail --session ID | --nachziehen [--tage 14], scan --verarbeiten [--max N] [--versuche N] für Freunde ohne n8n,
-   benutzer pruefen|einrichten|koppeln und briefkasten abholen|status nur in der Instanz eines Freundes)
+   benutzer pruefen|einrichten|koppeln und briefkasten abholen|status nur in der Instanz eines Freundes,
+   laufzeiten [--tage 7] – nur lesen: wie lange Rechenaufträge warten und rechnen)
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -20,9 +21,10 @@ from pathlib import Path
 
 from . import aufraeumen, bestand, big, caption, db, erfassung, highlight, lernen, material, replay, shorts, stimmung, verarbeitung
 from . import erwartung, merkmale, mikro  # Stufe 2 (Lernschleife): Merkmale, Mic-Schritt, Erwartung
+from . import laufzeiten  # Mehrbenutzer, Stufe 3: jede Rechen-Sperre schreibt eine Zeile „lauf“ (M139)
 from .konfig import KonfigFehler, SpeicherOffline, lade
 from .medien import MedienFehler
-from .sperre import Gesperrt, SperreFehler, pfad as sperre_pfad, sperre
+from .sperre import Gesperrt, SperreFehler
 from .vorbewertung import MERKMAL_NAMEN, MERKMALE, zahl
 from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
 
@@ -689,6 +691,13 @@ def _cmd_lernstand(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_laufzeiten(args, konfig, con) -> int:
+    """Mehrbenutzer, Stufe 3 (M139–M142): nur lesen – Zeilen „lauf“ der eigenen Datenbank und die Render-Sidecars im
+    Puffer. Keine Sperre, weckt nie; ein Freund: bash deploy/benutzer/benutzer-befehl.sh <name> laufzeiten."""
+    _json(laufzeiten.auswertung(con, tage=args.tage))
+    return 0
+
+
 def _cmd_benutzer(args, konfig, con) -> int:
     """Mehrbenutzer (Schritt 7/8): die Instanz eines Freundes prüfen (nur nachsehen), einrichten (Datenbank, Whisper,
     Musik, danach prüfen) bzw. mit Telegram koppeln (Einladungslink) – nur mit CLIP_INSTANZ, gestartet von
@@ -1032,6 +1041,11 @@ def baue_parser() -> argparse.ArgumentParser:
     s = unter.add_parser("lernstand", help="Was hat der Regisseur gelernt? (inkl. deiner Vorgaben)")
     s.set_defaults(fn=_cmd_lernstand, sperren=False)
 
+    s = unter.add_parser("laufzeiten", help="Wie lange Rechenaufträge auf die Sperre warten und rechnen: je Auftragsart, "
+                                            "Rendern je Encoder, ✅ → Upload, Abend → Video (nur lesen, weckt nie)")
+    s.add_argument("--tage", type=_ab_eins, default=7, help="die letzten N Tage (Standard 7)")
+    s.set_defaults(fn=_cmd_laufzeiten, sperren=False)   # nur lesen: keine Rechen-Sperre, nicht in WECKEN
+
     s = unter.add_parser("warum", help="Sieht alles gleich aus? Material, Wiederholung, Lernen der Moment-Formel")
     s.set_defaults(fn=_cmd_warum, sperren=False)
 
@@ -1106,6 +1120,14 @@ def _vorab_ablehnen(args, konfig) -> int | None:
     return None
 
 
+def _ziel(args) -> str | int | None:
+    """Was ein gesperrter Befehl bearbeitet – für die Zeile „lauf“: --session, --id, Entwurf oder Clip."""
+    for name in ("session", "id", "entwurf", "clip"):
+        if (wert := getattr(args, name, None)) is not None:
+            return wert
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = baue_parser().parse_args(argv)
@@ -1121,15 +1143,22 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.sperren:
             warten = float(konfig.wert("sperre.warten_s", 7200))
-            with sperre(sperre_pfad(konfig), warten_s=warten, melde=log.info):  # eine Sperre für den ganzen Mini (M1)
+            # Eine Sperre für den ganzen Mini (M1); danach eine Zeile „lauf“ in der eigenen Datenbank (Stufe 3, M139).
+            # schliesst_gleich: con wird unten geschlossen – eine offene Transaktion ginge so oder so verloren (M141)
+            with laufzeiten.lauf(konfig, args.befehl, ziel=_ziel(args), warten_s=warten, con=con,
+                                 match_id=getattr(args, "session", None), melde=log.info,
+                                 schliesst_gleich=True) as lauf:
                 if args.befehl in WECKEN:
                     konfig.pruefe_speicher(wecken=True)
                 if konfig.getrennt:
                     # Getrennter Betrieb: der Schritt arbeitet nur im Puffer. Ein Herzschlag im Lager hielte
                     # pve-big per NFS wach (Stolperfalle 11) – dort schlägt nur noch big.wach_halten.
-                    return args.fn(args, konfig, con)
-                with big.herzschlag(konfig, args.befehl):  # hält pve-big über clip-leerlauf wach
-                    return args.fn(args, konfig, con)
+                    code = args.fn(args, konfig, con)
+                else:
+                    with big.herzschlag(konfig, args.befehl):  # hält pve-big über clip-leerlauf wach
+                        code = args.fn(args, konfig, con)
+                lauf.exit_code(code)   # Exit ≠ 0 ohne Ausnahme: ergebnis „fehler“
+                return code
         return args.fn(args, konfig, con)
     # Jeder Fehler steht auch auf stderr – der n8n-Fehler-Alarm zeigt stderr an
     except SpeicherOffline as e:

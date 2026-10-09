@@ -7,7 +7,8 @@ Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sa
 anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl, eigener Claude-Zugang per /claude). Seite für
 Freunde: `docs/FREUNDE.md`. Stufe 2 („Freunde liefern selbst“, Annahmen ab M85): Schritt 1 Briefkasten auf dem
 vServer (`docs/BRIEFKASTEN.md`), Schritt 2 Abholen am Mini und Schritt 3 Abholen einschalten (unten) sind gebaut –
-eingeschaltet wird je Freund mit `benutzer-anlegen.sh`, Schritt „Briefkasten“.
+eingeschaltet wird je Freund mit `benutzer-anlegen.sh`, Schritt „Briefkasten“. Stufe 3 („Hybrider Render-Manager“,
+Annahmen ab M139): Schritt 1 Laufzeiten messen (unten) ist gebaut.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -94,7 +95,8 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
   Fehlt sie und lässt sie sich nicht anlegen: klarer Fehler (Exit 2), nie eine Ersatzsperre.
 - `/paket` im Clip-Bot rendert jetzt auch unter der Sperre (wartet nicht, sagt „gleich nochmal“).
 - Jeder gesperrte Schritt schreibt „Sperre gewartet x s, gehalten y s“ ins Log – so sieht man vor und nach dem ersten
-  Freund, wie lange Schritte aufeinander warten: `journalctl -u clip-lernbot | grep "Sperre gewartet"`.
+  Freund, wie lange Schritte aufeinander warten: `journalctl -u clip-lernbot | grep "Sperre gewartet"`. Seit Stufe 3
+  steht das zusätzlich in der Datenbank: `pipeline laufzeiten` (unten).
 
 ## Freund-Pipeline ohne n8n (umgesetzt, Schritt 3)
 - **`scan --verarbeiten --max 1 --versuche 3`** (Timer alle 5 min): je Lauf nur das älteste offene Match, so ist die
@@ -348,6 +350,20 @@ alte `puffer.py`). Annahmen M105, M131–M134.
   (`pipeline` darf ihre Konfig nicht lesen) – dann hilft nur `benutzer-pruefen.sh`.
 - **Beim Freund:** nichts – seine Instanz prüft nie die anderen.
 
+## Laufzeiten messen (Stufe 3, Schritt 1 – umgesetzt)
+Jeder Rechenauftrag unter der gemeinsamen Sperre schreibt danach eine Zeile in die **eigene** Datenbank (`ereignisse`,
+art `lauf`): was (der Befehl, z. B. `render` oder `sitzungen`, bzw. `lernbot-bau`, `lernbot-paket`,
+`lernbot-kalibrieren`, `ki-note`, `clipbot-short`, `benutzer-einrichten`), wie lange er gewartet und gerechnet hat und
+ob er ok, gesperrt oder mit Fehler endete; der Lern-Bot-Bau dazu Stimmung, Schnitt und Render. Das Render-Sidecar
+`<video>.render.json` bekommt Rechenzeit, Rückfall VA-API → CPU, Eingabe-Größe und Länge.
+- **Auswerten:** `pipeline laufzeiten [--tage 7]` – eine JSON-Zeile, nur lesen, keine Sperre, weckt nie: je Auftragsart
+  Median, p90 und Maximum von Warten und Rechnen, gesperrte und fehlerhafte Läufe; Rendern je Encoder in Sekunden je
+  Video-Sekunde (ältere Videos aus Dateizeiten); ✅ → Upload-Fassung; Abend → Video; Freigabe-Quote. Fehlt etwas, steht
+  dort null. Für einen Freund: `bash deploy/benutzer/benutzer-befehl.sh <name> laufzeiten`.
+- **Am Auftrag ändert sich nichts:** n8n-Vertrag, Exit-Codes, JSON-Zeile und offene Transaktionen bleiben; ein
+  Schreibfehler steht nur im Log. Leere Läufe (unter 1 s) schreiben nichts, „gesperrt“ nur, wer mindestens 60 s warten
+  darf. Annahmen M139–M142.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -377,6 +393,7 @@ Offen: freier Speicher auf dem vServer für den Briefkasten.
    Briefkasten (Schritt 1), Abholen am Mini (Schritt 2), Abholen einschalten (Schritt 3), PC-Programm und /pc
    (Schritt 4), Lager für Freunde (Schritt 5), Morgenprüfung kennt die Freunde (Schritt 6); Löschen im Briefkasten erst
    nach Florians Ja.
-3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.
+3. **Hybrider Render-Manager:** Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für
+   Rechen-Arbeiter. Gebaut: Laufzeiten messen (Schritt 1).
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

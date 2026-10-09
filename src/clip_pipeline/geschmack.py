@@ -254,9 +254,9 @@ def offen_fuer_ki(con: sqlite3.Connection, ohne: set[int] | frozenset = frozense
 def ki_nachtragen(konfig: Konfig, entwurf_id: int) -> float | None:
     """Misst (falls nötig) und lässt die KI den Entwurf blind benoten – eigene Verbindung (läuft in einem Thread),
     unter der Pipeline-Sperre (belegt: sperre.Gesperrt). Rückgabe: KI-Note oder None (Tageslimit, Claude-Fehler).
-    Freund ohne eigenen Claude-Zugang (M1): None, ohne zu messen – die KI ist bei ihm aus."""
-    from . import claude_aufruf, kritik
-    from .sperre import pfad as sperre_pfad, sperre
+    Freund ohne eigenen Claude-Zugang (M1): None, ohne zu messen – die KI ist bei ihm aus.
+    Laufzeit (Stufe 3): Zeile „ki-note“ nur für die Messung unter der Sperre; „gesperrt“ schreibt sie nie (5 s, M140)."""
+    from . import claude_aufruf, kritik, laufzeiten
 
     if not claude_aufruf.ki_moeglich(konfig):
         return None
@@ -266,7 +266,8 @@ def ki_nachtragen(konfig: Konfig, entwurf_id: int) -> float | None:
         daten = copy.deepcopy(k.daten)   # nie die geladene Konfig ändern
         daten.setdefault("regie", {}).setdefault("kritik", {})["ki"] = True   # einfacher Modus: KI nur hier, nach dem Senden
         k = Konfig(daten=daten, quelle=k.quelle)
-        with sperre(sperre_pfad(konfig), warten_s=5.0):   # belegt: Gesperrt, der Bot probiert später
+        # belegt: Gesperrt, der Bot probiert später
+        with laufzeiten.lauf(konfig, "ki-note", ziel=entwurf_id, warten_s=5.0, con=con):
             kritik.bewerte(con, k, entwurf_id, ki=False, lernen=False)       # Messung (ffmpeg) unter der Sperre
         return kritik.bewerte(con, k, entwurf_id).get("ki_score")          # Claude ohne Sperre: neue Fassung wartet nicht
     finally:

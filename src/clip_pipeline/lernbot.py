@@ -31,8 +31,8 @@ from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 
-from . import (autonom, big, db, einstellungen, entwurf, erwartung, geschmack, highlight, kriterien, kritik, lernen,
-               massstab, musik, regeln, regie, regie_lernen, stile, stimmung, szenen, viral)
+from . import (autonom, big, db, einstellungen, entwurf, erwartung, geschmack, highlight, kriterien, kritik, laufzeiten,
+               lernen, massstab, musik, regeln, regie, regie_lernen, stile, stimmung, szenen, viral)
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
 from .konfig import Konfig, SpeicherOffline
 from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
@@ -497,9 +497,9 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
     Vorgänger-Fassungen sind für sie frei und keine Wiederholung (szenen.ersetzt_kette, Parameter „ersetzt“).
     Abwechslung mit Ermüdung (08.10.): Reicht der Abend nicht, baut regie.erstelle (mischen) gemischt aus den letzten
     Tagen – neue Szenen zuerst, bekannte gebremst, nie eine aus deinen letzten Videos.
-    Fehler: regie.ZuWenigSzenen / regie.KeineNeuenSzenen, wenn es auch gemischt nicht reicht."""
-    from .sperre import pfad as sperre_pfad, sperre
-
+    Fehler: regie.ZuWenigSzenen / regie.KeineNeuenSzenen, wenn es auch gemischt nicht reicht.
+    Laufzeit (Stufe 3, M139): die Sperre über laufzeiten.lauf – eine Zeile „lernbot-bau“ mit den Phasen stimmung_s,
+    schnitt_s und render_s (Rendern + Kritik), ziel = Entwurf-Nummer."""
     konfig.pruefe_speicher(wecken=True)  # wirft SpeicherOffline mit Grund, wenn Wecken nicht erlaubt ist
     con = db.verbinde(konfig.datenbank)
     try:
@@ -516,9 +516,10 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
             nur_matches, quell_hinweis = einstellungen.quell_matches(con, konfig)
         # Rendern ist ein rechenintensiver Schritt: gleiche Sperre wie die Pipeline (nur einer gleichzeitig)
         t0 = time.monotonic()
-        with sperre(sperre_pfad(konfig), warten_s=float(konfig.wert("sperre.warten_s", 7200))), \
-                big.herzschlag(konfig, "lernbot"):
+        with laufzeiten.lauf(konfig, "lernbot-bau", warten_s=float(konfig.wert("sperre.warten_s", 7200)),
+                             con=con) as lauf, big.herzschlag(konfig, "lernbot"):
             t1 = time.monotonic()
+            lauf.daten["format"] = fmt
             nachgezogen = stimmung_nachziehen(con, konfig, nur_matches)
             try:  # 06.10.: deine Bewertungen bis eben lehren die Moment-Formel (lernen.entwurf_paare) – vor jedem Entwurf
                 version, gelernt_formel = lernen.aktualisiere(con, konfig)
@@ -526,6 +527,7 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
             except Exception:  # noqa: BLE001 – der Entwurf ist wichtiger; dann gelten die bisherigen Gewichte
                 log.exception("Moment-Formel nachlernen")
             t2 = time.monotonic()
+            lauf.daten["stimmung_s"] = round(t2 - t1, 1)
             variante = None
             if fmt in viral.KNOEPFE:   # 🔥 Viral (05.10.): Mischung wählt der Bot, Momente schätzt die KI ein
                 variante = viral.waehle_variante(con, konfig) if fmt == "viral" else fmt
@@ -559,11 +561,13 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
                 tipp = " Andere Auswahl: ⚙️ → 🎯 Clips." if einstellungen.experte(con, konfig) else ""
                 raise regie.RegieFehler(f"{fehler} – {quell_hinweis}.{tipp}") from fehler
             t3 = time.monotonic()
+            lauf.ziel, lauf.daten["schnitt_s"] = int(e["entwurf"]), round(t3 - t2, 1)
             entwurf.entwurf(con, konfig, e["entwurf"])
             try:  # Cutter-Kritik (30.09.): der Bot benotet sich selbst – ein Fehler kostet nie den Entwurf
                 kritik.bewerte(con, konfig, e["entwurf"])
             except Exception:
                 log.exception("Cutter-Kritik Entwurf #%s", e["entwurf"])
+            lauf.daten["render_s"] = round(time.monotonic() - t3, 1)
         # Wo die Wartezeit nach ✅ fertig bleibt (27.09.) – journalctl -u clip-lernbot | grep "gebaut in"
         log.info("Entwurf #%s gebaut in %.0f s: Sperre %.0f s · Stimmung %.0f s (%s Clips) · Schnitt %.0f s · Render %.0f s",
                  e["entwurf"], time.monotonic() - t0, t1 - t0, t2 - t1, nachgezogen["analysiert"], t3 - t2,

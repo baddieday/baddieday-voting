@@ -18,11 +18,11 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict, RetryAfter, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
 
-from .. import (auto_freigabe, caption, db, einstellungen, erwartung, highlight, lernbot_einstellungen, lernen,
-               merkmale, publikum, shorts, uebertragung)
+from .. import (auto_freigabe, caption, db, einstellungen, erwartung, highlight, laufzeiten, lernbot_einstellungen,
+               lernen, merkmale, publikum, shorts, uebertragung)
 from ..konfig import Konfig, SpeicherOffline
 from ..medien import MedienFehler
-from ..sperre import Gesperrt, pfad as sperre_pfad, sperre
+from ..sperre import Gesperrt
 from ..zeit import aus_iso, iso, jetzt
 from . import aktionen, texte
 
@@ -442,8 +442,10 @@ async def cmd_gewichte(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 def _rendere_short(konfig: Konfig, quelle, ziel, stimmen) -> None:
     """Short für /paket unter der Pipeline-Sperre rendern – wie jeder rechenintensive Schritt (eine Sperre für den
     ganzen Mini, M1). Ohne Warten: Rechnet gerade etwas anderes → Gesperrt. Der Clip-Bot arbeitet Nachrichten
-    nacheinander ab; ein langes Warten hielte jeden Klick auf."""
-    with sperre(sperre_pfad(konfig), warten_s=0):
+    nacheinander ab; ein langes Warten hielte jeden Klick auf.
+    Laufzeit (Stufe 3): Zeile „clipbot-short“ über eine eigene kurze Verbindung (die des Bots bleibt im Haupt-Thread);
+    „gesperrt“ schreibt sie nie (0 s, M140)."""
+    with laufzeiten.lauf(konfig, "clipbot-short", ziel=getattr(ziel, "name", str(ziel)), warten_s=0):
         shorts.rendere(quelle, ziel, konfig, stimmen=stimmen)
 
 

@@ -194,7 +194,7 @@ class Verdrahtung(unittest.TestCase):
             with mock.patch.dict(os.environ, umgebung), \
                     mock.patch("clip_pipeline.konfig.Konfig.getrennt", new_callable=mock.PropertyMock,
                                return_value=False), \
-                    mock.patch("clip_pipeline.cli.sperre") as sperre, \
+                    mock.patch("clip_pipeline.sperre.sperre") as sperre, \
                     contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
                 code = cli.main(list(argv))
             sperre.assert_not_called()

@@ -44,7 +44,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from . import claude_aufruf, db, sperre
+from . import claude_aufruf, db, laufzeiten, sperre
 from .konfig import (INSTANZ_MARKE, INSTANZ_NAME, INSTANZ_WARTEN_S, STANDARD_KONFIG, Konfig, KonfigFehler,
                      claude_verboten, liegt_in)
 from .zeit import iso, jetzt
@@ -247,7 +247,8 @@ def _whisper(konfig: Konfig) -> str:
 def _musik(con, konfig: Konfig) -> str:
     """Musik wie im einfachen Modus: die Genres aus einstellungen (DEINE_GENRES), bis MUSIK_ZIEL freie Titel – genau
     die Grenze, ab der musik.nachschub im Abend-Lauf (10–17 Uhr, höchstens einmal am Tag) von selbst nachlädt.
-    Laden und Messen unter der gemeinsamen Sperre (wie im Abend-Lauf); der Tages-Merker des Nachschubs bleibt frei."""
+    Laden und Messen unter der gemeinsamen Sperre (wie im Abend-Lauf); der Tages-Merker des Nachschubs bleibt frei.
+    Laufzeit (Stufe 3): Zeile „benutzer-einrichten“ über eine eigene kurze Verbindung, die nie eine Datenbank anlegt."""
     from . import einstellungen, musik  # musik braucht numpy
 
     k = einstellungen.anwenden(con, konfig)
@@ -259,8 +260,8 @@ def _musik(con, konfig: Konfig) -> str:
     if not genres or fehlen <= 0:
         return f"{sum(frei.values())} Songs der Genres schon da"
     try:
-        with sperre.sperre(sperre.pfad(k), warten_s=float(k.wert("sperre.warten_s", INSTANZ_WARTEN_S)),
-                           melde=log.info):
+        with laufzeiten.lauf(k, "benutzer-einrichten", warten_s=float(k.wert("sperre.warten_s", INSTANZ_WARTEN_S)),
+                             melde=log.info):
             neu = musik.ncs_genres_laden(con, k, sorted(genres, key=lambda g: frei[g]), anzahl=fehlen)
     except (sperre.Gesperrt, sperre.SperreFehler):
         return "später – gerade rechnet etwas anderes (die Musik kommt tagsüber von selbst)"
