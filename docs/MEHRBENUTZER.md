@@ -163,6 +163,7 @@ bash /root/freunde-volume.sh             # fragt vor jeder Änderung (j = ja); a
   nichts, es bleibt als `unusedN` in der CT-Konfig. Solange Dienste von Freunden laufen, weigert es sich. Ein neuer
   Lauf von `freunde-volume.sh` hängt genau dieses Volume wieder ein, statt ein leeres neues anzulegen.
 - **Größer machen** (nur wachsen, nichts geht verloren): `pct resize 102 mp2 150G` – vorher `lvs pve/data` ansehen.
+  Wird es knapp, sagt es dir die Morgenprüfung (unter 15 GB frei, Stufe 2, Schritt 6).
 - Geprüft (`tests/test_deploy_benutzer.py`, Attrappen wie beim Puffer): Probe ändert nichts, Pool-Grenze mit vollem
   Puffer, zweiter Lauf ohne Änderung, Rückweg hängt nur aus und sperrt bei laufenden Freunden, Wiedereinhängen.
 
@@ -334,6 +335,19 @@ weckt nie. Annahmen M98–M101, M107, M125–M130.
   Rundgang läuft sein Abgleich genau wie bisher. Neu sichtbar: der Ordner `freunde/` im Lager (auch über sein SMB
   `[clips]`) und an Tagen mit Freunden ein länger wacher pve-big (nur tagsüber).
 
+## Morgenprüfung kennt die Freunde (Stufe 2, Schritt 6 – umgesetzt)
+Florian bekommt Probleme der Freunde in seiner Morgenprüfung (11 Uhr, `puffer.py`, Thema „freunde“) – nur, wenn es das
+Freunde-Volume als eigenes Dateisystem gibt; sonst ist die Morgenprüfung Zeichen für Zeichen wie vorher (Test gegen die
+alte `puffer.py`). Annahmen M105, M131–M134.
+- **Platz:** nur `statvfs` auf `/var/lib/clip-benutzer`, nie ein Blick hinein. Warnung unter 15 GB, Alarm unter 5 GB
+  (`[puffer].freunde_warnung_frei_gb`/`freunde_alarm_frei_gb`) mit dem nächsten Schritt `pct resize 102 mp2 +50G`.
+- **Lager:** aus `/var/lib/clip-pipeline/lager-freunde.json`. Der Rundgang schreibt dort jetzt auch, wer Lager hat, seit
+  wann und wer stillgelegt ist (`mit_lager`). Je Freund mit Lager eine Zeile, wenn sein letzter Lauf nicht ging (einmal,
+  solange er höchstens 24 h alt ist; Exit 3/4 zählt nicht) oder er seit 8 Tagen nicht ins Lager kam; nächster Schritt
+  `benutzer-pruefen.sh <name>`. Ohne Rundgang-Datei weiß die Morgenprüfung nichts über die Lager der Freunde
+  (`pipeline` darf ihre Konfig nicht lesen) – dann hilft nur `benutzer-pruefen.sh`.
+- **Beim Freund:** nichts – seine Instanz prüft nie die anderen.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -361,7 +375,8 @@ Offen: freier Speicher auf dem vServer für den Briefkasten.
 2. **Freunde liefern selbst:** Briefkasten auf dem vServer + kleines Programm für den PC, Lager je Freund mit
    Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot. Gebaut:
    Briefkasten (Schritt 1), Abholen am Mini (Schritt 2), Abholen einschalten (Schritt 3), PC-Programm und /pc
-   (Schritt 4), Lager für Freunde (Schritt 5); Löschen im Briefkasten erst nach Florians Ja.
+   (Schritt 4), Lager für Freunde (Schritt 5), Morgenprüfung kennt die Freunde (Schritt 6); Löschen im Briefkasten erst
+   nach Florians Ja.
 3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

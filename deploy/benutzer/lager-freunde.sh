@@ -12,8 +12,10 @@
 #     freunde/<name> mit Marke anlegen, falls sie fehlen (nur auf deinem Lager-NFS, nie ein eigenes Dataset), dann
 #     clip-freund-lager@<name> – sein Abgleich in seiner Sandbox, höchstens 2 h.
 #   4 Am Ende: Marke gelöst, Herzschlag weg, Zusammenfassung /var/lib/clip-pipeline/lager-freunde.json (je Freund
-#     Start, Ende, Exit, zuletzt gut).
-# Im Lager wird nie etwas gelöscht (nur der eigene Herzschlag verschwindet wieder). Ohne Freund mit Lager: nichts.
+#     Start, Ende, Exit, zuletzt gut; dazu wer Lager hat, seit wann und wer stillgelegt ist – für deine
+#     Morgenprüfung, Thema „freunde“).
+# Im Lager wird nie etwas gelöscht (nur der eigene Herzschlag verschwindet wieder). Ohne Freund mit Lager: nichts –
+# nur eine schon vorhandene Zusammenfassung erfährt, dass keiner mehr Lager hat (sonst warnte die Morgenprüfung weiter).
 # Intern für benutzer-anlegen.sh (Schritt „Lager“):
 #   --nfs             Exit 0 = Lager eingehängt und pve-big wach, sonst 1 mit dem Grund
 #   --ordner <name>   freunde/<name> und seine Marke anlegen, falls sie fehlen (nur bei bestätigtem NFS)
@@ -90,6 +92,61 @@ ordner_anlegen() {
   fi
 }
 
+scan_an() { [ "$(systemctl is-active "clip-freund-scan@$1.timer" 2> /dev/null || true)" = active ]; }
+
+# Zusammenfassung für benutzer-pruefen.sh und deine Morgenprüfung (puffer.py). Argumente: Datei, Start, Ende, Ergebnis
+# (Start leer = den letzten Rundgang stehen lassen), Freunde mit Lager, davon stillgelegt (je durch Leerzeichen
+# getrennt), dann je Freund mit Lauf eine Zeile. Freunde ohne Lauf behalten ihren Eintrag. mit_lager: Name → seit wann
+# mit Lager und nicht stillgelegt (neu, Schalter wieder an oder wieder aktiv: dieser Rundgang), stillgelegt ja/nein.
+# Die Datei liegt in deinem Ordner (gehört pipeline): nie einem Link folgen.
+ERGEBNISSE=()   # je Freund: Name, Start, Ende, systemctl, Exit, Hinweis (Tab getrennt)
+ZUSAMMEN_PY="$(cat <<'PY'
+import json, os, sys
+pfad, start, ende, ergebnis, mit, still = sys.argv[1:7]
+
+def lies(name):
+    try:
+        with os.fdopen(os.open(name, os.O_RDONLY | os.O_NOFOLLOW), encoding="utf-8") as datei:
+            daten = json.load(datei)
+    except (OSError, ValueError):
+        return {}
+    return daten if isinstance(daten, dict) else {}
+
+alt = lies(pfad)
+freunde, alt_mit, lauf = ({**alt[k]} if isinstance(alt.get(k), dict) else {} for k in ("freunde", "mit_lager", "lauf"))
+
+def zahl(text):
+    return int(text) if text.lstrip("-").isdigit() else None
+
+for zeile in sys.argv[7:]:
+    name, s, e, rc, code, hinweis = (zeile.split("\t") + [""] * 6)[:6]
+    vorher = freunde.get(name) if isinstance(freunde.get(name), dict) else {}
+    ok = rc == "0" and code == "0"
+    freunde[name] = {"start": s, "ende": e, "rc": zahl(rc), "exit": zahl(code), "ok": ok,
+                     "zuletzt_ok": e if ok else vorher.get("zuletzt_ok"), "hinweis": hinweis or None}
+stillgelegt = set(still.split())
+mit_lager = {}
+for name in mit.split():
+    vorher = alt_mit.get(name) if isinstance(alt_mit.get(name), dict) else {}
+    ruht = name in stillgelegt
+    weiter = bool(vorher.get("seit")) and (ruht or vorher.get("stillgelegt") is not True)
+    mit_lager[name] = {"seit": vorher["seit"] if weiter else start, "stillgelegt": ruht}
+if start:
+    lauf = {"start": start, "ende": ende, "ergebnis": ergebnis}
+fd = os.open(pfad + ".neu", os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+with os.fdopen(fd, "w", encoding="utf-8") as datei:
+    json.dump({"lauf": lauf, "mit_lager": mit_lager, "freunde": freunde}, datei, ensure_ascii=False, indent=2)
+    datei.write("\n")
+PY
+)"
+zusammenfassung() {
+  local n still=()
+  for n in "${FREUNDE[@]}"; do scan_an "$n" || still+=("$n"); done
+  python3 -I -c "$ZUSAMMEN_PY" "$ZUSAMMENFASSUNG" "$LAUF_START" "$(jetzt)" "$ENDE" "${FREUNDE[*]}" "${still[*]}" \
+    "${ERGEBNISSE[@]}" \
+    && chown -h pipeline:pipeline "$ZUSAMMENFASSUNG.neu" && mv -fT "$ZUSAMMENFASSUNG.neu" "$ZUSAMMENFASSUNG"
+}
+
 [ "$(id -u)" = 0 ] || { echo "Bitte als root im CT ausführen."; exit 1; }
 case "$MODUS" in
   nfs)
@@ -122,12 +179,20 @@ for ordner in "$BENUTZER_DIR"/*; do
   fi
   FREUNDE+=("$n")
 done
-if [ "${#FREUNDE[@]}" = 0 ]; then log "Kein Freund mit Lager – nichts zu tun."; exit 0; fi
+if [ "${#FREUNDE[@]}" = 0 ]; then
+  # Hatte früher ein Freund Lager, steht er noch in der Zusammenfassung – sonst warnte deine Morgenprüfung weiter.
+  # Nur diese Liste wird geleert (der letzte Rundgang und die Läufe bleiben); keine Marke, kein Start.
+  if [ "$MODUS" = rundgang ] && [ -f "$ZUSAMMENFASSUNG" ]; then
+    LAUF_START=""
+    ENDE=""
+    zusammenfassung || log "⚠️  $ZUSAMMENFASSUNG ließ sich nicht schreiben"
+  fi
+  log "Kein Freund mit Lager – nichts zu tun."; exit 0
+fi
 if ! systemctl cat clip-freund-lager@.service > /dev/null 2>&1; then
   log "Die Vorlage clip-freund-lager@.service fehlt – erst das Update (alles-aktualisieren.sh). Nichts getan."; exit 0
 fi
 
-scan_an() { [ "$(systemctl is-active "clip-freund-scan@$1.timer" 2> /dev/null || true)" = active ]; }
 im_fenster() {
   local h
   h="$(TZ="$ZEITZONE" date +%H)"
@@ -176,36 +241,6 @@ herz_an() {
 herz_aus() {
   if [ -n "$HERZ_PID" ]; then kill "$HERZ_PID" 2> /dev/null || true; wait "$HERZ_PID" 2> /dev/null || true; HERZ_PID=""; fi
   if [ -n "$HERZ" ]; then t rm -f -- "$HERZ" 2> /dev/null || true; HERZ=""; fi
-}
-ERGEBNISSE=()   # je Freund: Name, Start, Ende, systemctl, Exit, Hinweis (Tab getrennt)
-ZUSAMMEN_PY="$(cat <<'PY'
-import json, sys
-pfad, start, ende, ergebnis = sys.argv[1:5]
-try:
-    with open(pfad, encoding="utf-8") as datei:
-        alt = json.load(datei)
-except (OSError, ValueError):
-    alt = {}
-freunde = alt.get("freunde") if isinstance(alt, dict) and isinstance(alt.get("freunde"), dict) else {}
-
-def zahl(text):
-    return int(text) if text.lstrip("-").isdigit() else None
-
-for zeile in sys.argv[5:]:
-    name, s, e, rc, code, hinweis = (zeile.split("\t") + [""] * 6)[:6]
-    vorher = freunde.get(name) if isinstance(freunde.get(name), dict) else {}
-    ok = rc == "0" and code == "0"
-    freunde[name] = {"start": s, "ende": e, "rc": zahl(rc), "exit": zahl(code), "ok": ok,
-                     "zuletzt_ok": e if ok else vorher.get("zuletzt_ok"), "hinweis": hinweis or None}
-with open(pfad + ".neu", "w", encoding="utf-8") as datei:
-    json.dump({"lauf": {"start": start, "ende": ende, "ergebnis": ergebnis}, "freunde": freunde}, datei,
-              ensure_ascii=False, indent=2)
-    datei.write("\n")
-PY
-)"
-zusammenfassung() {
-  python3 -I -c "$ZUSAMMEN_PY" "$ZUSAMMENFASSUNG" "$LAUF_START" "$(jetzt)" "$ENDE" "${ERGEBNISSE[@]}" \
-    && chown pipeline:pipeline "$ZUSAMMENFASSUNG.neu" && mv -f "$ZUSAMMENFASSUNG.neu" "$ZUSAMMENFASSUNG"
 }
 aufraeumen() {
   local rc=$?

@@ -8,6 +8,11 @@ Themen: lager · platz · lager_platz · pool · pc · samba. Je Thema und Tag h
 (Schlüssel puffer:<thema>:<Datum>), montags ein Lebenszeichen (puffer:woche:<JJJJ-Www>) – so heißt Stille eindeutig
 „alles in Ordnung“.
 Verschickt werden die Meldungen vom Clip-Bot, in der Ruhezeit ([telegram].leise_von/leise_bis) erst danach.
+
+Mehrbenutzer (Stufe 2, M131/M132): Bei Florian kommt das Thema freunde dazu – nur, wenn [puffer].freunde_volume ein
+eigenes Dateisystem ist (das Freunde-Volume). Gemessen wird dort nur der freie Platz (statvfs), hineingeschaut wird nie;
+dazu liest die Prüfung die Zusammenfassung des Lager-Rundgangs der Freunde (lager-freunde.json). Ohne Freunde-Volume
+gibt es das Thema nicht, die Ausgabe bleibt Zeichen für Zeichen wie vorher.
 """
 
 from __future__ import annotations
@@ -23,16 +28,20 @@ from pathlib import Path
 from typing import Callable
 
 from . import db, lager
-from .konfig import Konfig, KonfigFehler
+from .konfig import INSTANZ_NAME, Konfig, KonfigFehler
 from .zeit import aus_iso, jetzt, utc_zu_lokal
 
 log = logging.getLogger("pipeline")
 
 THEMEN = ("lager", "platz", "lager_platz", "pool", "pc", "samba")
+FREUNDE = "freunde"  # nur mit Freunde-Volume, hinter THEMEN (M131)
 POOL_ALT_H = 2       # ältere Pool-Datei: Host-Timer steht o. Ä. – still übergehen, kein Fehlalarm
 # Ältere pc-status.json (PC aus): schon geprüft – nicht jeden Morgen wiederholen. 26 statt 24 h: 2 h Spielraum
 # für den Timer. Ein Bericht kurz vor der Prüfung kommt so an höchstens zwei Morgen, aber nie gar nicht.
 PC_FRISCH_H = 26
+# Lager-Lauf eines Freundes mit Fehler: gemeldet, wenn er höchstens so alt ist – die Läufe enden meist zwischen 10 und
+# 11 Uhr, 26 h hieße dann fast immer zweimal. Was danach noch klemmt, meldet die Tage-Regel (freunde_lager_tage).
+FREUNDE_FEHLER_FRISCH_H = 24
 
 Befund = tuple[dict | None, str | None]  # (Stand fürs JSON, Meldungstext oder None = alles gut)
 
@@ -253,6 +262,153 @@ def _samba() -> Befund:
         "Nächster Schritt: im CT systemctl status smbd ansehen, dann systemctl restart smbd")
 
 
+# --- Thema freunde (Mehrbenutzer, Stufe 2) -------------------------------------------------------
+
+def _eingehaengt(pfad: Path) -> bool:
+    """Eigenes Dateisystem (Einhängepunkt: anderes Gerät als der Ordner darüber)? Nur stat() auf den Ordner und auf
+    „..“ – nie ein Blick hinein. Eigene Funktion, damit Tests sie ersetzen können (Temp-Ordner liegen auf einem
+    Dateisystem)."""
+    return os.path.ismount(pfad)
+
+
+def _freunde_volume(konfig: Konfig) -> Path | None:
+    """Das Freunde-Volume (deploy/pve-mini/freunde-volume.sh, im CT /var/lib/clip-benutzer) – nur bei Florian und nur,
+    wenn [puffer].freunde_volume ein eigenes Dateisystem ist. Sonst None: Das Thema freunde gibt es dann nicht."""
+    if konfig.instanz is not None:  # die Instanz eines Freundes prüft nie die anderen
+        return None
+    name = str(konfig.wert("puffer.freunde_volume", "") or "").strip()
+    if not name:
+        return None
+    pfad = Path(name)
+    return pfad if _eingehaengt(pfad) else None
+
+
+def _text(wert, laenge: int = 200) -> str:
+    """Text aus der Zusammenfassung (fremde Eingabe): nur druckbare Zeichen, gekürzt."""
+    return "".join(z for z in str(wert or "") if z.isprintable())[:laenge]
+
+
+def _zeitpunkt(wert) -> datetime | None:
+    if not isinstance(wert, str) or not wert:
+        return None
+    try:
+        return aus_iso(wert)
+    except ValueError:
+        return None
+
+
+def _freunde_platz(konfig: Konfig, volume: Path) -> tuple[dict, str | None]:
+    """Freier Platz auf dem Freunde-Volume – shutil.disk_usage ist statvfs, gelesen wird kein Ordner und keine Datei."""
+    platte = shutil.disk_usage(volume)
+    frei, gesamt = platte.free / 1e9, platte.total / 1e9
+    warnung = float(konfig.wert("puffer.freunde_warnung_frei_gb", 15))
+    alarm = float(konfig.wert("puffer.freunde_alarm_frei_gb", 5))
+    stand = {"frei_gb": round(frei, 1), "gesamt_gb": round(gesamt, 1), "warnung_gb": warnung, "alarm_gb": alarm}
+    platz = f"{frei:.1f} GB frei von {gesamt:.0f} GB"
+    if frei < alarm:
+        return stand, f"🚨 Speicher der Freunde fast voll: nur noch {platz} (Alarm unter {alarm:g} GB)."
+    if frei < warnung:
+        return stand, f"👥 Speicher der Freunde wird knapp: noch {platz} (Warnung unter {warnung:g} GB)."
+    return stand, None
+
+
+def _freunde_lager(konfig: Konfig, zeit: datetime) -> tuple[dict, list[str], list[str], str]:
+    """Lager der Freunde aus der Zusammenfassung des Rundgangs (lager-freunde.json, deploy/benutzer/lager-freunde.sh).
+    Je Freund mit Lager, der nicht stillgelegt ist, höchstens eine Zeile:
+    - sein letzter Lauf ging nicht und ist höchstens FREUNDE_FEHLER_FRISCH_H alt (Exit 3/4 = pve-big ging aus bzw. sein
+      Abgleich lief schon – das holt das nächste Mal nach, dafür gibt es keine Zeile), oder
+    - seit freunde_lager_tage kein guter Lauf. Bezug: der letzte gute Lauf bzw. seit wann er mit Lager dabei ist (das
+      jüngere von beiden – nach dem Einschalten oder Stilllegen zählt die Zeit neu). pve-big wird spätestens alle
+      7 Tage geweckt (sicherung_wecken_tage), 8 Tage heißt also: Da klemmt etwas.
+    Die Datei schreibt root; sie gilt trotzdem als fremde Eingabe: nur bekannte Felder, Namen nach dem Muster, Texte
+    gekürzt. Fehlt sie oder ist sie unlesbar: keine Zeile, nur ein Hinweis im Stand.
+    Liefert (Stand, Zeilen, Namen der Freunde mit Zeile, Zeile zum letzten Rundgang)."""
+    name = str(konfig.wert("puffer.freunde_lager_status", "") or "").strip()
+    if not name:
+        return {"hinweis": "[puffer].freunde_lager_status leer"}, [], [], ""
+    pfad = Path(name)
+    try:
+        daten = json.loads(pfad.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"hinweis": f"{pfad.name} fehlt – noch kein Rundgang (kein Freund mit Lager?)"}, [], [], ""
+    except (OSError, ValueError) as e:
+        log.warning("%s unlesbar: %s", pfad, e)
+        return {"hinweis": f"{pfad.name} unlesbar"}, [], [], ""
+    daten = daten if isinstance(daten, dict) else {}
+    mit_lager = daten.get("mit_lager")
+    if not isinstance(mit_lager, dict):
+        return {"hinweis": f"{pfad.name} ohne mit_lager – noch kein Rundgang mit Stufe 2, Schritt 6"}, [], [], ""
+    freunde = daten["freunde"] if isinstance(daten.get("freunde"), dict) else {}
+    lauf = daten["lauf"] if isinstance(daten.get("lauf"), dict) else {}
+    grenze = timedelta(days=float(konfig.wert("puffer.freunde_lager_tage", 8)))
+    frisch = timedelta(hours=FREUNDE_FEHLER_FRISCH_H)
+    zeilen: list[str] = []
+    namen: list[str] = []
+    aktiv: list[str] = []
+    for freund in sorted(n for n in mit_lager if isinstance(n, str) and INSTANZ_NAME.fullmatch(n)):
+        info = mit_lager[freund] if isinstance(mit_lager[freund], dict) else {}
+        if info.get("stillgelegt") is True:
+            continue
+        aktiv.append(freund)
+        seit = _zeitpunkt(info.get("seit"))
+        e = freunde.get(freund) if isinstance(freunde.get(freund), dict) else {}
+        ende = _zeitpunkt(e.get("ende"))
+        gut = _zeitpunkt(e.get("zuletzt_ok"))
+        gut_text = f"zuletzt gesichert am {_wann(konfig, e['zuletzt_ok'])}" if gut else "noch nie gesichert"
+        if (e.get("ok") is not True and e.get("exit") not in (3, 4) and ende is not None
+                and zeit - ende <= frisch and (seit is None or ende >= seit)):
+            code = e.get("exit")
+            gestartet = isinstance(code, int) and not isinstance(code, bool) and code != 0
+            wie = f"Exit {code}" if gestartet else "nicht gestartet"
+            hinweis = _text(e.get("hinweis")).rstrip(". ")
+            zeilen.append(f"🗄️ Lager von {freund}: letzter Lauf am {_wann(konfig, e['ende'])} ging nicht ({wie}, "
+                          f"{gut_text})" + (f" – {hinweis}" if hinweis else "") + ".")
+            namen.append(freund)
+            continue
+        bezug = max((t for t in (gut, seit) if t is not None), default=None)
+        if bezug is None or zeit - bezug <= grenze:
+            continue
+        tage = int((zeit - bezug).total_seconds() // 86400)
+        if gut and bezug == gut:
+            zeilen.append(f"🗄️ Lager von {freund}: seit {tage} Tagen nicht gesichert ({gut_text}).")
+        else:
+            zeilen.append(f"🗄️ Lager von {freund}: seit {tage} Tagen mit Lager dabei, aber seitdem nicht gesichert "
+                          f"({gut_text}).")
+        namen.append(freund)
+    stand = {"datei": str(pfad), "mit_lager": aktiv, "zeilen": len(zeilen)}
+    rundgang = ""
+    if _zeitpunkt(lauf.get("ende")):
+        stand["rundgang"] = {"ende": lauf["ende"], "ergebnis": _text(lauf.get("ergebnis"))}
+        rundgang = (f"Letzter Rundgang der Freunde am {_wann(konfig, lauf['ende'])}: "
+                    f"{_text(lauf.get('ergebnis')) or '?'}.")
+    return stand, zeilen, namen, rundgang
+
+
+def _freunde(konfig: Konfig, volume: Path, zeit: datetime) -> Befund:
+    """Thema freunde: Platz auf dem Freunde-Volume und das Lager der Freunde – eine Meldung für beides."""
+    platz_stand, platz_kopf = _freunde_platz(konfig, volume)
+    lager_stand, zeilen, namen, rundgang = _freunde_lager(konfig, zeit)
+    stand = {"volume": str(volume), **platz_stand, "lager": lager_stand}
+    if not platz_kopf and not zeilen:
+        return stand, None
+    koepfe, ruhig, schritte = [], [], []
+    if platz_kopf:
+        koepfe.append(platz_kopf)
+        ruhig.append("wird es zu knapp, holt der Mini nichts mehr ab – die Aufnahmen warten im Briefkasten und auf den "
+                     "PCs der Freunde, dein Puffer ist davon nicht betroffen")
+        schritte.append("auf pve-mini lvs pve/data ansehen und das Freunde-Volume vergrößern (nur wachsen), z. B. "
+                        f"pct resize 102 mp2 +50G (docs/MEHRBENUTZER.md); wer wie viel belegt: im CT du -sh {volume}/*")
+    if zeilen:
+        koepfe += zeilen + ([rundgang] if rundgang else [])
+        ruhig.append("ohne Lager bleiben ihre Aufnahmen im Puffer des Freundes, freigegeben wird dort nur, was geprüft "
+                     "im Lager liegt")
+        andere = f" (ebenso für {', '.join(namen[1:])})" if len(namen) > 1 else ""
+        schritte.append(f"im CT bash /opt/clip-pipeline/deploy/benutzer/benutzer-pruefen.sh {namen[0]}{andere} "
+                        f"(Abschnitt Lager), dann journalctl -u clip-freund-lager@{namen[0]} -n 50")
+    return stand, ("\n".join(koepfe) + "\nNichts verloren – " + "; ".join(ruhig) + ".\nNächster Schritt: "
+                   + "; ".join(schritte))
+
+
 # --- Status und Morgenprüfung ----------------------------------------------------------------
 
 def _getrennt(konfig: Konfig) -> None:
@@ -262,7 +418,8 @@ def _getrennt(konfig: Konfig) -> None:
 
 def status(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None) -> dict:
     """Alle Themen und was die Morgenprüfung melden würde (befunde). Schreibt nichts, weckt nie.
-    Ein Thema, das sich nicht prüfen lässt (Programmfehler), landet in fehler – die anderen laufen weiter."""
+    Ein Thema, das sich nicht prüfen lässt (Programmfehler), landet in fehler – die anderen laufen weiter.
+    freunde kommt nur mit Freunde-Volume dazu (als letztes Thema) – ohne bleibt alles wie vorher."""
     _getrennt(konfig)
     zeit = zeit or jetzt()
     pruefungen: dict[str, Callable[[], Befund]] = {
@@ -270,8 +427,13 @@ def status(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = None
         "lager_platz": lambda: _lager_platz(con, konfig), "pool": lambda: _pool(konfig, zeit),
         "pc": lambda: _pc(konfig, zeit), "samba": _samba,
     }
+    themen = THEMEN
+    volume = _freunde_volume(konfig)
+    if volume is not None:
+        pruefungen[FREUNDE] = lambda: _freunde(konfig, volume, zeit)
+        themen = THEMEN + (FREUNDE,)
     stand: dict = {"getrennt": True, "befunde": {}, "fehler": []}
-    for thema in THEMEN:
+    for thema in themen:
         try:
             stand[thema], text = pruefungen[thema]()
         except Exception as e:  # ein kaputtes Thema darf die anderen nicht verschlucken

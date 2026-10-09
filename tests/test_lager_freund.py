@@ -444,9 +444,58 @@ class Rundgang(unittest.TestCase):
         self.assertEqual((e["freunde"]["max"]["ok"], e["freunde"]["max"]["zuletzt_ok"]),
                          (True, e["freunde"]["max"]["ende"]))
         self.assertEqual(e["lauf"]["ergebnis"], "fertig")
+        seit = e["lauf"]["start"]   # für Florians Morgenprüfung: wer Lager hat (kaputt ohne Einhängepunkt nicht)
+        self.assertEqual(e["mit_lager"], {"eva": {"seit": seit, "stillgelegt": False},
+                                          "max": {"seit": seit, "stillgelegt": False},
+                                          "still": {"seit": seit, "stillgelegt": True}})
         self.assertIn("still: stillgelegt", r.stdout)
         self.assertIn("kaputt: Lager-Schalter an, aber", r.stdout)
         self.assertNotIn("ohne", r.stdout)
+
+    def test_mit_lager_fuer_die_morgenpruefung(self):
+        """Für Florians Morgenprüfung (puffer.py, M133): wer Lager hat, seit wann (bleibt, solange er dabei ist; neu,
+        wenn er nach dem Stilllegen wieder läuft) und wer stillgelegt ist – auch wenn pve-big schläft. Hat keiner mehr
+        Lager, wird nur diese Liste geleert. Die Zusammenfassung schreibt und liest root nie durch einen Link (M134)."""
+        alt_seit = "2026-09-01T10:00:00Z"
+        datei = self.florian / "lager-freunde.json"
+        datei.write_text(json.dumps({
+            "lauf": {"start": "x"}, "freunde": {"eva": {"ok": True}},
+            "mit_lager": {"eva": {"seit": alt_seit, "stillgelegt": False}, "max": {"seit": alt_seit, "stillgelegt": True},
+                          "still": {"seit": alt_seit, "stillgelegt": False}, "weg": {"seit": alt_seit}}}),
+            encoding="utf-8")
+        r = self.lauf()   # pve-big schläft
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        e = self.zusammenfassung()
+        self.assertEqual(e["mit_lager"], {"eva": {"seit": alt_seit, "stillgelegt": False},
+                                          "max": {"seit": e["lauf"]["start"], "stillgelegt": False},
+                                          "still": {"seit": alt_seit, "stillgelegt": True}})
+        self.assertEqual(e["freunde"], {"eva": {"ok": True}})
+        for name in ("eva", "max", "still", "kaputt"):   # keiner hat mehr Lager
+            shutil.rmtree(self.benutzer / name)
+        for name in ("aufrufe", "pipeline"):
+            (self.stub / name).unlink(missing_ok=True)
+        r = self.lauf()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        danach = self.zusammenfassung()
+        self.assertEqual((danach["mit_lager"], danach["lauf"], danach["freunde"]), ({}, e["lauf"], e["freunde"]))
+        self.assertNotIn("systemctl", self.lies("aufrufe"))
+        self.assertEqual(self.lies("pipeline"), "")                         # keine Marke
+        # Links (pipeline gehört der Ordner): durch .neu wird nie geschrieben, aus einem Link nie gelesen
+        fremd = self.t / "fremd.json"
+        fremd.write_text('{"freunde": {"geheim": {"ok": true}}}\n', encoding="utf-8")
+        neu = self.florian / "lager-freunde.json.neu"
+        neu.symlink_to(fremd)
+        r = self.lauf()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ließ sich nicht schreiben", r.stdout)
+        neu.unlink()
+        datei.unlink()
+        datei.symlink_to(fremd)
+        r = self.lauf()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(datei.is_symlink())
+        self.assertEqual(json.loads(datei.read_text(encoding="utf-8")), {"lauf": {}, "mit_lager": {}, "freunde": {}})
+        self.assertEqual(fremd.read_text(encoding="utf-8"), '{"freunde": {"geheim": {"ok": true}}}\n')
 
     def test_nach_18_uhr_kein_start(self):
         self.wach()

@@ -86,6 +86,14 @@ pool_alarm_prozent = 90
 lager_spaetestens_h = 36       # offene Dateien, aber seit so vielen Stunden kein erfolgreicher Abgleich → Meldung
 pc_status_datei = "sitzungen/pc-status.json"   # schreibt der Gaming-PC (Uebertragung.ps1)
 pc_stau_h = 24                 # älteste nicht übertragene Datei auf dem PC älter → Meldung
+# Mehrbenutzer (Stufe 2, M131/M132): Thema „freunde“ – nur, wenn freunde_volume ein eigenes Dateisystem ist (das
+# Freunde-Volume, deploy/pve-mini/freunde-volume.sh); sonst gibt es das Thema nicht. Gemessen wird nur der freie Platz,
+# hineingeschaut wird nie. Dazu die Zusammenfassung des Lager-Rundgangs der Freunde (deploy/benutzer/lager-freunde.sh).
+freunde_volume = "/var/lib/clip-benutzer"
+freunde_warnung_frei_gb = 15   # weniger frei → Meldung (die Abhol-Bremse lässt max(10 GB, 10 %) frei)
+freunde_alarm_frei_gb = 5
+freunde_lager_status = "/var/lib/clip-pipeline/lager-freunde.json"
+freunde_lager_tage = 8         # Freund mit Lager so lange ohne guten Lauf → Zeile (pve-big wacht spätestens alle 7 Tage)
 
 [material]
 # Lokale Kopie auf dem Mini (pipeline material): gleiche Ordner wie in der Speicher-Wurzel.

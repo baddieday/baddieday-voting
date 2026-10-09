@@ -630,3 +630,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     nichts gelöscht. Einschalten je Freund: `benutzer-anlegen.sh`, Schritt „Lager“ (nur bei wachem pve-big, mit Probe
     der Bindung; rot = Schalter wieder aus). Dein Lager-Code bleibt Zeichen für Zeichen gleich. M98–M101, M107,
     M125–M130.
+  - Schritt 6 (Morgenprüfung kennt die Freunde): Gibt es das Freunde-Volume, meldet deine Morgenprüfung im Thema
+    „freunde“, wenn dort weniger als 15 GB frei sind (Alarm unter 5 GB, nächster Schritt `pct resize`), und je Freund mit
+    Lager eine Zeile, wenn sein letzter Lager-Lauf nicht ging oder er seit 8 Tagen nicht ins Lager kam (nächster Schritt
+    `benutzer-pruefen.sh <name>`). Hineingeschaut wird nie, nur der freie Platz gemessen. Ohne Freunde-Volume ist die
+    Morgenprüfung Zeichen für Zeichen wie vorher. M105, M131–M134.
