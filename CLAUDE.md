@@ -611,3 +611,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Namen nie angefasst; Videos vor Replays, die Abend-Datei erst, wenn seine Matches fertig sind. Keine Rechen-Sperre,
     weckt nie, löscht im Briefkasten nichts. Mit Briefkasten erkennt sein Mini den Abend nicht selbst
     (`[sitzungen].auto_abend`, bei dir weiter an). M89–M93, M96, M103.
+  - Schritt 3 (Abholen einschalten): `benutzer-anlegen.sh <name>` hat den Schritt „Briefkasten“ (j/N) – einmal die
+    Adressen des vServers, zwei eigene Schlüssel für ihn (der private nie auf dem Bildschirm), Hostschlüssel über das
+    Tailnet, eine Zeile für den vServer, dann eine Probe-Abholung in seiner Sandbox; erst wenn die grün ist, holt
+    `clip-freund-abholen@` alle 2 min ab. Rot: nur das Abholen bleibt aus, ein neuer Lauf setzt fort. Prüfen und
+    Stilllegen kennen das Abholen; das Update legt die Vorlage nur hin. M95, M104, M108–M116.

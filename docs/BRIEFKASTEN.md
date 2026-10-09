@@ -43,10 +43,22 @@ Bricht es ab (Container ohne Loop-Geräte, Tailscale im Userspace-Modus, Port be
 verändert – bitte melden.
 
 ## Je Freund
-Die fertige Zeile zeigt dir `benutzer-anlegen.sh` im CT (kommt mit dem nächsten Schritt):
-```
-bash /root/briefkasten/briefkasten-freund.sh max --pc '<Schlüssel>' --abholen '<Schlüssel>'   [--groesse 20]
-```
+Im CT als root `bash /opt/clip-pipeline/deploy/benutzer/benutzer-anlegen.sh max` (erst mit `--probe`), Schritt 9
+„Briefkasten“ mit j:
+1. Beim ersten Freund fragt es einmal die Tailnet-Adresse des vServers (dort `tailscale ip -4`), seinen öffentlichen
+   Namen (dahin laden die PCs) und den Port (Enter = 2222). Gemerkt in `/etc/clip-briefkasten.conf`, sobald der
+   Briefkasten antwortet.
+2. Es legt zwei Schlüssel für ihn an (`/var/lib/clip-benutzer/max/briefkasten`, der private Teil erscheint nie), holt
+   den Hostschlüssel über das Tailnet und zeigt dessen Fingerabdruck – vergleiche ihn mit „Hostschlüssel:“ am Ende des
+   Einrichtens.
+3. Es zeigt dir **eine Zeile** – auf dem vServer als root ausführen (dort j), dann im CT Enter:
+   ```
+   bash /root/briefkasten/briefkasten-freund.sh max --pc '<Schlüssel>' --abholen '<Schlüssel>'   [--groesse 20]
+   ```
+4. Probe-Abholung in seiner Sandbox. Erst wenn sie grün ist, geht das Abholen an (alle 2 min). Ist sie rot, nennt es
+   den Grund; danach nochmal dasselbe Skript – Schlüssel und Eintrag bleiben, nur Enter und die Probe.
+
+Auf dem vServer gilt für die Zeile:
 - **Größe:** Standard 20 GB, mindestens 8 GB. Das System behält immer 15 % und mindestens 10 GB frei (n8n); passt es
   nicht, nennt das Skript die größte Größe, die geht.
 - **Vergrößern:** `… max --groesse 40` (nur wachsen; das Fach ist dabei kurz ausgehängt, ein Upload setzt später fort).
@@ -59,17 +71,28 @@ eingehängt, Marke, belegt, Dateien, gesperrt, Schlüssel. Derselbe Schlüssel b
 „Alles in Ordnung.“ = Exit 0.
 
 ## Abnahme von Hand (ohne PC-Programm)
-1. Im CT clips als root zwei Test-Schlüssel: `ssh-keygen -t ed25519 -N '' -f /root/bk-test-pc` und
-   `ssh-keygen -t ed25519 -N '' -f /root/bk-test-mini`.
-2. Auf dem vServer: `bash briefkasten-freund.sh test --groesse 8 --pc '<Inhalt von bk-test-pc.pub>' --abholen '<Inhalt von bk-test-mini.pub>'`.
-3. **Hochladen wie ein PC** (über die öffentliche Adresse; beim ersten Mal den Fingerabdruck mit „Hostschlüssel: …“ aus
-   dem Einrichten vergleichen): `sftp -P 2222 -i /root/bk-test-pc bk-test@<öffentliche Adresse>`, dann
-   `put a.mp4 videos/a.mp4.teil`, `rename videos/a.mp4.teil videos/a.mp4`, `ls -1 videos`, `df`.
-   Erwartet: `get videos/a.mp4 x` und `rm videos/a.mp4` → „Permission denied“.
-4. **Abholen wie der Mini** (über das Tailnet): `sftp -P 2222 -i /root/bk-test-mini bk-test@<Tailnet-IP des vServers>`,
-   dann `get videos/a.mp4 /tmp/a.mp4` und `sha256sum` vergleichen. Erwartet: `put` und `rm` → „Permission denied“.
-5. Erwartet abgewiesen: der Mini-Schlüssel über die öffentliche Adresse, der PC-Schlüssel über das Tailnet.
-6. Danach `bash briefkasten-freund.sh test --sperren` (das Fach bleibt; wegräumen nur von Hand, wenn du willst).
+Mit einem Test-Freund `test` (eigener Test-Bot), angelegt mit `benutzer-anlegen.sh test` samt Schritt „Briefkasten“
+(grüne Probe). Du spielst seinen PC – im CT als root, mit Kopien deiner Aufnahmen eines Abends:
+1. Seinen PC-Schlüssel für dich kopieren (als root nimmt ssh ihn nur mit 0600):
+   `install -m 600 /var/lib/clip-benutzer/test/briefkasten/pc /root/bk-test-pc`.
+2. In einem leeren Ordner mit Kopien: Aufnahmen (`*.mp4` mit Nvidia- oder SteelSeries-Namen), das Replay
+   (`UnsavedReplay-*.replay`) und eine Abend-Datei `session_<ID>.json` mit
+   `{"session": "<ID>", "matches": ["<ID>"], "ende_utc": "2026-10-09T20:45:00Z"}` – die ID ist Datum und Uhrzeit aus
+   dem Replay-Namen (`UnsavedReplay-2026.10.08-20.15.33.replay` → `2026-10-08_20-15-33`). Zu jeder Datei ein
+   Lieferschein:
+   ```
+   for f in *.mp4 *.replay session_*.json; do printf '{"name": "%s", "groesse": %s, "sha256": "%s", "mtime_ms": %s, "utc_offset_min": 120}\n' "$f" "$(stat -c %s "$f")" "$(sha256sum "$f" | cut -d' ' -f1)" "$(stat -c %Y "$f")000" > "$f.lieferschein"; done
+   ```
+3. Hochladen wie sein PC (öffentliche Adresse; je Datei erst `.teil`, dann umbenennen, dann der Lieferschein):
+   `sftp -P 2222 -i /root/bk-test-pc -o UserKnownHostsFile=/var/lib/clip-benutzer/test/briefkasten/known_hosts_pc bk-test@<öffentlich>`,
+   dann z. B. `put a.mp4 videos/a.mp4.teil`, `rename videos/a.mp4.teil videos/a.mp4`,
+   `put a.mp4.lieferschein videos/a.mp4.lieferschein.teil`, `rename videos/a.mp4.lieferschein.teil videos/a.mp4.lieferschein`
+   – ebenso das Replay nach `replays/` und zuletzt die Abend-Datei nach `sitzungen/`.
+   Erwartet abgewiesen: `get videos/a.mp4 x`, `rm videos/a.mp4` („Permission denied“).
+4. Erwartet: Binnen 2 min holt der Mini ab (`journalctl -u clip-freund-abholen@test -n 20`), dann rechnet sein Match,
+   und das Abend-Video kommt **nur in seinem Bot**. Dein nächster n8n-Lauf läuft wie immer.
+5. Danach `bash briefkasten-freund.sh test --sperren` auf dem vServer und `bash …/benutzer-stilllegen.sh test` im CT
+   (Fach und Daten bleiben; die Kopie `/root/bk-test-pc` wegräumen, wenn du willst).
 
 ## Abschalten
 - Ganz: `bash /root/briefkasten/zurueck.sh` (= `systemctl disable --now briefkasten-sshd`). Gelöscht wird nichts.

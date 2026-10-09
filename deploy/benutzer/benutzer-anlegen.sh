@@ -6,10 +6,13 @@
 #   1 Prüfen: Name, Freunde-Volume, Code, deine Sperre · 2 Zugänge, verdeckt: Bot-Token, Epic-Konto-ID
 #   3 Benutzer, Ordner, Konfig · 4 deine Sperrdatei für alle lesbar · 5 Dienst-Vorlagen · 6 Vorab-Prüfung
 #   7 Einrichten in seiner Sandbox (Datenbank, Whisper-Modell, Musik) · 8 Telegram: Einladungslink, er drückt Start
-#   9 Einschalten · 10 Prüfung und Bot-Link
+#   9 Briefkasten (Stufe 2, j/N): Schlüssel, Hostschlüssel, Zeile für den vServer, Probe-Abholung in seiner Sandbox
+#   10 Einschalten (das Abholen nur nach grüner Probe) · 11 Prüfung und Bot-Link
 #   Zusatz (j/N): deine eigenen Rechte schärfen – nur chmod, nur was pipeline gehört, mit Rückweg-Skript
 # Wiederholbar: Fertiges wird übersprungen, gefragt wird nur, was fehlt. Gelöscht wird nichts. Zugänge stehen nur in
-# <Ordner>/.env (root:clip-<name>, 0640) – nie im Log, nie auf dem Bildschirm, nie auf einer Befehlszeile.
+# <Ordner>/.env (root:clip-<name>, 0640) – nie im Log, nie auf dem Bildschirm, nie auf einer Befehlszeile. Die
+# Schlüssel für den Briefkasten liegen nur in <Ordner>/briefkasten (root:clip-<name>); gezeigt werden nur die
+# öffentlichen.
 # Ausschalten (Daten bleiben): bash benutzer-stilllegen.sh <name>
 set -euo pipefail
 BENUTZER_DIR="${BENUTZER_DIR:-/var/lib/clip-benutzer}"
@@ -19,6 +22,7 @@ UNITS="${UNITS:-/etc/systemd/system}"
 PUFFER="${PUFFER:-/srv/puffer}"
 FLORIAN_DIR="${FLORIAN_DIR:-/var/lib/clip-pipeline}"
 RECHTE_ABLAGE="${RECHTE_ABLAGE:-/root/benutzer-rechte}"
+BK_CONF="${BK_CONF:-/etc/clip-briefkasten.conf}"   # Adressen des vServers – für alle Freunde gleich
 HIER="$(cd "$(dirname "$0")" && pwd)"
 ZEIT="$(date +%Y%m%d-%H%M%S)"
 NAME=""
@@ -40,7 +44,7 @@ sag() { printf '\n== %s\n' "$*"; }
 # Befehl so anzeigen, dass man ihn kopieren kann, und ausführen – im Probe-Modus nur anzeigen
 tu() {
   local a z=""
-  for a in "$@"; do case "$a" in *[!A-Za-z0-9_./:=,@%+-]*) z="$z '$a'" ;; *) z="$z $a" ;; esac; done
+  for a in "$@"; do case "$a" in ""|*[!A-Za-z0-9_./:=,@%+-]*) z="$z '$a'" ;; *) z="$z $a" ;; esac; done
   printf '   $%s\n' "$z"
   [ "$PROBE" = 1 ] || "$@"
 }
@@ -135,7 +139,7 @@ zeige_log() {
 [ ! -d /etc/pve ] || { echo "Das ist der Proxmox-Host – bitte im CT ausführen (pct enter 102)."; exit 1; }
 if [ "$PROBE" = 1 ]; then echo "PROBE: Ich zeige nur, was ich tun würde, und ändere nichts."; fi
 
-sag "1/10 Prüfen: Name, Freunde-Volume, Code, deine Sperre"
+sag "1/11 Prüfen: Name, Freunde-Volume, Code, deine Sperre"
 # Reserviert: Namen, die man mit deinen Diensten oder Ordnern verwechseln würde (clip-bot, clip-pipeline, …)
 RESERVIERT=" pipeline benutzer freund root admin "
 for d in "$PROD"/deploy/systemd/clip-*.service; do
@@ -148,10 +152,12 @@ esac
 getent passwd pipeline >/dev/null || abbruch "Benutzer pipeline fehlt – ist das der CT clips?"
 getent group render >/dev/null || abbruch "Gruppe render fehlt – ohne sie starten die Dienste nicht (Grafikchip). Bitte melden."
 [ -x "$PROD/.venv/bin/pipeline" ] || abbruch "$PROD/.venv/bin/pipeline fehlt – ist die Pipeline installiert?"
-for v in bot scan abend einrichten pruefen koppeln; do
+for v in bot scan abend einrichten pruefen koppeln abholen; do
   [ -f "$HIER/clip-freund-$v@.service" ] || abbruch "$HIER/clip-freund-$v@.service fehlt – bitte deploy/benutzer/ vollständig."
 done
-[ -f "$HIER/benutzer-pruefen.sh" ] || abbruch "$HIER/benutzer-pruefen.sh fehlt – bitte deploy/benutzer/ vollständig."
+for s in benutzer-pruefen.sh benutzer-befehl.sh; do
+  [ -f "$HIER/$s" ] || abbruch "$HIER/$s fehlt – bitte deploy/benutzer/ vollständig."
+done
 # Freunde-Volume: ein eigener Speicher – nicht die CT-Platte (deine Datenbank), nicht dein Puffer (M53)
 [ -d "$BENUTZER_DIR" ] && [ ! -L "$BENUTZER_DIR" ] \
   || abbruch "$BENUTZER_DIR fehlt – erst das Freunde-Volume: freunde-volume.sh auf pve-mini (docs/MEHRBENUTZER.md)."
@@ -210,7 +216,7 @@ if ! frage "Freund $NAME jetzt anlegen bzw. vervollständigen (Benutzer $U, Ordn
   echo "Abgebrochen – nichts verändert."; exit 1
 fi
 
-sag "2/10 Zugänge – verdeckt: nichts davon erscheint auf dem Bildschirm oder im Log"
+sag "2/11 Zugänge – verdeckt: nichts davon erscheint auf dem Bildschirm oder im Log"
 TOKEN=""
 EPIC=""
 if hat LEARN_BOT_TOKEN; then echo "Bot-Token: schon da – bleibt"
@@ -235,7 +241,7 @@ else
 fi
 # Seine Telegram-Zahl fragt das Skript nicht ab – die kommt in Schritt 8 über den Einladungslink
 
-sag "3/10 Benutzer $U (ohne Anmeldung), Ordner, Marken, Konfig"
+sag "3/11 Benutzer $U (ohne Anmeldung), Ordner, Marken, Konfig"
 if [ "$NEUER_BENUTZER" = 1 ]; then
   tu useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$U"
 fi
@@ -286,13 +292,13 @@ else
 fi
 setze "$I/instanz.toml" "root:$U" 640
 
-sag "4/10 Deine Sperrdatei: für alle lesbar – so wartet $NAME auf dich und du auf ihn"
+sag "4/11 Deine Sperrdatei: für alle lesbar – so wartet $NAME auf dich und du auf ihn"
 # Fehlt sie, lege ich sie als pipeline an – eine Instanz legt nie eine eigene an (M41)
 if [ ! -e "$SPERRE" ]; then tu runuser -u pipeline -- touch "$SPERRE"; fi
 if [ "$(stat -c %a "$SPERRE" 2>/dev/null || true)" = 644 ]; then echo "   $SPERRE: schon 0644"
 else tu chmod 644 "$SPERRE"; fi
 
-sag "5/10 Dienst-Vorlagen hinlegen (eingeschaltet wird in Schritt 9 nur $NAME)"
+sag "5/11 Dienst-Vorlagen hinlegen (eingeschaltet wird in Schritt 10 nur $NAME)"
 NEU=0
 for q in "$HIER"/clip-freund-*@.service "$HIER"/clip-freund-*@.timer; do
   [ -f "$q" ] || continue
@@ -303,13 +309,13 @@ for q in "$HIER"/clip-freund-*@.service "$HIER"/clip-freund-*@.timer; do
 done
 if [ "$NEU" = 1 ]; then tu systemctl daemon-reload; fi
 
-sag "6/10 Vorab-Prüfung (Rechte, Sperre, Zugänge) – bevor etwas eingeschaltet wird"
+sag "6/11 Vorab-Prüfung (Rechte, Sperre, Zugänge) – bevor etwas eingeschaltet wird"
 if [ "$PROBE" = 1 ]; then echo "   \$ bash $HIER/benutzer-pruefen.sh $NAME --vorab"
 elif ! bash "$HIER/benutzer-pruefen.sh" "$NAME" --vorab < /dev/null; then
   abbruch "die Vorab-Prüfung hat etwas gefunden (siehe ❌) – nichts eingeschaltet. Danach nochmal: bash $0 $NAME"
 fi
 
-sag "7/10 Einrichten in seiner Sandbox: Datenbank, Whisper-Modell (~480 MB), Musik – ein paar Minuten"
+sag "7/11 Einrichten in seiner Sandbox: Datenbank, Whisper-Modell (~480 MB), Musik – ein paar Minuten"
 EINRICHTEN="clip-freund-einrichten@$NAME.service"
 if [ "$PROBE" = 1 ]; then echo "   \$ systemctl start $EINRICHTEN"
 else
@@ -319,10 +325,10 @@ else
   [ "$RC" = 0 ] || abbruch "Einrichten oder die Prüfung in seiner Sandbox ging nicht (siehe oben) – nichts eingeschaltet. Log: journalctl -u $EINRICHTEN -n 50"
 fi
 
-sag "8/10 Telegram: Einladungslink – $NAME tippt ihn an und drückt Start (keine Telegram-Zahl suchen)"
+sag "8/11 Telegram: Einladungslink – $NAME tippt ihn an und drückt Start (keine Telegram-Zahl suchen)"
 # In seiner Sandbox wartet clip-freund-koppeln@ bis zu 15 min auf „/start <code>“ und schreibt seine Zahl nach
 # db/kopplung.json; hier wird sie gelesen und als LEARN_BOT_ALLOWED_USER_ID in seine .env eingetragen (die liest sein
-# Lern-Bot). Je Bot nur ein Empfänger: Ohne Zahl holt sein Bot nie Nachrichten ab, er geht erst in Schritt 9 an.
+# Lern-Bot). Je Bot nur ein Empfänger: Ohne Zahl holt sein Bot nie Nachrichten ab, er geht erst in Schritt 10 an.
 KOPPELN="clip-freund-koppeln@$NAME.service"
 BOT="clip-freund-bot@$NAME.service"
 # Einladung starten, dir den Link zeigen und warten, bis er Start drückt oder die Frist um ist. Strg+C beendet nur das
@@ -378,8 +384,264 @@ else
   fi
 fi
 
-sag "9/10 Einschalten – nur für $NAME"
+sag "9/11 Briefkasten auf dem vServer (Stufe 2): seine Aufnahmen kommen von selbst"
+# docs/BRIEFKASTEN.md. Der PC des Freundes lädt in sein Fach auf deinem vServer, clip-freund-abholen@ holt es alle 2 min
+# über das Tailnet in seinen Puffer. Die Adressen des vServers fragt das Skript einmal für alle Freunde ($BK_CONF, gelesen
+# per awk, nie ausgeführt). Schlüssel und Hostschlüssel liegen in I/briefkasten (Ordner root:clip-<name> 0750, Dateien
+# 0640): Er liest sie (sein Abholer, später das PC-Paket), tauschen kann er sie nicht. Scheitert etwas, bleibt nur das
+# Abholen aus – der Rest läuft weiter, der nächste Lauf setzt an derselben Stelle fort.
+OKTETT='(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])'
+TAILNET_RE="^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.$OKTETT\.$OKTETT$"
+OEFFENTLICH_RE='^[A-Za-z0-9.:-]{1,253}$'
+# Wie briefkasten-freund.sh auf dem vServer: nackter Ed25519-Schlüssel, Kommentar nur aus harmlosen Zeichen
+SCHLUESSEL_RE='^ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI[A-Za-z0-9+/]{43}( [A-Za-z0-9@._:+-]{1,64})?$'
+HOSTKEY_RE='^AAAAC3NzaC1lZDI1NTE5AAAAI[A-Za-z0-9+/]{43}$'
+BK="$I/briefkasten"
+BK_TIMER="clip-freund-abholen@$NAME.timer"
+BK_AN=0
+conf_wert() { [ -f "$BK_CONF" ] && awk -F= -v k="$1" '$1 == k {sub(/^[^=]*=/, ""); print; exit}' "$BK_CONF"; }
+adressen_ok() { [[ "$1" =~ $TAILNET_RE ]] && [[ "$2" =~ $OEFFENTLICH_RE ]] && [[ "$3" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$3" -le 65535 ]; }
+normal_oder_nichts() {   # root folgt keinem Link und legt nichts über einen fremden Eintrag
+  if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then abbruch "$1 ist keine normale Datei – ich ändere nichts, bitte melden."; fi
+}
+# [briefkasten] seiner instanz.toml: „fehlt“, „kaputt“ oder host<TAB>port<TAB>oeffentlich
+TOML_BK_PY="$(cat <<'PY'
+import sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as datei:
+        b = tomllib.load(datei).get("briefkasten")
+except (OSError, ValueError):
+    b = "kaputt"
+if b is None:
+    print("fehlt")
+elif not isinstance(b, dict):
+    print("kaputt")
+else:
+    print(f"{b.get('host', '')}\t{b.get('port', 2222)}\t{b.get('oeffentlich', '')}")
+PY
+)"
+# Bliebe die instanz.toml mit dem neuen Abschnitt lesbar? (Exit ≠ 0: nein – dann wird nichts angehängt)
+TOML_DAZU_PY='import sys, tomllib
+alt = open(sys.argv[1], encoding="utf-8").read()
+tomllib.loads(alt + ("\n" if alt and not alt.endswith("\n") else "") + sys.argv[2] + "\n")'
+# Ergebnis der Probe-Abholung (Exit-Code und letzte JSON-Zeile von pipeline) -> „ok<TAB>Text“ oder „fehler<TAB>Text“
+PROBE_PY="$(cat <<'PY'
+import json, sys
+rc, zeile = int(sys.argv[1]), sys.argv[2]
+try:
+    e = json.loads(zeile) if zeile else {}
+except ValueError:
+    e = {}
+e = e if isinstance(e, dict) else {}
+
+def sauber(text):
+    return "".join(z for z in str(text) if z.isprintable())[:300]
+
+fehler = e.get("fehler")
+fehler = [fehler] if isinstance(fehler, str) else fehler if isinstance(fehler, list) else []
+grund = sauber("; ".join(str(f) for f in fehler[:3]))
+if rc in (0, 1) and "abgeholt" in e and not e.get("unerreichbar"):
+    teile = ["Briefkasten erreicht"]
+    if type(e.get("fach_prozent")) is int:
+        teile.append(f"Fach zu {e['fach_prozent']} % voll")
+    teile.append(f"{e.get('abgeholt', 0)} Datei(en) abgeholt")
+    if rc == 1 and grund:
+        teile.append(f"einzelne Dateien beim nächsten Lauf ({grund})")
+    print("ok\t" + ", ".join(teile))
+elif e.get("aus"):
+    print("fehler\tkein [briefkasten] in seiner instanz.toml")
+elif rc == 4:
+    print("fehler\tein Abholen läuft gerade – gleich nochmal")
+else:
+    print("fehler\t" + (sauber(e.get("hinweis", "")) or grund or "ohne Ergebnis"))
+PY
+)"
+briefkasten() {
+  local ip oeff port rolle f p pub_abholen="<Schlüssel>" pub_pc="<Schlüssel>" kh="$BK/known_hosts"
+  local kh_pc="$BK/known_hosts_pc" kh_name kh_pc_name hostkey="" zeilen h typ k rest n soll toml_bk block ausgabe rc
+  local ergebnis bewertung
+  if systemctl is-enabled -q "$BK_TIMER" 2>/dev/null; then
+    echo "   Briefkasten: schon eingerichtet – das Abholen läuft (alle 2 min)"; BK_AN=1; return 0
+  fi
+  if ! frage "Briefkasten für $NAME einrichten? (Erst, wenn er auf dem vServer läuft – docs/BRIEFKASTEN.md)"; then
+    echo "   Briefkasten: nicht eingerichtet – seine Aufnahmen kommen weiter nur von Hand. Später: bash $0 $NAME"
+    return 0
+  fi
+  for p in ssh-keygen ssh-keyscan sftp; do
+    command -v "$p" > /dev/null 2>&1 || { echo "   ❌ $p fehlt im CT (Paket openssh-client) – Briefkasten nicht eingerichtet."; return 0; }
+  done
+
+  # 1 Adressen des vServers: einmal fragen, für alle Freunde merken – gemerkt erst, wenn der Briefkasten dort antwortet
+  #   (Teil 3 unten), so bleibt ein Tippfehler nicht hängen
+  if [ -f "$BK_CONF" ]; then
+    ip="$(conf_wert TAILNET_IP)"; oeff="$(conf_wert OEFFENTLICH)"; port="$(conf_wert PORT)"
+    adressen_ok "$ip" "$oeff" "$port" \
+      || { echo "   ❌ $BK_CONF ist unvollständig (TAILNET_IP, OEFFENTLICH, PORT) – bitte ansehen. Nichts geändert."; return 0; }
+    echo "   vServer: Tailnet $ip, öffentlich $oeff, Port $port (aus $BK_CONF)"
+  elif [ "$PROBE" = 1 ]; then
+    echo "   (Probe: würde einmal Tailnet-Adresse, öffentlichen Namen und Port des vServers fragen und in $BK_CONF merken)"
+    ip="<Tailnet-IP>"; oeff="<öffentlich>"; port=2222
+  else
+    echo "   Einmal für alle Freunde: die Adressen deines vServers (dort: tailscale ip -4 bzw. sein Name im Internet)."
+    read -r -p "   Tailnet-Adresse des vServers (100.x.y.z): " ip || true
+    read -r -p "   Öffentlicher Name oder öffentliche Adresse (dahin laden die PCs der Freunde): " oeff || true
+    read -r -p "   Port des Briefkastens [2222]: " port || true
+    port="${port:-2222}"
+    if ! adressen_ok "$ip" "$oeff" "$port"; then
+      echo "   ❌ Das passt nicht (Tailnet-Adresse 100.64.0.0/10, Name nur aus A-Z, 0-9, Punkt, Strich; Port 1–65535)."
+      echo "   Nichts gemerkt, Briefkasten nicht eingerichtet. Nochmal: bash $0 $NAME"
+      return 0
+    fi
+  fi
+
+  # 2 Zwei Schlüsselpaare: abholen (der Mini, nur lesen) und pc (sein PC, nur hochladen). Sie bleiben bei jedem weiteren
+  #   Lauf; der private Teil erscheint nie auf dem Bildschirm (das Skript liest ihn nicht einmal).
+  ordner "$BK" "root:$U" 750
+  for rolle in abholen pc; do
+    f="$BK/$rolle"
+    normal_oder_nichts "$f"
+    normal_oder_nichts "$f.pub"
+    if [ -f "$f" ]; then
+      echo "   $f: schon da – bleibt"
+      if [ ! -f "$f.pub" ]; then   # nur der öffentliche Teil fehlt (Abbruch mittendrin): aus dem privaten ableiten
+        tu chmod 600 "$f"          # als root liest ssh-keygen einen root-eigenen Schlüssel nur mit 0600 (gleich wieder 0640)
+        printf '   $ ssh-keygen -y -f %s > %s.pub\n' "$f" "$f"
+        if [ "$PROBE" != 1 ]; then
+          p="$(ssh-keygen -y -f "$f" 2> /dev/null)" || p=""
+          [[ "$p" =~ $SCHLUESSEL_RE ]] || abbruch "aus $f ließ sich der öffentliche Schlüssel nicht ableiten – bitte melden."
+          ( umask 077; printf '%s\n' "$p" > "$f.pub" )
+        fi
+      fi
+    else
+      tu ssh-keygen -q -t ed25519 -N '' -C "clip-$NAME-$rolle" -f "$f"
+    fi
+    setze "$f" "root:$U" 640
+    setze "$f.pub" "root:$U" 640
+  done
+  if [ -f "$BK/abholen.pub" ] && [ -f "$BK/pc.pub" ]; then
+    pub_abholen="$(head -n 1 "$BK/abholen.pub")"
+    pub_pc="$(head -n 1 "$BK/pc.pub")"
+    if ! [[ "$pub_abholen" =~ $SCHLUESSEL_RE ]] || ! [[ "$pub_pc" =~ $SCHLUESSEL_RE ]] \
+       || [ "$(cut -d' ' -f2 <<< "$pub_abholen")" = "$(cut -d' ' -f2 <<< "$pub_pc")" ]; then
+      echo "   ❌ Die Schlüssel in $BK passen nicht (zwei verschiedene Ed25519-Schlüssel nötig) – bitte melden."; return 0
+    fi
+  fi
+
+  # 3 Hostschlüssel über das Tailnet holen (dort antwortet nur der echte vServer – WireGuard) und pinnen. Für die PCs
+  #   derselbe Schlüssel unter dem öffentlichen Namen – nie übers Internet gefragt. Gepinnt wird einmal, nie still ersetzt.
+  if [ "$port" = 22 ]; then kh_name="$ip"; kh_pc_name="$oeff"; else kh_name="[$ip]:$port"; kh_pc_name="[$oeff]:$port"; fi
+  normal_oder_nichts "$kh"
+  normal_oder_nichts "$kh_pc"
+  if [ -f "$kh" ]; then
+    read -r h typ k rest < "$kh" || true
+    if [ "$h" = "$kh_name" ] && [ "$typ" = ssh-ed25519 ] && [[ "$k" =~ $HOSTKEY_RE ]] && [ -z "$rest" ] \
+       && [ "$(grep -c . "$kh")" = 1 ]; then
+      hostkey="$k"
+      echo "   $kh: schon da – bleibt (Hostschlüssel gepinnt)"
+    else
+      echo "   ❌ $kh passt nicht zu $kh_name (anderer vServer oder Port?). Ich ändere nichts – bitte melden."; return 0
+    fi
+  else
+    printf '   $ ssh-keyscan -T 10 -t ed25519 -p %s %s\n' "$port" "$ip"
+    if [ "$PROBE" = 1 ]; then echo "   (Probe: würde den Hostschlüssel nach $kh schreiben)"
+    else
+      zeilen="$(ssh-keyscan -T 10 -t ed25519 -p "$port" "$ip" 2> /dev/null || true)"
+      n=0
+      while read -r h typ k rest; do
+        if [ "$h" = "$kh_name" ] && [ "$typ" = ssh-ed25519 ] && [[ "$k" =~ $HOSTKEY_RE ]] && [ -z "$rest" ]; then
+          hostkey="$k"; n=$((n + 1))
+        fi
+      done <<< "$zeilen"
+      if [ "$n" != 1 ]; then
+        echo "   ❌ Der Briefkasten antwortet über das Tailnet nicht ($ip, Port $port). Läuft er auf dem vServer (dort:"
+        echo "      bash /root/briefkasten/briefkasten-pruefen.sh), und darf der CT dorthin (Tailnet-Regel, Port $port)?"
+        if [ -f "$BK_CONF" ]; then echo "      Die Adressen stehen in $BK_CONF (für alle Freunde) – ein Tippfehler? Dort ändern."
+        else echo "      Nichts gemerkt – beim nächsten Lauf fragt es die Adressen neu."; fi
+        echo "   Das Abholen bleibt aus. Danach nochmal: bash $0 $NAME"
+        return 0
+      fi
+      ( umask 077; printf '%s ssh-ed25519 %s\n' "$kh_name" "$hostkey" > "$kh" )
+      echo "   $kh geschrieben"
+    fi
+  fi
+  setze "$kh" "root:$U" 640
+  if [ "$PROBE" != 1 ] && [ ! -f "$BK_CONF" ]; then   # der Briefkasten antwortet: Adressen für alle Freunde merken
+    ( umask 022
+      { printf '# Briefkasten der Freunde auf dem vServer (docs/BRIEFKASTEN.md) – geschrieben von benutzer-anlegen.sh am %s.\n' \
+          "$(date +%d.%m.%Y)"
+        printf 'TAILNET_IP=%s\nOEFFENTLICH=%s\nPORT=%s\n' "$ip" "$oeff" "$port"; } > "$BK_CONF" )
+    echo "   $BK_CONF geschrieben (Adressen des vServers für alle Freunde)"
+  fi
+  if [ -n "$hostkey" ]; then
+    soll="$kh_pc_name ssh-ed25519 $hostkey"
+    if [ -f "$kh_pc" ] && [ "$(cat "$kh_pc")" = "$soll" ]; then echo "   $kh_pc: schon da"
+    else ( umask 077; printf '%s\n' "$soll" > "$kh_pc" ); echo "   $kh_pc geschrieben (derselbe Schlüssel unter $kh_pc_name)"; fi
+    echo "   Hostschlüssel des Briefkastens: $(ssh-keygen -l -f "$kh" 2> /dev/null | awk '{print $2}')"
+    echo "   (derselbe wie in der Zeile Hostschlüssel am Ende von briefkasten-einrichten.sh auf dem vServer?)"
+  else
+    echo "   (Probe: würde $kh_pc mit demselben Hostschlüssel unter $kh_pc_name schreiben)"
+  fi
+  setze "$kh_pc" "root:$U" 640
+
+  # 4 [briefkasten] in seine instanz.toml – nur anhängen (vorher geprüft), nie umschreiben. Danach erkennt sein Mini
+  #   den Abend nicht mehr selbst, die Abend-Datei kommt vom PC (M93).
+  if [ ! -f "$I/instanz.toml" ]; then
+    echo "   (Probe: würde [briefkasten] mit host = \"$ip\", port = $port, oeffentlich = \"$oeff\" an $I/instanz.toml anhängen)"
+  else
+    toml_bk="$(python3 -I -c "$TOML_BK_PY" "$I/instanz.toml" 2> /dev/null)" || toml_bk="kaputt"
+    if [ "$toml_bk" = fehlt ]; then
+      block="$(printf '\n[briefkasten]\n# Stufe 2: sein Briefkasten auf dem vServer – eingetragen von benutzer-anlegen.sh am %s\nhost = "%s"\nport = %s\noeffentlich = "%s"' \
+        "$(date +%d.%m.%Y)" "$ip" "$port" "$oeff")"
+      if [ "$PROBE" = 1 ]; then
+        echo "   (Probe: würde an $I/instanz.toml anhängen:)"
+        printf '%s\n' "$block" | sed 's/^/   | /'
+      elif python3 -I -c "$TOML_DAZU_PY" "$I/instanz.toml" "$block" 2> /dev/null; then
+        ( umask 077
+          if [ -n "$(tail -c 1 "$I/instanz.toml")" ]; then echo >> "$I/instanz.toml"; fi
+          printf '%s\n' "$block" >> "$I/instanz.toml" )
+        ENV_NEU=1   # sein Bot liest die Konfig nur beim Start
+        echo "   [briefkasten] an $I/instanz.toml angehängt"
+      else
+        echo "   ❌ $I/instanz.toml bliebe mit [briefkasten] nicht lesbar – nichts geändert, bitte melden."; return 0
+      fi
+    elif [ "$toml_bk" = "$ip"$'\t'"$port"$'\t'"$oeff" ]; then
+      echo "   $I/instanz.toml: [briefkasten] schon da – bleibt"
+    else
+      echo "   ❌ [briefkasten] in $I/instanz.toml weicht von $BK_CONF ab – ich ändere nichts, bitte melden."; return 0
+    fi
+  fi
+
+  # 5 Die eine Zeile für den vServer (nur die öffentlichen Schlüssel)
+  printf '\n   👉 Auf dem vServer als root ausführen – legt sein Fach und seinen Zugang an (fragt dort j/N):\n\n'
+  printf "      bash /root/briefkasten/briefkasten-freund.sh %s --pc '%s' --abholen '%s'\n\n" "$NAME" "$pub_pc" "$pub_abholen"
+  if [ "$PROBE" = 1 ]; then echo "   (Probe: würde warten, bis du hier Enter drückst)"
+  else read -r -p "   Enter, wenn die Zeile auf dem vServer gelaufen ist (bei einem neuen Versuch reicht Enter) … " _ || true; fi
+
+  # 6 Probe-Abholung: ein echter Lauf in seiner Sandbox (wie benutzer-befehl.sh). Erst wenn sie grün ist, geht in Schritt
+  #   10 der Timer an.
+  printf '   $ bash %s %s briefkasten abholen\n' "$HIER/benutzer-befehl.sh" "$NAME"
+  if [ "$PROBE" = 1 ]; then echo "   (Probe: das Abholen geht erst nach einer grünen Probe-Abholung an)"; BK_AN=1; return 0; fi
+  echo "   Probe-Abholung läuft … (holt auch, was schon wartet – dann dauert es länger)"
+  if ausgabe="$(bash "$HIER/benutzer-befehl.sh" "$NAME" briefkasten abholen < /dev/null 2>&1)"; then rc=0; else rc=$?; fi
+  printf '%s\n' "$ausgabe" | grep -v '^{' | tail -n 12 | sed 's/^/   | /' || true
+  ergebnis="$(printf '%s\n' "$ausgabe" | grep '^{' | tail -n 1 || true)"
+  bewertung="$(python3 -I -c "$PROBE_PY" "$rc" "$ergebnis" 2> /dev/null)" || bewertung=$'fehler\tErgebnis unlesbar'
+  if [ "${bewertung%%$'\t'*}" = ok ]; then
+    echo "   ✅ Probe-Abholung: ${bewertung#*$'\t'}"
+    BK_AN=1
+  else
+    echo "   ❌ Probe-Abholung: ${bewertung#*$'\t'} (Exit $rc)"
+    echo "      Häufig: Die Zeile lief auf dem vServer noch nicht (oder ohne j) · die Tailnet-Regel lässt den CT nicht auf"
+    echo "      Port $port · auf dem vServer steht eine andere Mini-IP (briefkasten-einrichten.sh --mini-ip; hier im CT:"
+    echo "      tailscale ip -4) · sein Fach ist nicht eingehängt (dort: bash /root/briefkasten/briefkasten-pruefen.sh $NAME)."
+    echo "   Das Abholen bleibt aus. Danach nochmal: bash $0 $NAME – Schlüssel und Eintrag bleiben, nur Enter und die Probe."
+  fi
+}
+briefkasten
+
+sag "10/11 Einschalten – nur für $NAME"
 AN=("clip-freund-scan@$NAME.timer" "clip-freund-abend@$NAME.timer")
+if [ "$BK_AN" = 1 ]; then AN+=("$BK_TIMER"); fi
 if verbunden; then AN+=("$BOT")
 elif [ "$PROBE" = 1 ]; then echo "   (Probe: $BOT kommt dazu, sobald $NAME mit Telegram verbunden ist)"
 else echo "   $BOT bleibt aus, bis $NAME mit Telegram verbunden ist (dann nochmal: bash $0 $NAME)"; fi
@@ -388,11 +650,11 @@ for e in "${AN[@]}"; do
   if systemctl is-enabled -q "$e" 2>/dev/null; then echo "   $e: schon an"
   else tu systemctl enable --now "$e"; [ "$e" != "$BOT" ] || BOT_AN=1; fi
 done
-# Neue Zugänge bei eingeschaltetem Bot: neu starten – er liest seine .env nur beim Start (startet auch einen, den
-# Schritt 8 angehalten hat)
+# Neue Zugänge oder Konfig bei eingeschaltetem Bot: neu starten – er liest .env und instanz.toml nur beim Start
+# (startet auch einen, den Schritt 8 angehalten hat)
 if [ "$ENV_NEU" = 1 ] && [ "$BOT_AN" = 0 ] && systemctl is-enabled -q "$BOT" 2>/dev/null; then tu systemctl restart "$BOT"; fi
 
-sag "10/10 Prüfung: ist alles getrennt?"
+sag "11/11 Prüfung: ist alles getrennt?"
 if [ "$PROBE" = 1 ]; then echo "   \$ bash $HIER/benutzer-pruefen.sh $NAME"
 elif ! bash "$HIER/benutzer-pruefen.sh" "$NAME" < /dev/null; then
   echo "❌ Die Prüfung hat etwas gefunden (siehe oben). Bis es behoben ist, ausschalten (Daten bleiben):"
@@ -448,5 +710,7 @@ if verbunden; then echo "Für $NAME: docs/FREUNDE.md – sein Bot schreibt ihm a
 else echo "Für $NAME: docs/FREUNDE.md. Mit Telegram verbinden: nochmal bash $0 $NAME (neuer Einladungslink)."; fi
 echo "Prüfen:            bash $HIER/benutzer-pruefen.sh $NAME"
 echo "Log seines Bots:   journalctl -u $BOT -f"
+if [ "$BK_AN" = 1 ]; then echo "Log des Abholens:  journalctl -u clip-freund-abholen@$NAME -n 50"
+else echo "Briefkasten:       noch aus – einrichten mit nochmal bash $0 $NAME (Schritt 9, docs/BRIEFKASTEN.md)"; fi
 echo "Match nachholen:   bash $HIER/benutzer-befehl.sh $NAME process <ID>"
 echo "Ausschalten:       bash $HIER/benutzer-stilllegen.sh $NAME   (Daten bleiben)"

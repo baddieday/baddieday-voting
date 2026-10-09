@@ -1,0 +1,12 @@
+# Alle 2 Minuten: Briefkasten eines Freundes abholen (clip-freund-abholen@<name>.service, nur lesend über das Tailnet).
+# Arbeitet nur in seinem eigenen Ordner, weckt pve-big nie. Eingeschaltet nur über benutzer-anlegen.sh <name> (Schritt
+# „Briefkasten“, erst nach einer grünen Probe-Abholung).
+[Unit]
+Description=Clip-Pipeline: Briefkasten von %i alle 2 Minuten abholen (Freund)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

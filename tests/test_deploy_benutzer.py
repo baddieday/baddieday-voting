@@ -1,5 +1,6 @@
 """Mehrbenutzer, Stufe 1, Schritt 5–8: Dienst-Vorlagen je Freund mit Sandbox, das Update kennt Freunde, Speicher,
-Freund anlegen (mit Einladungslink) und prüfen.
+Freund anlegen (mit Einladungslink) und prüfen. Stufe 2, Schritt 3: Abholen aus dem Briefkasten einschalten (Vorlage
+clip-freund-abholen@ mit Timer, Schritt „Briefkasten“ im Anlege-Skript, Prüfen und Stilllegen kennen das Abholen).
 
 Fünf Teile:
 - Vorlagen (deploy/benutzer): derselbe Sandbox-Block in jeder Vorlage, eigener Benutzer, eigener Ordner, Florians
@@ -17,6 +18,9 @@ Fünf Teile:
   kommt über die Kopplung und der Bot erst danach an, ohne Kopplung bleibt nur der Bot aus, ein zweiter Lauf überspringt
   Fertiges, derselbe Bot-Token in zwei .env ist ein Befund, Stilllegen schaltet nur aus (auch eine laufende Einladung),
   ein Einzelbefehl läuft nur mit der Sandbox der Vorlage. Zugänge erscheinen nie in Ausgabe oder Aufrufen.
+  Briefkasten (echtes ssh-keygen, ssh-keyscan als Attrappe): Schlüssel nur einmal und nur 0640, der private nie in
+  Ausgabe oder Aufrufen, die Zeile für den vServer passt zu briefkasten-freund.sh, der Timer erst nach grüner
+  Probe-Abholung (rot: bleibt aus), derselbe Schlüssel bei zwei Freunden ist ein Befund.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ import tempfile
 import threading
 import tomllib
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from clip_pipeline import cli, konfig, sperre
@@ -82,8 +87,9 @@ def innen_teil() -> str:
 
 class Vorlagen(unittest.TestCase):
     def test_sandbox_in_jeder_vorlage_woertlich_gleich(self):
-        self.assertLessEqual({"clip-freund-bot", "clip-freund-scan", "clip-freund-abend"}, set(DIENSTE))
-        self.assertEqual(set(TIMER), {"clip-freund-scan", "clip-freund-abend"})
+        self.assertLessEqual({"clip-freund-bot", "clip-freund-scan", "clip-freund-abend", "clip-freund-abholen"},
+                             set(DIENSTE))
+        self.assertEqual(set(TIMER), {"clip-freund-scan", "clip-freund-abend", "clip-freund-abholen"})
         bloecke = {d.name: sandbox(d) for d in DIENSTE.values()}
         self.assertEqual(len(set(bloecke.values())), 1, "Sandbox-Block weicht ab")
         s = werte(next(iter(bloecke.values())))
@@ -177,12 +183,20 @@ class Vorlagen(unittest.TestCase):
                 self.assertEqual(s["Type"], ["oneshot"])
                 self.assertEqual(s["SuccessExitStatus"], ["3 4"])        # 4 = Sperre belegt: nächster Timer-Lauf
                 self.assertNotIn("WantedBy", s)                           # startet nur über seinen Timer
+        # Stufe 2: Abholen nur lesen, nie die Rechen-Sperre (M96); 3/4 kein Fehler, Platte im Leerlauf-Vorrang (M95)
+        abholen, s = befehle["clip-freund-abholen"], lies_unit(DIENSTE["clip-freund-abholen"])
+        self.assertEqual((abholen.fn, abholen.aktion), (cli._cmd_briefkasten, "abholen"))
+        self.assertFalse(abholen.sperren)
+        self.assertEqual((s["Type"], s["SuccessExitStatus"], s["IOSchedulingClass"], s["TimeoutStartSec"]),
+                         (["oneshot"], ["3 4"], ["idle"], ["2h"]))
+        self.assertNotIn("WantedBy", s)
         bot = lies_unit(DIENSTE["clip-freund-bot"])
         self.assertEqual((bot["Type"], bot["Restart"], bot["WantedBy"]),
                          (["simple"], ["always"], ["multi-user.target"]))
 
     def test_timer(self):
-        for name, abstand in (("clip-freund-scan", "5min"), ("clip-freund-abend", "10min")):
+        for name, abstand in (("clip-freund-scan", "5min"), ("clip-freund-abend", "10min"),
+                              ("clip-freund-abholen", "2min")):
             t = lies_unit(TIMER[name])
             with self.subTest(name):
                 self.assertEqual(t["OnUnitActiveSec"], [abstand])
@@ -884,7 +898,19 @@ PATH=/usr/bin:/bin exec stat "$@"''',
   cat) [ -f "$UNITS/$2" ] ;;
 esac''',
     "journalctl": '[ "$1" = --sync ] || cat "$STUB/journal" 2>/dev/null\ntrue',
-    "systemd-run": 'printf "%s\\n" "$@" > "$STUB/systemd-run.argumente"\nexit "${RUN_RC:-0}"',
+    # pipeline briefkasten abholen|status in seiner Sandbox: Log, JSON-Zeile und Exit-Code wie die echte Pipeline
+    "systemd-run": 'printf "%s\\n" "$@" > "$STUB/systemd-run.argumente"\n'
+                   'case "${*: -2}" in\n'
+                   '  "briefkasten abholen") printf "%s\\n" "Briefkasten: 0 abgeholt (Attrappe)" "$ABHOLEN_JSON"; '
+                   'exit "${ABHOLEN_RC:-0}" ;;\n'
+                   '  "briefkasten status") printf "%s\\n" "$STATUS_JSON"; exit 0 ;;\n'
+                   'esac\nexit "${RUN_RC:-0}"',
+    # Der Briefkasten antwortet über das Tailnet mit seinem Hostschlüssel (HOSTKEY leer: keine Antwort, wie ein toter Port)
+    "ssh-keyscan": r'''port=22; while [ $# -gt 1 ]; do [ "$1" = -p ] && port="$2"; shift; done
+[ -n "${HOSTKEY:-}" ] || exit 1
+echo "# $1:$port SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.19" >&2
+if [ "$port" = 22 ]; then echo "$1 ssh-ed25519 $HOSTKEY"; else echo "[$1]:$port ssh-ed25519 $HOSTKEY"; fi''',
+    "sftp": "exit 0",   # nur da muss es sein (der Abholer selbst läuft hier nicht)
     "sleep": "PATH=/usr/bin:/bin exec sleep 0.05",   # Warteschleifen im Test kurz
     # Löschen darf nie vorkommen – auch nicht aus Versehen
     "rm": "exit 1", "userdel": "exit 1", "groupdel": "exit 1",
@@ -934,7 +960,9 @@ class FreundAnlegen(unittest.TestCase):
         self.t = t = Path(os.path.realpath(self._tmp.name))
         self.stub = t / "stub"
         self.stub.mkdir()
-        stubs = {**FREUND_STUBS, "python3": f'exec {shlex.quote(shutil.which("python3"))} "$@"'}
+        keygen = shutil.which("ssh-keygen")   # echt: die Schlüssel haben so das Format, das der vServer annimmt
+        stubs = {**FREUND_STUBS, "python3": f'exec {shlex.quote(shutil.which("python3"))} "$@"',
+                 "ssh-keygen": f'exec {shlex.quote(keygen)} "$@"' if keygen else "exit 127"}
         for name, inhalt in stubs.items():
             datei = self.stub / name
             datei.write_text(f'#!/bin/bash\necho "{name} $*" >> "$STUB/aufrufe"\n{inhalt}\n', encoding="utf-8")
@@ -1000,17 +1028,46 @@ esac
                     "TESTORDNER": str(t), "BENUTZER_DIR": str(self.benutzer), "PROD": str(self.prod),
                     "REGIE": str(t / "opt/clip-regie"), "UNITS": str(self.units), "PUFFER": str(t / "srv/puffer"),
                     "FLORIAN_DIR": str(self.florian), "RECHTE_ABLAGE": str(t / "root/benutzer-rechte"),
-                    "TELEGRAM_API": f"http://127.0.0.1:{server.server_address[1]}", "KOPPEL_CODE": KOPPEL_CODE}
+                    "TELEGRAM_API": f"http://127.0.0.1:{server.server_address[1]}", "KOPPEL_CODE": KOPPEL_CODE,
+                    "BK_CONF": str(t / "etc/clip-briefkasten.conf"), "HOSTKEY": self.hostkey(),
+                    "ABHOLEN_JSON": json.dumps({"abgeholt": 0, "gb": 0.0, "wartet": 0, "fehler": [],
+                                                "fach_prozent": 1, "vermerkt": 0, "aufgegeben": 0, "bremse": False}),
+                    "STATUS_JSON": json.dumps({"aus": False, "host": "100.100.1.1", "abgeholt": 3, "offen": 0,
+                                               "zuletzt_erreicht": (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+                                               "fach_prozent": 1, "letzter_fehler": None, "pc_status": False})}
+
+    def hostkey(self) -> str:
+        """Hostschlüssel des Briefkastens (öffentlicher Teil, echt erzeugt) – die ssh-keyscan-Attrappe nennt ihn."""
+        if not shutil.which("ssh-keygen"):
+            return ""
+        datei = self.t / "hostkey"
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(datei)], check=True,
+                       capture_output=True)
+        return datei.with_suffix(".pub").read_text(encoding="utf-8").split()[1]
 
     def lauf(self, skript: Path, *argumente: str, eingabe: str = "", **umgebung: str) -> subprocess.CompletedProcess:
         return subprocess.run(["bash", str(self.hier / skript.name), *argumente], input=eingabe, capture_output=True,
                               text=True, env={**self.env, **umgebung}, timeout=120)
 
     def anlegen_max(self) -> subprocess.CompletedProcess:
-        """Ein Lauf, bei dem er den Einladungslink antippt (KOPPEL_ID) – Telegram-Zahl fragt das Skript nicht mehr ab."""
-        r = self.lauf(ANLEGEN, "max", eingabe=f"j\n{MAX_TOKEN}\n{EPIC}\nj\n", KOPPEL_ID=TG_ZAHL)
+        """Ein Lauf, bei dem er den Einladungslink antippt (KOPPEL_ID) – Telegram-Zahl fragt das Skript nicht mehr ab.
+        Den Briefkasten (Schritt 9) noch nicht: n."""
+        r = self.lauf(ANLEGEN, "max", eingabe=f"j\n{MAX_TOKEN}\n{EPIC}\nn\nj\n", KOPPEL_ID=TG_ZAHL)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
+
+    def briefkasten_max(self, **umgebung: str) -> subprocess.CompletedProcess:
+        """Max ist angelegt; jetzt der Schritt Briefkasten: j, einmal die Adressen des vServers (Port: Enter = 2222),
+        Enter nach der Zeile für den vServer."""
+        self.anlegen_max()
+        self.neu()
+        return self.lauf(ANLEGEN, "max", eingabe="j\nj\n100.100.1.1\nvserver.example.org\n\n\n", **umgebung)
+
+    def privat(self) -> list[str]:
+        """Die Zeilen der beiden privaten Schlüssel (ohne Kopf- und Fußzeile)."""
+        return [z for rolle in ("abholen", "pc")
+                for z in (self.inst / "briefkasten" / rolle).read_text(encoding="utf-8").splitlines()
+                if z and not z.startswith("-----")]
 
     def aufrufe(self) -> str:
         datei = self.stub / "aufrufe"
@@ -1059,8 +1116,16 @@ esac
             f"datei = \"{self.sperre}\"",
             f"$ chmod 644 {self.sperre}", "$ install -m 644", "$ systemctl daemon-reload",
             "$ systemctl start clip-freund-einrichten@max.service", "$ systemctl start clip-freund-koppeln@max.service",
-            "$ systemctl enable --now clip-freund-scan@max.timer", "Probe fertig – nichts verändert"])
+            "Probe: würde einmal Tailnet-Adresse", f"$ mkdir {self.inst}/briefkasten",
+            f"$ ssh-keygen -q -t ed25519 -N '' -C clip-max-abholen -f {self.inst}/briefkasten/abholen",
+            "$ ssh-keyscan -T 10 -t ed25519 -p 2222 <Tailnet-IP>",
+            "bash /root/briefkasten/briefkasten-freund.sh max --pc '<Schlüssel>' --abholen '<Schlüssel>'",
+            f"$ bash {self.hier}/benutzer-befehl.sh max briefkasten abholen",
+            "$ systemctl enable --now clip-freund-scan@max.timer", "$ systemctl enable --now clip-freund-abholen@max.timer",
+            "Probe fertig – nichts verändert"])
         self.assertEqual(self.aenderungen(), [])
+        self.assertFalse([z for z in self.aufrufe().splitlines() if z.startswith(("ssh-keygen", "ssh-keyscan",
+                                                                                   "systemd-run"))])
 
     def test_anlegen_und_zweiter_lauf_ueberspringt_fertiges(self):
         r = self.anlegen_max()
@@ -1137,7 +1202,7 @@ esac
     def test_ohne_kopplung_bleibt_nur_der_bot_aus(self):
         """Er tippt den Link nicht an: Timer an, Bot aus, keine Zahl in .env. Tippt er später (Strg+C, Einladung lief
         weiter), übernimmt der nächste Lauf die Zahl aus kopplung.json, ohne neu zu koppeln – aber nie über einen Link."""
-        r = self.lauf(ANLEGEN, "max", eingabe=f"j\n{MAX_TOKEN}\n{EPIC}\nj\n")
+        r = self.lauf(ANLEGEN, "max", eingabe=f"j\n{MAX_TOKEN}\n{EPIC}\nn\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(f"https://t.me/max_clips_bot?start={KOPPEL_CODE}", r.stdout)
         self.assertIn("Telegram: noch nicht verbunden – sein Bot bleibt aus", r.stdout)
@@ -1203,8 +1268,11 @@ esac
     def test_stilllegen_schaltet_nur_aus(self):
         self.anlegen_max()
         vorher = {k: v for k, v in self.zustand().items() if k.startswith("var/lib/clip-benutzer")}
-        # eine Einladung läuft gerade (Schritt = „activating“ – is-active -q allein sähe sie nicht)
-        (self.stub / "aktivierend").write_text("clip-freund-koppeln@max.service\n", encoding="utf-8")
+        # eine Einladung und ein Abholen laufen gerade (Schritt = „activating“ – is-active -q allein sähe sie nicht)
+        (self.stub / "aktivierend").write_text("clip-freund-koppeln@max.service\nclip-freund-abholen@max.service\n",
+                                               encoding="utf-8")
+        with open(self.stub / "an", "a", encoding="utf-8") as an:
+            an.write("clip-freund-abholen@max.timer\n")
         self.neu()
         r = self.lauf(STILLLEGEN, "max", "--probe")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -1212,13 +1280,145 @@ esac
         r = self.lauf(STILLLEGEN, "max", eingabe="j\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("systemctl disable --now clip-freund-bot@max.service clip-freund-scan@max.timer "
-                      "clip-freund-abend@max.timer", self.aufrufe())
-        self.assertIn("systemctl stop clip-freund-koppeln@max.service", self.aufrufe())
+                      "clip-freund-abend@max.timer clip-freund-abholen@max.timer", self.aufrufe())
+        self.assertIn("systemctl stop clip-freund-abholen@max.service clip-freund-koppeln@max.service", self.aufrufe())
         self.assertEqual({k: v for k, v in self.zustand().items() if k.startswith("var/lib/clip-benutzer")}, vorher)
         self.assertIn("clip-max:", (self.stub / "passwd").read_text(encoding="utf-8"))
         r = self.lauf(STILLLEGEN, "max")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("schon aus", r.stdout)
+
+    @unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen fehlt")
+    def test_briefkasten_schluessel_zeile_probe_dann_timer(self):
+        """Normaler Weg (Stufe 2, Schritt 3): Adressen einmal gemerkt, zwei eigene Schlüssel (0640, root:clip-max), der
+        Hostschlüssel über das Tailnet gepinnt, [briefkasten] angehängt, die Zeile für den vServer passt zu
+        briefkasten-freund.sh – und erst nach der grünen Probe-Abholung in seiner Sandbox geht der Timer an. Bei Florian
+        ändert sich nichts. Ein zweiter Lauf fragt nichts und erzeugt keine neuen Schlüssel."""
+        self.anlegen_max()
+        florian = {k: v for k, v in self.zustand().items() if k.startswith(("var/lib/clip-pipeline", "opt/", "srv/"))}
+        self.neu()
+        r = self.lauf(ANLEGEN, "max", eingabe="j\nj\n100.100.1.1\nvserver.example.org\n\n\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual({k: v for k, v in self.zustand().items()
+                          if k.startswith(("var/lib/clip-pipeline", "opt/", "srv/"))}, florian)
+        bk, aufrufe = self.inst / "briefkasten", self.aufrufe()
+        conf = (self.t / "etc/clip-briefkasten.conf")
+        self.assertIn("TAILNET_IP=100.100.1.1\nOEFFENTLICH=vserver.example.org\nPORT=2222\n", conf.read_text())
+        self.assertEqual(stat.S_IMODE(conf.stat().st_mode), 0o644)
+        self.assertEqual((self.besitzer(bk), stat.S_IMODE(bk.stat().st_mode)), ("root:clip-max", 0o750))
+        for datei in ("abholen", "abholen.pub", "pc", "pc.pub", "known_hosts", "known_hosts_pc"):
+            with self.subTest(datei):
+                self.assertEqual((self.besitzer(bk / datei), stat.S_IMODE((bk / datei).stat().st_mode)),
+                                 ("root:clip-max", 0o640))
+        hostkey = self.env["HOSTKEY"]
+        self.assertEqual((bk / "known_hosts").read_text(), f"[100.100.1.1]:2222 ssh-ed25519 {hostkey}\n")
+        self.assertEqual((bk / "known_hosts_pc").read_text(), f"[vserver.example.org]:2222 ssh-ed25519 {hostkey}\n")
+        toml = (self.inst / "instanz.toml").read_text(encoding="utf-8")
+        self.assertTrue(toml.startswith(self.toml))          # nur angehängt
+        self.assertEqual(tomllib.loads(toml)["briefkasten"],
+                         {"host": "100.100.1.1", "port": 2222, "oeffentlich": "vserver.example.org"})
+        # Die Zeile für den vServer: nur öffentliche Schlüssel, so wie briefkasten-freund.sh sie annimmt
+        zeile = re.search(r"bash /root/briefkasten/briefkasten-freund\.sh max --pc '([^']*)' --abholen '([^']*)'",
+                          r.stdout)
+        muster = re.search(r"^SCHLUESSEL_RE='(.*)'$", (DEPLOY / "vserver/briefkasten-freund.sh").read_text(),
+                           flags=re.M).group(1)
+        self.assertEqual(zeile.groups(), ((bk / "pc.pub").read_text().strip(), (bk / "abholen.pub").read_text().strip()))
+        for schluessel in zeile.groups():
+            self.assertRegex(schluessel, muster)
+        self.assertNotEqual(zeile.group(1).split()[1], zeile.group(2).split()[1])
+        for z in self.privat():                              # der private Teil nie auf dem Bildschirm, nie in Aufrufen
+            self.assertNotIn(z, r.stdout + r.stderr + aufrufe)
+        assertReihenfolge(self, aufrufe, [
+            "ssh-keygen -q -t ed25519 -N  -C clip-max-abholen", "ssh-keygen -q -t ed25519 -N  -C clip-max-pc",
+            "ssh-keyscan -T 10 -t ed25519 -p 2222 100.100.1.1",
+            f"-- {self.prod}/.venv/bin/pipeline briefkasten abholen",        # Probe in seiner Sandbox …
+            "systemctl enable --now clip-freund-abholen@max.timer",           # … erst dann der Timer
+            "systemctl restart clip-freund-bot@max.service"])                 # er liest die neue Konfig
+        self.assertIn("-p User=clip-max", aufrufe)
+        for satz in ("✅ Probe-Abholung: Briefkasten erreicht, Fach zu 1 % voll", "Hostschlüssel des Briefkastens: SHA256:",
+                     "✅ Hostschlüssel des Briefkastens gepinnt ([100.100.1.1]:2222)", "✅ Abholen an (alle 2 min)",
+                     "✅ Briefkasten zuletzt erreicht vor 1 min · Fach zu 1 % voll · 3 abgeholt", "Alles getrennt"):
+            self.assertIn(satz, r.stdout)
+        self.assertNichtsVerraten(r.stdout, r.stderr, aufrufe)
+
+        # Zweiter Lauf: nichts gefragt außer dem j, keine neuen Schlüssel, keine Änderung
+        vorher = {d: (bk / d).read_bytes() for d in os.listdir(bk)}
+        self.neu()
+        r = self.lauf(ANLEGEN, "max", eingabe="j\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Briefkasten: schon eingerichtet – das Abholen läuft", r.stdout)
+        self.assertEqual({d: (bk / d).read_bytes() for d in os.listdir(bk)}, vorher)
+        self.assertFalse([z for z in self.aufrufe().splitlines() if z.startswith(("ssh-keygen", "ssh-keyscan"))])
+        self.assertEqual(self.aenderungen(), ["systemctl start clip-freund-einrichten@max.service"])
+
+    @unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen fehlt")
+    def test_briefkasten_rot_abholen_bleibt_aus_naechster_lauf_setzt_fort(self):
+        """Wichtigster Fehlerfall: Der Briefkasten antwortet nicht bzw. die Probe-Abholung ist rot – der Timer bleibt aus,
+        der Rest des Skripts läuft weiter. Der nächste Lauf nimmt dieselben Schlüssel und setzt fort (auch, wenn nach
+        einem Abbruch nur der öffentliche Teil fehlt)."""
+        r = self.briefkasten_max(HOSTKEY="")                  # 1: keine Antwort über das Tailnet
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Der Briefkasten antwortet über das Tailnet nicht (100.100.1.1, Port 2222)", r.stdout)
+        bk = self.inst / "briefkasten"
+        self.assertFalse((bk / "known_hosts").exists())
+        self.assertFalse((self.t / "etc/clip-briefkasten.conf").exists())   # ein Tippfehler bliebe sonst hängen
+        self.assertEqual((self.inst / "instanz.toml").read_text(encoding="utf-8"), self.toml)
+        schluessel = {d: (bk / d).read_bytes() for d in ("abholen", "abholen.pub", "pc", "pc.pub")}
+        self.assertNotIn("briefkasten abholen", self.aufrufe())
+        self.assertNotIn("enable --now clip-freund-abholen@max.timer", self.aufrufe())
+        self.assertIn("Fertig:", r.stdout)
+        (bk / "pc.pub").unlink()                               # Abbruch mitten in ssh-keygen: nur der private Teil da …
+        (bk / "abholen").chmod(0o600)                          # … und vor dem Übergeben (noch root:root 0600)
+        with open(self.stub / "besitzer", "a", encoding="utf-8") as besitzer:
+            besitzer.write(f"{bk / 'abholen'} root:root\n")
+
+        self.neu()                                             # 2: erreichbar, aber die Probe-Abholung ist rot
+        rot = {"abgeholt": 0, "fehler": ["Briefkasten nicht erreichbar (bk-max@100.100.1.1: Permission denied "
+                                         "(publickey).)"], "unerreichbar": True}
+        r = self.lauf(ANLEGEN, "max", eingabe="j\nj\n100.100.1.1\nvserver.example.org\n\n\n", ABHOLEN_RC="3",
+                      ABHOLEN_JSON=json.dumps(rot))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("❌ Probe-Abholung: Briefkasten nicht erreichbar (bk-max@100.100.1.1: Permission denied "
+                      "(publickey).) (Exit 3)", r.stdout)
+        self.assertIn("Das Abholen bleibt aus.", r.stdout)
+        self.assertIn("briefkasten abholen", self.aufrufe())
+        self.assertNotIn("enable --now clip-freund-abholen@max.timer", self.aufrufe())
+        self.assertNotIn("ssh-keygen -q", self.aufrufe())     # dieselben Schlüssel, die Vorab-Prüfung hielt nicht an
+        self.assertEqual((self.besitzer(bk / "abholen"), stat.S_IMODE((bk / "abholen").stat().st_mode)),
+                         ("root:clip-max", 0o640))
+        self.assertEqual({d: (bk / d).read_bytes() for d in schluessel}, schluessel)
+        self.assertIn("[briefkasten]", (self.inst / "instanz.toml").read_text(encoding="utf-8"))
+        self.assertIn("ℹ️  Abholen ist aus", r.stdout)       # die Prüfung sagt es, ein Befund ist es nicht
+
+        self.neu()                                             # 3: grün – erst jetzt der Timer
+        r = self.lauf(ANLEGEN, "max", eingabe="j\nj\n\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("vServer: Tailnet 100.100.1.1, öffentlich vserver.example.org, Port 2222 (aus ", r.stdout)
+        self.assertIn("systemctl enable --now clip-freund-abholen@max.timer", self.aufrufe())
+        self.assertFalse([z for z in self.aufrufe().splitlines() if z.startswith(("ssh-keygen -q", "ssh-keyscan"))])
+        self.assertEqual((self.inst / "instanz.toml").read_text(encoding="utf-8").count("[briefkasten]"), 1)
+
+    @unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen fehlt")
+    def test_briefkasten_pruefen_doppelter_schluessel_rechte_nicht_erreicht(self):
+        """benutzer-pruefen.sh: derselbe Schlüssel bei einem anderen Freund, ein Schlüssel mit zu weiten Rechten und ein
+        Abholen, das den Briefkasten zuletzt nicht erreichte, sind Befunde."""
+        self.assertEqual(self.briefkasten_max().returncode, 0)
+        eva = self.benutzer / "eva" / "briefkasten"
+        eva.mkdir(parents=True)
+        (eva.parent / ".clip-benutzer").write_text("eva\n", encoding="utf-8")
+        shutil.copy(self.inst / "briefkasten" / "pc.pub", eva / "abholen.pub")   # aus Versehen kopiert
+        (self.inst / "briefkasten" / "abholen").chmod(0o644)
+        stand = {"aus": False, "zuletzt_erreicht": None, "letzter_fehler": "Briefkasten nicht erreichbar (Connection "
+                 "timed out)", "pc_status": False}
+        r = self.lauf(PRUEFEN, "max", STATUS_JSON=json.dumps(stand))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        for satz in (f"❌ {self.inst}/briefkasten/abholen: root:clip-max 644 statt root:clip-max 640",
+                     "❌ der Schlüssel pc von max steht auch bei eva (abholen) – jeder Freund braucht eigene",
+                     "❌ beim letzten Abholen nicht erreicht: Briefkasten nicht erreichbar (Connection timed out)",
+                     "ℹ️  sein PC hat sich noch nicht gemeldet"):
+            self.assertIn(satz, r.stdout)
+        for z in self.privat():
+            self.assertNotIn(z, r.stdout + r.stderr)
 
     def test_befehl_nur_mit_der_sandbox_der_vorlage(self):
         self.inst.mkdir()

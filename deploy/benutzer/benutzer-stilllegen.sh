@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Im CT als root:  bash benutzer-stilllegen.sh <name> --probe   (zeigt nur)   ·   bash benutzer-stilllegen.sh <name>
-# Mehrbenutzer (docs/MEHRBENUTZER.md): schaltet die Dienste eines Freundes aus – seinen Bot, seine Timer und Schritte,
-# die gerade laufen (ein halb fertiges Match holt sein nächster Lauf nach; eine offene Einladung verfällt). Seine Daten,
-# sein Benutzer und seine Zugänge bleiben, gelöscht wird nichts. Wieder an: bash benutzer-anlegen.sh <name> (überspringt
-# Fertiges, fragt nichts neu).
+# Mehrbenutzer (docs/MEHRBENUTZER.md): schaltet die Dienste eines Freundes aus – seinen Bot, seine Timer (auch das
+# Abholen aus dem Briefkasten) und Schritte, die gerade laufen (ein halb fertiges Match holt sein nächster Lauf nach, ein
+# halber Download setzt beim nächsten Abholen fort; eine offene Einladung verfällt). Seine Daten, sein Benutzer und seine
+# Zugänge bleiben, gelöscht wird nichts; sein Fach auf dem vServer auch. Wieder an: bash benutzer-anlegen.sh <name>
+# (überspringt Fertiges).
 set -euo pipefail
 BENUTZER_DIR="${BENUTZER_DIR:-/var/lib/clip-benutzer}"
 HIER="$(cd "$(dirname "$0")" && pwd)"
@@ -47,11 +48,12 @@ fi
 
 sag "Dienste von $NAME"
 AN=()
-for e in "clip-freund-bot@$NAME.service" "clip-freund-scan@$NAME.timer" "clip-freund-abend@$NAME.timer"; do
+for e in "clip-freund-bot@$NAME.service" "clip-freund-scan@$NAME.timer" "clip-freund-abend@$NAME.timer" \
+         "clip-freund-abholen@$NAME.timer"; do
   if systemctl is-enabled -q "$e" 2>/dev/null || laeuft "$e"; then AN+=("$e"); fi
 done
 LAEUFT=()
-for e in scan abend einrichten pruefen koppeln; do
+for e in scan abend abholen einrichten pruefen koppeln; do
   if laeuft "clip-freund-$e@$NAME.service"; then LAEUFT+=("clip-freund-$e@$NAME.service"); fi
 done
 if [ "${#AN[@]}" = 0 ] && [ "${#LAEUFT[@]}" = 0 ]; then
@@ -68,3 +70,7 @@ if [ "${#LAEUFT[@]}" -gt 0 ]; then tu systemctl stop "${LAEUFT[@]}"; fi
 if [ "$PROBE" = 1 ]; then sag "Probe fertig – nichts verändert. Echt:  bash $0 $NAME"; exit 0; fi
 sag "Fertig: $NAME ist ausgeschaltet. Seine Daten liegen weiter in $BENUTZER_DIR/$NAME."
 echo "Wieder an:  bash $HIER/benutzer-anlegen.sh $NAME"
+if [ -d "$BENUTZER_DIR/$NAME/briefkasten" ]; then
+  echo "Sein Fach im Briefkasten bleibt offen (sein PC lädt weiter hoch). Ganz zu, auf dem vServer:"
+  echo "  bash /root/briefkasten/briefkasten-freund.sh $NAME --sperren"
+fi

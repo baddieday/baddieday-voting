@@ -6,7 +6,8 @@ unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M8
 Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox, Speicher für Freunde, Freund
 anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl, eigener Claude-Zugang per /claude). Seite für
 Freunde: `docs/FREUNDE.md`. Stufe 2 („Freunde liefern selbst“, Annahmen ab M85): Schritt 1 Briefkasten auf dem
-vServer (`docs/BRIEFKASTEN.md`) und Schritt 2 Abholen am Mini (unten) sind gebaut, eingeschaltet wird noch nichts.
+vServer (`docs/BRIEFKASTEN.md`), Schritt 2 Abholen am Mini und Schritt 3 Abholen einschalten (unten) sind gebaut –
+eingeschaltet wird je Freund mit `benutzer-anlegen.sh`, Schritt „Briefkasten“.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -24,6 +25,7 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
   - `clip-freund-einrichten@`, `clip-freund-pruefen@` – einmalig, gestartet von `benutzer-anlegen.sh` und
     `benutzer-pruefen.sh` (Schritt 7)
   - `clip-freund-koppeln@` – Einladungslink, einmalig, gestartet von `benutzer-anlegen.sh` (Schritt 8)
+  - `clip-freund-abholen@` + Timer – alle 2 min `briefkasten abholen` (Stufe 2; an erst nach grüner Probe-Abholung)
 - **Gemeinsam:** nur Florians Sperrdatei `/var/lib/clip-pipeline/pipeline.lock`, dazu Prozessor, Grafikchip und Netz.
 
 ## Ordner (I = `/var/lib/clip-benutzer/<name>`)
@@ -33,7 +35,7 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
 | I | `root:clip-<name>` 0750 | `instanz.toml` und `.env` (beide `root:clip-<name>` 0640), Marke `.clip-benutzer` |
 | I/db | 0700 | `pipeline.db`, `publikum-oauth.json`, `mikro.anstoss`, `big-zustand`, `kopplung.json` (0600); Stufe 2: `briefkasten.json`, `pc-status.json`, `pipeline.briefkasten.lock` |
 | I/daten (= Puffer) | 0700 | `.clip-speicher`, `.clip-puffer`, `eingang/`, `replays/`, `sessions/`, `sitzungen/`, `export/`; Stufe 2: `.abholen/` (Zwischenablage des Abholers) |
-| I/briefkasten (Stufe 2, Schritt 3) | `root:clip-<name>` | Schlüssel `abholen` und `known_hosts` (0640) für den Briefkasten |
+| I/briefkasten (Stufe 2) | `root:clip-<name>` 0750 | Schlüssel `abholen`, `pc` (je mit `.pub`), `known_hosts`, `known_hosts_pc` – alle `root:clip-<name>` 0640: er liest sie, tauschen kann er sie nicht |
 | I/regie, I/musik, I/material, I/sfx, I/cache | 0700 | I/cache ist auch HOME und Whisper-Cache |
 
 ## Konfig im Instanz-Modus (`CLIP_INSTANZ=I`, umgesetzt in Schritt 2)
@@ -179,6 +181,7 @@ Was das Skript tut – passt etwas nicht, bricht es vor der ersten Änderung ab;
   schreibt sie nur in seine `.env` (root:clip-<name>, 0640) – nie auf den Bildschirm, nie ins Log;
 - legt Benutzer `clip-<name>` ohne Anmeldung an, seine Ordner, macht deine Sperrdatei für alle lesbar (nur
   `chmod 644`) und legt fehlende Dienst-Vorlagen hin;
+- richtet auf Wunsch (j/N) seinen Briefkasten ein (Stufe 2, oben);
 - richtet in seiner Sandbox ein (Datenbank, Whisper-Modell, Musik seiner Genres) und prüft dort die Trennung, dann
   verbindet es ihn über den Einladungslink mit Telegram (unten) – erst danach schaltet es seine Dienste ein, nur für ihn
   (ohne Verbindung bleibt nur sein Bot aus);
@@ -224,7 +227,7 @@ Der Freund muss keine Zahl suchen: Er tippt einen Link an und drückt Start.
   sein Bot nie Nachrichten ab (er beendet sich sofort). Das Anlege-Skript hält ihn vorher an (falls doch etwas läuft)
   und schaltet ihn erst nach der Kopplung ein. Meldet Telegram trotzdem einen zweiten Empfänger, bricht koppeln ab,
   ohne etwas zu speichern. Telegram fragt es wie sein Lern-Bot (über IPv4), keine neue Bibliothek.
-- **Im Anlege-Skript** (Schritt 8 von 10): zeigt dir den Link (nur den dieses Laufs), wartet, liest danach als root
+- **Im Anlege-Skript** (Schritt 8 von 11): zeigt dir den Link (nur den dieses Laufs), wartet, liest danach als root
   `kopplung.json` (folgt keinem Link, nur eine Zahl und der Vorname) und hängt die Zahl als
   `LEARN_BOT_ALLOWED_USER_ID` an seine `.env` (bleibt root:clip-<name>, 0640). Strg+C beendet nur das Warten: die
   Einladung gilt weiter, der nächste Lauf übernimmt die Zahl ohne neuen Link.
@@ -251,9 +254,9 @@ Der Freund verbindet sein Claude-Abo selbst – ohne Konsole und ohne dich:
   Schweigen, kein Link, Frist, claude fehlt → nichts gespeichert, claude beendet, freundliche Antwort; Token direkt;
   dein Bot ohne `/claude`, deine Hilfe gleich. Den Link findet es auch im echten `claude setup-token` (2.1.294).
 
-## Briefkasten abholen (Stufe 2, Schritt 2 – umgesetzt, noch nicht eingeschaltet)
+## Briefkasten abholen (Stufe 2, Schritt 2 und 3 – umgesetzt)
 Der PC eines Freundes lädt in sein Fach im Briefkasten (`docs/BRIEFKASTEN.md`); `pipeline briefkasten abholen` holt es
-in seinen Puffer. Vorlage mit Timer (alle 2 min) und Schlüssel kommen mit Schritt 3. Annahmen M89–M93, M96, M103.
+in seinen Puffer, alle 2 min über `clip-freund-abholen@` (Timer). Annahmen M89–M93, M95, M96, M103, M104, M108–M116.
 - **Nur in der Instanz**, nur lesend über das Tailnet als `bk-<name>` mit `I/briefkasten/abholen` (Hostschlüssel
   gepinnt), höchstens 20 Mbit/s. Bei Florian Exit 2, bevor etwas angefasst wird. Ohne `[briefkasten].host`: „aus“.
 - **Fertig ist eine Datei erst mit Lieferschein** (Name, Größe, SHA-256, Zeit vom PC). Geholt wird nach
@@ -268,6 +271,17 @@ in seinen Puffer. Vorlage mit Timer (alle 2 min) und Schlüssel kommen mit Schri
   Platz knapp, Datei aufgegeben).
 - **Nachsehen:** `bash deploy/benutzer/benutzer-befehl.sh <name> briefkasten status` (ohne Netz: letzter Kontakt,
   Füllstand, Dateien je Zustand). Die Tabelle `abholung` gibt es nur in seiner Datenbank.
+- **Einschalten (Schritt 3):** `benutzer-anlegen.sh <name>`, Schritt 9 „Briefkasten“ (j/N): einmal die Adressen des
+  vServers (gemerkt in `/etc/clip-briefkasten.conf`, sobald der Briefkasten antwortet), zwei eigene Schlüssel in
+  `I/briefkasten`, Hostschlüssel über das Tailnet gepinnt, `[briefkasten]` an seine `instanz.toml` angehängt, eine
+  Zeile für den vServer, dann eine Probe-Abholung in seiner Sandbox – erst wenn die grün ist, geht der Timer an. Ist
+  etwas rot, bleibt nur das Abholen aus; ein neuer Lauf setzt fort.
+- **Vorlage:** wie die übrigen, derselbe Sandbox-Block; Exit 3/4 kein Fehler, nach 2 h Schluss (der nächste Lauf
+  setzt fort), Platte im Leerlauf-Vorrang. Netz braucht er nur zum vServer (Tailnet, Port 2222); einen Netz-Zaun gibt es
+  noch nicht (M19, vor Ort prüfen: M104).
+- **Prüfen und Stilllegen:** `benutzer-pruefen.sh` zeigt Rechte und Schlüssel (kein Schlüssel doppelt), ob das Abholen
+  an ist, wann der Briefkasten zuletzt erreicht wurde, den Füllstand und ob sich sein PC gemeldet hat;
+  `benutzer-stilllegen.sh` schaltet auch das Abholen aus (sein Fach auf dem vServer bleibt: dort `--sperren`).
 
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
@@ -296,7 +310,8 @@ weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
    einem Befehl, Einladungslink, eigener Claude-Zugang per /claude (alles umgesetzt).
 2. **Freunde liefern selbst:** Briefkasten auf dem vServer + kleines Programm für den PC, Lager je Freund mit
    Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot. Gebaut:
-   Briefkasten (Schritt 1), Abholen am Mini (Schritt 2); Löschen im Briefkasten erst nach Florians Ja.
+   Briefkasten (Schritt 1), Abholen am Mini (Schritt 2), Abholen einschalten (Schritt 3); Löschen im Briefkasten erst
+   nach Florians Ja.
 3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

@@ -11,7 +11,12 @@
 #     (nur Hinweis – ohne Verbindung bleibt nur sein Bot aus)
 #   4 In seiner Sandbox (clip-freund-pruefen@<name>): nichts von dir und den anderen Freunden sichtbar, und die Sperre
 #     dort ist genau deine Datei (Gerät und Inode)
-#   5 Bot-Link
+#   5 Briefkasten (Stufe 2): gibt es I/briefkasten, Ordner root:clip-<name> 0750 und alles darin 0640; mit [briefkasten]
+#     in seiner instanz.toml dazu Schlüssel vollständig, Hostschlüssel gepinnt, kein Schlüssel doppelt (abholen ≠ pc, bei
+#     keinem anderen Freund), Abholen an?, und aus seiner Sandbox (pipeline briefkasten status, ohne Netz): zuletzt
+#     erreicht, Füllstand des Fachs, PC gemeldet. Nicht in --vorab: Ein Lauf, der mitten im Schritt „Briefkasten“
+#     abbrach, ließe sonst Schritt 9 nie mehr die Rechte richten.
+#   6 Bot-Link
 # --vorab: nur 1–3 (benutzer-anlegen.sh, bevor etwas eingeschaltet wird). Exit 0 = alles getrennt, 1 = Befund.
 # Intern für benutzer-anlegen.sh:  printf '%s' "$TOKEN" | bash benutzer-pruefen.sh --token-frei <name>
 #   (Exit 0 = dieser Bot-Token ist noch nirgends eingetragen, 1 = schon vergeben)
@@ -95,6 +100,80 @@ if not von_stdin:   # auch die anderen untereinander: über alle .env verschiede
 sys.exit(fehler)
 PY
 )"
+# Briefkasten: öffentliche Schlüssel aller Freunde vergleichen (abholen.pub, pc.pub) – nur normale Dateien, ohne Link,
+# höchstens 4 KB; ausgegeben werden nur Namen. Exit 1 = derselbe Schlüssel zweimal.
+SCHLUESSEL_PY="$(cat <<'PY'
+import os, re, stat, sys
+eigen, wurzel = sys.argv[1], sys.argv[2]
+
+def lies(pfad):
+    try:
+        fd = os.open(pfad, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as datei:
+            if not stat.S_ISREG(os.fstat(datei.fileno()).st_mode):
+                return None
+            teile = datei.read(4096).decode("utf-8", "replace").split()
+    except OSError:
+        return None
+    return teile[1] if len(teile) >= 2 and teile[0] == "ssh-ed25519" else None
+
+alle = []   # (wer, Rolle, Schlüssel)
+for wer in sorted(os.listdir(wurzel)):
+    if re.fullmatch(r"[a-z][a-z0-9-]{1,26}", wer):
+        for rolle in ("abholen", "pc"):
+            if schluessel := lies(os.path.join(wurzel, wer, "briefkasten", rolle + ".pub")):
+                alle.append((wer, rolle, schluessel))
+meine = [(r, s) for w, r, s in alle if w == eigen]
+fehler = 0
+if len({s for _, s in meine}) < len(meine):
+    print(f"abholen und pc von {eigen} sind derselbe Schlüssel")
+    fehler = 1
+for rolle, s in meine:
+    for wer, r, s2 in alle:
+        if wer != eigen and s2 == s:
+            print(f"der Schlüssel {rolle} von {eigen} steht auch bei {wer} ({r}) – jeder Freund braucht eigene")
+            fehler = 1
+sys.exit(fehler)
+PY
+)"
+# Briefkasten: JSON von `pipeline briefkasten status` (aus seiner Sandbox) -> Zeilen „ok|befund|hinweis<TAB>Text“
+STAND_PY="$(cat <<'PY'
+import json, sys
+from datetime import datetime, timezone
+
+def sauber(text):
+    return "".join(z for z in str(text) if z.isprintable())[:200]
+
+def vor(zeit):
+    try:
+        t = datetime.fromisoformat(str(zeit).replace("Z", "+00:00"))
+    except ValueError:
+        return "?"
+    t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    m = max(0, int((datetime.now(timezone.utc) - t).total_seconds() // 60))
+    return f"vor {m} min" if m < 120 else f"vor {m // 60} h" if m < 2880 else f"vor {m // 1440} Tagen"
+
+try:
+    s = json.loads(sys.argv[1]) if sys.argv[1] else None
+except ValueError:
+    s = None
+if not isinstance(s, dict) or s.get("fehler") or s.get("aus"):
+    grund = f" ({sauber(s.get('hinweis') or s.get('fehler'))})" if isinstance(s, dict) and s.get("fehler") else ""
+    print(f"hinweis\tStand aus seiner Sandbox nicht lesbar{grund}")
+    sys.exit(0)
+fach = f" · Fach zu {s['fach_prozent']} % voll" if type(s.get("fach_prozent")) is int else ""
+zahlen = ", ".join(f"{s[k]} {t}" for k, t in (("abgeholt", "abgeholt"), ("offen", "offen"),
+                                                 ("aufgegeben", "aufgegeben"), ("konflikt", "Konflikt"))
+                   if type(s.get(k)) is int and s[k] > 0)
+if s.get("letzter_fehler"):
+    print(f"befund\tbeim letzten Abholen nicht erreicht: {sauber(s['letzter_fehler'])}")
+elif s.get("zuletzt_erreicht"):
+    print(f"ok\tBriefkasten zuletzt erreicht {vor(s['zuletzt_erreicht'])}{fach}" + (f" · {zahlen}" if zahlen else ""))
+else:
+    print("hinweis\tnoch nie abgeholt")
+print("ok\tsein PC hat sich gemeldet" if s.get("pc_status") else "hinweis\tsein PC hat sich noch nicht gemeldet")
+PY
+)"
 # Quellen für den Vergleich: deine .env (Produktion und Lern-Bot-Stand) und die .env jedes Freundes
 token_quellen() {
   QUELLEN=("Florian=$PROD/.env" "Florian=$REGIE/.env")
@@ -126,7 +205,7 @@ erwarte() {
   if [ "$ist" = "$3 $4" ]; then ok "$1  ($ist)"; else befund "$1: $ist statt $3 $4"; fi
 }
 
-sag "1/5 Besitzer und Rechte"
+sag "1/6 Besitzer und Rechte"
 getent passwd "clip-$NAME" >/dev/null || befund "Benutzer clip-$NAME fehlt"
 erwarte "$BENUTZER_DIR" d root:root 711
 erwarte "$I" d "root:clip-$NAME" 750
@@ -137,7 +216,7 @@ for datei in .clip-benutzer instanz.toml .env; do erwarte "$I/$datei" f "root:cl
 for ordner in db daten regie musik material sfx cache; do erwarte "$I/$ordner" d "clip-$NAME:clip-$NAME" 700; done
 if [ -e "$I/kein-lager" ] || [ -L "$I/kein-lager" ]; then befund "$I/kein-lager gibt es – das darf nicht sein (M10)"; fi
 
-sag "2/5 Die eine Rechen-Sperre"
+sag "2/6 Die eine Rechen-Sperre"
 VORLAGE="$UNITS/clip-freund-bot@.service"
 [ -f "$VORLAGE" ] || VORLAGE="$HIER/clip-freund-bot@.service"
 GEBUNDEN="$(awk -F= '$1 == "BindReadOnlyPaths" {split($2, t, " "); print t[1]; exit}' "$VORLAGE")"
@@ -157,7 +236,7 @@ if [ -n "$SPERRE" ]; then
   fi
 fi
 
-sag "3/5 Zugänge (nur verglichen, nie angezeigt)"
+sag "3/6 Zugänge (nur verglichen, nie angezeigt)"
 token_quellen
 if MELDUNG="$(python3 -I -c "$TOKENS_PY" "$NAME" "" "${QUELLEN[@]}" < /dev/null)"; then
   ok "eigener Bot-Token, verschieden von deinen und denen der anderen Freunde"
@@ -177,7 +256,7 @@ if [ "$VORAB" = 1 ]; then
   sag "Vorab-Prüfung: $BEFUNDE Befund(e) – siehe ❌ oben"; exit 1
 fi
 
-sag "4/5 In seiner Sandbox (clip-freund-pruefen@$NAME)"
+sag "4/6 In seiner Sandbox (clip-freund-pruefen@$NAME)"
 VORHER=$BEFUNDE
 EINHEIT="clip-freund-pruefen@$NAME.service"
 if systemctl start "$EINHEIT"; then RC=0; else RC=$?; fi
@@ -212,7 +291,54 @@ print("sperre\t" + str(s.get("dev", "")) + " " + str(s.get("ino", "")))' "$ERGEB
   [ "$BEFUNDE" -gt "$VORHER" ] || ok "in seiner Sandbox nichts von dir und den anderen Freunden sichtbar"
 fi
 
-sag "5/5 Bot-Link"
+sag "5/6 Briefkasten (Stufe 2)"
+# Er liest Schlüssel und Hostschlüssel (sein Abholer, das PC-Paket), tauschen kann er sie nicht
+BK="$I/briefkasten"
+BK_DATEIEN=(abholen abholen.pub pc pc.pub known_hosts known_hosts_pc)
+if [ -e "$BK" ] || [ -L "$BK" ]; then
+  erwarte "$BK" d "root:clip-$NAME" 750
+  for datei in "${BK_DATEIEN[@]}"; do
+    if [ -e "$BK/$datei" ] || [ -L "$BK/$datei" ]; then erwarte "$BK/$datei" f "root:clip-$NAME" 640; fi
+  done
+fi
+BK_WERTE="$(python3 -I -c 'import sys, tomllib
+b = tomllib.load(open(sys.argv[1], "rb")).get("briefkasten") or {}
+print(str(b.get("host", "")).strip() + "\t" + str(b.get("port", 2222)))' "$I/instanz.toml" 2>/dev/null)" || BK_WERTE=""
+BK_HOST="${BK_WERTE%%$'\t'*}"
+BK_PORT="${BK_WERTE#*$'\t'}"
+if [ -z "$BK_HOST" ]; then
+  echo "   ℹ️  kein Briefkasten – seine Aufnahmen kommen nur von Hand. Einrichten: bash $HIER/benutzer-anlegen.sh $NAME"
+else
+  for datei in "${BK_DATEIEN[@]}"; do
+    [ -f "$BK/$datei" ] || befund "$BK/$datei fehlt – bash $HIER/benutzer-anlegen.sh $NAME"
+  done
+  if [ "$BK_PORT" = 22 ]; then KH_NAME="$BK_HOST"; else KH_NAME="[$BK_HOST]:$BK_PORT"; fi
+  if [ -f "$BK/known_hosts" ] && [ ! -L "$BK/known_hosts" ]; then
+    read -r KH_H KH_TYP _ < "$BK/known_hosts" || true
+    if [ "$(grep -c . "$BK/known_hosts")" = 1 ] && [ "${KH_H:-}" = "$KH_NAME" ] && [ "${KH_TYP:-}" = ssh-ed25519 ]; then
+      ok "Hostschlüssel des Briefkastens gepinnt ($KH_NAME)"
+    else befund "$BK/known_hosts passt nicht zu $KH_NAME (dorthin holt sein Abholer)"; fi
+  fi
+  if MELDUNG="$(python3 -I -c "$SCHLUESSEL_PY" "$NAME" "$BENUTZER_DIR")"; then
+    ok "eigene Schlüssel (abholen und pc verschieden, bei keinem anderen Freund)"
+  else
+    while IFS= read -r zeile; do [ -z "$zeile" ] || befund "$zeile"; done <<< "$MELDUNG"
+  fi
+  ABHOLEN_AN=0
+  if systemctl is-enabled -q "clip-freund-abholen@$NAME.timer" 2>/dev/null; then ok "Abholen an (alle 2 min)"; ABHOLEN_AN=1
+  else echo "   ℹ️  Abholen ist aus (Probe-Abholung noch nicht grün oder stillgelegt) – bash $HIER/benutzer-anlegen.sh $NAME"; fi
+  # Stand aus seiner Sandbox – nur nachsehen, ohne Netz (root liest keine Datei, die dem Freund gehört)
+  STAND="$(bash "$HIER/benutzer-befehl.sh" "$NAME" briefkasten status < /dev/null 2>/dev/null | grep '^{' | tail -n 1 || true)"
+  while IFS=$'\t' read -r art text; do
+    case "$art" in
+      ok) ok "$text" ;;
+      befund) if [ "$ABHOLEN_AN" = 1 ]; then befund "$text"; else echo "   ℹ️  $text"; fi ;;
+      hinweis) echo "   ℹ️  $text" ;;
+    esac
+  done < <(python3 -I -c "$STAND_PY" "$STAND")
+fi
+
+sag "6/6 Bot-Link"
 LINK="$(python3 -I -c 'import json, sys, urllib.request
 werte = {}
 for zeile in open(sys.argv[1], encoding="utf-8").read().splitlines():
