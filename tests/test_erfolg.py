@@ -151,3 +151,26 @@ class Erfolg(MitSpeicher):
         code, daten = self.cli("erfolg")
         self.assertEqual((code, daten["fehler"]), (2, "konfig"))
         self.assertIn("[erfolg.gewichte].zuschauer", daten["hinweis"])
+
+    def test_beim_freund_ohne_abruf_wartet_nichts(self):
+        """Prüfung S4-3 (M175): Beim Freund holt niemand Zahlen ab (M169), sein ✅ legt trotzdem TikTok-Posts an
+        (lernbot_paket.posts_anlegen). Dann darf dort nichts „warten“, und „nicht gefunden?“ wäre geraten. Bei Florian
+        bleibt es beim Warten – seine Zahlen holt der tägliche Abruf."""
+        with db.transaktion(self.con):   # ein Post von vorgestern, einer von vor 30 Tagen – beide ohne Zahlen
+            for i, tage in enumerate((2, 30)):
+                t = START - timedelta(days=tage)
+                self.post(self.entwurf(i, "kino", t), "tiktok", t)
+        with mock.patch.object(publikum_adapter, "tiktok_verbunden", return_value=True):
+            florian = erfolg.text(erfolg.auswertung(self.con, self.konfig, START))
+        self.assertIn("Zuschauer: wartet auf die Wochenzahlen (1 Video)", florian)
+        self.assertIn("1 × keine Wochenzahlen nach 14 Tagen (nicht hochgeladen oder nicht gefunden?)", florian)
+
+        self.konfig.daten["instanz"] = {"wurzel": str(self.tmp), "name": "max"}
+        b = erfolg.auswertung(self.con, self.konfig, START)
+        self.assertEqual(b["plattformen"]["tiktok"]["ziele"]["zuschauer"],
+                         {"status": "nicht gemessen", "grund": "Zuschauerzahlen werden bei dir noch nicht abgeholt"})
+        text = erfolg.text(b)
+        self.assertIn("TikTok: 0 Videos mit fertigen Wochenzahlen · 1 noch ohne Wochenzahlen", text)
+        self.assertIn("1 × keine Wochenzahlen nach 14 Tagen (Zuschauerzahlen werden bei dir noch nicht abgeholt)", text)
+        for falsch in ("wartet", "warten", "nicht gefunden"):
+            self.assertNotIn(falsch, text)

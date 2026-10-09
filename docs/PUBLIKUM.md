@@ -165,7 +165,9 @@ Im CT als `pipeline`: `/opt/clip-pipeline/bin/pipeline erfolg` – für einen Fr
 - **Was zählt.** Jedes hochgeladene Short je Plattform einmal (Fassungen eines Videos einmal, ein Crosspost auf jeder
   Plattform für sich). Nicht gezählt, mit Grund: die ersten 5 je Plattform (nur Vergleich), Wochenzahl nicht aus Tag
   4–10, Fail-Videos, das 2-Wochen-Video, Clips aus dem Clip-Bot, weitere Fassungen. Ohne Wochenzahlen „wartet“ ein Video
-  bis 14 Tage nach dem Upload, danach zählt es nicht (nicht hochgeladen oder nicht gefunden?).
+  bis 14 Tage nach dem Upload, danach zählt es nicht (nicht hochgeladen oder nicht gefunden?). Bei einem Freund holt
+  niemand Zahlen ab – dort wartet nichts: „noch ohne Wochenzahlen“ und „nicht gemessen (Zuschauerzahlen werden bei dir
+  noch nicht abgeholt)“ (M175).
 - **Vergleich.** 9 feste Strategien je Plattform: 4 Aufbauten (je gegen die anderen), schnelle gegen ruhige Schnitte,
   viel gegen wenig Zeitlupe, Länge unter 45 / 45–60 / über 60 s. „Belegt“ erst ab 8 Videos je Seite, bei ähnlicher
   Länge (höchstens 15 % Unterschied) und nur, wenn der Unterschied sehr wahrscheinlich kein Zufall ist (1 % Irrtum,

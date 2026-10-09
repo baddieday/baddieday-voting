@@ -12,7 +12,8 @@ Einheit (M158): ein Short je Plattform. Fassungen eines Videos (Familie = kleins
 Parameter „ersetzt“, wie szenen.verlauf) zählen einmal; ein Crosspost ist je Plattform eine eigene Einheit, Plattformen
 werden nie zusammengeworfen. Nicht gezählt, jeweils mit Grund: Clip-Posts, kein Short, Fail-Video, „Basis zu klein“
 (Platzhalter-0 der ersten 5 Posts je Plattform), Messung außerhalb Tag 4–10, unlesbare Score-Teile, weitere Fassung.
-Noch ohne Wochenzahlen = „wartet“ (nach 14 Tagen ohne: nicht gezählt).
+Noch ohne Wochenzahlen = „wartet“ (nach 14 Tagen ohne: nicht gezählt). Holt niemand Zahlen ab (Freund, M169), sagen
+Ziel und Text nie „wartet“ (M175); die JSON-Zahlen bleiben roh.
 
 Drei Ziele je Einheit – gemessen · zu wenig Vergleich · wartet · nicht gemessen (Grund), nie eine 0, nie geschätzt:
   Zuschauer  aus den Teilen z_r (Bindung), z_e (Reaktionen), z_v (Reichweite) mit [publikum.gewichte] über
@@ -314,11 +315,13 @@ def _ziel_status(einheiten: list[dict], ziel: str, plattform: str) -> dict:
 def _zuschauer_status(n: int, weg: Counter, wartet: int, plattform: str, abruf: str | None) -> dict:
     if n:
         return {"status": GEMESSEN, "videos": n}
-    if weg[BASIS_ZU_KLEIN]:
+    if weg[BASIS_ZU_KLEIN]:   # beim Freund nur nach Zahlen von Hand – dann ist es gemessen und stimmt
         return {"status": WENIG_VERGLEICH, "videos": weg[BASIS_ZU_KLEIN]}
+    if abruf == FREUND_OHNE_ABRUF:   # M175: bei ihm kommen keine Zahlen von selbst – „wartet“ wäre falsch
+        return {"status": NICHT_GEMESSEN, "grund": abruf}
     if wartet:
         return {"status": WARTET, "videos": wartet}
-    if abruf == FREUND_OHNE_ABRUF or (abruf and plattform == "tiktok"):
+    if abruf and plattform == "tiktok":
         grund = abruf
     elif plattform == "youtube" and not _youtube_verbunden():
         grund = "YouTube nicht verbunden"
@@ -464,15 +467,19 @@ def text(bericht: dict) -> str:
               + " – gerechnet wird nur mit dem, was gemessen ist."]
     if bericht["abruf"]:
         zeilen.append(f"⚠️ {bericht['abruf']}")
+    # M175: Holt niemand Zahlen ab (Freund), wartet nichts, und „nicht gefunden?“ wäre geraten – die JSON-Zahlen bleiben
+    ohne_abruf = bericht["abruf"] == FREUND_OHNE_ABRUF
+    erklaerung = {**ERKLAERUNG, OHNE_WOCHENZAHLEN: FREUND_OHNE_ABRUF} if ohne_abruf else ERKLAERUNG
     if not bericht["plattformen"]:
         zeilen.append("Noch keine Posts und keine Plattform eingerichtet ([publikum].plattformen).")
     for plattform, pl in bericht["plattformen"].items():
         kopf = f"{_plattform_name(plattform)}: {_videos(pl['einheiten'])} mit fertigen Wochenzahlen"
         if pl["wartet"]:
-            kopf += f" · {pl['wartet']} warten noch auf ihre Wochenzahlen"
+            kopf += f" · {pl['wartet']} " + ("noch ohne Wochenzahlen" if ohne_abruf else
+                                             "warten noch auf ihre Wochenzahlen")
         zeilen += ["", kopf]
         if pl["nicht_gezaehlt"]:
-            zeilen.append("  Nicht gezählt: " + " · ".join(f"{n} × {grund} ({ERKLAERUNG.get(grund, '')})"
+            zeilen.append("  Nicht gezählt: " + " · ".join(f"{n} × {grund} ({erklaerung.get(grund, '')})"
                                                            for grund, n in pl["nicht_gezaehlt"].items()))
         zeilen.append(f"  {ZIEL_NAMEN['zuschauer']}: {_status_text(pl['ziele']['zuschauer'])}")
         zeilen += [f"    {ZIEL_NAMEN[teil]}: {_status_text(stand)}" for teil, stand in pl["teilziele"].items()]
