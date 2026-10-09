@@ -107,6 +107,7 @@ class N8nEinstieg(unittest.TestCase):
             "vorangestelltes CLIP_INSTANZ=":
                 f"CLIP_INSTANZ=/var/lib/clip-benutzer/max {self.bin} render --session {SID}",
             "scan --verarbeiten": f"{self.bin} scan --verarbeiten",
+            "erfolg (nur lesen, Stufe 4 – nicht im Vertrag)": f"{self.bin} erfolg",
             "Zusatzwort --benutzer": f"{self.bin} render --session {SID} --benutzer max",
             "ungültige Session-ID": f"{self.bin} render --session ../geheim",
             "angehängter Shell-Befehl": f"{self.bin} render --session {SID}; touch {kanarie}",

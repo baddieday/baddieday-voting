@@ -9,7 +9,10 @@ Freunde: `docs/FREUNDE.md`. Stufe 2 („Freunde liefern selbst“, Annahmen ab M
 vServer (`docs/BRIEFKASTEN.md`), Schritt 2 Abholen am Mini und Schritt 3 Abholen einschalten (unten) sind gebaut –
 eingeschaltet wird je Freund mit `benutzer-anlegen.sh`, Schritt „Briefkasten“. Stufe 3 („Hybrider Render-Manager“,
 Annahmen M139–M152) ist fertig: Schritt 1 Laufzeiten messen, Schritt 2 Ausfallsicher, Schritt 3 Florian zuerst und
-Schritt 4 Vertrag für weitere Rechner (`docs/WORKER.md`, nur Doku) – Stufenbericht unten.
+Schritt 4 Vertrag für weitere Rechner (`docs/WORKER.md`, nur Doku) – Stufenbericht unten. Stufe 4 („Qualitäts- und
+Erfolgsmessung“, Annahmen M155–M174) ist fertig: Schritt 1 `pipeline erfolg`, Schritt 2 ehrliche Sätze im
+Sonntagsbericht, in /lernstand und /publikum – Stufenbericht unten; Zähler auf clip-battle.de und Video-Code in der
+Caption erst nach Florians Ja.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -494,6 +497,100 @@ Schneller wird nichts – ehrlich gesagt. Gemessen im Container (nur als Verhäl
 3. Florians Ja oder Nein zum Nachhol-Timer für liegengebliebene n8n-Matches (M148).
 4. Danach Stufe 4: Kampagnenlink je Instanz, neue Zielgrößen versioniert neben dem alten Score.
 
+## Erfolg ehrlich messen (Stufe 4, Schritt 1 und 2 – umgesetzt)
+- **`pipeline erfolg` (Schritt 1):** nur nachsehen – keine Sperre, weckt nie, über n8n nicht erreichbar; für einen
+  Freund `bash deploy/benutzer/benutzer-befehl.sh <name> erfolg`. Drei Ziele getrennt: Zuschauer (die feste
+  Wochen-Note), neue Follower, Besuche auf clip-battle.de; was fehlt, heißt „nicht gemessen“ mit Grund, nie 0. Neun
+  feste Vergleiche (4 Aufbauten, Tempo, Zeitlupe, 3 Längen); „belegt“ erst ab 8 Videos je Seite und nur, wenn es sehr
+  wahrscheinlich kein Zufall ist. Erklärung: `docs/PUBLIKUM.md`, Abschnitt 7.
+- **Ehrliche Sätze (Schritt 2):** Im Sonntagsbericht steht die 📊-Zeile aus `pipeline erfolg` statt „👀 Bei den
+  Zuschauern kommt gut an“, und „🎯 Wähle ich gerade öfter/seltener“ statt „👍 Kommt gut an / 👎 Kommt weniger an“
+  (dieselbe Zahl); ein Fehler darin kostet den Bericht nie. Unter /experte: /lernstand „Tendenzen (nicht belegt)“,
+  /publikum „Wochen-Note (fest)“ und „Lernwert (vorläufig)“. Für Florian: `docs/SO-GEHTS.md`, „Der Sonntagsbericht“.
+- **Freunde:** dieselben Regeln. Bei ihnen holt niemand Zuschauerzahlen ab – `pipeline erfolg` sagt es, der
+  Sonntagsbericht schweigt dazu. Annahmen M155–M174.
+
+## Stufenbericht Stufe 4 (09.10.2026)
+Abnahme „Das System zeigt belegbare Unterschiede zwischen Strategien, ohne fehlende Daten zu erfinden“: erfüllt im
+Code, in Tests und Nachstellungen – Nachweis unten. Auf Florians echten Daten gibt es noch nichts zu belegen: Posts
+entstehen im einfachen Modus erst seit 08.10. automatisch, und die ersten 5 je Plattform sind nur Vergleich.
+
+**Was wurde tatsächlich implementiert?**
+- **Schritt 1 – `pipeline erfolg`** (`erfolg.py`, neu): Einheiten (ein Short je Plattform, Fassungen einmal,
+  Ausschlüsse mit Grund), drei Ziele mit Status (gemessen · zu wenig Vergleich · wartet · nicht gemessen mit Grund),
+  Gesamt nur über die gemessenen Ziele (`[erfolg.gewichte]` 0,5/0,2/0,3), neun feste Vergleiche mit Mindestzahl und
+  Zufallsschutz, Text ohne Fachbegriffe und eine JSON-Zeile mit Version und Gewichten; kaputte Gewichte → Exit 2.
+- **Schritt 2 – ehrliche Sätze:** Sonntagsbericht mit 📊-Zeile statt „👀 …“ und „🎯 Wähle ich gerade öfter/seltener“
+  statt „👍/👎 Kommt (weniger) gut an“; ein Fehler in `erfolg` geht nur ins Log. /lernstand „Tendenzen (nicht belegt)“;
+  /publikum „Wochen-Note (fest)“ und „Lernwert (vorläufig)“, mit „nur gegen Startwerte“, solange es keinen früheren
+  Post zum Vergleich gibt.
+- **Bewusst nicht gebaut:** Zähler auf clip-battle.de, Video-Code in der Caption, Abruf der Zählerzahlen,
+  YouTube-Anmeldung, Kanal-Follower (PR 3–7 des Plans – brauchen Florians Ja, teils eine Rechtsprüfung und neue
+  Zugänge). Keine neue Tabelle, keine Migration, kein neuer Dienst, Timer, Port oder Paket. Die Lerner rechnen
+  unverändert (M163); Captions, Videos, Knöpfe, 📋 Stand, Clip-Bot und n8n-Vertrag bleiben gleich.
+
+**Welche Funktionen wurden wiederverwendet?**
+- die feste Wochen-Note der Lernschleife (`publikum.bewerte_alle`, `score_fuer`, `score_teile` mit `messung_id`), ihre
+  Gewichte (`publikum._gewichte`), `publikum.robust_z` (auch für Follower) und „Basis zu klein“;
+- die eingefrorene Strategie je Video (`geschmack._wahl_aus`, `KNOEPFE`, `NAMEN`) und die Fassungs-Familie
+  (`szenen._ersetzt`);
+- ohne Netz: `publikum_adapter.tiktok_verbunden`, `publikum.post_plattformen`; Plattform-Namen aus
+  `bot.aktionen.PLATTFORM_NAMEN`;
+- das Muster von `pipeline laufzeiten` (nur lesen, keine Sperre, eine JSON-Zeile); der Wochenbericht
+  (`geschmack.wochenbericht`, `lern_meldungen`) mit Rechnung und Schwelle der alten 👍/👎-Zeile;
+  `lernbot_publikum.score_worte`/`score_text`; `basis_n` der vorläufigen Note für „nur gegen Startwerte“;
+- für die Statistik nur die Standardbibliothek (`statistics.NormalDist`), kein neues Paket.
+
+**Was wurde praktisch geprüft?**
+- **Tests** (feste Zahlen, je unter 1 s): 48 Shorts mit „erzählt“ doppelt → „belegt besser“, nie die Gegenrichtung,
+  und im Sonntagsbericht „📊 Belegt (TikTok, 43 Videos) …“; Bindung, Follower, Webseite „nicht gemessen“ mit Grund;
+  KI-Noten ändern nichts; Zuschauer = Wochen-Note. 9 Shorts mit Crossposts und einer Fassung → kein Befund, „frühestens
+  nach 13 weiteren“. Versuch E als Test → keine Behauptung, weder aus Zuschauer- noch aus KI-Noten (mit dem alten
+  Bericht rot). Kaputte Gewichte → der Bericht kommt trotzdem (ohne die Absicherung rot). /publikum mit beiden Werten
+  im Ende-zu-Ende-Test der Lernschleife.
+- **Nachstellung des echten Sonntagsberichts** (Wegwerf-Skript mit dem echten Code: 200 Halbjahre à 26 Wochen × 3
+  Shorts, Aufbau, Tempo und Zeitlupe zufällig, also ohne echten Unterschied; TikTok-Zahlen wie in der Planung,
+  keine ✅/❌, keine KI; dieselben Daten vorher und nachher): vorher stand in 99,5 % der Halbjahre irgendwann eine
+  Behauptung im Bericht (in 28 % der Wochen, meist „👎 Kommt weniger an: …“); nachher in 5,0 % (±1,5; 33 von 5200
+  Wochen), jedes Mal ein falsches „📊 Belegt“ – im Rahmen der Simulation aus Schritt 1. „👍/👎/👀“ kamen nie mehr vor.
+- **Simulation der Regel** (Schritt 1, echter Score-Code, 3 Shorts je Woche, wöchentlich nachgesehen): ohne echten
+  Unterschied ein falsches „belegt“ in 3,6 % (±0,6) der Halbjahre und 6,3 % (±0,8) der Jahre, je 1000 Läufe.
+- **Zum Abschluss** (nach Schritt 2): die berührten Testmodule und ihre Nachbarn – 20 Module, 409 Tests, keiner rot
+  (`test_geschmack`, `test_erfolg`, `test_publikum*`, `test_ende_zu_ende_publikum`, `test_lernbot*`, `test_stufe1`,
+  `test_autonom`, `test_n8n_einstieg`, `test_deploy_publikum`, dazu `test_keine_secrets`, `test_secrets_dateien`,
+  `test_einstellungen`, `test_laufzeiten`, `test_instanz`, `test_isolation`). Die volle Suite läuft in der CI.
+- **Nicht geprüft:** Florians echte Zahlen – `pipeline erfolg` nach dem Update; ehrlich erwartet „zu wenig Videos“
+  bzw. „nicht gemessen“.
+
+**Wie viel schneller oder besser ist das System nachweislich?**
+Schneller wird nichts: `pipeline erfolg` braucht für 300 Posts 15 ms, der ganze Befehl 0,25 s; der Sonntagsbericht
+rechnet einmal je Woche. Besser, belegt:
+- **Kaum noch falsche Gewinner:** Ohne echten Unterschied stand vorher in 81,5–100 % der Halbjahre irgendwann eine
+  Gewinner-Behauptung im Bericht (Leser-Simulation des Plans; Nachstellung oben: 99,5 %). Jetzt steht nur noch
+  „belegt“ da – falsch in 3,6 % der Halbjahre bzw. 6,3 % der Jahre (Simulation, je 1000 Läufe; Nachstellung: 5,0 %).
+- **Echte Unterschiede werden gefunden:** doppelte Reaktionen bei einem Aufbau in 100 % binnen eines Jahres belegt
+  (im Median nach 16 Wochen), ×1,6 in 99 % (Woche 22), ×1,3 nur in 49 % (Woche 32) – je 200 Läufe, 3 Shorts je Woche.
+- **Nichts erfunden:** Was nicht gemessen wird, steht mit Grund da (auf TikTok heute: wie lange geschaut wird, neue
+  Follower, Besuche auf clip-battle.de); vorher stand „nicht gemessen“ nirgends.
+- **Eine Zahl, ein Name:** Für dasselbe Video nannte die Tagesmeldung die Wochen-Note (im Versuch +0,6) und /publikum
+  ohne Namen die vorläufige Note (−0,1); jetzt stehen beide beschriftet nebeneinander.
+- **Ehrlich:** Belegte Unterschiede gibt es erst nach Wochen bis Monaten (ein erster Vergleich frühestens nach etwa 7
+  bzw. 12 Wochen bei 3 Shorts je Woche, M168); Besuche auf clip-battle.de erst mit dem Zähler (Florians Ja). Die
+  Tendenzen in /lernstand erscheinen so oft wie vorher (bei reinem Zufall nach 16 Videos in jedem zweiten Fall) – sie
+  heißen jetzt nur so, wie sie sind. Die echte Fehlalarmquote liegt mit 6,3 % im Jahr über der Schätzung des Plans
+  (etwa 3 %), weil jede Woche neu nachgesehen wird (M161).
+
+**Was ist die nächste sinnvolle Erweiterung?**
+1. Vor Ort, ohne neuen Code: nach dem Update einmal `pipeline erfolg` (für einen Freund `benutzer-befehl.sh <name>
+   erfolg`) und sonntags den Bericht ansehen; 📋 Stand muss „Zuschauern (n Videos ausgewertet)“ zeigen, sonst einmal
+   /tiktok.
+2. Florians Antworten auf die gebündelten Fragen (CLAUDE.md, „Offene Fragen“): Zähler auf clip-battle.de mit
+   Rechtsprüfung → Video-Code und Abruf (PR 3–5); YouTube verbinden (PR 6 – wie lange geschaut wird und neue Abos je
+   Video würden messbar); TikTok-Follower als Wochenwert (PR 7); Gewichte; Shorts je Woche.
+3. Stufe 5 (Liga je Instanz-Datenbank): dieselbe Vergleichsfunktion entscheidet über Champion und Herausforderer; die
+   Lerner bekommen reife Werte und die Gewichte; gegen das wöchentliche Nachsehen eine strengere Regel (z. B. „belegt
+   in zwei Wochen nacheinander“).
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -527,5 +624,7 @@ Offen: freier Speicher auf dem vServer für den Briefkasten.
    Rechen-Arbeiter. Fertig: Laufzeiten messen (Schritt 1), Ausfallsicher (Schritt 2), Florian zuerst (Schritt 3),
    Vertrag für weitere Rechner als Doku (Schritt 4, `docs/WORKER.md`); Fern- und Cloud-Rechner erst nach einem
    Messbefund und Florians Ja (Stufenbericht oben).
-4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
+4. **Erfolg ehrlich messen:** neue Zielgrößen versioniert neben dem alten Score, belegter Strategievergleich. Fertig:
+   `pipeline erfolg` (Schritt 1), ehrliche Sätze im Sonntagsbericht, in /lernstand und /publikum (Schritt 2);
+   Kampagnenlink je Instanz (Zähler auf clip-battle.de) erst nach Florians Ja und Rechtsprüfung (Stufenbericht oben).
 5. Liga je Instanz-Datenbank.
