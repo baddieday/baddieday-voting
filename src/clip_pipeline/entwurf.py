@@ -268,7 +268,8 @@ def encoder(konfig: Konfig, final: bool) -> tuple[list[str], list[str], str]:
 
 def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max_bytes: int = 48_000_000,
             encoder_name: str | None = None, volle_aufloesung: bool = False, crf: int = 23,
-            kbit_max: int = ENTWURF_KBIT, vollstaendig: bool = True, stems: Path | None = None) -> dict:
+            kbit_max: int = ENTWURF_KBIT, vollstaendig: bool = True, stems: Path | None = None,
+            _beginn: float | None = None) -> dict:
     """Rendert eine Schnittliste nach `ziel` (erst `<name>.tmp.mp4`, dann umbenannt – nie eine halbe Datei).
     Rückgabe {"datei", "mb", "dauer_s", "encoder", "aufloesung"}, z. B. {…, "encoder": "libx264",
     "aufloesung": [720, 1280]}.
@@ -286,11 +287,14 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
       FLAC – Vordergrund und Musik nach dem Ducking – für messung.messe; ohne Musik entsteht keine Datei.
     Ton-Hygiene (R1): nach der Dauerprüfung und vor der Größenprüfung gleicht normalisiere_ton die Lautheit auf
       [regie.ton] an (zwei Pässe loudnorm); scheitert das, bleibt der Ton wie gerendert.
-    Sidecar: neben ziel liegt danach `<name>.render.json` (Geometrie, Encoder, Ton – _sidecar) für die Messung.
+    Sidecar: neben ziel liegt danach `<name>.render.json` (Geometrie, Encoder, Ton – _sidecar) für die Messung, dazu
+      die Laufzeit (Stufe 3, M142): render_s (Sekunden ab dem ersten Versuch, mit Lautheit), rueckfall (VA-API → CPU),
+      eingabe_mb (Summe der Eingabedateien) und dauer_s (echte Bildlänge). _beginn: nur der Rückfall selbst.
 
     Fehler: MedienFehler, wenn eine Moment-Datei oder die Musik fehlt (vor ffmpeg) oder ffmpeg scheitert – VA-API
     fällt vorher einmal auf CPU zurück (mit denselben Werten). ZuGross(kbit) mit der benutzten Rate, wenn die Datei
     ohne final über max_bytes liegt; bei ZuGross gibt es keinen Rückfall auf CPU (entscheidet der Aufrufer)."""
+    beginn = time.monotonic() if _beginn is None else _beginn   # Rückfall: die Zeit zählt ab dem ersten Versuch
     if vollstaendig or final:
         _pruefe_formatdauer(liste)
     segmente = liste["segmente"]
@@ -367,7 +371,7 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
         if name == "h264_vaapi" and encoder_name is None:  # VA-API streikt -> CPU
             return rendere(liste, ziel, konfig, final=final, max_bytes=max_bytes, encoder_name="libx264",
                            volle_aufloesung=volle_aufloesung, crf=crf, kbit_max=kbit_max,
-                           vollstaendig=vollstaendig, stems=stems)
+                           vollstaendig=vollstaendig, stems=stems, _beginn=beginn)
         raise
     finally:
         graph_datei.unlink(missing_ok=True)
@@ -387,11 +391,12 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
             stems_tmp.unlink(missing_ok=True)
         raise ZuGross(f"Entwurf {liste['name']} ist {groesse // 1_000_000} MB groß (Grenze {max_bytes // 1_000_000})",
                       kbit)
-    tmp.replace(ziel)
+    medien.uebernehmen(tmp, ziel)   # mit fsync: nach einem Stromausfall nie ein leeres Video unter dem Endnamen (M144)
     if stems_tmp is not None and stems_tmp.is_file():
-        stems_tmp.replace(stems)
+        medien.uebernehmen(stems_tmp, stems)
     _sidecar(ziel, {**geometrie(liste, b, h, quellen, rahmen), "fps": int(liste["fps"]), "encoder": name, **ton,
-                    "stems": str(stems) if mit_stems else None})
+                    "stems": str(stems) if mit_stems else None, "render_s": round(time.monotonic() - beginn, 1),
+                    "rueckfall": _beginn is not None, "eingabe_mb": _eingabe_mb(befehl), "dauer_s": round(wirklich, 3)})
     return {"datei": str(ziel), "mb": round(groesse / 1e6, 1), "dauer_s": round(wirklich, 3), "encoder": name,
             "aufloesung": [b, h]}
 
@@ -431,6 +436,16 @@ def geometrie(liste: dict, b: int, h: int, quellen: list[tuple[int, int]], rahme
         y1 = y0 + niedrigste
     return {"b": b, "h": h, "format": liste.get("format"), "band": [y0, y1],
             "spiel_anteile": [round(x / h, 4) for x in hoehen], "rahmen": round(rahmen, 3)}
+
+
+def _eingabe_mb(befehl: list[str]) -> float | None:
+    """Summe der Eingabedateien (-i) in MB – so viel bekäme ein anderer Rechner für diesen Render (Stufe 3, M142).
+    Nur eine Messzahl: None statt eines Fehlers."""
+    try:
+        dateien = {Path(befehl[i + 1]) for i, arg in enumerate(befehl[:-1]) if arg == "-i"}
+        return round(sum(d.stat().st_size for d in dateien if d.is_file()) / 1e6, 1)
+    except OSError:
+        return None
 
 
 def _sidecar(ziel: Path, daten: dict) -> None:

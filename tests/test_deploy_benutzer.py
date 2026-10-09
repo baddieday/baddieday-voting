@@ -191,6 +191,7 @@ class Vorlagen(unittest.TestCase):
                 self.assertEqual(s["Type"], ["oneshot"])
                 self.assertEqual(s["SuccessExitStatus"], ["3 4"])        # 4 = Sperre belegt: nächster Timer-Lauf
                 self.assertNotIn("WantedBy", s)                           # startet nur über seinen Timer
+                self.assertEqual(s["TimeoutStartSec"], ["1h"])            # Stufe 3 (M146): unter Florians 2 h Warten
         # Stufe 2: Abholen nur lesen, nie die Rechen-Sperre (M96); 3/4 kein Fehler, Platte im Leerlauf-Vorrang (M95)
         abholen, s = befehle["clip-freund-abholen"], lies_unit(DIENSTE["clip-freund-abholen"])
         self.assertEqual((abholen.fn, abholen.aktion), (cli._cmd_briefkasten, "abholen"))
@@ -209,6 +210,21 @@ class Vorlagen(unittest.TestCase):
         bot = lies_unit(DIENSTE["clip-freund-bot"])
         self.assertEqual((bot["Type"], bot["Restart"], bot["WantedBy"]),
                          (["simple"], ["always"], ["multi-user.target"]))
+
+    def test_florians_timer_mit_sperre_enden_vor_seiner_wartezeit(self):
+        """Prüfung K2 (M154): clip-sitzungen und clip-mikro nehmen die Rechen-Sperre und enden spätestens nach
+        [sperre].warten_s (TimeoutStartSec zählt ab dem Start, mit dem Warten). Hängt so ein Lauf mit der Sperre,
+        bekommt ein n8n-Schritt, der danach kommt, sie noch vor seiner Frist. Bewusst nicht länger: Mit 2 h + x endete
+        ein n8n-Schritt, der in den ersten x nach einem Hänger kommt, mit Exit 4 (nachgestellt mit der echten Sperre).
+        Preis: Wer die ganzen 2 h nur wartet, endet durch systemd statt mit Exit 4, ohne Zeile „gesperrt“."""
+        warten = KONFIG["sperre"]["warten_s"]
+        einheit = {"h": 3600, "min": 60, "s": 1}
+        for name in ("clip-sitzungen.service", "clip-mikro.service"):
+            spanne = lies_unit(DEPLOY / "systemd" / name)["TimeoutStartSec"][0]
+            with self.subTest(name):
+                self.assertRegex(spanne, r"^(\d+(h|min|s))+$")
+                self.assertLessEqual(sum(int(z) * einheit[e] for z, e in re.findall(r"(\d+)(h|min|s)", spanne)),
+                                     warten)
 
     def test_lager_vorlage_ist_block_plus_genau_eine_bindung(self):
         """Isolation (Stufe 2): Außerhalb des Sandbox-Blocks hat die Lager-Vorlage nur ihre Grenzen und genau zwei
@@ -539,12 +555,9 @@ class UpdateMitFreunden(unittest.TestCase):
         self.prod, self.units, self.stub, self.benutzer = (self.t / n for n in ("prod", "units", "stub", "benutzer"))
         for teil in ("systemd", "benutzer"):
             shutil.copytree(DEPLOY / teil, self.prod / "deploy" / teil)
-        git = ["git", "-C", str(self.prod), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-               "-c", "commit.gpgsign=false"]
-        for befehl in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "Stand"]):
-            subprocess.run(git + befehl, check=True, capture_output=True)
-        self.stand = subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True,
-                                    text=True).stdout.strip()
+        self.git = ["git", "-C", str(self.prod), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "-c", "commit.gpgsign=false"]
+        self.stand = self.commit("Stand", init=True)
         self.units.mkdir()
         for name in ("clip-bot.service", "clip-lernbot.service"):
             shutil.copy(DEPLOY / "systemd" / name, self.units / name)
@@ -574,19 +587,25 @@ class UpdateMitFreunden(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def commit(self, text: str, *, init: bool = False) -> str:
+        for befehl in ([["init", "-q", "-b", "main"]] if init else []) + [["add", "-A"], ["commit", "-q", "-m", text]]:
+            subprocess.run(self.git + befehl, check=True, capture_output=True)
+        return subprocess.run(self.git + ["rev-parse", "HEAD"], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
     def freund(self, name: str = "max") -> Path:
         inst = self.benutzer / name
         (inst / "db").mkdir(parents=True)
         (inst / ".clip-benutzer").write_text(f"{name}\n", encoding="utf-8")
         return inst
 
-    def lauf(self) -> subprocess.CompletedProcess:
+    def lauf(self, alt: str | None = None, ziel: str | None = None) -> subprocess.CompletedProcess:
         env = {**os.environ, "PATH": f"{self.stub}:{os.environ['PATH']}", "STUB": str(self.stub),
                "UNITS": str(self.units), "BENUTZER_DIR": str(self.benutzer)}
         # innen <PROD> <REGIE> <MIT_REGIE> <ALT_PROD> <ZIEL_PROD> <ALT_REGIE> <ZIEL_REGIE> <STEMPEL> <UNITS> <SICH>
         r = subprocess.run(["bash", "-c", innen_teil(), "innen", str(self.prod), str(self.t / "regie"), "0",
-                            self.stand, self.stand, "", "", "TEST", str(self.units), str(self.t / "sich")],
-                           capture_output=True, text=True, env=env, timeout=120)
+                            alt or self.stand, ziel or self.stand, "", "", "TEST", str(self.units),
+                            str(self.t / "sich")], capture_output=True, text=True, env=env, timeout=120)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
@@ -658,6 +677,43 @@ class UpdateMitFreunden(unittest.TestCase):
         self.assertFalse([a for a in self.aufrufe() if a.startswith("runuser -u clip-max")])   # nicht einmal versucht
         self.assertIn("systemctl restart clip-lernbot", self.aufrufe())   # umgestellt wurde trotzdem
         self.assertTrue((self.units / "clip-freund-bot@.service").exists())
+
+    def test_zeitgrenzen_nur_in_unveraenderte_units(self):
+        """Stufe 3 (M146): Das Update bringt die Zeitgrenze in clip-sitzungen.service (2 h) und in die Timer-Dienste
+        der Freunde (1 h statt 2 h) – aber nur, wo die installierte Datei genau dem alten Repo-Stand entspricht. Eine
+        eigene Anpassung bleibt, das Update sagt es (Florian trägt die Zeile dann selbst ein)."""
+        self.freund()
+        neu = {"systemd/clip-sitzungen.service": "", "benutzer/clip-freund-scan@.service": "",
+               "benutzer/clip-freund-abend@.service": ""}
+        alt = {}
+        for rel in neu:
+            neu[rel] = (self.prod / "deploy" / rel).read_text(encoding="utf-8")
+            # Stand vor Stufe 3: clip-sitzungen ohne Grenze, die Freunde mit 2 h
+            ersatz = "" if rel.startswith("systemd/") else ("# Hängt etwas, gibt der Lauf die gemeinsame Sperre "
+                                                            "spätestens nach 2 h wieder frei (wie clip-mikro)\n"
+                                                            "TimeoutStartSec=2h\n")
+            alt[rel] = re.sub(r"# Hängt etwas[^\n]*\n#[^\n]*\nTimeoutStartSec=[12]h\n", ersatz, neu[rel])
+            self.assertNotEqual(alt[rel], neu[rel], rel)
+            (self.prod / "deploy" / rel).write_text(alt[rel], encoding="utf-8")
+        vorher = self.commit("vor Stufe 3")
+        for rel, text in neu.items():
+            (self.prod / "deploy" / rel).write_text(text, encoding="utf-8")
+            (self.units / Path(rel).name).write_text(alt[rel], encoding="utf-8")   # so ist es heute installiert
+        nachher = self.commit("Stufe 3")
+        r = self.lauf(vorher, nachher)
+        for rel, text in neu.items():
+            with self.subTest(rel):
+                self.assertEqual((self.units / Path(rel).name).read_text(encoding="utf-8"), text)
+        self.assertIn("Dienst aktualisiert: clip-sitzungen.service", r.stdout)
+        self.assertIn("Vorlage aktualisiert: clip-freund-scan@.service", r.stdout)
+        # Von Hand angepasst (z. B. Nice=5 dazugeschrieben): nicht überschrieben, das Update sagt, wo es abweicht
+        for rel in neu:
+            (self.units / Path(rel).name).write_text(alt[rel] + "Nice=5\n", encoding="utf-8")
+        r = self.lauf(vorher, nachher)
+        for rel in neu:
+            with self.subTest(rel):
+                self.assertEqual((self.units / Path(rel).name).read_text(encoding="utf-8"), alt[rel] + "Nice=5\n")
+                self.assertIn(f"{Path(rel).name} weicht vom Repo ab", r.stdout)
 
 
 class Skript(unittest.TestCase):

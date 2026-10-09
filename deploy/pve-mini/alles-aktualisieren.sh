@@ -84,7 +84,8 @@ im_ct flock -E 75 -w $(( WARTEN_MIN * 60 )) "$SPERRE" bash -c "$INNEN" innen \
 rc=$?
 if [ "$rc" = 75 ]; then
   echo "⚠️  Nach $WARTEN_MIN min läuft immer noch etwas (Render/Highlight) – stelle trotzdem um."
-  echo "    Der laufende Schritt rechnet mit dem alten Code zu Ende; schlägt er fehl, wiederholt n8n ihn."
+  echo "    Der laufende Schritt rechnet mit dem alten Code zu Ende. Scheitert ein n8n-Schritt, meldet n8n den Fehler"
+  echo "    (kein neuer Versuch von selbst) – ein Match holst du nach mit: pipeline process <ID>"
   im_ct bash -c "$INNEN" innen \
     "$PROD" "$REGIE" "$MIT_REGIE" "$ALT_PROD" "$ZIEL_PROD" "$ALT_REGIE" "$ZIEL_REGIE" "$STEMPEL" "$UNIT_DIR" "$SICH"
   rc=$?

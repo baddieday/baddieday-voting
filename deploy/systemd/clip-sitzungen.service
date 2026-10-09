@@ -9,6 +9,9 @@ User=pipeline
 WorkingDirectory=/opt/clip-pipeline
 ExecStart=/opt/clip-pipeline/.venv/bin/pipeline sitzungen
 SuccessExitStatus=3 4
+# Hängt etwas, gibt der Lauf die Rechen-Sperre spätestens nach 2 h frei (wie clip-mikro, zählt ab dem Start mit dem
+# Warten); das abgebrochene Abend-Video rendert der nächste Lauf auf der CPU nach (Stufe 3, M146)
+TimeoutStartSec=2h
 SupplementaryGroups=render
 NoNewPrivileges=true
 ProtectSystem=strict

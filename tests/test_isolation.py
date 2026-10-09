@@ -59,16 +59,17 @@ ECHTE_ORTE = ("/var/lib/clip-benutzer", "/srv/clips", "/srv/puffer", "/srv/big")
 FLORIANS_ZUGAENGE = {"TELEGRAM_BOT_TOKEN": "florian-test-clipbot", "LEARN_BOT_TOKEN": "florian-test-lernbot",
                      "CLIP_EPIC_ID": "FLORIAN-EPIC-TEST"}
 
-# Startet die Pipeline wie bin/pipeline und schreibt den Sperrpfad jedes Laufs mit (Spec: „Aufträge“)
+# Startet die Pipeline wie bin/pipeline und schreibt den Sperrpfad jedes Laufs mit (Spec: „Aufträge“). Seit Stufe 3
+# nimmt cli.main die Sperre über laufzeiten.lauf, und das ruft sperre.sperre – also wird dort mitgeschrieben.
 STARTER = """
 import os, sys
-from clip_pipeline import cli
-echte_sperre = cli.sperre
+from clip_pipeline import cli, sperre
+echte_sperre = sperre.sperre
 def mitschreiben(pfad, *args, **kwargs):
     with open(os.environ["TEST_SPERRPROTOKOLL"], "a", encoding="utf-8") as f:
         f.write(os.path.realpath(pfad) + "\\n")
     return echte_sperre(pfad, *args, **kwargs)
-cli.sperre = mitschreiben
+sperre.sperre = mitschreiben
 sys.exit(cli.main(sys.argv[1:]))
 """
 
