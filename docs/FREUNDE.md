@@ -22,12 +22,45 @@ niemand zu sehen, auch nicht die anderen Freunde. (Florian betreibt den Rechner 
 4. Nimm wie gewohnt mit der **Nvidia App** oder **SteelSeries Moments** auf.
 
 ## Wie deine Aufnahmen zu Florian kommen
-Das kommt mit dem nächsten Schritt: ein kleines Programm für deinen PC, das deine Aufnahmen und Replays von selbst
-hochlädt. Bis dahin probiert Florian alles mit ein paar Aufnahmen von Hand aus.
+Dein PC lädt sie von selbst hoch – in deinen eigenen Briefkasten auf Florians Server im Internet. Nur dein PC kann dort
+etwas hineinlegen, nur Florians Rechner daheim holt es ab. Einmal einrichten (2–3 Minuten, Windows 10 oder 11):
+1. Tipp in deinem Bot auf **/pc**. Er schickt dir eine Datei `ClipUpload-<dein Name>.zip`.
+2. Speicher sie auf deinem PC, Rechtsklick → **Alle extrahieren**, dann im neuen Ordner **Freund-Einrichten.cmd**
+   doppelklicken. Kommt „Der Computer wurde durch Windows geschützt“: **Weitere Informationen** → **Trotzdem
+   ausführen**. Am Ende steht im Fenster „[OK] Verbunden mit Florians Briefkasten“.
+3. In Fortnite **Replays aufzeichnen** anlassen. Kurz danach schreibt dein Bot „✅ Dein PC ist verbunden“.
+
+Danach läuft alles von selbst, alle 2 Minuten, ohne Fenster:
+- Das Programm nimmt nur Fortnite-Aufnahmen der **Nvidia App** und von **SteelSeries Moments** und deine Replays – ab dem Tag
+  der Einrichtung (einen Tag zurück), nichts Älteres. Findet die Einrichtung im Videos-Ordner keine Aufnahmen, fragt
+  sie einmal nach dem Ordner.
+- Solange Fortnite läuft, lädt es langsam (2 Mbit/s), damit nichts ruckelt – danach mit voller Leitung.
+- **Auf deinem PC wird nie etwas gelöscht.** Aufnahmen ohne Replay bleiben dort; dein Bot erinnert dich dann an die
+  Replays.
+- Kein Admin, keine Installation, kein offener Port. Fehlt der „OpenSSH-Client“ (selten), sagt dir die Einrichtung,
+  wo du ihn einmal nachinstallierst (dafür braucht es Admin).
+- **Neue Version:** im Bot wieder /pc und Freund-Einrichten.cmd noch einmal. **Ausschalten:** in der
+  Aufgabenplanung die Aufgabe „Clip-Upload“ deaktivieren (oder in der Eingabeaufforderung im Ordner
+  `Freund-Einrichten.cmd /entfernen`) – deine Dateien bleiben.
+- In der ZIP-Datei steckt dein Schlüssel. Er kann nur in deinen Briefkasten legen, sonst nichts – trotzdem nicht
+  weitergeben.
 
 ## Was danach passiert
-Nichts mehr – einfach spielen. Etwa 45 Minuten nach deinem letzten Match kommt das Video in deinen Chat. Du drückst
-nur ✅ oder ❌.
+Nichts mehr – einfach spielen. Das Video kommt etwa 45 Minuten nach deinem letzten Match, wenn der PC so lange an
+bleibt. Machst du ihn gleich aus, kommt es, sobald er wieder an ist. Du drückst nur ✅ oder ❌. Wann sich dein PC
+zuletzt gemeldet hat, steht unter 📋 Stand.
+
+## Deine Aufnahmen bleiben gesichert
+Hat Florian das Lager für dich eingeschaltet, kommen deine Aufnahmen und Replays einmal am Tag zusätzlich auf seinen
+großen Speicher daheim – meist am Tag nach dem Spielen, wenn er dort ohnehin seine eigenen sichert. Dort wird nie
+etwas gelöscht. Erst wenn die Kopie dort nachgeprüft ist und eine Aufnahme älter als 14 Tage ist, macht sie in deiner
+Ecke auf dem Rechner, der deine Videos schneidet, Platz. Deine Videos und Clips bleiben. Du musst dafür nichts tun.
+
+## Datenschutz
+Deine Aufnahmen können euren Sprachchat enthalten. Sie liegen kurz in deinem Briefkasten auf Florians gemietetem
+Server (unverschlüsselt beim Anbieter; bis Florian das Löschen dort freigibt, auch länger) und dauerhaft auf Florians
+Rechnern daheim – mit Lager auch in deinem eigenen Ordner auf seinem großen Speicher, den er über sein Netzlaufwerk
+sehen kann. Florian kann technisch hineinschauen, die anderen Freunde nicht.
 
 ## Claude verbinden (freiwillig)
 Hast du ein eigenes Claude-Abo, kann das Programm damit zusätzlich jedes Video benoten und so schneller lernen. Das

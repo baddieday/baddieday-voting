@@ -25,6 +25,8 @@ Stufe 4, Musik (08.10.): Am Ende jedes Laufs lädt der Bot tagsüber selbst NCS-
 Neige gehen (_musik → musik.nachschub) – keine Musik mehr von Hand. Nur einfacher Modus.
 Mehrbenutzer (08.10., M36/M37): Ein Whisper-Fehler bricht den Lauf nicht mehr ab – die Szenen werden dann ohne Sprache
 gemessen (_stimmung); auf ein Match, das `scan --versuche` aufgegeben hat (Status 'fehler'), wartet der Abend nicht.
+Mehrbenutzer, Stufe 2 (09.10., M93): Bei Freunden mit Briefkasten ist auto_abend aus ([sitzungen].auto_abend); die
+Sitzungsdatei legt der Abholer erst hin, wenn ihre Matches verarbeitet sind – dann baut der nächste Lauf sofort.
 """
 
 from __future__ import annotations
@@ -348,7 +350,11 @@ def auto_abend(con: sqlite3.Connection, konfig: Konfig, schon: list[str] = ()) -
     die neueste Session“ – die Datei vom PC kam nie, SessionVorbeiMinuten steht ab Werk auf 0). Der letzte Block von
     Matches (Lücke ≤ 2 h, Start in den letzten 18 h) gilt als Abend, wenn seit dem letzten Match-Ende
     [sitzungen].ruhe_min (45) vergangen sind und noch keine Sitzung eines seiner Matches kennt. Name: abend_<1. Match>.
-    Ältere Abende werden nie nachgeholt (kein Video-Schwall nach dem Update)."""
+    Ältere Abende werden nie nachgeholt (kein Video-Schwall nach dem Update).
+    Mehrbenutzer, Stufe 2 (M93): [sitzungen].auto_abend = false (bei Freunden mit Briefkasten erzwungen) – dann kommt das
+    Abend-Ende nur als Datei vom PC: Ihre Aufnahmen kommen mit Verzug, ein selbst erkannter Abend käme zu früh."""
+    if not konfig.wert("sitzungen.auto_abend", True):
+        return None
     ruhe = float(konfig.wert("sitzungen.ruhe_min", 45) or 0)
     if ruhe <= 0:
         return None

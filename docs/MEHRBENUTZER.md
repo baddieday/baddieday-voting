@@ -5,7 +5,9 @@ unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M8
 „Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 9 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
 Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox, Speicher für Freunde, Freund
 anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl, eigener Claude-Zugang per /claude). Seite für
-Freunde: `docs/FREUNDE.md`.
+Freunde: `docs/FREUNDE.md`. Stufe 2 („Freunde liefern selbst“, Annahmen ab M85): Schritt 1 Briefkasten auf dem
+vServer (`docs/BRIEFKASTEN.md`), Schritt 2 Abholen am Mini und Schritt 3 Abholen einschalten (unten) sind gebaut –
+eingeschaltet wird je Freund mit `benutzer-anlegen.sh`, Schritt „Briefkasten“.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -23,6 +25,9 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
   - `clip-freund-einrichten@`, `clip-freund-pruefen@` – einmalig, gestartet von `benutzer-anlegen.sh` und
     `benutzer-pruefen.sh` (Schritt 7)
   - `clip-freund-koppeln@` – Einladungslink, einmalig, gestartet von `benutzer-anlegen.sh` (Schritt 8)
+  - `clip-freund-abholen@` + Timer – alle 2 min `briefkasten abholen` (Stufe 2; an erst nach grüner Probe-Abholung)
+  - `clip-freund-lager@` – ohne Timer, `lager abgleich` mit seinem Unterordner im Lager (Stufe 2; gestartet nur vom
+    Rundgang `clip-lager-freunde.service`, der als root bei Florians Abgleich mitfährt)
 - **Gemeinsam:** nur Florians Sperrdatei `/var/lib/clip-pipeline/pipeline.lock`, dazu Prozessor, Grafikchip und Netz.
 
 ## Ordner (I = `/var/lib/clip-benutzer/<name>`)
@@ -30,8 +35,10 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
 |---|---|---|
 | `/var/lib/clip-benutzer` | root 0711 | – |
 | I | `root:clip-<name>` 0750 | `instanz.toml` und `.env` (beide `root:clip-<name>` 0640), Marke `.clip-benutzer` |
-| I/db | 0700 | `pipeline.db`, `publikum-oauth.json`, `mikro.anstoss`, `big-zustand`, `kopplung.json` (0600) |
-| I/daten (= Puffer) | 0700 | `.clip-speicher`, `.clip-puffer`, `eingang/`, `replays/`, `sessions/`, `sitzungen/`, `export/` |
+| I/db | 0700 | `pipeline.db`, `publikum-oauth.json`, `mikro.anstoss`, `big-zustand`, `kopplung.json` (0600); Stufe 2: `briefkasten.json`, `pc-status.json`, `pipeline.briefkasten.lock` |
+| I/daten (= Puffer) | 0700 | `.clip-speicher`, `.clip-puffer`, `eingang/`, `replays/`, `sessions/`, `sitzungen/`, `export/`; Stufe 2: `.abholen/` (Zwischenablage des Abholers) |
+| I/briefkasten (Stufe 2) | `root:clip-<name>` 0750 | Schlüssel `abholen`, `pc` (je mit `.pub`), `known_hosts`, `known_hosts_pc` – alle `root:clip-<name>` 0640: er liest sie, tauschen kann er sie nicht |
+| I/lager (Stufe 2) | root:root 0755, leer | Einhängepunkt: nur im Dienst `clip-freund-lager@` liegt hier sein Unterordner `freunde/<name>` aus dem Lager |
 | I/regie, I/musik, I/material, I/sfx, I/cache | 0700 | I/cache ist auch HOME und Whisper-Cache |
 
 ## Konfig im Instanz-Modus (`CLIP_INSTANZ=I`, umgesetzt in Schritt 2)
@@ -45,11 +52,15 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
   `CLIP_EPIC_ID` raus, danach gilt nur `I/.env` – und dort nur diese Namen (sonst Exit 2). Florians `.env` und
   `lokal.toml` werden nie geöffnet. Verboten: `--konfig`, `CLIP_KONFIG`, `CLIP_SPEICHER`, `CLIP_DATENBANK` (Exit 2).
 - **Quellen:** Repo-`pipeline.toml` plus `I/instanz.toml`. Dort erlaubt: `[schnitt]`, `[zeit]`, `[merkmale.waffen]`
-  (nur Schlüssel, die die Repo-Konfig dort kennt), `[sperre]` `datei`/`warten_s`, `[instanz]` `claude`. Alles andere
-  (Datenbank, Lager, pve-big, Pfade …) ist ein Konfig-Fehler.
+  (nur Schlüssel, die die Repo-Konfig dort kennt), `[sperre]` `datei`/`warten_s`, `[instanz]` `claude`, seit Stufe 2
+  `[briefkasten]` (host, port, oeffentlich, drossel_kbit, loeschen, karenz_h – geprüft, siehe unten) und `[instanz]`
+  `lager` (true/false, siehe „Lager für Freunde“). Alles andere (Datenbank, Lager-Pfade, pve-big, Pfade …) ist ein
+  Konfig-Fehler.
 - **Erzwungen:** `I/db/pipeline.db`, Puffer `I/daten`, `I/regie`, `I/musik`, `I/material`, `I/sfx`, Zustand von
-  pve-big in `I/db`; kein Host, keine MAC, kein SSH (auch kein Schlüssel); Freigeben im Puffer und Aufräumen aus;
-  Lager-Pfad `I/kein-lager` (darf es nicht geben – jeder Lager-Zugriff scheitert sicher, Puffer-Betrieb ohne Lager).
+  pve-big in `I/db`; kein Host, keine MAC, kein SSH (auch kein Schlüssel); Aufräumen aus. Ohne Lager-Schalter:
+  Freigeben im Puffer aus, Lager-Pfad `I/kein-lager` (darf es nicht geben – jeder Lager-Zugriff scheitert sicher,
+  Puffer-Betrieb ohne Lager). Mit `[instanz] lager = true` (Stufe 2): Lager `I/lager`, Marke `.clip-lager-<name>`,
+  Freigeben wie bei Florian (B5).
 - **Sperre:** `[sperre].datei` ist Pflicht, absolut, außerhalb von I und muss es schon geben (Florians Datei – eine
   Instanz legt nie eine eigene an, auch nicht bei einem Tippfehler, M41). Fehlt `warten_s`, wartet ein Freund 900 s.
 - **Pfadwächter:** Jeder Datenpfad (auch die Unterordner im Puffer) muss aufgelöst in I liegen – ein Link hinaus ist
@@ -152,6 +163,7 @@ bash /root/freunde-volume.sh             # fragt vor jeder Änderung (j = ja); a
   nichts, es bleibt als `unusedN` in der CT-Konfig. Solange Dienste von Freunden laufen, weigert es sich. Ein neuer
   Lauf von `freunde-volume.sh` hängt genau dieses Volume wieder ein, statt ein leeres neues anzulegen.
 - **Größer machen** (nur wachsen, nichts geht verloren): `pct resize 102 mp2 150G` – vorher `lvs pve/data` ansehen.
+  Wird es knapp, sagt es dir die Morgenprüfung (unter 15 GB frei, Stufe 2, Schritt 6).
 - Geprüft (`tests/test_deploy_benutzer.py`, Attrappen wie beim Puffer): Probe ändert nichts, Pool-Grenze mit vollem
   Puffer, zweiter Lauf ohne Änderung, Rückweg hängt nur aus und sperrt bei laufenden Freunden, Wiedereinhängen.
 
@@ -176,6 +188,7 @@ Was das Skript tut – passt etwas nicht, bricht es vor der ersten Änderung ab;
   schreibt sie nur in seine `.env` (root:clip-<name>, 0640) – nie auf den Bildschirm, nie ins Log;
 - legt Benutzer `clip-<name>` ohne Anmeldung an, seine Ordner, macht deine Sperrdatei für alle lesbar (nur
   `chmod 644`) und legt fehlende Dienst-Vorlagen hin;
+- richtet auf Wunsch (j/N) seinen Briefkasten ein (Stufe 2, oben);
 - richtet in seiner Sandbox ein (Datenbank, Whisper-Modell, Musik seiner Genres) und prüft dort die Trennung, dann
   verbindet es ihn über den Einladungslink mit Telegram (unten) – erst danach schaltet es seine Dienste ein, nur für ihn
   (ohne Verbindung bleibt nur sein Bot aus);
@@ -221,7 +234,7 @@ Der Freund muss keine Zahl suchen: Er tippt einen Link an und drückt Start.
   sein Bot nie Nachrichten ab (er beendet sich sofort). Das Anlege-Skript hält ihn vorher an (falls doch etwas läuft)
   und schaltet ihn erst nach der Kopplung ein. Meldet Telegram trotzdem einen zweiten Empfänger, bricht koppeln ab,
   ohne etwas zu speichern. Telegram fragt es wie sein Lern-Bot (über IPv4), keine neue Bibliothek.
-- **Im Anlege-Skript** (Schritt 8 von 10): zeigt dir den Link (nur den dieses Laufs), wartet, liest danach als root
+- **Im Anlege-Skript** (Schritt 8 von 12): zeigt dir den Link (nur den dieses Laufs), wartet, liest danach als root
   `kopplung.json` (folgt keinem Link, nur eine Zahl und der Vorname) und hängt die Zahl als
   `LEARN_BOT_ALLOWED_USER_ID` an seine `.env` (bleibt root:clip-<name>, 0640). Strg+C beendet nur das Warten: die
   Einladung gilt weiter, der nächste Lauf übernimmt die Zahl ohne neuen Link.
@@ -248,6 +261,93 @@ Der Freund verbindet sein Claude-Abo selbst – ohne Konsole und ohne dich:
   Schweigen, kein Link, Frist, claude fehlt → nichts gespeichert, claude beendet, freundliche Antwort; Token direkt;
   dein Bot ohne `/claude`, deine Hilfe gleich. Den Link findet es auch im echten `claude setup-token` (2.1.294).
 
+## Briefkasten abholen (Stufe 2, Schritt 2 und 3 – umgesetzt)
+Der PC eines Freundes lädt in sein Fach im Briefkasten (`docs/BRIEFKASTEN.md`); `pipeline briefkasten abholen` holt es
+in seinen Puffer, alle 2 min über `clip-freund-abholen@` (Timer). Annahmen M89–M93, M95, M96, M103, M104, M108–M116.
+- **Nur in der Instanz**, nur lesend über das Tailnet als `bk-<name>` mit `I/briefkasten/abholen` (Hostschlüssel
+  gepinnt), höchstens 20 Mbit/s. Bei Florian Exit 2, bevor etwas angefasst wird. Ohne `[briefkasten].host`: „aus“.
+- **Fertig ist eine Datei erst mit Lieferschein** (Name, Größe, SHA-256, Zeit vom PC). Geholt wird nach
+  `I/daten/.abholen`, geprüft (Größe, SHA-256 kalt zurückgelesen), dann bekommt sie die Zeit vom PC (höchstens jetzt −
+  130 s – scan nimmt sie sofort) und per `os.link` ihren Namen. Nie überschrieben; fremde Namen (auch ein Datum, das es
+  nicht gibt) nie angefasst. Drei Fehlversuche: aufgegeben, eine Zeile an den Freund.
+- **Reihenfolge:** Videos → Replays (nur ohne offenes Video) → Sitzungsdatei (erst, wenn ihre Matches verarbeitet sind,
+  spätestens nach 24 h). So baut `sitzungen` danach sofort das Abend-Video; `auto_abend` ist bei Freunden mit
+  Briefkasten aus.
+- **Keine Rechen-Sperre**, eigene Sperre, weckt nie, löscht im Briefkasten nichts. Bremse: nur holen, wenn danach
+  10 GB bzw. 10 % frei bleiben. Meldungen je Thema höchstens einmal am Tag (Fach 80 %, nicht erreichbar seit 24 h,
+  Platz knapp, Datei aufgegeben).
+- **Nachsehen:** `bash deploy/benutzer/benutzer-befehl.sh <name> briefkasten status` (ohne Netz: letzter Kontakt,
+  Füllstand, Dateien je Zustand). Die Tabelle `abholung` gibt es nur in seiner Datenbank.
+- **Einschalten (Schritt 3):** `benutzer-anlegen.sh <name>`, Schritt 9 „Briefkasten“ (j/N): einmal die Adressen des
+  vServers (gemerkt in `/etc/clip-briefkasten.conf`, sobald der Briefkasten antwortet), zwei eigene Schlüssel in
+  `I/briefkasten`, Hostschlüssel über das Tailnet gepinnt, `[briefkasten]` an seine `instanz.toml` angehängt, eine
+  Zeile für den vServer, dann eine Probe-Abholung in seiner Sandbox – erst wenn die grün ist, geht der Timer an. Ist
+  etwas rot, bleibt nur das Abholen aus; ein neuer Lauf setzt fort.
+- **Vorlage:** wie die übrigen, derselbe Sandbox-Block; Exit 3/4 kein Fehler, nach 2 h Schluss (der nächste Lauf
+  setzt fort), Platte im Leerlauf-Vorrang. Netz braucht er nur zum vServer (Tailnet, Port 2222); einen Netz-Zaun gibt es
+  noch nicht (M19, vor Ort prüfen: M104).
+- **Prüfen und Stilllegen:** `benutzer-pruefen.sh` zeigt Rechte und Schlüssel (kein Schlüssel doppelt), ob das Abholen
+  an ist, wann der Briefkasten zuletzt erreicht wurde, den Füllstand und ob sich sein PC gemeldet hat;
+  `benutzer-stilllegen.sh` schaltet auch das Abholen aus (sein Fach auf dem vServer bleibt: dort `--sperren`).
+
+## PC-Programm der Freunde (Stufe 2, Schritt 4 – umgesetzt)
+Der Freund tippt in seinem Bot `/pc` (nur bei Freunden mit Briefkasten), entpackt das ZIP und startet
+`Freund-Einrichten.cmd`. Das Programm (`windows/Freund-Hochladen.ps1`, Aufgabe „Clip-Upload“ alle 2 min, Windows
+PowerShell 5.1, kein Admin) lädt fertige Aufnahmen und Replays in sein Fach – je Datei `.teil`, umbenennen,
+Lieferschein; Replays erst nach den Aufnahmen ihres Matches; 45 min nach dem letzten Match die Abend-Datei; beim Spielen
+2 Mbit/s; es löscht nie. Anleitung für Freunde: `docs/FREUNDE.md`, für Florian: `docs/BRIEFKASTEN.md`. Annahmen M94,
+M97, M117–M124.
+- **Ein ZIP, jedes Mal frisch:** drei Skripte, `freund.psd1` (öffentliche Adresse, Port, `bk-<name>`), sein
+  PC-Schlüssel und der Hostschlüssel – nie der Abhol-Schlüssel, nichts von anderen.
+- **Rückmeldung:** `status/pc-status.json` (was wartet, was übersprungen ist); daraus meldet sein Bot „PC verbunden“,
+  eine falsche Zeitzone und Aufnahmen ohne Replay, 📋 zeigt „PC: zuletzt vor … · n unterwegs“.
+
+## Lager für Freunde (Stufe 2, Schritt 5 – umgesetzt)
+„Wie bei dir, mit Lager“: Hat Florians täglicher Abgleich pve-big ohnehin geweckt, fahren die Freunde mit. Ein Freund
+weckt nie. Annahmen M98–M101, M107, M125–M130.
+- **Ort:** im bestehenden Lager `freunde/<name>/` (im CT `/srv/big/clips/freunde/<name>`) mit Marke
+  `.clip-lager-<name>` – kein neues Dataset, kein neuer Export, keine neue Einhängung.
+- **Schalter:** `[instanz] lager = true` plus der leere, root-eigene Einhängepunkt `I/lager`; beides setzt nur
+  `benutzer-anlegen.sh` (Schritt 11 „Lager“, nur bei wachem pve-big). Dann gelten Lager `I/lager`, Marke
+  `.clip-lager-<name>` und Freigeben wie bei Florian; ohne Schalter genau Stufe 1.
+- **Kopieren:** `clip-freund-lager@<name>` (Sandbox-Block plus genau eine Bindung `freunde/<name>` → `I/lager`, ohne
+  Netz, höchstens 2 h) ruft `pipeline lager abgleich` – derselbe Code wie bei Florian: Datenbank sichern, jede Datei mit
+  SHA-256 zurücklesen, Rohdaten nie überschreiben; danach gibt sein Puffer Rohvideos frei, die älter als 14 Tage und im
+  Lager bestätigt sind (erster Lauf nur Probe). Vorher prüft er: `I/lager` ist NFS, Florians Marke und `freunde/` sind
+  dort unsichtbar, seine Marke ist da – sonst nichts kopiert. Seine anderen Dienste sehen nur das leere `I/lager`.
+- **Mitfahren:** `clip-lager-freunde.service` (root) startet zusammen mit Florians `clip-lager.service` und läuft
+  `deploy/benutzer/lager-freunde.sh`: Halten-Marke „freunde“, warten bis Florians Abgleich fertig ist, prüfen ohne Wecken
+  (NFS eingehängt, Port 2049, Florians Marke), dann je Freund mit Lager und laufendem scan-Timer nacheinander, neue
+  Starts nur 10–18 Uhr, mit Herzschlag für clip-leerlauf; am Ende Marke lösen und
+  `/var/lib/clip-pipeline/lager-freunde.json` schreiben. Schläft pve-big: nichts, die Freunde fahren beim nächsten Mal
+  mit (höchstens 7 Tage, wenn Florian nichts Neues hat).
+- **Nachsehen:** `bash deploy/benutzer/lager-freunde.sh --probe` (wer würde mitfahren), `journalctl -u
+  clip-lager-freunde -n 50`, `bash deploy/benutzer/benutzer-befehl.sh <name> lager status`; `benutzer-pruefen.sh` zeigt
+  Einhängepunkt, Rundgang und seinen letzten Lauf. `benutzer-stilllegen.sh` hält auch einen laufenden Lager-Lauf an.
+- **Vor Ort einmal** (bei wachem pve-big, nach dem 10-Uhr-Abgleich): auf pve-big `exportfs -v` (all_squash,
+  anonuid=101000?), im CT `findmnt -no SOURCE,FSTYPE,OPTIONS /srv/big/clips` (nfs4, soft; die Quelle muss vom CT aus
+  erreichbar sein, am besten als IP), dann `benutzer-anlegen.sh <name>`, im Schritt „Lager“ j. Am Tag danach
+  `journalctl -u clip-lager-freunde -n 50` und `benutzer-befehl.sh <name> lager status` – die erste Freigabe ist nur
+  eine Probe.
+- **Rückweg:** für alle `systemctl disable clip-lager-freunde.service`; je Freund das Rückweg-Skript in
+  `/root/benutzer-lager/` (Schalter wie vorher). Seine Daten im Lager bleiben.
+- **Bei Florian:** `lager.py`, `big.py` und `clip-lager.service` unverändert (Test mit Prüfsummen); ohne eingeschalteten
+  Rundgang läuft sein Abgleich genau wie bisher. Neu sichtbar: der Ordner `freunde/` im Lager (auch über sein SMB
+  `[clips]`) und an Tagen mit Freunden ein länger wacher pve-big (nur tagsüber).
+
+## Morgenprüfung kennt die Freunde (Stufe 2, Schritt 6 – umgesetzt)
+Florian bekommt Probleme der Freunde in seiner Morgenprüfung (11 Uhr, `puffer.py`, Thema „freunde“) – nur, wenn es das
+Freunde-Volume als eigenes Dateisystem gibt; sonst ist die Morgenprüfung Zeichen für Zeichen wie vorher (Test gegen die
+alte `puffer.py`). Annahmen M105, M131–M134.
+- **Platz:** nur `statvfs` auf `/var/lib/clip-benutzer`, nie ein Blick hinein. Warnung unter 15 GB, Alarm unter 5 GB
+  (`[puffer].freunde_warnung_frei_gb`/`freunde_alarm_frei_gb`) mit dem nächsten Schritt `pct resize 102 mp2 +50G`.
+- **Lager:** aus `/var/lib/clip-pipeline/lager-freunde.json`. Der Rundgang schreibt dort jetzt auch, wer Lager hat, seit
+  wann und wer stillgelegt ist (`mit_lager`). Je Freund mit Lager eine Zeile, wenn sein letzter Lauf nicht ging (einmal,
+  solange er höchstens 24 h alt ist; Exit 3/4 zählt nicht) oder er seit 8 Tagen nicht ins Lager kam; nächster Schritt
+  `benutzer-pruefen.sh <name>`. Ohne Rundgang-Datei weiß die Morgenprüfung nichts über die Lager der Freunde
+  (`pipeline` darf ihre Konfig nicht lesen) – dann hilft nur `benutzer-pruefen.sh`.
+- **Beim Freund:** nichts – seine Instanz prüft nie die anderen.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -255,26 +355,28 @@ Der Freund verbindet sein Claude-Abo selbst – ohne Konsole und ohne dich:
 | Speicher, alte Rohvideos? | „Wie bei dir, mit Lager“ | Ab Stufe 2: Rohvideos ins Lager auf pve-big (eigener Unterordner je Freund), im Puffer nach 14 Tagen frei bei bestätigter Kopie (wie B5). In Stufe 1 wird bei Freunden nichts gelöscht |
 | KI für Freunde? | „Eigener Claude-Zugang“ | Jeder Freund mit eigenem Claude-Abo; ohne Zugang bleibt die KI bei ihm aus |
 
-Geplanter Lager-Abgleich ab Stufe 2 (nur geplant): Florians täglicher Abgleich hält pve-big wach; danach läuft je
-Freund ein Abgleich als dessen eigener Benutzer in der Sandbox, der nur seinen eigenen Unterordner sieht. Ein Freund
-weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
+Offen: freier Speicher auf dem vServer für den Briefkasten.
 
 ## Migration
 - Keine Daten werden bewegt, das Schema bleibt. Ohne `CLIP_INSTANZ` und ohne `[sperre].datei` läuft alles wie bisher.
-- Gibt es Freunde, sichert das Update zusätzlich jede Instanz-Datenbank, legt die Vorlagen nur auf die Platte (schaltet
-  sie nie ein) und startet laufende Freundes-Bots neu (umgesetzt, Schritt 5). Florian spielt alles selbst ein; kein
+- Gibt es Freunde, sichert das Update zusätzlich jede Instanz-Datenbank, legt die Vorlagen und den Lager-Rundgang
+  `clip-lager-freunde.service` nur auf die Platte (schaltet sie nie ein) und startet laufende Freundes-Bots neu
+  (umgesetzt, Schritt 5). Florian spielt alles selbst ein; kein
   Auto-Update.
 
 ## Schnittstellen
 - **n8n-Vertrag:** unverändert, nur für Florian. Freunde laufen ohne n8n über Timer.
-- **Windows-Skript und Samba `[clips]`:** unverändert.
+- **Windows-Skript und Samba `[clips]`:** unverändert (das PC-Programm der Freunde ist ein eigenes Skript).
 
 ## Stufen
 1. **Sichere Benutzertrennung** (dieser Plan): gemeinsame Sperre, Instanz-Modus, Freund-Pipeline ohne n8n,
    Isolationstests, Dienst-Vorlagen mit Sandbox, Freunde-Volume (ohne Samba je Freund, M12), Anlegen und Prüfen mit
    einem Befehl, Einladungslink, eigener Claude-Zugang per /claude (alles umgesetzt).
 2. **Freunde liefern selbst:** Briefkasten auf dem vServer + kleines Programm für den PC, Lager je Freund mit
-   Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot.
+   Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot. Gebaut:
+   Briefkasten (Schritt 1), Abholen am Mini (Schritt 2), Abholen einschalten (Schritt 3), PC-Programm und /pc
+   (Schritt 4), Lager für Freunde (Schritt 5), Morgenprüfung kennt die Freunde (Schritt 6); Löschen im Briefkasten erst
+   nach Florians Ja.
 3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

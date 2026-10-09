@@ -36,6 +36,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   im CT als `/srv/clips`): Der Gaming-PC kopiert per SMB hierher, die Pipeline arbeitet nur hier und weckt nie. Das
   Lager von pve-big ist per NFS eingebunden (`/srv/big/clips`). iGPU für Hardware-Encoding durchgereicht.
 - **vServer (Rechenzentrum):** n8n in Docker, der **Dirigent**. Es werden **keine Videos** dorthin übertragen.
+  Einzige Ausnahme (M106): der Briefkasten der Freunde – eigener SFTP-Dienst auf Port 2222, nur Aufnahmen von Freunden
+  auf dem Durchweg zum Mini, nie durch n8n (`docs/BRIEFKASTEN.md`).
 - **Verbindung:** Tailscale zwischen Gaming-PC, Heimserver, vServer und Handy. n8n steuert den Heimserver per **SSH-Node** über Tailscale, mit eigenem Benutzer `pipeline` und SSH-Schlüssel.
 - **KI-Entscheidungen:** Claude Code headless (`claude -p`) über mein Max-Abo, **kein API-Key**. Nur Leserechte (`--allowedTools "Read"`), Ausgabe als JSON.
 - **Schnittprogramm:** CapCut. CapCut kann keine XML/EDL-Timelines importieren → nummerierte Einzelclips mit ein paar Sekunden Puffer vorne und hinten.
@@ -593,3 +595,52 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - Prüfung von Schritt 5–9: Das freiwillige Schärfen deiner Rechte fasst nur noch an, was pipeline gehört. Vorher wurde
     eine `lokal.toml`, die root gehört (mit nano als root angelegt), nur noch für root lesbar – alle deine Dienste wären
     beim Start abgestürzt. Jetzt bleibt sie, wie sie ist, und das Skript sagt es. M84.
+- 2026-10-09 (Stufe 2 Mehrbenutzer, „Freunde liefern selbst“ – Plan aus zwei Entwürfen, sechs Schritte; Löschen im
+  Briefkasten erst nach deinem Ja): Freunde laden ihre Aufnahmen in einen Briefkasten auf dem vServer, der Mini holt sie
+  über Tailscale ab, ihr Lager fährt bei deinem täglichen Abgleich mit. Bei dir ändert sich nichts. Annahmen ab M85:
+  `docs/ENTSCHEIDUNGEN.md`, „Mehrbenutzer“.
+  - Schritt 1 (Briefkasten auf dem vServer, nur Skripte): eigener SFTP-Dienst `briefkasten-sshd` auf Port 2222 neben
+    deinem normalen SSH; je Freund ein Fach fester Größe (Standard 20 GB, mindestens 8; das System behält 15 % und
+    10 GB frei). Der PC des Freundes darf nur hochladen, der Mini nur lesen und nur über das Tailnet; Freunde sehen
+    einander nicht; dort wird nichts gelöscht. `deploy/vserver/briefkasten-{einrichten,freund,pruefen}.sh`, je mit
+    `--probe`, j/N und Rückweg; Anleitung mit Abnahme von Hand: `docs/BRIEFKASTEN.md`. Ausnahme zu „keine Videos auf
+    den vServer“: M106. M85–M88.
+  - Schritt 2 (Abholen am Mini, noch nicht eingeschaltet): `pipeline briefkasten abholen|status` nur in der Instanz
+    eines Freundes (bei dir Exit 2, nichts angefasst). Holt nur Dateien mit Lieferschein (Größe, Prüfsumme, Zeit vom
+    PC), prüft sie nach dem Zurücklesen und legt sie unter ihrem Namen in seinen Puffer – nie überschrieben, fremde
+    Namen nie angefasst; Videos vor Replays, die Abend-Datei erst, wenn seine Matches fertig sind. Keine Rechen-Sperre,
+    weckt nie, löscht im Briefkasten nichts. Mit Briefkasten erkennt sein Mini den Abend nicht selbst
+    (`[sitzungen].auto_abend`, bei dir weiter an). M89–M93, M96, M103.
+  - Schritt 3 (Abholen einschalten): `benutzer-anlegen.sh <name>` hat den Schritt „Briefkasten“ (j/N) – einmal die
+    Adressen des vServers, zwei eigene Schlüssel für ihn (der private nie auf dem Bildschirm), Hostschlüssel über das
+    Tailnet, eine Zeile für den vServer, dann eine Probe-Abholung in seiner Sandbox; erst wenn die grün ist, holt
+    `clip-freund-abholen@` alle 2 min ab. Rot: nur das Abholen bleibt aus, ein neuer Lauf setzt fort. Prüfen und
+    Stilllegen kennen das Abholen; das Update legt die Vorlage nur hin. M95, M104, M108–M116.
+  - Schritt 4 (PC-Programm und /pc): Der Freund tippt in seinem Bot `/pc`, entpackt die Datei und doppelklickt
+    `Freund-Einrichten.cmd` – kein Admin, keine Installation. Danach lädt sein PC alle 2 min fertige Fortnite-Aufnahmen
+    und Replays hoch (beim Spielen langsam, 2 Mbit/s): je Datei erst halb, dann umbenannt, dann der Lieferschein; ein
+    Replay erst nach den Aufnahmen seines Matches; 45 min nach dem letzten Match die Abend-Datei. Er löscht nie etwas.
+    Sein Bot meldet „PC verbunden“, eine falsche Zeitzone und Aufnahmen ohne Replay, 📋 zeigt, wann der PC sich zuletzt
+    meldete. Bei dir gibt es `/pc` nicht, `Uebertragung.ps1` bleibt, wie es ist. Vor Ort einmal unter echter
+    PowerShell 5.1 mit `-Probe` prüfen (docs/BRIEFKASTEN.md). M94, M97, M117–M124.
+  - Schritt 5 (Lager für Freunde): Hat dein täglicher Abgleich pve-big ohnehin geweckt, fahren Freunde mit Lager mit –
+    `clip-lager-freunde.service` hängt sich an `clip-lager.service`, hält pve-big mit der Marke „freunde“ wach und
+    sichert je Freund nacheinander (neue Starts 10–18 Uhr, höchstens 2 h) seinen Puffer nach `freunde/<name>` in deinem
+    Lager; danach gibt sein Puffer Rohvideos nach 14 Tagen frei wie bei dir. Der Rundgang weckt nie, im Lager wird
+    nichts gelöscht. Einschalten je Freund: `benutzer-anlegen.sh`, Schritt „Lager“ (nur bei wachem pve-big, mit Probe
+    der Bindung; rot = Schalter wieder aus). Dein Lager-Code bleibt Zeichen für Zeichen gleich. M98–M101, M107,
+    M125–M130.
+  - Schritt 6 (Morgenprüfung kennt die Freunde): Gibt es das Freunde-Volume, meldet deine Morgenprüfung im Thema
+    „freunde“, wenn dort weniger als 15 GB frei sind (Alarm unter 5 GB, nächster Schritt `pct resize`), und je Freund mit
+    Lager eine Zeile, wenn sein letzter Lager-Lauf nicht ging oder er seit 8 Tagen nicht ins Lager kam (nächster Schritt
+    `benutzer-pruefen.sh <name>`). Hineingeschaut wird nie, nur der freie Platz gemessen. Ohne Freunde-Volume ist die
+    Morgenprüfung Zeichen für Zeichen wie vorher. M105, M131–M134.
+  - Prüfung: Auf einem vServer mit älterem SSH (Ubuntu 20.04, Debian 11) wäre kein Upload eines Freundes fertig
+    geworden – das Umbenennen nach dem Hochladen wurde abgewiesen, obwohl alle Proben grün waren. Das PC-Programm
+    benennt jetzt auf die alte Art um, die jede Version kennt und die nie überschreibt; mit echtem SSH 8.2 und 9.6
+    nachgestellt. Die Mindestversion auf dem vServer bleibt 8. M135.
+    Dazu drei Lücken aus derselben Prüfung geschlossen: Änderte sich eine Aufnahme beim Hochladen, kam sie nie an
+    (jetzt ersetzt der PC sie oben durch die aktuelle Fassung, dann der Lieferschein); riss die Verbindung zwischen
+    Abend-Datei und Lieferschein ab, kam für den Abend nie ein Video (jetzt wird die Datei neu geschrieben); ein
+    absichtlich verschachtelter Lieferschein blockierte das Abholen dieses Freundes für immer (jetzt ungültig, nach 3
+    Versuchen aufgegeben). M136–M138.

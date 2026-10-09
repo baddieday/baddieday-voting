@@ -3,14 +3,24 @@
 Puffer und Lager sind Temp-Ordner (MitAbgleich aus test_lager). Die Prüfung darf pve-big nie wecken und das Lager
 nie anfassen – wach_halten zählt mit, lager_tabu macht jeden Blick ins Lager zum Fehler. Freier Platz (Puffer und
 Lager) und Samba sind ersetzt, damit das Ergebnis nicht vom Testrechner abhängt.
+
+Thema freunde (Mehrbenutzer, Stufe 2): Das Freunde-Volume ist ein Temp-Ordner, „eigenes Dateisystem“ per patch; ein
+Wächter (Audit-Hook) zählt jeden Blick hinein (öffnen, auflisten) – erlaubt ist nur der freie Platz. Ohne Freunde-Volume
+ist die Ausgabe Zeichen für Zeichen die von main d72349f (Vergleich mit der alten puffer.py, wo git sie liefert).
 """
 
+import contextlib
+import importlib.util
 import json
+import os
 import shutil
 import subprocess
+import sys
 import unittest
 from collections import namedtuple
 from datetime import datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -21,7 +31,53 @@ from clip_pipeline.zeit import iso, jetzt, lokal_zu_utc, utc_zu_lokal
 from tests.test_lager import MitAbgleich
 
 ECHT_SAMBA = puffer._samba_aktiv
+ECHT_EINGEHAENGT = puffer._eingehaengt
 Platte = namedtuple("Platte", "total used free")
+PROJEKT = Path(__file__).resolve().parents[1]
+MAIN = "d72349f"   # letzter Stand vor Stufe 2 – ohne Freunde-Volume muss die Morgenprüfung genau so antworten
+
+# Wächter: Pfade, in die die Prüfung nie hineinschauen darf (Freunde-Volume). Ein Audit-Hook lässt sich nicht wieder
+# entfernen – ohne Eintrag in _TABU kehrt er sofort zurück.
+_TABU: list[str] = []
+_GESEHEN: list[str] = []
+
+
+def _waechter(ereignis: str, argumente: tuple) -> None:
+    if not _TABU or ereignis not in ("open", "os.listdir", "os.scandir") or not argumente:
+        return
+    pfad = argumente[0]
+    if isinstance(pfad, (str, bytes, os.PathLike)):
+        pfad = os.fsdecode(os.fspath(pfad))
+        if any(pfad == t or pfad.startswith(t + os.sep) for t in _TABU):
+            _GESEHEN.append(f"{ereignis} {pfad}")
+
+
+sys.addaudithook(_waechter)
+
+
+@contextlib.contextmanager
+def nie_hinein(pfad: Path):
+    """Zählt jeden Blick in pfad (Datei öffnen, Ordner auflisten) – stat und statvfs sind erlaubt."""
+    _GESEHEN.clear()
+    _TABU.append(str(pfad))
+    try:
+        yield _GESEHEN
+    finally:
+        _TABU.clear()
+
+
+@lru_cache(maxsize=None)
+def puffer_von_main():
+    """puffer.py aus main d72349f als eigenes Modul im Paket – None ohne git oder ohne diesen Stand (flacher Klon)."""
+    try:
+        quelle = subprocess.run(["git", "-C", str(PROJEKT), "show", f"{MAIN}:src/clip_pipeline/puffer.py"],
+                                capture_output=True, text=True, timeout=30, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    modul = importlib.util.module_from_spec(importlib.util.spec_from_loader("clip_pipeline._puffer_main", loader=None))
+    modul.__package__ = "clip_pipeline"
+    exec(compile(quelle, f"puffer.py@{MAIN}", "exec"), modul.__dict__)
+    return modul
 
 
 def _wochentag(ziel: int, ab=None):
@@ -41,6 +97,11 @@ class MitPuffer(MitAbgleich):
         self.konfig.daten["puffer"].update(pool_status=str(self.pool_datei), warnung_frei_gb=20, alarm_frei_gb=8,
                                            pool_warnung_prozent=85, pool_alarm_prozent=90, lager_spaetestens_h=36,
                                            pc_stau_h=24, pc_status_datei="sitzungen/pc-status.json")
+        # Freunde-Volume und Rundgang nie vom Testrechner (auf dem Mini gäbe es beides): ab Werk gibt es kein Volume
+        self.volume = self.tmp / "clip-benutzer"
+        self.rundgang = self.tmp / "lager-freunde.json"
+        self.konfig.daten["puffer"].update(freunde_volume=str(self.volume), freunde_lager_status=str(self.rundgang),
+                                           freunde_warnung_frei_gb=15, freunde_alarm_frei_gb=5, freunde_lager_tage=8)
         lager_platte = SimpleNamespace(f_frsize=4096, f_bavail=1000 * 10**9 // 4096, f_blocks=4000 * 10**9 // 4096)
         patcher = [mock.patch("shutil.disk_usage", return_value=Platte(500e9, 400e9, 100e9)),
                    mock.patch.object(puffer, "_samba_aktiv", return_value=None),
@@ -483,6 +544,184 @@ class Meldungsweg(MitPuffer):
         zeilen = self.con.execute("SELECT schluessel, gesendet FROM meldungen").fetchall()
         self.assertEqual([(z[0][:13], z[1]) for z in zeilen], [("puffer:platz:", None)])
         self.assertFalse(db.meldung(self.con, zeilen[0][0], "doppelt"))
+
+
+class Freunde(MitPuffer):
+    """Thema freunde (Mehrbenutzer Stufe 2, M131/M132): Platz auf dem Freunde-Volume und das Lager der Freunde aus der
+    Zusammenfassung des Rundgangs – nur bei Florian mit eigenem Freunde-Volume. Hineingeschaut wird nie: Jeder Aufruf
+    von pruefe() läuft unter dem Wächter, im Volume liegt Inhalt eines Freundes."""
+
+    def setUp(self):
+        super().setUp()
+        (self.volume / "max" / "daten").mkdir(parents=True)
+        (self.volume / "max" / "instanz.toml").write_text("[instanz]\nlager = true\n", encoding="utf-8")
+        self.volume_frei = 60.0
+        self.platte.side_effect = lambda pfad: (Platte(100e9, 100e9 - self.volume_frei * 1e9, self.volume_frei * 1e9)
+                                                if Path(pfad) == self.volume else self.platte.return_value)
+        patcher = mock.patch.object(puffer, "_eingehaengt", side_effect=lambda pfad: Path(pfad) == self.volume)
+        self.eingehaengt = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def vor(self, **dauer) -> str:
+        return iso(self.zeit - timedelta(**dauer))
+
+    def wann(self, **dauer) -> str:
+        return f"{utc_zu_lokal(self.zeit - timedelta(**dauer), 'Europe/Berlin'):%d.%m. %H:%M}"
+
+    def rundgang_schreiben(self, mit_lager: dict, freunde: dict) -> None:
+        self.rundgang.write_text(json.dumps({
+            "lauf": {"start": self.vor(hours=2), "ende": self.vor(hours=1), "ergebnis": "fertig"},
+            "mit_lager": mit_lager, "freunde": freunde}), encoding="utf-8")
+
+    def pruefe(self, zeit=None) -> list[str]:
+        with nie_hinein(self.volume) as gesehen:
+            neu = super().pruefe(zeit)
+        self.assertEqual(gesehen, [])
+        return neu
+
+    def test_genug_frei_keine_meldung(self):
+        self.rundgang_schreiben({"max": {"seit": self.vor(days=20), "stillgelegt": False}},
+                                {"max": {"ende": self.vor(days=1), "ok": True, "exit": 0, "zuletzt_ok": self.vor(days=1)}})
+        self.assertEqual(self.pruefe(), [])
+        with nie_hinein(self.volume) as gesehen:
+            stand = puffer.status(self.con, self.konfig, self.zeit)
+        self.assertEqual(gesehen, [])
+        self.assertNotIn("freunde", stand["befunde"])
+        self.assertEqual((stand["freunde"]["frei_gb"], stand["freunde"]["lager"]["mit_lager"]), (60.0, ["max"]))
+        with nie_hinein(self.volume) as gesehen:  # der Wächter schlägt an, wenn doch jemand hineinschaut
+            os.listdir(self.volume)
+            (self.volume / "max" / "instanz.toml").read_text(encoding="utf-8")
+        self.assertEqual(len(gesehen), 2)
+
+    def test_knapp_genau_eine_meldung_am_tag(self):
+        self.volume_frei = 12
+        schluessel = f"puffer:freunde:{self.tag()}"
+        self.assertEqual(self.pruefe(), [schluessel])
+        self.assertEqual(self.pruefe(), [])  # zweiter Lauf am selben Tag
+        text = self.text(schluessel)
+        self.assertIn("👥 Speicher der Freunde wird knapp: noch 12.0 GB frei von 100 GB (Warnung unter 15 GB).", text)
+        self.assertIn("Nichts verloren – wird es zu knapp, holt der Mini nichts mehr ab", text)
+        self.assertIn("Nächster Schritt: auf pve-mini lvs pve/data ansehen", text)
+        self.assertIn(f"pct resize 102 mp2 +50G (docs/MEHRBENUTZER.md); wer wie viel belegt: im CT du -sh {self.volume}/*",
+                      text)
+        self.volume_frei = 4
+        self.assertEqual(self.pruefe(), [])  # Alarm am selben Tag: das Thema ist schon gemeldet
+        morgen = self.zeit + timedelta(days=1)
+        self.assertEqual(self.pruefe(morgen), [f"puffer:freunde:{self.tag(morgen)}"])
+        self.assertIn("🚨 Speicher der Freunde fast voll: nur noch 4.0 GB frei von 100 GB (Alarm unter 5 GB).",
+                      self.text(f"puffer:freunde:{self.tag(morgen)}"))
+
+    def test_rundgang_eine_zeile_je_freund(self):
+        """Eine Zeile: frischer Fehler (max), 8 Tage ohne guten Lauf (bob: Exit 3 zählt nur hier; ute: noch nie, Bezug
+        „seit“). Keine: kai (Fehler älter als 24 h, zuletzt gut vor 7 Tagen), eva (gut), still (stillgelegt), alt (hat
+        kein Lager mehr), ein Name, der nicht dem Muster folgt."""
+        aktiv = lambda tage: {"seit": self.vor(days=tage), "stillgelegt": False}  # noqa: E731
+        self.rundgang_schreiben(
+            {"max": aktiv(20), "ute": aktiv(9), "bob": aktiv(30), "kai": aktiv(30), "eva": aktiv(30),
+             "still": {"seit": self.vor(days=40), "stillgelegt": True}, "Böse;x": aktiv(30)},
+            {"max": {"ende": self.vor(hours=2), "ok": False, "rc": 0, "exit": 2, "zuletzt_ok": self.vor(days=3),
+                     "hinweis": "Lager ist kein NFS\x1b[31m"},
+             "bob": {"ende": self.vor(hours=2), "ok": False, "exit": 3, "zuletzt_ok": self.vor(days=9)},
+             "kai": {"ende": self.vor(days=2), "ok": False, "exit": 2, "zuletzt_ok": self.vor(days=7)},
+             "eva": {"ende": self.vor(days=1), "ok": True, "exit": 0, "zuletzt_ok": self.vor(days=1)},
+             "still": {"ende": self.vor(days=30), "ok": False, "exit": 2},
+             "alt": {"ende": self.vor(hours=1), "ok": False, "exit": 2},
+             "Böse;x": {"ende": self.vor(hours=1), "ok": False, "exit": 2}})
+        schluessel = f"puffer:freunde:{self.tag()}"
+        self.assertEqual(self.pruefe(), [schluessel])
+        text = self.text(schluessel)
+        self.assertEqual([z.split(":")[0] for z in text.splitlines() if z.startswith("🗄️")],
+                         ["🗄️ Lager von bob", "🗄️ Lager von max", "🗄️ Lager von ute"])
+        self.assertIn(f"🗄️ Lager von max: letzter Lauf am {self.wann(hours=2)} ging nicht (Exit 2, zuletzt gesichert am "
+                      f"{self.wann(days=3)}) – Lager ist kein NFS[31m.", text)
+        self.assertIn(f"🗄️ Lager von bob: seit 9 Tagen nicht gesichert (zuletzt gesichert am {self.wann(days=9)}).", text)
+        self.assertIn("🗄️ Lager von ute: seit 9 Tagen mit Lager dabei, aber seitdem nicht gesichert (noch nie gesichert).",
+                      text)
+        self.assertIn(f"Letzter Rundgang der Freunde am {self.wann(hours=1)}: fertig.", text)
+        self.assertIn("Nichts verloren – ohne Lager bleiben ihre Aufnahmen im Puffer des Freundes", text)
+        self.assertIn("Nächster Schritt: im CT bash /opt/clip-pipeline/deploy/benutzer/benutzer-pruefen.sh bob (ebenso für "
+                      "max, ute) (Abschnitt Lager), dann journalctl -u clip-freund-lager@bob -n 50", text)
+        self.assertNotIn("\x1b", text)
+        for name in ("kai", "eva", "still", "alt", "Böse"):
+            self.assertNotIn(f"Lager von {name}", text)
+        self.assertNotIn("Speicher der Freunde", text)  # genug Platz: nur die Lager-Zeilen
+
+    def test_ohne_freunde_volume_wie_bisher(self):
+        """Ohne Freunde-Volume (fehlt, gleiches Gerät wie der Ordner darüber, Schlüssel leer) und in der Instanz eines
+        Freundes gibt es das Thema nicht: Stand und Meldungen sind Zeichen für Zeichen die einer Konfig ohne die neuen
+        Schlüssel – obwohl alles anschlägt (Florians Themen, Volume fast voll, Fehler im Rundgang)."""
+        self.volume_frei = 1
+        self.rundgang_schreiben({"max": {"seit": self.vor(days=30), "stillgelegt": False}},
+                                {"max": {"ende": self.vor(hours=1), "ok": False, "exit": 2}})
+        self.frei(5)
+        self.pool(95, 20)
+        self.pc(fehler=1)
+        self.samba.return_value = False
+        self.con.execute("DELETE FROM lager_laeufe")
+        self.datei(self.puffer, "eingang/a.mp4", b"x")
+        neu_werte = dict(self.konfig.daten["puffer"])
+        alt_werte = {k: v for k, v in neu_werte.items() if not k.startswith("freunde_")}
+
+        def ausgabe(werte: dict) -> tuple:
+            self.konfig.daten["puffer"] = dict(werte)
+            self.con.execute("DELETE FROM meldungen")
+            with nie_hinein(self.volume) as gesehen:
+                stand = puffer.status(self.con, self.konfig, self.zeit)
+                puffer.pruefe_morgens(self.con, self.konfig, self.zeit)
+            self.assertEqual(gesehen, [])
+            return json.dumps(stand, ensure_ascii=False), [tuple(m) for m in self.meldungen()]
+
+        vorher = ausgabe(alt_werte)
+        self.assertEqual(set(json.loads(vorher[0])), {"getrennt", "befunde", "fehler", "zeile", *puffer.THEMEN})
+        self.assertEqual(len(vorher[1]), 5)
+        self.eingehaengt.side_effect = ECHT_EINGEHAENGT  # echt: ein Temp-Ordner ist kein eigenes Dateisystem
+        for fall, volume in (("gleiches Gerät", str(self.volume)), ("fehlt", str(self.tmp / "fehlt")), ("leer", "")):
+            with self.subTest(fall):
+                self.assertEqual(ausgabe({**neu_werte, "freunde_volume": volume}), vorher)
+        self.eingehaengt.side_effect = lambda pfad: True
+        self.eingehaengt.reset_mock()
+        self.konfig.daten["instanz"] = {"wurzel": str(self.tmp / "inst"), "name": "max"}
+        self.assertNotIn("freunde", ausgabe(neu_werte)[0])  # die Instanz eines Freundes prüft nie die anderen
+        self.eingehaengt.assert_not_called()
+        del self.konfig.daten["instanz"]
+        stand, meldungen = ausgabe(neu_werte)  # Gegenprobe: mit Freunde-Volume schlägt das Thema an
+        self.assertIn("puffer:freunde:", " ".join(m[0] for m in meldungen))
+        self.assertIn("Lager von max", json.loads(stand)["befunde"]["freunde"])
+
+    def test_wie_main_zeichen_fuer_zeichen(self):
+        """Ohne Freunde-Volume antwortet die neue puffer.py wie die aus main d72349f – Stand und Meldungen, an einem
+        Dienstag und an einem Montag (Lebenszeichen), einmal mit allem gut und einmal mit allem schlecht."""
+        alt = puffer_von_main()
+        if alt is None:
+            self.skipTest(f"puffer.py aus main {MAIN} nicht lesbar (kein git oder flacher Klon)")
+        self.eingehaengt.side_effect = ECHT_EINGEHAENGT
+        self.volume_frei = 1
+        self.rundgang_schreiben({"max": {"seit": self.vor(days=30), "stillgelegt": False}},
+                                {"max": {"ende": self.vor(hours=1), "ok": False, "exit": 2}})
+
+        def vergleiche() -> None:
+            for zeit in (self.zeit, _wochentag(0, self.zeit)):
+                ergebnisse = []
+                for modul in (alt, puffer):
+                    self.con.execute("DELETE FROM meldungen")
+                    with mock.patch.object(alt, "_samba_aktiv", self.samba), nie_hinein(self.volume) as gesehen:
+                        stand = modul.status(self.con, self.konfig, zeit)
+                        neu = modul.melde(self.con, self.konfig, stand, zeit)
+                    self.assertEqual(gesehen, [])
+                    ergebnisse.append((json.dumps(stand, ensure_ascii=False), neu, [tuple(m) for m in self.meldungen()]))
+                self.assertEqual(ergebnisse[1], ergebnisse[0])
+
+        self.pool(50, 10)
+        self.pc()
+        self.samba.return_value = True
+        vergleiche()
+        self.frei(5)
+        self.pool(95, 20)
+        self.pc(fehler=1)
+        self.samba.return_value = False
+        self.con.execute("DELETE FROM lager_laeufe")
+        self.datei(self.puffer, "eingang/a.mp4", b"x")
+        vergleiche()
 
 
 if __name__ == "__main__":

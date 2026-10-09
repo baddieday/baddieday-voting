@@ -577,6 +577,15 @@ anderen Fehler ab.
   50 GB (`lager_alarm_frei_gb`) – höchstens einmal am Tag, mit dem Tag der Messung. Nächster Schritt dann: Platz auf
   pve-big schaffen oder die Platte erweitern. Noch keine Messung (z. B. kurz nach R6): keine Meldung. Läuft das Lager
   doch voll, bricht der Abgleich ab, und alles bleibt im Puffer, bis wieder Platz ist.
+- **Freunde** (Mehrbenutzer, seit Stufe 2): Nur wenn es das Freunde-Volume gibt (`/var/lib/clip-benutzer` ist ein
+  eigenes Dateisystem, `[puffer].freunde_volume`), kommt das Thema „freunde“ dazu – sonst bleibt die Morgenprüfung
+  Zeichen für Zeichen wie bisher. Gemessen wird dort nur der freie Platz (`statvfs`), hineingeschaut wird nie: Warnung
+  unter 15 GB, Alarm unter 5 GB (`freunde_warnung_frei_gb`, `freunde_alarm_frei_gb`); nächster Schritt dann
+  `pct resize 102 mp2 +50G` auf pve-mini (nur wachsen). Dazu liest sie die Zusammenfassung des Lager-Rundgangs der
+  Freunde (`/var/lib/clip-pipeline/lager-freunde.json`): je Freund mit Lager eine Zeile, wenn sein letzter Lauf nicht
+  ging (gemeldet, solange der Lauf höchstens 24 h alt ist – also einmal) oder er seit 8 Tagen nicht ins Lager kam
+  (`freunde_lager_tage`; dein Abgleich weckt pve-big spätestens alle 7 Tage). Stillgelegte Freunde zählen nicht.
+  Nächster Schritt dann `benutzer-pruefen.sh <name>`. Wie bei den anderen Themen höchstens eine Meldung am Tag.
 
 ## B5 · Puffer gibt alte Rohvideos frei (seit 08.10.)
 
