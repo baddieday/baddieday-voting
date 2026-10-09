@@ -639,3 +639,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     geworden – das Umbenennen nach dem Hochladen wurde abgewiesen, obwohl alle Proben grün waren. Das PC-Programm
     benennt jetzt auf die alte Art um, die jede Version kennt und die nie überschreibt; mit echtem SSH 8.2 und 9.6
     nachgestellt. Die Mindestversion auf dem vServer bleibt 8. M135.
+    Dazu drei Lücken aus derselben Prüfung geschlossen: Änderte sich eine Aufnahme beim Hochladen, kam sie nie an
+    (jetzt ersetzt der PC sie oben durch die aktuelle Fassung, dann der Lieferschein); riss die Verbindung zwischen
+    Abend-Datei und Lieferschein ab, kam für den Abend nie ein Video (jetzt wird die Datei neu geschrieben); ein
+    absichtlich verschachtelter Lieferschein blockierte das Abholen dieses Freundes für immer (jetzt ungültig, nach 3
+    Versuchen aufgegeben). M136–M138.

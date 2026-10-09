@@ -235,6 +235,46 @@ class Fehlerfall(MitPc):
         self.assertEqual(self.im_fach(), ["status/pc-status.json"])      # nichts geladen – auch das Replay nicht
         self.assertEqual({o["quelle"]: o["anzahl"] for o in self.status()["offen"]}, {"videos": 2, "replays": 1})
 
+    def test_aenderung_beim_hochladen_kommt_trotzdem_mit_lieferschein_an(self):
+        # Befund B2: Ändert sich eine Aufnahme, während sie hochgeht, liegt oben eine frühere Fassung ohne Lieferschein.
+        # Vorher merkte der nächste Lauf sie als erledigt – sie kam nie beim Mini an. Jetzt ersetzt er sie direkt durch
+        # die aktuelle Fassung (der Mini fasst ohne Lieferschein nichts an) und schickt den Lieferschein.
+        video = self.datei(self.videos / VIDEO_A, os.urandom(200_000), 600)
+        self.datei(self.demos / REPLAY, os.urandom(50_000), 3000)
+        huelle = self.tmp / "sftp-huelle"   # nach dem ersten put dieser Aufnahme schreibt „der Rekorder“ noch etwas dazu
+        huelle.write_text(f"""#!/bin/bash
+"{self.sftp}" "$@"; rc=$?
+b=""; for a in "$@"; do [ "$prev" = -b ] && b="$a"; prev="$a"; done
+if [ -n "$b" ] && grep -q '^put "{VIDEO_A}"' "$b" && [ ! -e "{self.tmp}/schon" ]; then
+  printf 'X' >> "{video}"; touch "{self.tmp}/schon"
+fi
+exit $rc
+""")
+        huelle.chmod(0o755)
+        self.konfig(Sftp=f"'{huelle}'")
+        self.lauf()
+        self.assertNotIn(f"videos/{VIDEO_A}.lieferschein", self.im_fach())    # geändert: noch kein Lieferschein
+        lauf = self.lauf(uhr_plus(10))
+        self.assertEqual(lauf.returncode, 0, lauf.stdout + lauf.stderr)
+        self.assertIn(f'put "{VIDEO_A}" "videos/{VIDEO_A}"', self.befehle())   # direkt auf den Namen
+        self.assertEqual((self.fach / "videos" / VIDEO_A).read_bytes(), video.read_bytes())
+        self.assertEqual(self.lieferschein("videos", VIDEO_A)["sha256"], sha(video))
+
+    def test_abend_datei_ohne_lieferschein_wird_neu_geschrieben(self):
+        # Befund B4: Riss die Verbindung zwischen Abend-Datei und Lieferschein ab, lag oben eine Abend-Datei ohne
+        # Lieferschein – womöglich mit weniger Matches. Vorher kam nur ein Lieferschein mit der neuen Prüfsumme dazu (der
+        # Mini gab die Sitzung auf, kein Abend-Video). Jetzt schreibt der PC die Datei neu, der Lieferschein passt.
+        self.datei(self.videos / VIDEO_A, os.urandom(100_000), 1300)
+        self.datei(self.demos / REPLAY, b"replay" * 5000, 1000)
+        self.assertEqual(self.lauf().returncode, 0)
+        name = f"session_{MATCH}.json"
+        alt = self.fach / "sitzungen" / name
+        alt.write_text('{"session": "alt", "matches": [], "ende_utc": "2026-10-08T18:00:00Z"}', encoding="utf-8")
+        lauf = self.lauf(uhr_plus(50))
+        self.assertEqual(lauf.returncode, 0, lauf.stdout + lauf.stderr)
+        self.assertEqual(json.loads(alt.read_text(encoding="utf-8"))["matches"], [MATCH])
+        self.assertEqual(self.lieferschein("sitzungen", name)["sha256"], sha(alt))
+
     def test_briefkasten_vor_openssh_8_6_nimmt_trotzdem_alles_an(self):
         # Befund B1 (M135): OpenSSH vor 8.6 bietet posix-rename trotz Erlaubnisliste an und verweigert es dann – mit
         # rename ohne -l bliebe jede Datei als .teil liegen (Exit 1 in jedem Lauf), obwohl -Probe grün ist

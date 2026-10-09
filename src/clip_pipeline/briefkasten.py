@@ -165,13 +165,22 @@ def _ganz(wert, unten: int, oben: int) -> bool:
     return isinstance(wert, int) and not isinstance(wert, bool) and unten <= wert <= oben
 
 
+def _json(roh: bytes):
+    """JSON vom PC lesen (utf-8, BOM erlaubt). Tief verschachteltes JSON (RecursionError) gilt wie jedes andere
+    kaputte JSON als ValueError – sonst bräche jeder Abhol-Lauf dieses Freundes ab, bevor etwas geholt wird."""
+    try:
+        return json.loads(roh.decode("utf-8-sig"))
+    except RecursionError:
+        raise ValueError("JSON zu tief verschachtelt") from None
+
+
 def pruefe_lieferschein(roh: bytes, ordner: str, name: str) -> dict:
     """Lieferschein streng prüfen: höchstens 4 KB, JSON (utf-8, BOM erlaubt), name = Dateiname, groesse 1 B–50 GB (eine
     Sitzungsdatei höchstens 64 KB), sha256 = 64 Hex-Zeichen, mtime_ms und utc_offset_min ganze Zahlen. ValueError mit
     Grund."""
     if not roh or len(roh) > LIEFERSCHEIN_MAX:
         raise ValueError(f"fehlt, ist leer oder größer als {LIEFERSCHEIN_MAX} Byte")
-    daten = json.loads(roh.decode("utf-8-sig"))
+    daten = _json(roh)
     if not isinstance(daten, dict) or daten.get("name") != name:
         raise ValueError("nennt eine andere Datei")
     groesse, sha = daten.get("groesse"), daten.get("sha256")
@@ -188,7 +197,7 @@ def pruefe_lieferschein(roh: bytes, ordner: str, name: str) -> dict:
 def pruefe_sitzung(roh: bytes) -> list[str]:
     """Sitzungsdatei vom PC ({session, matches, ende_utc}): Matches als Liste gültiger Session-IDs (1–500), ende_utc
     lesbar. Sonst ValueError – sitzung.py bekäme sonst Unsinn."""
-    daten = json.loads(roh.decode("utf-8-sig"))
+    daten = _json(roh)
     matches = daten.get("matches") if isinstance(daten, dict) else None
     if (not isinstance(matches, list) or not 0 < len(matches) <= 500
             or not all(isinstance(m, str) and SESSION_ID.fullmatch(m) for m in matches)):
@@ -367,7 +376,7 @@ def _pc_status(con: sqlite3.Connection, konfig: Konfig, lokal: Path) -> bool:
         if not lokal.is_file() or not 0 < lokal.stat().st_size <= STATUS_MAX:
             return False
         roh = lokal.read_bytes()
-        daten = json.loads(roh.decode("utf-8-sig"))
+        daten = _json(roh)
         if not isinstance(daten, dict):
             return False
         _schreibe(pc_status_datei(konfig), roh)
@@ -421,7 +430,7 @@ def pc_status(konfig: Konfig) -> dict | None:
     try:
         with open(pc_status_datei(konfig), "rb") as datei:
             roh = datei.read(STATUS_MAX + 1)
-        daten = json.loads(roh.decode("utf-8-sig")) if len(roh) <= STATUS_MAX else None
+        daten = _json(roh) if len(roh) <= STATUS_MAX else None
     except (OSError, ValueError):
         return None
     return daten if isinstance(daten, dict) else None

@@ -409,6 +409,17 @@ class Isolation(MitBriefkasten):
 
 # --- Florian unverändert -----------------------------------------------------------------------------------------------
 
+class KaputtesJson(unittest.TestCase):
+    def test_tief_verschachtelt_ist_ungueltig_statt_absturz(self):
+        # Befund B3: 3000-mal „[“ (unter 4 KB) warf RecursionError – jeder Abhol-Lauf dieses Freundes brach ab, bevor
+        # etwas geholt wurde. Jetzt ist es ungültig wie jedes kaputte JSON (zählt als Versuch, nach 3 aufgegeben).
+        roh = b"[" * 3000
+        with self.assertRaises(ValueError):
+            briefkasten.pruefe_lieferschein(roh, "videos", VIDEO)
+        with self.assertRaises(ValueError):
+            briefkasten.pruefe_sitzung(roh)
+
+
 class Florian(MitSpeicher):
     def test_ohne_instanz_exit_2_nichts_angefasst(self):
         vorher = abdruck(self.tmp)

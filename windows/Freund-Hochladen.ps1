@@ -373,18 +373,29 @@ function Lade-Hoch($e) {
     $namen = $script:fach.namen[$o]
     if ($namen.Contains($n) -and $namen.Contains("$n.lieferschein")) { Merke-Erledigt $e 'schon im Briefkasten'; return 'ok' }
     $teilSchluessel = "$o/$n"
-    if (-not $namen.Contains($n)) {
-        if ($null -ne $script:fach.frei -and $e.datei.Length + 1MB -gt $script:fach.frei) {
+    # Oben liegt der Name schon, aber ohne Lieferschein und nicht genau diese Fassung (der Rekorder hat die Datei nach dem
+    # Hochladen geändert, ein direktes Hochladen brach ab oder der Stand hier ist neu): Der Mini fasst ohne Lieferschein
+    # nichts an – also die aktuelle Fassung direkt auf den Namen schreiben (Umbenennen kann kein Ziel ersetzen). „~“ vor
+    # dem Schlüssel heißt: Das direkte Hochladen läuft noch – bis es fertig ist, gilt die Datei oben als unvollständig.
+    $direkt = $namen.Contains($n) -and $script:teile[$teilSchluessel] -ne $e.schluessel
+    if (-not $namen.Contains($n) -or $direkt) {
+        if (-not $direkt -and $null -ne $script:fach.frei -and $e.datei.Length + 1MB -gt $script:fach.frei) {
             $script:fachVoll = $true
             Fehler-Merken "Briefkasten voll ($n braucht $([Math]::Ceiling($e.datei.Length / 1MB)) MB) – die Aufnahmen bleiben hier, bis wieder Platz ist"
             return 'stopp'
         }
         $sha = Sha $e
         $befehl = 'put'
-        if ($namen.Contains("$n.teil") -and $script:teile[$teilSchluessel] -eq $e.schluessel) { $befehl = 'reput' }
-        Notiere $teilDatei "$teilSchluessel`t$($e.schluessel)"
-        $script:teile[$teilSchluessel] = $e.schluessel
-        $befehle = @("$befehl ""$n"" ""$o/$n.teil""", "$UMBENENNEN ""$o/$n.teil"" ""$o/$n""")
+        if ($direkt) {
+            Notiere $teilDatei "$teilSchluessel`t~$($e.schluessel)"
+            $script:teile[$teilSchluessel] = "~$($e.schluessel)"
+            $befehle = @("put ""$n"" ""$o/$n""")
+        } else {
+            if ($namen.Contains("$n.teil") -and $script:teile[$teilSchluessel] -eq $e.schluessel) { $befehl = 'reput' }
+            Notiere $teilDatei "$teilSchluessel`t$($e.schluessel)"
+            $script:teile[$teilSchluessel] = $e.schluessel
+            $befehle = @("$befehl ""$n"" ""$o/$n.teil""", "$UMBENENNEN ""$o/$n.teil"" ""$o/$n""")
+        }
         Log "lade hoch ($befehl, $([Math]::Round($e.datei.Length / 1MB, 1)) MB$(if ($script:kbit) { ", höchstens $($script:kbit) kbit/s" })): $o/$n"
         Strom-Halten $true
         $r = Sftp-Aufruf $befehle $e.verzeichnis $script:kbit 0 -Beobachten
@@ -413,14 +424,15 @@ function Lade-Hoch($e) {
             Fehler-Merken "$n`: $(Letzte $r.fehler)"
             return 'fehler'
         }
+        if ($direkt) {
+            # Fertig oben – ab jetzt gilt die Datei dort als vollständig (der Lieferschein folgt gleich)
+            Notiere $teilDatei "$teilSchluessel`t$($e.schluessel)"
+            $script:teile[$teilSchluessel] = $e.schluessel
+            Log "oben lag eine andere Fassung ohne Lieferschein – durch die aktuelle ersetzt: $o/$n"
+        }
         [void]$namen.Add($n)
         $script:bytes += $e.datei.Length
-        if ($null -ne $script:fach.frei) { $script:fach.frei -= $e.datei.Length }
-    } elseif ($script:teile.ContainsKey($teilSchluessel) -and $script:teile[$teilSchluessel] -ne '-' -and
-              $script:teile[$teilSchluessel] -ne $e.schluessel) {
-        # Oben liegt eine frühere Fassung dieser Datei (der Rekorder hat sie danach geändert) – überschrieben wird nie
-        Merke-Erledigt $e 'oben liegt schon eine frühere Fassung, bleibt so'
-        return 'ok'
+        if ($null -ne $script:fach.frei -and -not $direkt) { $script:fach.frei -= $e.datei.Length }
     }
     $neu = Get-Item -LiteralPath $e.datei.FullName -ErrorAction SilentlyContinue
     if ($null -eq $neu -or (Datei-Schluessel $neu) -ne $e.schluessel) {
@@ -506,6 +518,10 @@ function Sende-Abend($oben) {
         $befehle = @()
         if (-not $namen.Contains($name)) {
             $befehle += @("put ""abend.json"" ""sitzungen/$name.teil""", "$UMBENENNEN ""sitzungen/$name.teil"" ""sitzungen/$name""")
+        } else {
+            # Oben liegt sie schon, aber ohne Lieferschein (Abbruch dazwischen): Der Mini hat sie nie angefasst. Neu
+            # darüber schreiben – sonst passte der Lieferschein nicht mehr, wenn inzwischen Matches dazukamen
+            $befehle += @("put ""abend.json"" ""sitzungen/$name""")
         }
         $befehle += @("put ""lieferschein.json"" ""sitzungen/$name.lieferschein.teil""",
                       "$UMBENENNEN ""sitzungen/$name.lieferschein.teil"" ""sitzungen/$name.lieferschein""")
