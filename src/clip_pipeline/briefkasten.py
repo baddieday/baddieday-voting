@@ -19,6 +19,9 @@ Regeln (docs/ENTSCHEIDUNGEN.md M89–M93, M96):
   - Keine Rechen-Sperre (nur Ein- und Ausgabe), eigene Sperre I/db/pipeline.briefkasten.lock, weckt nie. Im Briefkasten
     wird nie etwas gelöscht. Bremse: geholt wird nur, wenn auf dem Freunde-Volume danach max(10 GB, 10 %) frei bleiben.
   - Die Tabelle `abholung` entsteht nur in der Datenbank eines Freundes.
+  - Den Status, den sein PC-Programm schickt (status/pc-status.json, windows/Freund-Hochladen.ps1), legt der Mini nach
+    I/db/pc-status.json; daraus kommen Zeilen an den Freund: PC verbunden (einmal), Zeitzone falsch, Aufnahmen ohne
+    Replay (je einmal am Tag, M118). 📋 Stand liest ihn über pc_status/unterwegs (lernbot_pc).
 """
 
 from __future__ import annotations
@@ -357,21 +360,86 @@ def _melde_unerreichbar(con: sqlite3.Connection, konfig: Konfig, stand: dict) ->
                         "sag Florian Bescheid.")
 
 
-def _pc_status(konfig: Konfig, lokal: Path) -> bool:
+def _pc_status(con: sqlite3.Connection, konfig: Konfig, lokal: Path) -> bool:
     """status/pc-status.json (vom Listen-Lauf geholt) → I/db/pc-status.json, wenn es ein JSON-Objekt ist. Kaputt oder
-    halb geschrieben (der PC überschreibt die Datei direkt): Der alte Stand bleibt."""
+    halb geschrieben (der PC überschreibt die Datei direkt): Der alte Stand bleibt. Danach die Meldungen dazu."""
     try:
         if not lokal.is_file() or not 0 < lokal.stat().st_size <= STATUS_MAX:
             return False
         roh = lokal.read_bytes()
-        if not isinstance(json.loads(roh.decode("utf-8-sig")), dict):
+        daten = json.loads(roh.decode("utf-8-sig"))
+        if not isinstance(daten, dict):
             return False
         _schreibe(pc_status_datei(konfig), roh)
-        return True
     except (OSError, ValueError):
         return False
     finally:
         lokal.unlink(missing_ok=True)
+    _pc_meldungen(con, konfig, daten)
+    return True
+
+
+def _utc_text(minuten: int) -> str:
+    stunden, rest = divmod(abs(minuten), 60)
+    return f"UTC{'-' if minuten < 0 else '+'}{stunden}" + (f":{rest:02d}" if rest else "")
+
+
+def _pc_meldungen(con: sqlite3.Connection, konfig: Konfig, status: dict) -> None:
+    """M103/M118 (Schritt 4), aus dem Status, den der PC selbst schickt (fremde Eingabe – nur Zahlen und Zeiten werden
+    gelesen, nie ein Text weitergegeben):
+      - „✅ Dein PC ist verbunden“ – einmal, beim ersten Status überhaupt;
+      - die Zeitzone des PCs passt nicht zu [zeit].zeitzone (dann verrutschen die Clips) – einmal am Tag;
+      - Aufnahmen ohne Replay („Replays an?“) – einmal am Tag.
+    Die beiden letzten nur aus einem frischen Status (höchstens 24 h alt): Ein PC, der aus ist, meldet nichts Neues."""
+    db.lern_meldung(con, "briefkasten:pc_verbunden", "✅ Dein PC ist verbunden – deine Aufnahmen kommen ab jetzt von "
+                    "selbst zu mir.")
+    try:
+        zeit = aus_iso(status["zeit_utc"]) if isinstance(status.get("zeit_utc"), str) else None
+    except ValueError:
+        zeit = None
+    if zeit is None or abs((jetzt() - zeit).total_seconds()) > 24 * 3600:
+        return
+    zone = str(konfig.wert("zeit.zeitzone", "Europe/Berlin"))
+    versatz = status.get("utc_offset_min")
+    if _ganz(versatz, -1080, 1080):
+        soll = int(utc_zu_lokal(zeit, zone).utcoffset().total_seconds() // 60)
+        if soll != versatz:
+            _melde_taeglich(con, konfig, "zeitzone", f"🕐 Die Uhr deines PCs steht auf {_utc_text(versatz)}, ich "
+                            f"rechne mit {zone} ({_utc_text(soll)}). Dann passen deine Clips nicht zu den Kills – stell "
+                            "in Windows die richtige Zeitzone ein. Wohnst du woanders, sag Florian Bescheid.")
+    eintraege = status.get("uebersprungen") if isinstance(status.get("uebersprungen"), list) else []
+    ohne = sum(e["anzahl"] for e in eintraege
+               if isinstance(e, dict) and e.get("grund") == "ohne_replay" and _ganz(e.get("anzahl"), 1, 10**6))
+    if ohne:
+        _melde_taeglich(con, konfig, "ohne_replay", f"🎬 Auf deinem PC liegen {ohne} Aufnahme"
+                        f"{'n' if ohne != 1 else ''} ohne Replay – ist in Fortnite „Replays aufzeichnen“ an? Ohne "
+                        "Replay finde ich deine Kills nicht; solche Aufnahmen bleiben auf deinem PC.")
+
+
+def pc_status(konfig: Konfig) -> dict | None:
+    """Der letzte Status vom PC (I/db/pc-status.json) als dict – None, wenn es keinen gibt oder er nicht lesbar ist."""
+    try:
+        with open(pc_status_datei(konfig), "rb") as datei:
+            roh = datei.read(STATUS_MAX + 1)
+        daten = json.loads(roh.decode("utf-8-sig")) if len(roh) <= STATUS_MAX else None
+    except (OSError, ValueError):
+        return None
+    return daten if isinstance(daten, dict) else None
+
+
+def unterwegs(con: sqlite3.Connection, status: dict | None) -> int:
+    """Was auf dem Weg zum Puffer ist: noch auf dem PC (offen laut seinem Status) plus noch im Briefkasten (abholung
+    offen). Nur zum Anzeigen (📋)."""
+    n = 0
+    eintraege = (status or {}).get("offen")
+    for e in eintraege if isinstance(eintraege, list) else []:
+        if isinstance(e, dict) and _ganz(e.get("anzahl"), 0, 10**6):
+            n += e["anzahl"]
+    try:
+        n += con.execute("SELECT COUNT(*) FROM abholung WHERE status = 'offen'").fetchone()[0]
+    except sqlite3.OperationalError:   # noch nie abgeholt: keine Tabelle
+        pass
+    return n
 
 
 def _platz(pfad: Path) -> tuple[int, int]:
@@ -499,7 +567,7 @@ def _abholen(con: sqlite3.Connection, konfig: Konfig) -> dict:
         return {**e, "fehler": [fach.fehler], "unerreichbar": True}
     stand.update(zuletzt_erreicht=zeit, letzter_fehler=None, fach_prozent=fach.prozent, fach_frei_gb=fach.frei_gb)
     _schreibe(_stand_datei(konfig), json.dumps(stand, ensure_ascii=False, indent=1).encode())
-    _pc_status(konfig, ablage / "pc-status.json")
+    _pc_status(con, konfig, ablage / "pc-status.json")
     e["fach_prozent"] = fach.prozent
     if fach.prozent is not None and fach.prozent >= VOLL_PROZENT:
         _melde_taeglich(con, konfig, "voll", f"📦 Dein Briefkasten bei Florian ist zu {fach.prozent} % voll. Ist er "

@@ -264,6 +264,49 @@ class Fehlerfall(MitBriefkasten):
         self.assertEqual(self.abholen()[0], 0)                                    # danach: nichts mehr zu tun
 
 
+# --- Meldungen aus dem Status vom PC (Schritt 4) -----------------------------------------------------------------------
+
+class PcMeldungen(MitBriefkasten):
+    """M118: „PC verbunden“ einmal; Zeitzone falsch und Aufnahmen ohne Replay je einmal am Tag – nur aus einem frischen
+    Status, nur Zahlen daraus (kein Text vom PC geht weiter)."""
+
+    def status(self, **werte) -> None:
+        daten = {"zeit_utc": iso(jetzt()), "utc_offset_min": self.soll, "uebersprungen": [], **werte}
+        (self.fach() / "status" / "pc-status.json").write_text(json.dumps(daten), encoding="utf-8")
+
+    def setUp(self):
+        super().setUp()
+        self.soll = int(utc_zu_lokal(jetzt(), ZONE).utcoffset().total_seconds() // 60)
+
+    def test_verbunden_einmal_zeitzone_und_ohne_replay_je_tag_einmal(self):
+        self.status()                                                       # passt alles
+        self.assertEqual(self.abholen()[0], 0)
+        self.assertEqual(list(self.meldungen()), ["briefkasten:pc_verbunden"])
+        self.status(utc_offset_min=self.soll - 60,
+                    uebersprungen=[{"grund": "ohne_replay", "anzahl": 2, "beispiel": "<b>nie im Chat</b>"},
+                                   {"grund": "name", "anzahl": 5}])
+        for _ in range(2):                                                  # zwei Läufe am selben Tag: je einmal
+            self.assertEqual(self.abholen()[0], 0)
+        tag = utc_zu_lokal(jetzt(), ZONE).date().isoformat()
+        m = self.meldungen()
+        self.assertEqual(sorted(m), sorted(["briefkasten:pc_verbunden", f"briefkasten:zeitzone:{tag}",
+                                            f"briefkasten:ohne_replay:{tag}"]))
+        self.assertIn(f"UTC+{(self.soll - 60) // 60}", m[f"briefkasten:zeitzone:{tag}"])
+        self.assertIn("2 Aufnahmen ohne Replay", m[f"briefkasten:ohne_replay:{tag}"])
+        self.assertNotIn("nie im Chat", "".join(m.values()))
+
+    def test_alter_oder_kaputter_status_meldet_nichts_weiter(self):
+        self.status(zeit_utc=iso(jetzt() - timedelta(days=3)), utc_offset_min=0,   # PC seit Tagen aus
+                    uebersprungen=[{"grund": "ohne_replay", "anzahl": 1}])
+        self.assertEqual(self.abholen()[0], 0)
+        self.assertEqual(list(self.meldungen()), ["briefkasten:pc_verbunden"])
+        alt = (self.max / "db" / "pc-status.json").read_bytes()
+        (self.fach() / "status" / "pc-status.json").write_text("{halb geschrieben", encoding="utf-8")
+        self.assertEqual(self.abholen()[0], 0)
+        self.assertEqual((self.max / "db" / "pc-status.json").read_bytes(), alt)   # der alte Stand bleibt
+        self.assertEqual(list(self.meldungen()), ["briefkasten:pc_verbunden"])
+
+
 # --- Autorisierung und Isolation ---------------------------------------------------------------------------------------
 
 class Isolation(MitBriefkasten):

@@ -4,3 +4,5 @@ bin/pipeline text eol=lf
 *.service text eol=lf
 *.timer text eol=lf
 deploy/big/clip-leerlauf text eol=lf
+# Windows-Startdateien: immer CRLF – cmd.exe kommt mit LF allein nicht zuverlässig zurecht (PC-Programm der Freunde)
+*.cmd text eol=crlf

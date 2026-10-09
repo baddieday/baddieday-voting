@@ -10,7 +10,8 @@ Was er tut:
   - analysiert vor jedem Entwurf ein paar weitere Clips (Stimmung), damit die Auswahl wächst
   - schickt Meldungen aus lern_meldungen (Alarme, abends ein Satz zum Stand, Abschlussbericht)
 Befehle: /viral · /entwurf [short|zusammenschnitt|viral|twist|highlight|fail] · /musik · /lernstand · /stand · /hilfe
-(Bot eines Freundes, Mehrbenutzer M1: /claude – eigener Claude-Zugang, lernbot_claude – statt /tiktok)
+(Bot eines Freundes, Mehrbenutzer M1: /claude – eigener Claude-Zugang, lernbot_claude – statt /tiktok; mit Briefkasten
+dazu /pc – sein PC-Programm, lernbot_pc)
 🔥 /viral (05.10.): ein Knopf – der Bot wählt die Mischung selbst (viral.py), schätzt die Momente per KI ein, baut bis
 zu [viral].versuche_max Fassungen, lässt den Cutter-Maßstab benoten und schickt nur die beste.
 """
@@ -73,6 +74,8 @@ Kurzbefehle als Knöpfe: unter dieser Hilfe und nach ✅ fertig."""
 # in Stufe 1 niemand ab. Florians Hilfe bleibt Zeichen für Zeichen, wie sie ist (hilfe_text).
 TIKTOK_ZEILE = "🔗 /tiktok – TikTok-Konto verbinden (Zahlen kommen dann automatisch)"
 CLAUDE_ZEILE = "🤖 /claude – dein Claude-Abo verbinden: dann benotet die KI jedes Video mit (freiwillig)"
+# Freund mit Briefkasten (Stufe 2, Schritt 4): sein PC-Programm
+PC_ZEILE = "💻 /pc – dein PC-Programm: lädt deine Aufnahmen von selbst hoch"
 
 # Kurzbefehle (27.09.): Knöpfe im Chat wie beim Bewerten (Florian: „nicht die Tastatur ersetzen“). Callback k:0:<ziel>.
 # KURZBEFEHLE bleibt für Taps auf die alte Ersatz-Tastatur, bis sie weg ist (ReplyKeyboardRemove).
@@ -1037,20 +1040,24 @@ async def ki_nachtrag(app, konfig: Konfig) -> float | None:
 
 # --- Handler ---------------------------------------------------------------------------
 
-def hilfe_text(experte: bool, freund: bool = False) -> str:
+def hilfe_text(experte: bool, freund: bool = False, pc: bool = False) -> str:
     """Einfach: kurze Hilfe. Experte: die volle, der Teil zur Lernschleife „Publikum“ als Zusatz dahinter. Freund (M1):
-    mit /claude, ohne /tiktok – bei Florian (freund=False) genau wie bisher."""
+    mit /claude, ohne /tiktok; mit Briefkasten (pc) dazu /pc – bei Florian (freund=False) genau wie bisher."""
     from . import lernbot_publikum  # hier, nicht oben: die Publikums-Module dürfen lernbot selbst importieren
 
+    eigene = f"{CLAUDE_ZEILE}\n{PC_ZEILE}" if pc else CLAUDE_ZEILE
     if experte:
         text = HILFE_EXPERTE + lernbot_publikum.HILFE_ZUSATZ
-        return text.replace(TIKTOK_ZEILE, CLAUDE_ZEILE) if freund else text
-    return f"{HILFE}\n{CLAUDE_ZEILE}" if freund else HILFE
+        return text.replace(TIKTOK_ZEILE, eigene) if freund else text
+    return f"{HILFE}\n{eigene}" if freund else HILFE
 
 
 async def cmd_hilfe(update, context) -> None:
-    experte = experte_an(context.bot_data["con"], context.bot_data["konfig"])
-    text = hilfe_text(experte, freund=context.bot_data["konfig"].instanz is not None)
+    from . import lernbot_pc
+
+    konfig = context.bot_data["konfig"]
+    experte = experte_an(context.bot_data["con"], konfig)
+    text = hilfe_text(experte, freund=konfig.instanz is not None, pc=lernbot_pc.verfuegbar(konfig))
     await update.effective_message.reply_text(text, parse_mode="HTML", reply_markup=_markup(knoepfe_kurzbefehle(experte)))
 
 
@@ -1066,8 +1073,13 @@ async def cmd_experte(update, context) -> None:
 
 
 async def cmd_stand(update, context) -> None:
+    from . import lernbot_pc
+
     con, konfig = context.bot_data["con"], context.bot_data["konfig"]
-    await update.effective_message.reply_text(stand_satz(con) if experte_an(con, konfig) else stand_kurz(con, konfig))
+    text = stand_satz(con) if experte_an(con, konfig) else stand_kurz(con, konfig)
+    if pc := lernbot_pc.pc_zeile(con, konfig):   # Freund mit Briefkasten (Stufe 2): wann sein PC sich zuletzt meldete
+        text += f"\n{pc}"
+    await update.effective_message.reply_text(text)
 
 
 async def cmd_lernstand(update, context) -> None:
@@ -1536,6 +1548,10 @@ def baue_app(konfig: Konfig, token: str, erlaubt: int):
     for modul in (lernbot_zahlen, lernbot_paket, lernbot_publikum, lernbot_einstellungen, lernbot_kalibrierung,
                   verbinden):
         modul.registriere(app, nur_ich)
+    from . import lernbot_pc   # Freund mit Briefkasten (Stufe 2, Schritt 4): /pc – sein PC-Programm; bei Florian nie
+
+    if lernbot_pc.verfuegbar(konfig):
+        lernbot_pc.registriere(app, nur_ich)
     app.add_handler(CallbackQueryHandler(bei_klick))
     app.add_error_handler(bei_fehler)
     return app

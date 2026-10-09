@@ -283,6 +283,18 @@ in seinen Puffer, alle 2 min über `clip-freund-abholen@` (Timer). Annahmen M89�
   an ist, wann der Briefkasten zuletzt erreicht wurde, den Füllstand und ob sich sein PC gemeldet hat;
   `benutzer-stilllegen.sh` schaltet auch das Abholen aus (sein Fach auf dem vServer bleibt: dort `--sperren`).
 
+## PC-Programm der Freunde (Stufe 2, Schritt 4 – umgesetzt)
+Der Freund tippt in seinem Bot `/pc` (nur bei Freunden mit Briefkasten), entpackt das ZIP und startet
+`Freund-Einrichten.cmd`. Das Programm (`windows/Freund-Hochladen.ps1`, Aufgabe „Clip-Upload“ alle 2 min, Windows
+PowerShell 5.1, kein Admin) lädt fertige Aufnahmen und Replays in sein Fach – je Datei `.teil`, umbenennen,
+Lieferschein; Replays erst nach den Aufnahmen ihres Matches; 45 min nach dem letzten Match die Abend-Datei; beim Spielen
+2 Mbit/s; es löscht nie. Anleitung für Freunde: `docs/FREUNDE.md`, für Florian: `docs/BRIEFKASTEN.md`. Annahmen M94,
+M97, M117–M124.
+- **Ein ZIP, jedes Mal frisch:** drei Skripte, `freund.psd1` (öffentliche Adresse, Port, `bk-<name>`), sein
+  PC-Schlüssel und der Hostschlüssel – nie der Abhol-Schlüssel, nichts von anderen.
+- **Rückmeldung:** `status/pc-status.json` (was wartet, was übersprungen ist); daraus meldet sein Bot „PC verbunden“,
+  eine falsche Zeitzone und Aufnahmen ohne Replay, 📋 zeigt „PC: zuletzt vor … · n unterwegs“.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -302,7 +314,7 @@ weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
 
 ## Schnittstellen
 - **n8n-Vertrag:** unverändert, nur für Florian. Freunde laufen ohne n8n über Timer.
-- **Windows-Skript und Samba `[clips]`:** unverändert.
+- **Windows-Skript und Samba `[clips]`:** unverändert (das PC-Programm der Freunde ist ein eigenes Skript).
 
 ## Stufen
 1. **Sichere Benutzertrennung** (dieser Plan): gemeinsame Sperre, Instanz-Modus, Freund-Pipeline ohne n8n,
@@ -310,8 +322,8 @@ weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
    einem Befehl, Einladungslink, eigener Claude-Zugang per /claude (alles umgesetzt).
 2. **Freunde liefern selbst:** Briefkasten auf dem vServer + kleines Programm für den PC, Lager je Freund mit
    Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot. Gebaut:
-   Briefkasten (Schritt 1), Abholen am Mini (Schritt 2), Abholen einschalten (Schritt 3); Löschen im Briefkasten erst
-   nach Florians Ja.
+   Briefkasten (Schritt 1), Abholen am Mini (Schritt 2), Abholen einschalten (Schritt 3), PC-Programm und /pc
+   (Schritt 4); Löschen im Briefkasten erst nach Florians Ja.
 3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

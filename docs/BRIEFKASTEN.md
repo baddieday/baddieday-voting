@@ -57,6 +57,22 @@ Im CT als root `bash /opt/clip-pipeline/deploy/benutzer/benutzer-anlegen.sh max`
    ```
 4. Probe-Abholung in seiner Sandbox. Erst wenn sie grün ist, geht das Abholen an (alle 2 min). Ist sie rot, nennt es
    den Grund; danach nochmal dasselbe Skript – Schlüssel und Eintrag bleiben, nur Enter und die Probe.
+5. Der Freund tippt in seinem Bot **/pc** und richtet sein PC-Programm ein (`docs/FREUNDE.md`, „Wie deine Aufnahmen zu
+   Florian kommen“). Danach `bash …/benutzer-pruefen.sh max`: Briefkasten erreicht, Fach in %, PC gemeldet.
+
+## PC-Programm der Freunde
+`/pc` gibt es nur im Bot eines Freundes mit Briefkasten; der Bot baut das ZIP jedes Mal frisch: die drei Skripte aus
+`windows/` (`Freund-Hochladen.ps1`, `Freund-Einrichten.ps1`, `Freund-Einrichten.cmd`), `freund.psd1` (dein öffentlicher
+Name, Port, `bk-<name>`) und seinen PC-Schlüssel samt Hostschlüssel (`I/briefkasten/pc`, `known_hosts_pc`) – nie den
+Abhol-Schlüssel. Das Programm lädt je Datei erst `<name>.teil`, benennt um und legt dann den Lieferschein daneben;
+ein Replay erst nach den Aufnahmen seines Matches, 45 min nach dem letzten Match die Abend-Datei, dazu
+`status/pc-status.json`. Es löscht nie, braucht kein Admin und keine Installation. Annahmen M94, M97, M117–M124.
+
+**Einmal vor Ort prüfen (echte Windows PowerShell 5.1, hier nicht testbar):** beim Freund oder auf deinem PC mit
+einem Test-Fach `Freund-Einrichten.cmd` laufen lassen, dann in `%LOCALAPPDATA%\ClipUpload`
+`powershell -ExecutionPolicy Bypass -File .\Freund-Hochladen.ps1 -Probe`. Erwartet: „[OK] Verbunden mit Florians
+Briefkasten“ – damit stimmen Pfade mit Leerzeichen, die Rechte am Schlüssel und der Hostschlüssel. In der
+Aufgabenplanung läuft „Clip-Upload“ alle 2 min ohne Fenster; das Log steht in `%LOCALAPPDATA%\ClipUpload\hochladen.log`.
 
 Auf dem vServer gilt für die Zeile:
 - **Größe:** Standard 20 GB, mindestens 8 GB. Das System behält immer 15 % und mindestens 10 GB frei (n8n); passt es
@@ -71,8 +87,9 @@ eingehängt, Marke, belegt, Dateien, gesperrt, Schlüssel. Derselbe Schlüssel b
 „Alles in Ordnung.“ = Exit 0.
 
 ## Abnahme von Hand (ohne PC-Programm)
-Mit einem Test-Freund `test` (eigener Test-Bot), angelegt mit `benutzer-anlegen.sh test` samt Schritt „Briefkasten“
-(grüne Probe). Du spielst seinen PC – im CT als root, mit Kopien deiner Aufnahmen eines Abends:
+Mit dem PC-Programm (oben) ist das nicht mehr nötig – zum Nachstellen bleibt es. Mit einem Test-Freund `test` (eigener
+Test-Bot), angelegt mit `benutzer-anlegen.sh test` samt Schritt „Briefkasten“ (grüne Probe). Du spielst seinen PC –
+im CT als root, mit Kopien deiner Aufnahmen eines Abends:
 1. Seinen PC-Schlüssel für dich kopieren (als root nimmt ssh ihn nur mit 0600):
    `install -m 600 /var/lib/clip-benutzer/test/briefkasten/pc /root/bk-test-pc`.
 2. In einem leeren Ordner mit Kopien: Aufnahmen (`*.mp4` mit Nvidia- oder SteelSeries-Namen), das Replay

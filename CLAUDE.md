@@ -616,3 +616,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Tailnet, eine Zeile für den vServer, dann eine Probe-Abholung in seiner Sandbox; erst wenn die grün ist, holt
     `clip-freund-abholen@` alle 2 min ab. Rot: nur das Abholen bleibt aus, ein neuer Lauf setzt fort. Prüfen und
     Stilllegen kennen das Abholen; das Update legt die Vorlage nur hin. M95, M104, M108–M116.
+  - Schritt 4 (PC-Programm und /pc): Der Freund tippt in seinem Bot `/pc`, entpackt die Datei und doppelklickt
+    `Freund-Einrichten.cmd` – kein Admin, keine Installation. Danach lädt sein PC alle 2 min fertige Fortnite-Aufnahmen
+    und Replays hoch (beim Spielen langsam, 2 Mbit/s): je Datei erst halb, dann umbenannt, dann der Lieferschein; ein
+    Replay erst nach den Aufnahmen seines Matches; 45 min nach dem letzten Match die Abend-Datei. Er löscht nie etwas.
+    Sein Bot meldet „PC verbunden“, eine falsche Zeitzone und Aufnahmen ohne Replay, 📋 zeigt, wann der PC sich zuletzt
+    meldete. Bei dir gibt es `/pc` nicht, `Uebertragung.ps1` bleibt, wie es ist. Vor Ort einmal unter echter
+    PowerShell 5.1 mit `-Probe` prüfen (docs/BRIEFKASTEN.md). M94, M97, M117–M124.
