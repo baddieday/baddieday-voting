@@ -605,3 +605,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     einander nicht; dort wird nichts gelöscht. `deploy/vserver/briefkasten-{einrichten,freund,pruefen}.sh`, je mit
     `--probe`, j/N und Rückweg; Anleitung mit Abnahme von Hand: `docs/BRIEFKASTEN.md`. Ausnahme zu „keine Videos auf
     den vServer“: M106. M85–M88.
+  - Schritt 2 (Abholen am Mini, noch nicht eingeschaltet): `pipeline briefkasten abholen|status` nur in der Instanz
+    eines Freundes (bei dir Exit 2, nichts angefasst). Holt nur Dateien mit Lieferschein (Größe, Prüfsumme, Zeit vom
+    PC), prüft sie nach dem Zurücklesen und legt sie unter ihrem Namen in seinen Puffer – nie überschrieben, fremde
+    Namen nie angefasst; Videos vor Replays, die Abend-Datei erst, wenn seine Matches fertig sind. Keine Rechen-Sperre,
+    weckt nie, löscht im Briefkasten nichts. Mit Briefkasten erkennt sein Mini den Abend nicht selbst
+    (`[sitzungen].auto_abend`, bei dir weiter an). M89–M93, M96, M103.

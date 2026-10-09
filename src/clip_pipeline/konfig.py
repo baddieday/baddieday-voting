@@ -6,6 +6,7 @@ nur seine eigenen Werte (lade_instanz). Ohne die Variable (Florian) läuft alles
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import socket
@@ -339,7 +340,10 @@ CLAUDE_TOKEN_NAME = "CLAUDE_CODE_OAUTH_TOKEN"
 NICHT_MIT_INSTANZ = ("CLIP_KONFIG", "CLIP_SPEICHER", "CLIP_DATENBANK")
 # instanz.toml: Abschnitt → erlaubte Schlüssel (None = die, die die Repo-pipeline.toml dort kennt)
 INSTANZ_ERLAUBT: dict[str, tuple[str, ...] | None] = {
-    "schnitt": None, "zeit": None, "merkmale.waffen": None, "sperre": ("datei", "warten_s"), "instanz": ("claude",)}
+    "schnitt": None, "zeit": None, "merkmale.waffen": None, "sperre": ("datei", "warten_s"), "instanz": ("claude",),
+    # Stufe 2 (M93): Briefkasten auf dem vServer – trägt benutzer-anlegen.sh ein; Benutzer und Schlüssel sind fest
+    "briefkasten": ("host", "port", "oeffentlich", "drossel_kbit", "loeschen", "karenz_h")}
+TAILNET = ipaddress.IPv4Network("100.64.0.0/10")   # Adressen im Tailnet (Tailscale)
 INSTANZ_WARTEN_S = 900   # M7: ein Freund wartet höchstens 15 min auf die Sperre (wenn instanz.toml nichts sagt)
 # Florians Daten und Code: eine Instanz darf weder darin liegen noch sie umfassen (dazu der Code-Ordner PROJEKT)
 FLORIAN_BEREICHE = ("/var/lib/clip-pipeline", "/srv", "/opt/clip-regie")
@@ -347,7 +351,8 @@ FLORIAN_BEREICHE = ("/var/lib/clip-pipeline", "/srv", "/opt/clip-regie")
 CLAUDE_VERBOTEN = ("/var/lib/clip-pipeline", "/home", "/root", "/opt/clip-regie")
 # Pfadwächter: Datenpfade (absolut) und Pfade relativ zu [speicher].wurzel – aufgelöst müssen alle in I liegen
 DATENPFADE = ("datenbank.pfad", "speicher.wurzel", "regie.ordner", "regie.effekte.sfx_ordner", "musik.ordner",
-              "material.ordner", "big.zustand_ordner", "lager.wurzel")
+              "material.ordner", "big.zustand_ordner", "lager.wurzel", "briefkasten.schluessel",
+              "briefkasten.known_hosts")
 IM_PUFFER = ("speicher.markierung", "speicher.eingang", "speicher.replays", "speicher.sessions", "speicher.highlights",
              "speicher.musik", "speicher.archiv", "speicher.papierkorb", "sitzungen.ordner", "publikum.upload_ordner",
              "puffer.markierung", "puffer.pc_status_datei")
@@ -445,7 +450,7 @@ def _pruefe_erlaubt(eigen: dict, basis: dict, toml: Path) -> None:
     Lager, pve-big, Hosts, KI-Programm …) ist ein KonfigFehler – kein stilles Übergehen."""
     def nein(was: str) -> KonfigFehler:
         return KonfigFehler(f"{toml}: {was} ist in einer instanz.toml nicht erlaubt (nur [schnitt], [zeit], "
-                            "[merkmale.waffen], [sperre] datei/warten_s und [instanz] claude)")
+                            "[merkmale.waffen], [sperre] datei/warten_s, [instanz] claude und [briefkasten])")
 
     abschnitte: dict[str, Any] = {}
     for name, inhalt in eigen.items():
@@ -506,6 +511,43 @@ def _erzwinge(daten: dict, eigen: dict, inst: Path, name: str, toml: Path) -> No
     if claude.strip() and (bereich := claude_verboten(claude.strip())):
         raise KonfigFehler(f"{toml}: [instanz].claude liegt unter {bereich} – dort nie (Florians Bereich, Home-Ordner)")
     daten["instanz"] = {"wurzel": str(inst), "name": name, "claude": claude.strip()}
+    _briefkasten(daten, inst, name, toml)
+
+
+def _briefkasten(daten: dict, inst: Path, name: str, toml: Path) -> None:
+    """[briefkasten] einer Instanz (Stufe 2, M93): Werte prüfen, bevor etwas geholt wird. Fest: Benutzer bk-<name>,
+    Schlüssel und Hostschlüssel in I/briefkasten/. Mit host kommt das Abend-Ende als Datei vom PC (auto_abend aus)."""
+    b = daten.setdefault("briefkasten", {})
+
+    def nein(schluessel: str, text: str) -> KonfigFehler:
+        return KonfigFehler(f"{toml}: [briefkasten].{schluessel} = {b.get(schluessel)!r} – {text}")
+
+    host = b.get("host", "")
+    if not isinstance(host, str):
+        raise nein("host", "nötig ist die Tailnet-Adresse des vServers")
+    if host := host.strip():
+        try:
+            im_tailnet = ipaddress.IPv4Address(host) in TAILNET
+        except ValueError:
+            im_tailnet = False
+        if not im_tailnet:
+            raise nein("host", "nötig ist die Tailnet-Adresse des vServers (100.64.0.0/10), kein Name")
+    for schluessel, standard, unten, oben in (("port", 2222, 1, 65535), ("drossel_kbit", 20000, 0, 10**7)):
+        wert = b.get(schluessel, standard)
+        if isinstance(wert, bool) or not isinstance(wert, int) or not unten <= wert <= oben:
+            raise nein(schluessel, f"nötig ist eine ganze Zahl von {unten} bis {oben}")
+    oeffentlich = b.get("oeffentlich", "")
+    if not isinstance(oeffentlich, str) or not re.fullmatch(r"[A-Za-z0-9.:-]{0,253}", oeffentlich.strip()):
+        raise nein("oeffentlich", "nötig ist ein Name oder eine Adresse")
+    if b.get("loeschen", False) is not False:   # PR 7: erst nach Florians Ja – bis dahin gibt es kein Löschen
+        raise nein("loeschen", "Löschen im Briefkasten gibt es erst nach Florians Ja – bis dahin false")
+    karenz = b.get("karenz_h", 24)
+    if isinstance(karenz, bool) or not isinstance(karenz, (int, float)) or karenz < 0:
+        raise nein("karenz_h", "nötig ist eine Zahl ab 0")
+    b.update(host=host, benutzer=f"bk-{name}", schluessel=str(inst / "briefkasten" / "abholen"),
+             known_hosts=str(inst / "briefkasten" / "known_hosts"))
+    if host:
+        daten.setdefault("sitzungen", {})["auto_abend"] = False
 
 
 def _pruefe_pfade(daten: dict, inst: Path) -> None:

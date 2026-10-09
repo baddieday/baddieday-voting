@@ -303,7 +303,22 @@ ordner = "sitzungen"
 warten_h = 2
 # Abend-Ende selbst erkennen (07.10.): so viele Minuten kein neues Match = Abend vorbei (0 = nur die Datei vom PC)
 ruhe_min = 45
+# false = das Abend-Ende kommt nur als Datei vom PC (ruhe_min entprellt weiter den Nachtrag). Bei Freunden mit
+# Briefkasten immer false (M93) – ihre Aufnahmen kommen mit Verzug, ein selbst erkannter Abend käme zu früh.
+auto_abend = true
 format = "short"
+
+[briefkasten]
+# Mehrbenutzer, Stufe 2 (docs/BRIEFKASTEN.md): Briefkasten eines Freundes auf dem vServer. Wirkt nur in der Instanz
+# eines Freundes (CLIP_INSTANZ) – bei dir gibt es keinen. benutzer-anlegen.sh trägt die Werte in seine instanz.toml ein.
+# Fest und nicht einstellbar: Benutzer bk-<name>, Schlüssel und Hostschlüssel in <Instanz>/briefkasten/.
+host = ""                  # Tailnet-Adresse des vServers (100.x.y.z), kein Name. Leer = aus
+port = 2222
+oeffentlich = ""           # öffentlicher Name des vServers – nur fürs PC-Paket der Freunde
+drossel_kbit = 20000       # Abholen höchstens 20 Mbit/s je Freund (deine Leitung daheim); 0 = ungedrosselt
+# Löschen im Briefkasten gibt es erst nach Florians Ja – bis dahin muss loeschen false bleiben (sonst Exit 2)
+loeschen = false
+karenz_h = 24
 
 [bot]
 # Clip-Bot (07.10.): false = still – jede Szene wird wie bisher (Auto-Freigabe) entschieden, aber nicht mehr geschickt;

@@ -5,7 +5,8 @@ unabhängig und ohne Zugriff aufeinander. Florian merkt nichts. Annahmen M2–M8
 „Mehrbenutzer (Clip-Pipeline 4.0)“. Stand: Schritt 1 bis 9 sind umgesetzt (eine Rechen-Sperre, Instanz-Modus,
 Freund-Pipeline ohne n8n, Trennung Ende-zu-Ende geprüft, Dienst-Vorlagen mit Sandbox, Speicher für Freunde, Freund
 anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl, eigener Claude-Zugang per /claude). Seite für
-Freunde: `docs/FREUNDE.md`.
+Freunde: `docs/FREUNDE.md`. Stufe 2 („Freunde liefern selbst“, Annahmen ab M85): Schritt 1 Briefkasten auf dem
+vServer (`docs/BRIEFKASTEN.md`) und Schritt 2 Abholen am Mini (unten) sind gebaut, eingeschaltet wird noch nichts.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -30,8 +31,9 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
 |---|---|---|
 | `/var/lib/clip-benutzer` | root 0711 | – |
 | I | `root:clip-<name>` 0750 | `instanz.toml` und `.env` (beide `root:clip-<name>` 0640), Marke `.clip-benutzer` |
-| I/db | 0700 | `pipeline.db`, `publikum-oauth.json`, `mikro.anstoss`, `big-zustand`, `kopplung.json` (0600) |
-| I/daten (= Puffer) | 0700 | `.clip-speicher`, `.clip-puffer`, `eingang/`, `replays/`, `sessions/`, `sitzungen/`, `export/` |
+| I/db | 0700 | `pipeline.db`, `publikum-oauth.json`, `mikro.anstoss`, `big-zustand`, `kopplung.json` (0600); Stufe 2: `briefkasten.json`, `pc-status.json`, `pipeline.briefkasten.lock` |
+| I/daten (= Puffer) | 0700 | `.clip-speicher`, `.clip-puffer`, `eingang/`, `replays/`, `sessions/`, `sitzungen/`, `export/`; Stufe 2: `.abholen/` (Zwischenablage des Abholers) |
+| I/briefkasten (Stufe 2, Schritt 3) | `root:clip-<name>` | Schlüssel `abholen` und `known_hosts` (0640) für den Briefkasten |
 | I/regie, I/musik, I/material, I/sfx, I/cache | 0700 | I/cache ist auch HOME und Whisper-Cache |
 
 ## Konfig im Instanz-Modus (`CLIP_INSTANZ=I`, umgesetzt in Schritt 2)
@@ -45,7 +47,8 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
   `CLIP_EPIC_ID` raus, danach gilt nur `I/.env` – und dort nur diese Namen (sonst Exit 2). Florians `.env` und
   `lokal.toml` werden nie geöffnet. Verboten: `--konfig`, `CLIP_KONFIG`, `CLIP_SPEICHER`, `CLIP_DATENBANK` (Exit 2).
 - **Quellen:** Repo-`pipeline.toml` plus `I/instanz.toml`. Dort erlaubt: `[schnitt]`, `[zeit]`, `[merkmale.waffen]`
-  (nur Schlüssel, die die Repo-Konfig dort kennt), `[sperre]` `datei`/`warten_s`, `[instanz]` `claude`. Alles andere
+  (nur Schlüssel, die die Repo-Konfig dort kennt), `[sperre]` `datei`/`warten_s`, `[instanz]` `claude`, seit Stufe 2
+  `[briefkasten]` (host, port, oeffentlich, drossel_kbit, loeschen, karenz_h – geprüft, siehe unten). Alles andere
   (Datenbank, Lager, pve-big, Pfade …) ist ein Konfig-Fehler.
 - **Erzwungen:** `I/db/pipeline.db`, Puffer `I/daten`, `I/regie`, `I/musik`, `I/material`, `I/sfx`, Zustand von
   pve-big in `I/db`; kein Host, keine MAC, kein SSH (auch kein Schlüssel); Freigeben im Puffer und Aufräumen aus;
@@ -248,6 +251,24 @@ Der Freund verbindet sein Claude-Abo selbst – ohne Konsole und ohne dich:
   Schweigen, kein Link, Frist, claude fehlt → nichts gespeichert, claude beendet, freundliche Antwort; Token direkt;
   dein Bot ohne `/claude`, deine Hilfe gleich. Den Link findet es auch im echten `claude setup-token` (2.1.294).
 
+## Briefkasten abholen (Stufe 2, Schritt 2 – umgesetzt, noch nicht eingeschaltet)
+Der PC eines Freundes lädt in sein Fach im Briefkasten (`docs/BRIEFKASTEN.md`); `pipeline briefkasten abholen` holt es
+in seinen Puffer. Vorlage mit Timer (alle 2 min) und Schlüssel kommen mit Schritt 3. Annahmen M89–M93, M96, M103.
+- **Nur in der Instanz**, nur lesend über das Tailnet als `bk-<name>` mit `I/briefkasten/abholen` (Hostschlüssel
+  gepinnt), höchstens 20 Mbit/s. Bei Florian Exit 2, bevor etwas angefasst wird. Ohne `[briefkasten].host`: „aus“.
+- **Fertig ist eine Datei erst mit Lieferschein** (Name, Größe, SHA-256, Zeit vom PC). Geholt wird nach
+  `I/daten/.abholen`, geprüft (Größe, SHA-256 kalt zurückgelesen), dann bekommt sie die Zeit vom PC (höchstens jetzt −
+  130 s – scan nimmt sie sofort) und per `os.link` ihren Namen. Nie überschrieben; fremde Namen (auch ein Datum, das es
+  nicht gibt) nie angefasst. Drei Fehlversuche: aufgegeben, eine Zeile an den Freund.
+- **Reihenfolge:** Videos → Replays (nur ohne offenes Video) → Sitzungsdatei (erst, wenn ihre Matches verarbeitet sind,
+  spätestens nach 24 h). So baut `sitzungen` danach sofort das Abend-Video; `auto_abend` ist bei Freunden mit
+  Briefkasten aus.
+- **Keine Rechen-Sperre**, eigene Sperre, weckt nie, löscht im Briefkasten nichts. Bremse: nur holen, wenn danach
+  10 GB bzw. 10 % frei bleiben. Meldungen je Thema höchstens einmal am Tag (Fach 80 %, nicht erreichbar seit 24 h,
+  Platz knapp, Datei aufgegeben).
+- **Nachsehen:** `bash deploy/benutzer/benutzer-befehl.sh <name> briefkasten status` (ohne Netz: letzter Kontakt,
+  Füllstand, Dateien je Zustand). Die Tabelle `abholung` gibt es nur in seiner Datenbank.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -274,7 +295,8 @@ weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
    Isolationstests, Dienst-Vorlagen mit Sandbox, Freunde-Volume (ohne Samba je Freund, M12), Anlegen und Prüfen mit
    einem Befehl, Einladungslink, eigener Claude-Zugang per /claude (alles umgesetzt).
 2. **Freunde liefern selbst:** Briefkasten auf dem vServer + kleines Programm für den PC, Lager je Freund mit
-   Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot.
+   Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot. Gebaut:
+   Briefkasten (Schritt 1), Abholen am Mini (Schritt 2); Löschen im Briefkasten erst nach Florians Ja.
 3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

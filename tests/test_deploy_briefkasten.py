@@ -744,6 +744,40 @@ def _echter_sshd_moeglich() -> str | None:
     return None if r.returncode == 0 else "keine Mount- und Netz-Namensräume"
 
 
+def echte_attrappen(w: Path) -> tuple[str, str]:
+    """netz.py und die Attrappen für das System um den echten sshd (in <w>/stub) – auch für tests/test_briefkasten.py.
+    Liefert (sshd, LD_LIBRARY_PATH)."""
+    (w / "netz.py").write_text(NETZ_PY, encoding="utf-8")
+    stub = w / "stub"
+    stub.mkdir()
+    sshd, libs = _sshd_fuer_test()
+    echt = {p: shutil.which(p) for p in ("mount", "fallocate", "df")}
+    attrappen = {name: ATTRAPPEN[name] for name in ("systemd-detect-virt", "losetup", "ip", "ss", "systemctl")}
+    attrappen.update({
+        "ufw": 'echo "Status: inactive"',
+        "sshd": f'LD_LIBRARY_PATH="$LIBS" exec {shlex.quote(sshd)} "$@"',
+        # Fach = tmpfs mit 8 MB statt Loop-Bild (Loop-Geräte gehören dem ganzen System)
+        "mount": f'exec {echt["mount"]} -t tmpfs -o size=8m,mode=0755,noexec,nosuid,nodev tmpfs "${{*: -1}}"',
+        "fallocate": f'exec {echt["fallocate"]} -l 48M "${{*: -1}}"',
+        "findmnt": r'''o="$(awk -v p="${*: -1}" '$2 == p {o = $4} END {print o}' /proc/self/mounts)"; [ -n "$o" ] || exit 1
+case "$3" in FSTYPE) echo ext4 ;; *) echo "ext4 $o" ;; esac''',
+        # die Fächer echt messen, das System drumherum wie ein großer vServer
+        "df": f'case "${{*: -1}}" in */fach) exec {echt["df"]} "$@" ;; esac\n'
+              'echo "1B-blocks Used Avail"; echo "200000000000 50000000000 150000000000"',
+        "groupadd": 'echo "${*: -1}:x:2000:" >> /etc/group',
+        "useradd": r'''n="${*: -1}"; pw="!"; while [ $# -gt 1 ]; do [ "$1" = --password ] && pw="$2"; shift; done
+echo "$n:x:$(( 2001 + $(grep -c '^bk-' /etc/passwd || true) )):2000::/nonexistent:/usr/sbin/nologin" >> /etc/passwd
+echo "$n:$pw:20000:0:99999:7:::" >> /etc/shadow''',
+        "usermod": r'''n="${*: -1}"; case "$1" in -L) a="s/^$n:/$n:!/" ;; -U) a="s/^$n:!/$n:/" ;; esac
+sed "$a" /etc/shadow > "$STUB/shadow.neu"; cat "$STUB/shadow.neu" > /etc/shadow''',
+    })
+    for name, inhalt in attrappen.items():
+        datei = stub / name
+        datei.write_text(f'#!/bin/bash\necho "{name} $*" >> "$STUB/aufrufe"\n{inhalt}\n', encoding="utf-8")
+        datei.chmod(0o755)
+    return sshd, libs
+
+
 class EchterSshd(unittest.TestCase):
     """Die Skripte und der echte sshd in einem privaten Mount- und Netz-Namensraum – am System ändert sich nichts."""
 
@@ -753,35 +787,8 @@ class EchterSshd(unittest.TestCase):
             raise unittest.SkipTest(grund)
         cls._tmp = tempfile.TemporaryDirectory(prefix="clip-briefkasten-")
         w = cls.w = Path(cls._tmp.name)
-        (w / "netz.py").write_text(NETZ_PY, encoding="utf-8")
         (w / "treiber.sh").write_text(TREIBER, encoding="utf-8")
-        stub = w / "stub"
-        stub.mkdir()
-        sshd, libs = _sshd_fuer_test()
-        echt = {p: shutil.which(p) for p in ("mount", "fallocate", "df")}
-        attrappen = {name: ATTRAPPEN[name] for name in ("systemd-detect-virt", "losetup", "ip", "ss", "systemctl")}
-        attrappen.update({
-            "ufw": 'echo "Status: inactive"',
-            "sshd": f'LD_LIBRARY_PATH="$LIBS" exec {shlex.quote(sshd)} "$@"',
-            # Fach = tmpfs mit 8 MB statt Loop-Bild (Loop-Geräte gehören dem ganzen System)
-            "mount": f'exec {echt["mount"]} -t tmpfs -o size=8m,mode=0755,noexec,nosuid,nodev tmpfs "${{*: -1}}"',
-            "fallocate": f'exec {echt["fallocate"]} -l 48M "${{*: -1}}"',
-            "findmnt": r'''o="$(awk -v p="${*: -1}" '$2 == p {o = $4} END {print o}' /proc/self/mounts)"; [ -n "$o" ] || exit 1
-case "$3" in FSTYPE) echo ext4 ;; *) echo "ext4 $o" ;; esac''',
-            # die Fächer echt messen, das System drumherum wie ein großer vServer
-            "df": f'case "${{*: -1}}" in */fach) exec {echt["df"]} "$@" ;; esac\n'
-                  'echo "1B-blocks Used Avail"; echo "200000000000 50000000000 150000000000"',
-            "groupadd": 'echo "${*: -1}:x:2000:" >> /etc/group',
-            "useradd": r'''n="${*: -1}"; pw="!"; while [ $# -gt 1 ]; do [ "$1" = --password ] && pw="$2"; shift; done
-echo "$n:x:$(( 2001 + $(grep -c '^bk-' /etc/passwd || true) )):2000::/nonexistent:/usr/sbin/nologin" >> /etc/passwd
-echo "$n:$pw:20000:0:99999:7:::" >> /etc/shadow''',
-            "usermod": r'''n="${*: -1}"; case "$1" in -L) a="s/^$n:/$n:!/" ;; -U) a="s/^$n:!/$n:/" ;; esac
-sed "$a" /etc/shadow > "$STUB/shadow.neu"; cat "$STUB/shadow.neu" > /etc/shadow''',
-        })
-        for name, inhalt in attrappen.items():
-            datei = stub / name
-            datei.write_text(f'#!/bin/bash\necho "{name} $*" >> "$STUB/aufrufe"\n{inhalt}\n', encoding="utf-8")
-            datei.chmod(0o755)
+        sshd, libs = echte_attrappen(w)
         cls.lauf = subprocess.run(["timeout", "300", "unshare", "-m", "-n", "--propagation", "private", "bash",
                                    str(w / "treiber.sh"), str(w), str(PROJEKT), sshd, libs],
                                   capture_output=True, text=True, timeout=330)

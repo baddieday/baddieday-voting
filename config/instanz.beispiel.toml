@@ -3,9 +3,10 @@
 # deploy/benutzer/benutzer-anlegen.sh schreibt sie aus Florians wirksamer Konfig (nur Sperre, Rechnerwerte, Waffen).
 #
 # Startwissen ist config/pipeline.toml aus dem Repo (nie Florians lokal.toml). Hier stehen nur Abweichungen, und nur in
-# diesen Abschnitten: [sperre], [schnitt], [zeit], [merkmale.waffen], [instanz]. Alles andere – Pfade, Datenbank, Lager,
-# pve-big, Hosts, KI-Programm – ist ein Konfig-Fehler (pipeline endet mit Exit 2): Die Pfade legt die Pipeline selbst
-# unter dem Instanz-Ordner fest. Zugänge (Bot-Token, Telegram-Zahl, Epic-ID, Claude-Token) stehen in <Ordner>/.env.
+# diesen Abschnitten: [sperre], [schnitt], [zeit], [merkmale.waffen], [instanz], [briefkasten]. Alles andere – Pfade,
+# Datenbank, Lager, pve-big, Hosts, KI-Programm – ist ein Konfig-Fehler (pipeline endet mit Exit 2): Die Pfade legt
+# die Pipeline selbst unter dem Instanz-Ordner fest. Zugänge (Bot-Token, Telegram-Zahl, Epic-ID, Claude-Token) stehen in
+# <Ordner>/.env; der Schlüssel für den Briefkasten liegt fest in <Ordner>/briefkasten/.
 
 [sperre]
 # Pflicht: die EINE Rechen-Sperre des Mini – Florians Datei (im Dienst nur lesbar eingebunden). Absolut, außerhalb des
@@ -34,3 +35,10 @@ sonstige = []
 # Leer = „claude“ aus /usr/local/bin, /usr/bin oder /bin. Die KI läuft nur mit dem eigenen Claude-Zugang des Freundes
 # (per /claude in seinem Bot oder CLAUDE_CODE_OAUTH_TOKEN in .env) – sonst bleibt sie bei ihm aus.
 # claude = "/usr/local/bin/claude"
+
+# [briefkasten]
+# Stufe 2: der Briefkasten des Freundes auf dem vServer – trägt benutzer-anlegen.sh (Schritt „Briefkasten“) ein, nicht
+# von Hand. Erst das Update einspielen, dann den Abschnitt (sonst kennt der Code ihn nicht: Exit 2).
+# host = "100.64.0.7"                  # Tailnet-Adresse des vServers
+# port = 2222
+# oeffentlich = "vserver.example.org"  # öffentlicher Name – nur fürs PC-Paket

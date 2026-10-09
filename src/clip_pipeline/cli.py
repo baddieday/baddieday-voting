@@ -3,7 +3,7 @@
   prepare|analyze|decide|render --session ID     highlight --id ID --tage 14
   (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe],
    fail --session ID | --nachziehen [--tage 14], scan --verarbeiten [--max N] [--versuche N] für Freunde ohne n8n,
-   benutzer pruefen|einrichten|koppeln nur in der Instanz eines Freundes)
+   benutzer pruefen|einrichten|koppeln und briefkasten abholen|status nur in der Instanz eines Freundes)
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -716,6 +716,26 @@ def _cmd_benutzer(args, konfig, con) -> int:
     return 0 if ergebnis["ok"] else 1
 
 
+def _cmd_briefkasten(args, konfig, con) -> int:
+    """Mehrbenutzer, Stufe 2: den Briefkasten eines Freundes abholen (Timer alle 2 min) bzw. den Stand zeigen (nur
+    nachsehen, ohne Netz) – nur in seiner Instanz; bei Florian lehnt schon _vorab_ablehnen ab (Exit 2). Keine
+    Rechen-Sperre (nur Ein- und Ausgabe), eigene Sperre, weckt nie, löscht im Briefkasten nie.
+    Exit: 0 ok, nichts zu tun oder aus · 1 einzelne Dateien (nächster Lauf) · 2 Konfig · 3 Briefkasten nicht erreichbar,
+    Fach nicht eingehängt oder Puffer offline · 4 Sperre belegt."""
+    from . import briefkasten
+
+    try:
+        ergebnis = briefkasten.status(con, konfig) if args.aktion == "status" else briefkasten.abholen(con, konfig)
+    except KonfigFehler as e:
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
+    _json(ergebnis)
+    if ergebnis.get("unerreichbar"):
+        return 3
+    return 1 if ergebnis.get("fehler") else 0
+
+
 def _cmd_bot(args, konfig, con) -> int:
     from .bot.app import starte  # erst hier: der Rest braucht python-telegram-bot nicht
 
@@ -1024,6 +1044,12 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("aktion", choices=["pruefen", "einrichten", "koppeln"])
     s.set_defaults(fn=_cmd_benutzer, sperren=False, ohne_db=True)   # einrichten nimmt die Sperre selbst (nur Musik)
 
+    # Mehrbenutzer, Stufe 2: nur in der Instanz eines Freundes – Vorlage clip-freund-abholen@ (Timer alle 2 min)
+    s = unter.add_parser("briefkasten", help="Briefkasten eines Freundes (nur mit CLIP_INSTANZ): abholen (nur lesen im "
+                                             "Briefkasten, eigene Sperre, weckt nie) | status (nur nachsehen)")
+    s.add_argument("aktion", choices=["abholen", "status"])
+    s.set_defaults(fn=_cmd_briefkasten, sperren=False)   # nur Ein- und Ausgabe: nie die Rechen-Sperre, nicht in WECKEN
+
     # Lernschleife „Publikum“ (Spec §12). Unterbefehle wie bei `lager`; `holen` (TikTok-API) kommt in Stufe 4.
     s = unter.add_parser("publikum", help="Lernschleife Publikum: bewerten (Scores ab [publikum].alter_tage, "
                                                "Standard 7 – Timer clip-publikum)")
@@ -1044,6 +1070,12 @@ def _vorab_ablehnen(args, konfig) -> int | None:
     """Befehle, die in dieser Konfig nicht laufen dürfen, sofort ablehnen (Exit 2) – vor der Pipeline-Sperre.
     Sonst wartete z. B. ein noch aktiver clip-aufraeumen-Timer bis zu [sperre].warten_s auf einen laufenden render
     und endete dann mit „gesperrt“ (Exit 4, im Timer kein Fehler) statt mit dem Hinweis, ihn auszuschalten."""
+    if args.befehl == "briefkasten" and konfig.instanz is None:   # Florian hat keinen Briefkasten: nichts anfassen
+        hinweis = ("pipeline briefkasten läuft nur in der Instanz eines Freundes (CLIP_INSTANZ) – für einen Freund: "
+                   "bash deploy/benutzer/benutzer-befehl.sh <name> briefkasten status")
+        log.error("%s", hinweis)
+        _json({"fehler": "konfig", "hinweis": hinweis})
+        return 2
     # Ohne getrennten Betrieb wäre [speicher].wurzel pve-big selbst – diese Befehle arbeiten nur im Puffer (E19)
     nur_puffer = {"momente": "momente nachschneiden", "merkmale": "merkmale nachtragen", "fail": "fail"}
     if args.befehl == "stimmung" and getattr(args, "clips", False):
