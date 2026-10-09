@@ -347,6 +347,10 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
 
 
 def autonom_text(con: sqlite3.Connection) -> str:
+    """/lernstand (Experten-Modus; auch der Kopf von 📋 Stand dort). Mehrbenutzer Stufe 4 (M171): Was das
+    Publikums-Modell gerade sieht, steht als „Tendenzen (nicht belegt)“ da – es nennt sie schon ab einem kleinen
+    Gewicht, ohne Mindestzahl (bei reinem Zufall nach 16 Videos in jedem zweiten Fall). Belegt ist nur, was
+    `pipeline erfolg` zeigt. Die Rechnung bleibt (autonom.ueberblick)."""
     stand = autonom.ueberblick(con)
     version = stand.get("version")
     zeilen = ["🧠 AUTONOMES LERNEN",
@@ -355,7 +359,8 @@ def autonom_text(con: sqlite3.Connection) -> str:
               f"Aktueller Lernstand: v{version}" if version else "Aktueller Lernstand: Startwissen",
               f"Vertrauen: {round(100 * stand['confidence'])} %"]
     if stand.get("erkenntnisse"):
-        zeilen += ["", "Zuletzt gelernt:", *[f"• {e}" for e in stand["erkenntnisse"][:3]]]
+        zeilen += ["", "Tendenzen (nicht belegt) – belegt ist nur, was pipeline erfolg zeigt:",
+                   *[f"• {e}" for e in stand["erkenntnisse"][:3]]]
     else:
         zeilen += ["", "Noch keine belastbare Publikumstendenz. Mit weiteren gemessenen Videos lerne ich dazu."]
     zeilen += ["", "Bewertungen sind optional. Neue Publikumszahlen lösen das Lernen automatisch aus."]

@@ -198,7 +198,8 @@ class NieWecken(MitBewertung):
             text = lernbot_publikum.publikum_text(self.con, self.konfig, zeit=tag(8))
             lernbot_publikum.faellige_lern_meldungen(self.con, self.konfig, tag(8))
         self.assertEqual(code, 0, aus.getvalue())
-        self.assertIn("Publikumsscore", text)
+        self.assertIn("Wochen-Note 0 (fest; Basis zu klein", text)   # Stufe 4: beide Werte beschriftet
+        self.assertIn("Lernwert", text)
         wol.assert_not_called()
         wach.assert_not_called()
         herz.assert_not_called()
@@ -361,13 +362,14 @@ class PublikumText(MitBewertung):
         zeilen = self.text()
         self.assertEqual(zeilen[0], "📊 Publikum · 3 Posts, 2 mit Score (neueste zuerst)")
         self.assertTrue(zeilen[1].startswith(f"#{neu} TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s (Tag 4) · "))
-        self.assertIn("Publikumsscore", zeilen[1])
-        self.assertIn("Vertrauen", zeilen[1])
-        self.assertNotIn("ab 7 Tagen", zeilen[1])
+        # Stufe 4 (M172): die feste Wochen-Note ist noch offen, der vorläufige Lernwert steht beschriftet dahinter
+        self.assertIn("· Wochen-Note noch offen (ab 7 Tagen) · Lernwert ", zeilen[1])
+        self.assertIn("(vorläufig, Vertrauen", zeilen[1])
         self.assertEqual(zeilen[2], f"#{ohne_zahlen} TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Plattformzugang "
-                                    f"oder optional Screenshot mit #{ohne_zahlen} · Score offen (braucht eine Messung ab Tag 3 mit Views)")
+                                    f"oder optional Screenshot mit #{ohne_zahlen} · Wochen-Note offen (braucht eine Messung ab Tag 3 mit Views)")
         self.assertIn(f"#{alt} TikTok · Clip 88", zeilen[3])
-        self.assertIn("Publikumsscore", zeilen[3])  # spätere Messung hat auch ältere Posts autonom nachgetragen
+        self.assertIn("· Wochen-Note +0,8 (fest; Wiedergabe über, Reaktionen je View unter, Views über deinem Median)"
+                      " · Lernwert ", zeilen[3])  # spätere Messung hat auch ältere Posts autonom nachgetragen
         self.assertEqual(zeilen[-1], "🤖 Claude diese Woche: 0 Aufrufe")
 
     def test_youtube_heisst_wie_im_knopf_und_in_der_checkliste(self):
@@ -379,7 +381,7 @@ class PublikumText(MitBewertung):
                               zeit=self.JETZT - timedelta(days=1))
         self.assertTrue(self.text()[1].endswith(f"{aktionen.PLATTFORM_NAMEN['youtube']} · Entwurf 41 · 1 Tag · "
                                                 "noch keine Zahlen – Plattformzugang oder optional Screenshot mit #1 · "
-                                                "Score noch offen (ab 7 Tagen)"), self.text()[1])
+                                                "Wochen-Note noch offen (ab 7 Tagen)"), self.text()[1])
 
     def test_ganz_angesehen_mit_eigenem_zeichen(self):
         post_id = self.clip_post(88, self.JETZT - timedelta(days=4))
@@ -391,7 +393,7 @@ class PublikumText(MitBewertung):
         self.messung(post_id, self.JETZT - timedelta(days=1), views=900, wiedergabe_s=5.0)
         self.setze_score(post_id, 0.0, r=0.2, e=0.0, v=6.8, z_r=0.0, z_e=0.0, z_v=0.0,
                          vermerke=["Engagement unvollständig", "Basis zu klein"])
-        self.assertTrue(self.text()[1].endswith("· Score 0 (Basis zu klein · Engagement unvollständig)"),
+        self.assertTrue(self.text()[1].endswith("· Wochen-Note 0 (fest; Basis zu klein · Engagement unvollständig)"),
                         self.text()[1])
 
     def test_score_ohne_wiedergabe(self):
@@ -400,18 +402,19 @@ class PublikumText(MitBewertung):
         self.setze_score(post_id, -0.3, r=None, e=0.02, v=6.8, z_r=None, z_e=-0.5, z_v=0.0,
                          vermerke=["ohne Wiedergabe"])
         self.assertTrue(self.text()[1].endswith(
-            "· Score −0,3 (Reaktionen je View unter, Views gleich deinem Median · ohne Wiedergabe)"), self.text()[1])
+            "· Wochen-Note −0,3 (fest; Reaktionen je View unter, Views gleich deinem Median · ohne Wiedergabe)"),
+            self.text()[1])
 
     def test_faellig_mit_messung_kommt_beim_naechsten_lauf(self):
         post_id = self.clip_post(88, self.JETZT - timedelta(days=8))
         self.messung(post_id, self.JETZT - timedelta(days=1), views=900)
-        self.assertTrue(self.text()[1].endswith("· Score kommt beim nächsten Lauf"), self.text()[1])
+        self.assertTrue(self.text()[1].endswith("· Wochen-Note kommt beim nächsten Lauf"), self.text()[1])
 
     def test_kaputtes_score_teile_zeigt_den_score_trotzdem(self):
         post_id = self.clip_post(88, self.JETZT - timedelta(days=8))
         self.setze_score(post_id, 1.4)
         self.con.execute("UPDATE posts SET score_teile = '{kaputt' WHERE id = ?", (post_id,))
-        self.assertTrue(self.text()[1].endswith("· Score +1,4"), self.text()[1])
+        self.assertTrue(self.text()[1].endswith("· Wochen-Note +1,4 (fest)"), self.text()[1])
 
     def test_heute_und_ein_tag(self):
         self.clip_post(1, self.JETZT - timedelta(hours=5))

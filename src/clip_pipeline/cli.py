@@ -4,7 +4,8 @@
   (weitere Befehle für Handbetrieb und Timer, z. B. momente nachschneiden [--tage 14] [--probe],
    fail --session ID | --nachziehen [--tage 14], scan --verarbeiten [--max N] [--versuche N] für Freunde ohne n8n,
    benutzer pruefen|einrichten|koppeln und briefkasten abholen|status nur in der Instanz eines Freundes,
-   laufzeiten [--tage 7] – nur lesen: wie lange Rechenaufträge warten und rechnen)
+   laufzeiten [--tage 7] – nur lesen: wie lange Rechenaufträge warten und rechnen,
+   erfolg – nur lesen: Ziele getrennt und belegter Strategievergleich aus den festen Wochenzahlen)
 
 Logs gehen nach stderr; die letzte Zeile auf stdout ist genau eine JSON-Zeile.
 Exit-Codes: 0 ok · 1 Fehler · 2 falscher Aufruf/Konfig · 3 Speicher offline · 4 Sperre nicht bekommen
@@ -698,6 +699,24 @@ def _cmd_laufzeiten(args, konfig, con) -> int:
     return 0
 
 
+def _cmd_erfolg(args, konfig, con) -> int:
+    """Mehrbenutzer, Stufe 4 (M155–M164): nur lesen – Ziele mit Status und die m = 9 festen Vergleiche aus den
+    eingefrorenen Wochenzahlen (erfolg.py). Text ohne Fachbegriffe nach stderr, eine JSON-Zeile nach stdout. Keine
+    Sperre, weckt nie, nicht über n8n erreichbar; ein Freund: bash deploy/benutzer/benutzer-befehl.sh <name> erfolg.
+    Exit 0 · 2 bei kaputten [erfolg.gewichte] bzw. [publikum]-Werten."""
+    from . import erfolg
+
+    try:
+        bericht = erfolg.auswertung(con, konfig)
+    except KonfigFehler as e:
+        log.error("%s", e)
+        _json({"fehler": "konfig", "hinweis": str(e)})
+        return 2
+    print(erfolg.text(bericht), file=sys.stderr)
+    _json(bericht)
+    return 0
+
+
 def _cmd_benutzer(args, konfig, con) -> int:
     """Mehrbenutzer (Schritt 7/8): die Instanz eines Freundes prüfen (nur nachsehen), einrichten (Datenbank, Whisper,
     Musik, danach prüfen) bzw. mit Telegram koppeln (Einladungslink) – nur mit CLIP_INSTANZ, gestartet von
@@ -1045,6 +1064,10 @@ def baue_parser() -> argparse.ArgumentParser:
                                             "Rendern je Encoder, ✅ → Upload, Abend → Video (nur lesen, weckt nie)")
     s.add_argument("--tage", type=_ab_eins, default=7, help="die letzten N Tage (Standard 7)")
     s.set_defaults(fn=_cmd_laufzeiten, sperren=False)   # nur lesen: keine Rechen-Sperre, nicht in WECKEN
+
+    s = unter.add_parser("erfolg", help="Erfolg ehrlich messen: Zuschauer, Follower und Webseite getrennt, belegter "
+                                        "Vergleich der Strategien aus den festen Wochenzahlen (nur lesen, weckt nie)")
+    s.set_defaults(fn=_cmd_erfolg, sperren=False)   # nur lesen: keine Rechen-Sperre, nicht in WECKEN, nicht für n8n
 
     s = unter.add_parser("warum", help="Sieht alles gleich aus? Material, Wiederholung, Lernen der Moment-Formel")
     s.set_defaults(fn=_cmd_warum, sperren=False)

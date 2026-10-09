@@ -3,9 +3,10 @@
 Worum es geht: Die Lernschleife „Publikum“ sammelt zu jedem geposteten Short die TikTok-Zahlen und macht daraus
 nach einer Woche einen Publikums-Score (publikum.py). Dieses Modul ist die Stelle, an der du davon etwas siehst:
   - /publikum zeigt die letzten Posts mit Post-Nummer (die brauchst du für die Screenshots, „#17“), Plattform,
-    Alter, letzter Messung und – sobald gesetzt – dem Score mit seinen Teilen in Worten. So siehst du ohne
-    Datenbank, was die Lernschleife gerade weiß und wo noch Zahlen fehlen. Die letzte Zeile zählt die
-    Claude-Aufrufe der Woche (Spec §12; /lernstand zeigt sie ab Stufe 3 mit der Rezept-Tabelle, Annahme A34).
+    Alter, letzter Messung und zwei getrennt beschrifteten Werten (Mehrbenutzer Stufe 4): der festen Wochen-Note mit
+    ihren Teilen in Worten – nur sie zählt in `pipeline erfolg` als Beleg – und dem vorläufigen Lernwert, mit dem der
+    Bot lernt. So siehst du ohne Datenbank, was die Lernschleife gerade weiß und wo noch Zahlen fehlen. Die letzte
+    Zeile zählt die Claude-Aufrufe der Woche (Spec §12; /lernstand zeigt sie ab Stufe 3 mit der Rezept-Tabelle, A34).
   - Nach `pipeline publikum bewerten` (täglicher Timer) kommt höchstens eine Meldung am Tag: „📊 2 Posts bewertet …“.
 
 Die Lernidee dahinter in Alltagssprache: Ein Score ist nur so gut wie die Zahlen, aus denen er entsteht. Wenn du
@@ -203,35 +204,59 @@ def _zahlen_text(zeile: sqlite3.Row, messung: sqlite3.Row | None) -> str:
     return " ".join(teile or ["Zahlen unbekannt"]) + f" (Tag {tag})"
 
 
-def _score_zustand(con: sqlite3.Connection, zeile: sqlite3.Row, konfig: Konfig, zeit: datetime) -> str:
-    """Score-Teil einer /publikum-Zeile – vier Fälle:
-      bewertet                     → „Score +0,8 (Wiedergabe über, … deinem Median)“
-      jünger als alter_tage        → „Score noch offen (ab 7 Tagen)“
-      alt genug, passende Messung  → „Score kommt beim nächsten Lauf“ (der Timer war noch nicht dran)
-      alt genug, keine Messung     → „Score offen (braucht eine Messung ab Tag 3 mit Views)“"""
-    aktuell = con.execute("SELECT score,confidence FROM audience_ergebnisse WHERE post_id=?",
-                          (zeile["id"],)).fetchone()
-    if aktuell is not None:
-        return f"Publikumsscore {score_text(aktuell['score'])} · Vertrauen {round(100 * aktuell['confidence'])} %"
+def _wochen_note(con: sqlite3.Connection, zeile: sqlite3.Row, konfig: Konfig, zeit: datetime) -> str:
+    """Die feste Wochen-Note (posts.score: einmal um Tag 7 gesetzt, nie überschrieben – nur sie zählt in
+    `pipeline erfolg` als Beleg) – vier Fälle:
+      bewertet                     → „Wochen-Note +0,8 (fest; Wiedergabe über, … deinem Median)“
+      jünger als alter_tage        → „Wochen-Note noch offen (ab 7 Tagen)“
+      alt genug, passende Messung  → „Wochen-Note kommt beim nächsten Lauf“ (der Timer war noch nicht dran)
+      alt genug, keine Messung     → „Wochen-Note offen (braucht eine Messung ab Tag 3 mit Views)“"""
     if zeile["bewertet_utc"] is not None:
         worte = score_worte(_score_teile(zeile))
-        return f"Score {score_text(zeile['score'])}" + (f" ({worte})" if worte else "")
+        return f"Wochen-Note {score_text(zeile['score'])} (fest" + (f"; {worte})" if worte else ")")
     if not publikum.ist_faellig(zeile, konfig, zeit):
-        return f"Score noch offen (ab {publikum.dezimal_text(publikum.einstellung(konfig, 'alter_tage'))} Tagen)"
+        return (f"Wochen-Note noch offen (ab {publikum.dezimal_text(publikum.einstellung(konfig, 'alter_tage'))} "
+                "Tagen)")
     messungen = con.execute("SELECT * FROM publikum_messungen WHERE post_id = ? ORDER BY gemessen_utc, id",
                             (zeile["id"],)).fetchall()
     if publikum.waehle_messung(zeile, messungen, konfig) is not None:
-        return "Score kommt beim nächsten Lauf"
+        return "Wochen-Note kommt beim nächsten Lauf"
     mindest = publikum.dezimal_text(publikum.einstellung(konfig, "mindest_alter_tage"))
-    return f"Score offen (braucht eine Messung ab Tag {mindest} mit Views)"
+    return f"Wochen-Note offen (braucht eine Messung ab Tag {mindest} mit Views)"
+
+
+def _lernwert(con: sqlite3.Connection, post_id: int) -> str | None:
+    """Die vorläufige Zuschauer-Note (audience_ergebnisse), mit der der Bot lernt – sie wird bei jeder Messung neu
+    gerechnet: „Lernwert −0,1 (vorläufig, Vertrauen 86 %)“. Hat kein Teil eine eigene Vergleichsbasis (alle basis_n 0),
+    misst sie nur an den eingebauten Startwerten: „(vorläufig, nur gegen Startwerte, Vertrauen 20 %)“. None ohne Note."""
+    z = con.execute("SELECT score, confidence, teile FROM audience_ergebnisse WHERE post_id = ?", (post_id,)).fetchone()
+    if z is None:
+        return None
+    try:
+        teile = [t for t in ((json.loads(z["teile"] or "{}") or {}).get("components") or {}).values()
+                 if isinstance(t, dict)]
+    except (TypeError, ValueError, AttributeError):   # unlesbar: lieber nichts behaupten als „nur gegen Startwerte“
+        teile = []
+    start = "nur gegen Startwerte, " if teile and not any(t.get("basis_n") for t in teile) else ""
+    return f"Lernwert {score_text(z['score'])} (vorläufig, {start}Vertrauen {round(100 * z['confidence'])} %)"
+
+
+def _score_zustand(con: sqlite3.Connection, zeile: sqlite3.Row, konfig: Konfig, zeit: datetime) -> str:
+    """Score-Teil einer /publikum-Zeile (Mehrbenutzer Stufe 4, M155/M172): zwei Werte, getrennt beschriftet – die feste
+    Wochen-Note (_wochen_note) und, falls es ihn gibt, der vorläufige Lernwert (_lernwert). Vorher stand dort nur
+    „Publikumsscore“ (der Lernwert), und die Tagesmeldung nannte für dasselbe Video eine andere Zahl (die Wochen-Note).
+    Beispiel: „Wochen-Note +0,6 (fest; …) · Lernwert −0,1 (vorläufig, Vertrauen 86 %)“."""
+    lernwert = _lernwert(con, zeile["id"])
+    return _wochen_note(con, zeile, konfig, zeit) + (f" · {lernwert}" if lernwert else "")
 
 
 def publikum_text(con: sqlite3.Connection, konfig: Konfig, grenze: int = PUBLIKUM_STANDARD,
                   zeit: datetime | None = None) -> str:
     """Text für /publikum: die letzten `grenze` Posts, neueste zuerst, je Zeile z. B.
-    „#17 TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s (Tag 4) · Score noch offen (ab 7 Tagen)“ bzw.
-    „#12 TikTok · Clip 88 · 9 Tage · … · Score +0,8 (Wiedergabe über, Reaktionen je View unter deinem Median)“ bzw.
-    „… · Score 0 (Basis zu klein)“. Erste Zeile: „📊 Publikum · 12 Posts, 5 mit Score (die letzten 10, neueste
+    „#17 TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 (Tag 4) · Wochen-Note noch offen (ab 7 Tagen) · Lernwert −0,1
+    (vorläufig, Vertrauen 20 %)“ bzw. „#12 TikTok · Clip 88 · 9 Tage · … · Wochen-Note +0,8 (fest; Wiedergabe über,
+    Reaktionen je View unter deinem Median)“ bzw. „… · Wochen-Note 0 (fest; Basis zu klein)“ (_score_zustand).
+    Erste Zeile: „📊 Publikum · 12 Posts, 5 mit Score (die letzten 10, neueste
     zuerst)“. Letzte Zeile: „🤖 Claude diese Woche: 3 Aufrufe“ (claude_aufrufe_woche). Ohne Posts: kurzer Satz,
     wie ein Post entsteht (📦 → /link). Nur lesen – der Text ändert nichts in der Datenbank.
     KonfigFehler, wenn [publikum].alter_tage bzw. mindest_alter_tage fehlt (cmd_publikum fängt das ab)."""
