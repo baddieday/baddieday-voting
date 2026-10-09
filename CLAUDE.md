@@ -712,3 +712,12 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Halbjahre (6,3 % im Jahr); doppelte Reaktionen in 100 % binnen eines Jahres belegt, im Median nach 16 Wochen
     (bei 3 Shorts je Woche). 300 Posts in 15 ms. Die Zeile für den Sonntagsbericht ist fertig, eingehängt wird sie mit
     Schritt 2. M155–M161, M163–M170.
+  - Schritt 2 (ehrliche Sätze, `docs/SO-GEHTS.md` „Der Sonntagsbericht“): Statt „👀 Bei den Zuschauern kommt gut an“
+    steht dort die 📊-Zeile aus `pipeline erfolg` – wie viele Videos noch fehlen, „noch kein Unterschied sicher“ oder
+    „📊 Belegt (TikTok, 41 Videos): … – sehr wahrscheinlich kein Zufall“, darunter „Noch nicht gemessen: …“; ohne
+    fertige Wochenzahlen keine Zeile. Statt „👍 Kommt gut an / 👎 Kommt weniger an“ heißt dieselbe Zahl „🎯 Wähle ich
+    gerade öfter: … · seltener: …“ – was der Bot bevorzugt, kein Beweis. Ein Fehler in `erfolg` kostet den Bericht nie.
+    Unter /experte: /lernstand „Tendenzen (nicht belegt)“, /publikum „Wochen-Note (fest)“ und „Lernwert (vorläufig)“.
+    Lernen, 📋 Stand, Videos, Knöpfe und n8n unverändert. Nachgestellt (echter Bericht, 200 Halbjahre ohne
+    echten Unterschied, 3 Shorts je Woche): vorher irgendwann eine Behauptung in 99,5 % der Halbjahre, nachher in
+    5,0 %. Stufenbericht: `docs/MEHRBENUTZER.md`. M162, M171–M174.

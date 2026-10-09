@@ -9,7 +9,8 @@ Die Veröffentlichung wählst du weiterhin selbst; das Lernen danach läuft auto
 2. Direkt **📦 Upload-Paket** öffnen. Bewerten ist optional. **Nächster Entwurf** funktioniert ebenfalls ohne Urteil.
 3. Das Video veröffentlichen und im Lern-Bot `/link 41 https://…` senden; `41` ist die Entwurfsnummer.
 4. Eingerichtete Plattformzugänge holen Performance automatisch. Jede verwertbare neue Messung stößt Lernen an.
-5. `/lernstand` zeigt veröffentlichte und ausgewertete Videos, aktiven Lernstand, Vertrauen und Tendenzen.
+5. `/lernstand` zeigt veröffentlichte und ausgewertete Videos, aktiven Lernstand, Vertrauen und Tendenzen – „nicht
+   belegt“ (Stufe 4); belegt ist nur, was `pipeline erfolg` aus den festen Wochen-Noten zeigt (`docs/PUBLIKUM.md`, 7).
 
 Auch `pipeline highlight --id … --tage 14` verwendet für neue Ausgaben den gemeinsamen Regisseur. Es entsteht
 ein verknüpfter Zusammenschnitt-Entwurf mit denselben Längengrenzen und Lernmerkmalen. Der Clip-Bot nennt dessen

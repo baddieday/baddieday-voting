@@ -14,7 +14,7 @@ import json
 from datetime import datetime, timedelta
 from unittest import mock
 
-from clip_pipeline import autonom, cli, db, erfolg, publikum, publikum_adapter
+from clip_pipeline import autonom, cli, db, erfolg, geschmack, publikum, publikum_adapter
 from clip_pipeline.zeit import UTC, iso
 
 from tests.hilfen import MitSpeicher
@@ -114,6 +114,13 @@ class Erfolg(MitSpeicher):
         self.assertIn("📊 Belegt (TikTok, 43 Videos): Aufbau „erzählt“ kommt bei den Zuschauern besser an als die "
                       "anderen Aufbauten (10 gegen 33 Videos) – sehr wahrscheinlich kein Zufall.", zeile)
         self.assertIn("Noch nicht gemessen: wie lange geschaut wird, neue Follower, Besuche auf clip-battle.de.", zeile)
+        # Sonntagsbericht (Schritt 2): dieselben Zeilen statt „👀 Bei den Zuschauern …“. Was der Bot nach den KI-Noten
+        # gerade öfter wählt (hier „schnelle Montage“), heißt so (🎯) – belegt ist nur, was die Zuschauer zeigen
+        bericht = geschmack.wochen_text(self.con, self.konfig, START + timedelta(days=2 * 47 + 1))
+        self.assertIn(zeile, bericht)
+        self.assertIn("🎯 Wähle ich gerade öfter: Aufbau „schnelle Montage“", bericht)
+        for behauptung in ("👀", "Kommt gut an", "Kommt weniger an"):
+            self.assertNotIn(behauptung, bericht)
 
     def test_zu_wenig_videos_behauptet_nichts_und_kaputte_gewichte_enden_mit_exit_2(self):
         ende = self.videos(9, youtube=(6, 7, 8), fassung=(8, 6))

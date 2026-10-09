@@ -11,7 +11,8 @@ Was hier in EINEM Durchlauf passiert – so, wie du es später im Alltag erlebst
      „Basis zu klein“, weil es noch keine 5 bewerteten Posts zum Vergleich gibt (Spec §6.3, Abnahme im Plan).
      Die Meldung dazu kommt im Lern-Bot an.
   7. Am nächsten Tag läuft der Timer wieder: nichts ändert sich (Scores werden nie überschrieben).
-  8. `/publikum` zeigt beide Posts mit ihren Tag-7-Zahlen und „Score 0 (Basis zu klein)“.
+  8. `/publikum` zeigt beide Posts mit ihren Tag-7-Zahlen, „Wochen-Note 0 (fest; Basis zu klein)“ und dem vorläufigen
+     Lernwert (Mehrbenutzer Stufe 4: beide Werte getrennt beschriftet).
 Durchgehend gilt: pve-big wird nie geweckt, und kein Screenshot bleibt liegen.
 
 Warum das wichtig ist: Die Unit-Tests der Pakete a–e prüfen jedes Stück für sich. Nur hier sieht man, dass die
@@ -489,7 +490,8 @@ class EndeZuEndePublikum(MitSpeicher):
         self.assertEqual(len(self.lern_meldungen()), 2)
 
     def schritt_8_publikum_zeigt_den_score(self, clip_post: int, entwurf_post: int) -> None:
-        """/publikum im Lern-Bot: neueste zuerst, je Post die letzte Messung (Tag 7) und „Score 0 (Basis zu klein)“,
+        """/publikum im Lern-Bot: neueste zuerst, je Post die letzte Messung (Tag 7), „Wochen-Note 0 (fest; Basis zu
+        klein)“ und der Lernwert – beim ersten Post „nur gegen Startwerte“ (ohne frühere Posts zum Vergleich),
         unten die Claude-Aufrufe dieser Woche (die zwei Screenshots vom Montag)."""
         self.uhr = ANZEIGE
         (antwort,) = self.lern_bot_befehl(lernbot_publikum.cmd_publikum)
@@ -497,8 +499,9 @@ class EndeZuEndePublikum(MitSpeicher):
         self.assertEqual(antwort.splitlines(), [
             "📊 Publikum · 2 Posts, 2 mit Score (neueste zuerst)",
             f"#{entwurf_post} TikTok · Entwurf {ENTWURF} · 8 Tage · 👁 2{t}000 ❤️ 100 ⏱ 15,5 s 🏁 35 % (Tag 7) · "
-            "Publikumsscore 0 · Vertrauen 86 %",
-            f"#{clip_post} TikTok · Clip 1 · 8 Tage · 👁 5{t}000 ❤️ 300 ⏱ 11 s 🏁 40 % (Tag 7) · Publikumsscore 0 · Vertrauen 89 %",
+            "Wochen-Note 0 (fest; Basis zu klein) · Lernwert 0 (vorläufig, Vertrauen 86 %)",
+            f"#{clip_post} TikTok · Clip 1 · 8 Tage · 👁 5{t}000 ❤️ 300 ⏱ 11 s 🏁 40 % (Tag 7) · "
+            "Wochen-Note 0 (fest; Basis zu klein) · Lernwert 0 (vorläufig, nur gegen Startwerte, Vertrauen 89 %)",
             "🤖 Claude diese Woche: 2 Aufrufe",
         ])
 

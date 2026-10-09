@@ -73,11 +73,13 @@ class Geschmack(MitSpeicher):
         wahl = geschmack.waehle(self.con, self.konfig)
         self.assertIn(wahl["experiment"], geschmack.KNOEPFE)
         self.assertNotEqual(wahl[wahl["experiment"]], gut[wahl["experiment"]])
-        # Wochenbericht nennt, was ankommt und was nicht – ohne Videos in der Woche: Ruhe
+        # Wochenbericht nennt, was er öfter bzw. seltener wählt – dieselbe Zahl wie früher „👍 Kommt gut an / 👎 Kommt
+        # weniger an“, ehrlich benannt (Stufe 4, M162); ohne Videos in der Woche: Ruhe
         text = geschmack.wochen_text(self.con, self.konfig)
         self.assertIn("9 Videos · 4 ✅ · 5 ❌", text)
-        self.assertIn("👍 Kommt gut an: Aufbau „Steigerung“ (4 von 4 ✅)", text)
-        self.assertIn("Aufbau „Kino“ (0 von 4 ✅)", text)
+        self.assertIn("🎯 Wähle ich gerade öfter: Aufbau „Steigerung“ (4 von 4 ✅), ruhige Schnitte (4 von 4 ✅), "
+                      "wenig Zeitlupe (4 von 4 ✅) · seltener: Aufbau „Kino“ (0 von 4 ✅), schnelle Schnitte (0 von 4 ✅)",
+                      text)
         self.assertIsNone(geschmack.wochen_text(self.con, self.konfig, datetime(2020, 1, 1, tzinfo=timezone.utc)))
 
     def test_zuschauer_lehren_aufbau_tempo_und_zeitlupe(self):
@@ -92,7 +94,7 @@ class Geschmack(MitSpeicher):
         for eid in gut + rest:                     # hochgeladen, aber noch ohne Zahlen: alles wie vor Stufe 5
             self.zuschauer(eid)
         self.assertEqual(geschmack.statistik(self.con), vorher)
-        self.assertNotIn("👀", geschmack.wochen_text(self.con, self.konfig))
+        self.assertNotIn("📊", geschmack.wochen_text(self.con, self.konfig))   # Stufe 4: ohne Wochenzahlen keine Zeile
         for eid in gut:
             self.zuschauer(eid, 0.8)
         for eid in rest:
@@ -104,8 +106,42 @@ class Geschmack(MitSpeicher):
         self.assertAlmostEqual(stat["tempo"]["schnell"]["s"], 12 * 0.1)
         wahl = geschmack.waehle(self.con, self.konfig)
         self.assertEqual({k: wahl[k] for k in geschmack.KNOEPFE}, erzaehlt)
-        self.assertIn("👀 Bei den Zuschauern kommt gut an: Aufbau „erzählt“ (4 Videos) · ruhige Schnitte (4 Videos) · "
-                      "viel Zeitlupe (4 Videos)", geschmack.wochen_text(self.con, self.konfig))
+        # Stufe 4 (M162): Der Bot wählt das jetzt öfter und sagt es so – ein Beleg, dass es ankommt, ist das nicht
+        # (vorläufige Noten, 4 gegen 6 Videos); früher stand hier „👀 Bei den Zuschauern kommt gut an: …“
+        text = geschmack.wochen_text(self.con, self.konfig)
+        self.assertIn("🎯 Wähle ich gerade öfter: Aufbau „erzählt“, ruhige Schnitte, viel Zeitlupe · seltener: "
+                      "schnelle Schnitte, wenig Zeitlupe", text)
+        for behauptung in ("👀", "Kommt gut an", "Belegt", "📊"):
+            self.assertNotIn(behauptung, text)
+
+    def test_wochenbericht_behauptet_nichts_ohne_beleg(self):
+        """Mehrbenutzer Stufe 4 (Versuch E aus dem Plan): zwei Aufbauten aus derselben Verteilung, keine ✅/❌, alle
+        vorläufigen Zuschauer-Noten negativ (sie messen anfangs an Startwerten), dazu KI-Noten. Vorher stand im Bericht
+        „👎 Kommt weniger an: Aufbau „erzählt“ · ruhige Schnitte“ – ohne echten Unterschied. Jetzt behauptet er nichts,
+        weder aus Zuschauer- noch aus KI-Noten; was der Bot seltener wählt, heißt so (M162). Belegt wäre nur, was erfolg
+        aus fertigen Wochenzahlen zeigt – die gibt es hier noch nicht, also auch keine 📊-Zeile."""
+        noten = {"story": (-0.53, -0.45, -0.41, -0.38), "montage": (-0.44, -0.36, -0.31, -0.28)}
+        for i in range(8):
+            aufbau = ("story", "montage")[i % 2]
+            eid = self.entwurf({"aufbau": aufbau, "tempo": "ruhig" if aufbau == "story" else "schnell",
+                                "zeitlupe": "wenig"}, ki=80 if aufbau == "montage" else 40)
+            self.zuschauer(eid, noten[aufbau][i // 2])
+        text = geschmack.wochen_text(self.con, self.konfig)
+        for behauptung in ("Kommt gut an", "Kommt weniger an", "👀", "Belegt", "📊"):
+            self.assertNotIn(behauptung, text)
+        self.assertIn("🎯 Wähle ich gerade seltener: Aufbau „erzählt“, ruhige Schnitte", text)
+
+    def test_wochenbericht_kommt_auch_wenn_erfolg_scheitert(self):
+        """Stufe 4: Ein Fehler in erfolg (hier kaputte [erfolg.gewichte]) kostet den Sonntagsbericht nie – er kommt ohne
+        📊-Zeile, der Fehler steht im Log."""
+        self.entwurf({"aufbau": "story", "tempo": "ruhig", "zeitlupe": "viel"}, daumen=1)
+        self.konfig.daten["erfolg"] = {"gewichte": {"zuschauer": -1, "follower": 0.2, "webseite": 0.3}}
+        with self.assertLogs("pipeline", "ERROR") as protokoll:
+            text = geschmack.wochen_text(self.con, self.konfig)
+        self.assertTrue(text.startswith("🧠 Deine Woche"), text)
+        self.assertIn("📏 Deine Regeln gelten weiter", text)
+        self.assertNotIn("📊", text)
+        self.assertIn("[erfolg.gewichte].zuschauer", protokoll.output[0])
 
     def test_einfacher_modus_nutzt_geschmack_und_regeln_gehen_vor(self):
         k = einstellungen.anwenden(self.con, self.konfig)                       # einfacher Modus: geschmack an

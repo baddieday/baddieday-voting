@@ -24,8 +24,11 @@ Reihenfolge (Montage und Kino haben beide den Bogen) und das andere Tempo, das s
 (einstellungen.EINFACH_FEST, 08.10.). Deine Regeln (regeln.anwenden) kommen danach – sie gehen immer vor.
 
 Die KI schaut sich jedes gesendete Video danach im Hintergrund an (ki_nachtragen, Lern-Bot-Schleife) – das Video
-kommt dadurch nicht später. Sonntags ab 18 Uhr fasst wochen_text die Woche zusammen (Lern-Meldung woche:<JJJJ-Www>),
-mit einer Zeile, was bei den Zuschauern ankommt (zuschauer_zeile).
+kommt dadurch nicht später. Sonntags ab 18 Uhr fasst wochen_text die Woche zusammen (Lern-Meldung woche:<JJJJ-Www>).
+Ehrliche Sätze (Mehrbenutzer Stufe 4, M162): „🎯 Wähle ich gerade öfter/seltener“ ist die Zahl, mit der der Bot wählt
+(früher „👍 Kommt gut an / 👎 Kommt weniger an“) – kein Beleg. Was bei den Zuschauern belegt besser ankommt, sagt nur
+die 📊-Zeile aus erfolg (feste Wochenzahlen, Mindestzahl, Zufall herausgerechnet); sie ersetzt „👀 Bei den Zuschauern
+kommt gut an“, das schon ein einziges Video mit vorläufiger Note zum Favoriten machte.
 Wer gerade lehrt – deine ✅/❌, die KI-Note, die Zuschauer – sagt lehrer_zeile (08.10.): in 📋 Stand immer, im
 Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat.
 """
@@ -285,27 +288,31 @@ def _bewertet(w: dict) -> str:
     return f" ({w['ja']} von {gesamt} ✅)" if gesamt else ""
 
 
-def _videos(n: int) -> str:
-    return f"{n} Video{'s' if n != 1 else ''}"
+def wahl_zeile(stat: dict[str, dict[str, dict]]) -> str | None:
+    """„🎯 Wähle ich gerade öfter: Aufbau „Steigerung“ (4 von 4 ✅) · seltener: Aufbau „Kino“ (0 von 4 ✅)“ – None ohne
+    klares Bild. Rechnung und Schwelle wie früher „👍 Kommt gut an / 👎 Kommt weniger an“ (Anteil ab 0,6 bzw. bis 0,4,
+    je Wahl ab Gewicht 2), nur ehrlich benannt (M162): Das ist die Vorliebe, mit der der Bot wählt – gemischt aus deinen
+    ✅/❌, der vorläufigen Zuschauer-Note und der KI-Note –, kein Beleg, dass etwas ankommt."""
+    erprobt = [(k, o, w) for k, opt in stat.items() for o, w in opt.items() if w["n"] >= 2]
+    oefter = sorted((x for x in erprobt if _anteil(x[2]) >= 0.6), key=lambda x: -_anteil(x[2]))[:3]
+    seltener = sorted((x for x in erprobt if _anteil(x[2]) <= 0.4), key=lambda x: _anteil(x[2]))[:2]
+    teile = [f"{wort}: " + ", ".join(NAMEN[(k, o)] + _bewertet(w) for k, o, w in liste)
+             for wort, liste in (("öfter", oefter), ("seltener", seltener)) if liste]
+    return "🎯 Wähle ich gerade " + " · ".join(teile) if teile else None
 
 
-def zuschauer_zeile(stat: dict[str, dict[str, dict]]) -> str | None:
-    """„👀 Bei den Zuschauern kommt gut an: Aufbau „erzählt“ (3 Videos) · ruhige Schnitte (2 Videos)“ – nur aus den
-    Zuschauer-Noten, mit derselben Schwelle wie „👍 Kommt gut an“ (Anteil ab 0,6 bei Gewicht 2: ein Video ab Note
-    +0,4, viele ab +0,2). Mit Noten, aber ohne Favoriten: „noch kein klarer Favorit“; ganz ohne Noten: None."""
-    gemessen = max(sum(w["zuschauer"] for w in opt.values()) for opt in stat.values())
-    if not gemessen:
+def erfolg_zeile(con: sqlite3.Connection, konfig: Konfig, bis) -> str | None:
+    """Die 📊-Zeilen aus `pipeline erfolg` (Mehrbenutzer Stufe 4): je Plattform mit fertigen Wochenzahlen eine Zeile
+    („📊 Zuschauer (TikTok): 4 Videos mit fertigen Wochenzahlen – ein erster Vergleich frühestens nach 12 weiteren.“
+    bzw. „📊 Belegt (TikTok, 41 Videos): …“), darunter, was noch nicht gemessen wird. None ohne fertige Wochenzahlen und
+    beim Freund ohne Abruf (M169). Ein Fehler darin kostet den Wochenbericht nie – er steht nur im Log."""
+    try:
+        from . import erfolg   # hier, nicht oben: erfolg liest geschmack (Import-Kreis); im try, wie jeder Fehler darin
+
+        return erfolg.zeile_einfach(erfolg.auswertung(con, konfig, bis))
+    except Exception:   # noqa: BLE001 – kaputte [erfolg.gewichte], unlesbare Zeilen …: der Bericht kommt trotzdem
+        log.exception("Wochenbericht ohne Zeile „📊“ (pipeline erfolg zeigt den Fehler)")
         return None
-
-    def anteil(w: dict) -> float:
-        return _anteil({"s": ZUSCHAUER_GEWICHT * w["zuschauer_s"], "n": ZUSCHAUER_GEWICHT * w["zuschauer"]})
-
-    gut = sorted(((k, o, w) for k, opt in stat.items() for o, w in opt.items() if w["zuschauer"] and anteil(w) >= 0.6),
-                 key=lambda x: -anteil(x[2]))[:3]
-    if not gut:
-        return f"👀 Bei den Zuschauern noch kein klarer Favorit ({_videos(gemessen)} ausgewertet)."
-    return "👀 Bei den Zuschauern kommt gut an: " + " · ".join(f"{NAMEN[(k, o)]} ({_videos(w['zuschauer'])})"
-                                                             for k, o, w in gut)
 
 
 def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None:
@@ -326,18 +333,10 @@ def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None
     zeilen = [f"🧠 Deine Woche ({utc_zu_lokal(von, zone):%d.%m.}–{utc_zu_lokal(bis, zone):%d.%m.})",
               f"🎬 {len(woche)} Video{'s' if len(woche) != 1 else ''} · {ja} ✅ · {nein} ❌"
               + (f" · KI-Note im Schnitt {sum(ki) / len(ki):.0f}" if ki else "")]
-    stat = statistik(con)
-    erprobt = [(k, o, w) for k, opt in stat.items() for o, w in opt.items() if w["n"] >= 2]
-    gut = sorted((x for x in erprobt if _anteil(x[2]) >= 0.6), key=lambda x: -_anteil(x[2]))[:3]
-    schlecht = sorted((x for x in erprobt if _anteil(x[2]) <= 0.4), key=lambda x: _anteil(x[2]))[:2]
-    if gut:
-        zeilen.append("👍 Kommt gut an: " + " · ".join(NAMEN[(k, o)] + _bewertet(w) for k, o, w in gut))
-    if schlecht:
-        zeilen.append("👎 Kommt weniger an: " + " · ".join(NAMEN[(k, o)] + _bewertet(w) for k, o, w in schlecht))
-    if not gut and not schlecht:
-        zeilen.append("🤔 Noch kein klares Bild – ich probiere weiter selbst aus.")   # 08.10.: keine Bitte an dich
-    if zuschauer := zuschauer_zeile(stat):   # Stufe 5: was die Zuschauer mögen, lehrt die drei Schrauben mit
-        zeilen.append(zuschauer)
+    # 08.10.: ohne klares Bild keine Bitte an dich
+    zeilen.append(wahl_zeile(statistik(con)) or "🤔 Noch kein klares Bild – ich probiere weiter selbst aus.")
+    if belegt := erfolg_zeile(con, konfig, bis):   # Stufe 4: nur fertige Wochenzahlen, „belegt“ erst mit Mindestzahl
+        zeilen.append(belegt)
     neu = sum(1 for z in woche if ((json.loads(z["parameter"] or "{}") or {}).get("geschmack") or {}).get("experiment"))
     if neu:
         zeilen.append(f"🧪 {neu}× bewusst etwas Neues ausprobiert.")

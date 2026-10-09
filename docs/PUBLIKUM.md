@@ -108,15 +108,18 @@ spätere Screenshots ändern ihn nicht mehr. Die Rechnung steht in `src/clip_pip
 Im Lern-Bot: `/publikum` (die letzten 10) oder `/publikum 20` (höchstens 30). Beispiel:
 ```
 📊 Publikum · 12 Posts, 5 mit Score (die letzten 10, neueste zuerst)
-#17 TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s 🏁 34 % (Tag 4) · Score noch offen (ab 7 Tagen)
-#16 TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Screenshot mit #16 schicken · Score offen (braucht eine Messung ab Tag 3 mit Views)
-#12 TikTok · Clip 88 · 9 Tage · 👁 5 000 ❤️ 300 ⏱ 12 s (Tag 7) · Score +0,8 (Wiedergabe über, Reaktionen je View unter, Views über deinem Median)
+#17 TikTok · Entwurf 41 · 4 Tage · 👁 1 240 ❤️ 61 ⏱ 6,8 s 🏁 34 % (Tag 4) · Wochen-Note noch offen (ab 7 Tagen) · Lernwert −0,2 (vorläufig, Vertrauen 40 %)
+#16 TikTok · Clip 89 · 8 Tage · noch keine Zahlen – Screenshot mit #16 schicken · Wochen-Note offen (braucht eine Messung ab Tag 3 mit Views)
+#12 TikTok · Clip 88 · 9 Tage · 👁 5 000 ❤️ 300 ⏱ 12 s (Tag 7) · Wochen-Note +0,8 (fest; Wiedergabe über, Reaktionen je View unter, Views über deinem Median) · Lernwert −0,1 (vorläufig, Vertrauen 86 %)
 🤖 Claude diese Woche: 3 Aufrufe
 ```
 Zeichen: 👁 Views · ❤️ Likes · ⏱ Ø Wiedergabe · 🏁 ganz angesehen. „(Tag 4)“ ist das Alter des Posts bei der letzten
-Messung. „Score kommt beim nächsten Lauf“ heißt: alles da, der Timer war nur noch nicht dran. Die letzte Zeile zählt
-die Screenshot-Auswertungen seit Montag 00:00, bei denen claude wirklich lief (fand der Dienst claude gar nicht,
-zählt das nicht; `decide` und Stimmung zählen noch nicht mit, Annahme A18).
+Messung. Zwei Werte, getrennt beschriftet (Stufe 4): Die **Wochen-Note (fest)** wird einmal um Tag 7 gesetzt und nie
+mehr geändert – nur sie zählt in `pipeline erfolg` als Beleg (Abschnitt 7). Der **Lernwert (vorläufig)** ist die
+Zuschauer-Note, mit der der Bot lernt; sie wird bei jeder Messung neu gerechnet („nur gegen Startwerte“: noch keine
+früheren Posts zum Vergleich). „Wochen-Note kommt beim nächsten Lauf“ heißt: alles da, der Timer war nur noch nicht
+dran. Die letzte Zeile zählt die Screenshot-Auswertungen seit Montag 00:00, bei denen claude wirklich lief (fand der
+Dienst claude gar nicht, zählt das nicht; `decide` und Stimmung zählen noch nicht mit, Annahme A18).
 
 ### 5a. TikTok verbinden (Zahlen automatisch, 30.09.)
 1. Im TikTok-Entwicklerportal eine App anlegen: Plattform Web, Produkte **Login Kit** und **Display API**, Scopes
@@ -152,8 +155,8 @@ Ende der Ruhezeit (08:00) zurück; andere Lern-Bot-Meldungen (Abendstand, Fehler
 Im CT als `pipeline`: `/opt/clip-pipeline/bin/pipeline erfolg` – für einen Freund `bash deploy/benutzer/benutzer-befehl.sh
 <name> erfolg`. Nur nachsehen: keine Sperre, weckt nie, über n8n nicht erreichbar; Bots, Lernen und Videos bleiben gleich.
 - **Zwei Zahlen, zwei Zwecke.** Belegt wird nur mit der festen Wochen-Note (Abschnitt 4: einmal um Tag 7, nie
-  überschrieben). Die Zuschauer-Note in `/publikum`, mit der der Bot Aufbau, Tempo und Zeitlupe lernt, ändert sich mit
-  jeder Messung – sie ist zum Ausprobieren da, nicht als Beweis. KI-Note, Cutter-Note und deine ✅/❌ zählen hier nie.
+  überschrieben). Der Lernwert in `/publikum`, mit dem der Bot Aufbau, Tempo und Zeitlupe lernt, ändert sich mit
+  jeder Messung – er ist zum Ausprobieren da, nicht als Beweis. KI-Note, Cutter-Note und deine ✅/❌ zählen hier nie.
 - **Drei Ziele, getrennt.** Zuschauer (wie lange geschaut wird · Reaktionen je View · Reichweite – die Wochen-Note),
   neue Follower, Besuche auf clip-battle.de. Jedes ist „gemessen“, „zu wenig Vergleich“, „wartet“ oder „nicht gemessen“
   mit Grund – nie eine 0. Heute auf TikTok: wie lange geschaut wird und Follower nicht (die TikTok-Schnittstelle
@@ -174,7 +177,11 @@ Im CT als `pipeline`: `/opt/clip-pipeline/bin/pipeline erfolg` – für einen Fr
   4 von 100 Halbjahren irgendwann ein falsches „belegt“ da (nachgerechnet, M161).
 - **Ausgabe:** Text nach stderr, eine JSON-Zeile nach stdout (`version`, `gewichte`, `m`, je Plattform `einheiten`,
   `wartet`, `nicht_gezaehlt`, `ziele`, `teilziele`, `vergleich`, `befunde`). Exit 0; kaputte `[erfolg.gewichte]` (keine
-  Zahl, negativ, Summe 0, unbekannter Name) Exit 2. Der Sonntagsbericht bekommt die Zeile erst mit Schritt 2.
+  Zahl, negativ, Summe 0, unbekannter Name) Exit 2.
+- **Im Sonntagsbericht** (Schritt 2) steht dieselbe Zeile („📊 …“) statt „👀 Bei den Zuschauern kommt gut an“ – ohne
+  fertige Wochenzahlen keine, bei Freunden ohne Abruf keine. Was der Bot öfter oder seltener wählt, heißt dort
+  „🎯 Wähle ich gerade …“ (früher „👍 Kommt gut an / 👎 Kommt weniger an“, dieselbe Zahl). Ein Fehler in `erfolg`
+  kostet den Bericht nie, er steht nur im Log. Unter /experte heißt es in /lernstand „Tendenzen (nicht belegt)“.
 
 ## Befehle
 
@@ -182,7 +189,7 @@ Im CT als `pipeline`: `/opt/clip-pipeline/bin/pipeline erfolg` – für einen Fr
 |---|---|---|
 | CT | `pipeline publikum bewerten` | Scores aller fälligen Posts setzen (Timer `clip-publikum`, 10:00); weckt nie, keine Pipeline-Sperre |
 | CT | `pipeline erfolg` | nur nachsehen: Ziele mit Status und belegter Strategievergleich aus den Wochen-Noten (Abschnitt 7) |
-| Lern-Bot | `/publikum [anzahl]` | letzte Posts mit Zahlen und Score |
+| Lern-Bot | `/publikum [anzahl]` | letzte Posts mit Zahlen, Wochen-Note (fest) und Lernwert (vorläufig) |
 | Lern-Bot | `/link <entwurf> <url>` | Post zu einem Entwurf anlegen bzw. Link korrigieren |
 | Lern-Bot | Foto mit `#17` · Text `#17 1240 61 6.8 34` (optional `3 5 2` dahinter) | Zahlen per Screenshot bzw. von Hand |
 | Lern-Bot | `/hilfe` | alles oben in Kurzform |
@@ -411,13 +418,13 @@ musst, bewertet die Pipeline für die Abnahme schon ab Tag 3:
    Gibt es `[publikum]` dort schon, die Zeile darunter ergänzen – ein zweiter `[publikum]`-Kopf macht die Datei
    kaputt. Dann `systemctl restart clip-lernbot` (für die Anzeige in `/publikum`); der Timer braucht keinen
    Neustart, `pipeline` liest die Konfig bei jedem Aufruf. **Kontrolle:** `/publikum` zeigt bei einem jungen Post
-   „Score noch offen (ab 3 Tagen)“. Steht dort „ab 7 Tagen“, ist `alter_tage` oder `[publikum]` vertippt – ein
+   „Wochen-Note noch offen (ab 3 Tagen)“. Steht dort „ab 7 Tagen“, ist `alter_tage` oder `[publikum]` vertippt – ein
    vertippter Name gibt keinen Fehler, er wird still ignoriert.
 2. Einen 👍-Short über 📦 posten, `/link <entwurf> <TikTok-Link>` → der Bot nennt die Post-Nummer, z. B. `#1`.
 3. Ab Tag 3: Screenshot der Statistik mit `#1` an den Lern-Bot → der Bot bestätigt die gelesenen Zahlen.
 4. Nächster Lauf (10:00 oder von Hand `sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline publikum bewerten`)
    → JSON `"bewertet": 1`; Meldung `📊 1 Post bewertet: #1 0 – /publikum` mit der Zeile „Score 0 = noch zu wenige
-   bewertete Posts …“; in `/publikum`: `Score 0 (Basis zu klein)`.
+   bewertete Posts …“; in `/publikum`: `Wochen-Note 0 (fest; Basis zu klein)`.
 
 **Erwartet:** `bewertet_utc` gesetzt, **Score 0**, Vermerk **„Basis zu klein“** – unter 5 bewerteten Posts gibt es
 keinen Score ≠ 0. Danach `alter_tage = 3` **wieder entfernen**, aus beiden Dateien, dann
@@ -564,7 +571,7 @@ Aus: `systemctl disable --now clip-mikro.path clip-mikro.timer` (oder `[merkmale
   die JSON-Zeile nennt den Schlüssel, z. B. `[publikum.mad_minimum].engagement`. Achtung: Ein **vertippter** Name oder Abschnitt in `lokal.toml` (z. B.
   `alter_tag`, `[publkum]`) gibt **keinen** Fehler – er wird still ignoriert, und der Standard aus `pipeline.toml`
   gilt weiter.
-- **… `/publikum` „Score kommt beim nächsten Lauf“ sagt, aber nach 10:00 nichts passiert?** Meist steht
+- **… `/publikum` „Wochen-Note kommt beim nächsten Lauf“ sagt, aber nach 10:00 nichts passiert?** Meist steht
   `alter_tage` nur in einer der beiden `lokal.toml` (siehe Abnahme): Der Lern-Bot rechnet mit seiner, der Timer mit
   der aus `/opt/clip-pipeline`.
 - **… der Clip-Bot „⚠️ TikTok nicht abgehakt – Post fürs Lernen ging nicht: …“ meldet?** Das ist Absicht: ohne Post

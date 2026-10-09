@@ -1341,3 +1341,24 @@ Aufbau: in 100 % binnen eines Jahres belegt (Median Woche 16), ×1,6 in 99 % (Wo
 
 M162 („Kommt gut an / Kommt weniger an“ wird „Wähle ich gerade öfter / seltener“) gehört zum Wochenbericht und steht bei
 Schritt 2.
+
+### Stufe 4, Schritt 2 · Ehrliche Sätze im Sonntagsbericht, in /lernstand und /publikum; Stufenbericht (09.10.2026) – Annahmen bis Florian widerspricht
+PR 2 des Plans. Sichtbar anders nur der Sonntagsbericht (einfacher Modus) und unter /experte /lernstand und /publikum;
+Lernen, 📋 Stand, Clip-Bot, Videos, Knöpfe, Captions und n8n bleiben gleich. Tests: `tests/test_geschmack.py` – Versuch E
+als Test (zwei Aufbauten aus derselben Verteilung, keine ✅/❌, negative vorläufige Noten, dazu KI-Noten): kein „Kommt
+gut an“, kein „Kommt weniger an“, kein „👀“, kein „Belegt“ (mit dem alten Bericht rot: „👎 Kommt weniger an: Aufbau
+„erzählt“ · ruhige Schnitte“); kaputte `[erfolg.gewichte]` → der Bericht kommt trotzdem, der Fehler steht im Log (ohne
+die Absicherung rot). `tests/test_erfolg.py` – mit der Fixture aus Schritt 1 steht „📊 Belegt (TikTok, 43 Videos):
+Aufbau „erzählt“ …“ im Bericht. Alte Text-Asserts in `test_geschmack`, `test_publikum_cli` und
+`test_ende_zu_ende_publikum` angepasst. Nachgestellt (Wegwerf-Skript, echter Sonntagsbericht über 200 Halbjahre à
+26 Wochen × 3 Shorts ohne echten Unterschied, dieselben Daten vorher und nachher): vorher irgendwann eine Behauptung in
+99,5 % der Halbjahre (in 28 % der Wochen, meist „👎 Kommt weniger an: …“), nachher in 5,0 % (±1,5; 0,6 % der Wochen) –
+jedes Mal ein falsches „📊 Belegt“, im Rahmen der Simulation aus Schritt 1 (3,6 % ±0,6); „👍/👎/👀“ nie mehr.
+
+| Nr. | Annahme (bis Florian widerspricht) |
+|---|---|
+| M162 | „👍 Kommt gut an / 👎 Kommt weniger an“ heißt jetzt „🎯 Wähle ich gerade öfter: … · seltener: …“ – dieselbe Zahl (Anteil ab 0,6 bzw. bis 0,4, je Wahl ab Gewicht 2, höchstens 3 bzw. 2 Wahlen) mit derselben Angabe „(n von m ✅)“, innerhalb einer Liste mit Komma statt „·“. Sie mischt deine ✅/❌, die vorläufige Zuschauer-Note und die KI-Note und sagt, was der Bot bevorzugt – kein Beleg. Ohne klares Bild wie bisher „🤔 Noch kein klares Bild – ich probiere weiter selbst aus.“ Der Bot kann weiter etwas bevorzugen, das die 📊-Zeile nicht „belegt“ nennt, oder umgekehrt: Die Lerner bleiben in Stufe 4 unverändert (M163) – Ausprobieren ist kein Beleg |
+| M171 | /lernstand (nur /experte; derselbe Block steht unter /experte auch in 📋 Stand): „Tendenzen (nicht belegt) – belegt ist nur, was pipeline erfolg zeigt:“ statt „Zuletzt gelernt:“. Die Sätze selbst und ihre Rechnung (`autonom.ueberblick`, auch in der JSON-Zeile von `pipeline lernstand`) bleiben – sie erscheinen bei reinem Zufall so oft wie vorher (laut Plan 26/50/67 % bei 8/16/32 Videos), heißen aber jetzt so, wie sie sind. Weitere Zeilen ohne Mindestzahl (`stile.stil_zeile`, `viral.varianten_zeile` in `pipeline lernstand`: Durchschnitt mit Anzahl, kein „kommt an“) nennt der Plan nicht; sie bleiben |
+| M172 | /publikum zeigt je Post zwei Werte getrennt: die feste „Wochen-Note … (fest; Teile in Worten)“ – bzw. „Wochen-Note noch offen (ab 7 Tagen)“, „… kommt beim nächsten Lauf“, „… offen (braucht eine Messung …)“ – und dahinter, nur wenn es ihn gibt, „Lernwert … (vorläufig, Vertrauen x %)“. „nur gegen Startwerte“ steht dabei, wenn kein Teil des Lernwerts einen früheren Post zum Vergleich hatte (alle `basis_n` 0); sind die gespeicherten Teile unlesbar, steht es nicht da (lieber nichts behaupten). Vorher stand dort nur „Publikumsscore …“ (der Lernwert), während die Tagesmeldung „📊 n Posts bewertet: #17 +0,8“ die Wochen-Note nannte – zwei Zahlen ohne Namen für dasselbe Video. Kopfzeile („n mit Score“), Tagesmeldung und Hilfe bleiben, wie sie sind |
+| M173 | Sonntagsbericht: Die 📊-Zeilen (`erfolg.zeile_einfach` über `geschmack.erfolg_zeile`) stehen an der Stelle von „👀 …“, gerechnet zum Berichtszeitpunkt (bis wann ein Post „wartet“). Jeder Fehler darin – auch kaputte `[erfolg.gewichte]`, bei `pipeline erfolg` Exit 2 – geht nur ins Log (`log.exception`); der Bericht kommt dann ohne 📊-Zeile. Ohne fertige Wochenzahlen keine Zeile (wie bisher ohne Noten), beim Freund ohne Abruf keine (M169). `geschmack.zuschauer_zeile` ist entfallen; das Lernen von den Zuschauern (N75) bleibt |
+| M174 | Stufenbericht (`docs/MEHRBENUTZER.md`): „vorher“ = Leser-Simulation des Plans (81,5–100 % der Halbjahre mit Gewinner-Behauptung) und die Nachstellung oben; „nachher“ = die Simulation aus Schritt 1 (falsches „belegt“ in 3,6 % der Halbjahre, 6,3 % der Jahre, je 1000 Läufe) und die Nachstellung. Echte Zahlen vom Mini fehlen noch (`pipeline erfolg` nach dem Update; erwartet „zu wenig Videos“ bzw. „nicht gemessen“) |

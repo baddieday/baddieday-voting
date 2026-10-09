@@ -63,8 +63,25 @@ Er lernt aus deinen ✅/❌, aus den **Zuschauerzahlen** deiner hochgeladenen Vi
 ein ✅/❌ von dir – du musst dafür nichts tun außer hochladen) und aus der Note einer KI, die sich jedes Video nach dem
 Senden anschaut (zählt ein Drittel so viel wie du). Dein Grund unter ❌ zählt mit: „🎵 Musik“ oder „⏱️ Zu kurz“
 werden nicht dem Aufbau angelastet. Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen
-immer vor.** Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung: was gut ankommt, was weniger, was bei den
-Zuschauern ankommt („👀 …“), was er probiert hat.
+immer vor.**
+
+## Der Sonntagsbericht
+Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung der Woche (nur, wenn es Videos gab):
+- **🎯 Wähle ich gerade öfter / seltener:** was der Bot im Moment bevorzugt – sein Ausprobieren, kein Beweis. Das
+  kann anfangs auch etwas anderes sein als das, was die Zuschauer belegt mögen.
+- **📊 Zuschauer:** was bei den Zuschauern wirklich besser ankommt. „Belegt“ steht dort erst, wenn beide Seiten genug
+  Videos haben (je mindestens 8 hochgeladene Shorts mit fertigen Zahlen nach etwa einer Woche, die ersten 5 je
+  Plattform sind nur Vergleich) und der Unterschied sehr wahrscheinlich kein Zufall ist. Vorher steht dort, wie viele
+  Videos noch fehlen, oder „noch kein Unterschied sicher“. Ohne fertige Zahlen fehlt die Zeile ganz. KI-Note und deine
+  ✅/❌ zählen dafür nie.
+- **Noch nicht gemessen:** was es gar nicht gibt (heute: wie lange geschaut wird, neue Follower, Besuche auf
+  clip-battle.de) – das steht nie als 0 da.
+- dazu, was er bewusst ausprobiert hat (🧪) und dass deine Regeln weiter gelten.
+
+Ehrlich: Bei etwa 3 hochgeladenen Shorts pro Woche kommt ein erster Vergleich frühestens nach etwa 7 Wochen; ein
+Aufbau mit doppelt so vielen Reaktionen ist im Mittel nach rund 4 Monaten belegt, kleine Unterschiede oft erst nach
+einem Jahr oder nie. „Noch zu wenig Videos“ ist also kein Stillstand – der Bot lernt in der Zeit weiter. Genauer im CT:
+`pipeline erfolg` (Erklärung in `docs/PUBLIKUM.md`, Abschnitt 7).
 
 ## Knöpfe
 - **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend, zuerst mit Szenen, die du noch nicht
