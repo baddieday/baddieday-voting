@@ -12,7 +12,7 @@ Musik (NCS / Lern-Bot) ─► pipeline musik ─► Tempo, Beats, Energie ─┤
                                       pipeline compose ─► Schnittliste (JSON)
                                                                    ▼
                     pipeline render-entwurf ─► Entwurf < 48 MB ─► Lern-Bot ─► 👍/👎 + Gründe
-                    pipeline render-entwurf --final ─► pve-big (NVENC), danach aus            │
+                    pipeline render-entwurf --final ─► Vorläufer v0, im Puffer-Betrieb aus    │
                                       ▲                                                    │
                                       └──────────── regie_lernen (nächster compose) ◄──────┘
 ```
@@ -36,7 +36,7 @@ Musik (NCS / Lern-Bot) ─► pipeline musik ─► Tempo, Beats, Energie ─┤
 | `pipeline compose --format short\|zusammenschnitt` | Schnittliste erzeugen |
 | `pipeline render-entwurf <id>` | Entwurf rendern (VA-API, sonst CPU) |
 | `pipeline render-entwurf <id> --messen` | nur Renderzeit messen: rendert in eine Temp-Datei, löscht nur diese, DB bleibt gleich; letzte Zeile `{"sekunden", "encoder", "dauer_s", "aufloesung", …}` – zum Vorher/Nachher-Vergleich |
-| `pipeline render-entwurf <id> --final` | volle Qualität auf pve-big (NVENC), danach sofort aus – nicht im Puffer-Betrieb (Exit 2, weckt nicht; `docs/PUFFER.md` R5) |
+| `pipeline render-entwurf <id> --final` | **Vorläufer v0** eines Fern-Rechners: volle Qualität auf pve-big (NVENC), danach sofort aus – im Puffer-Betrieb aus (Exit 2, weckt nicht; `docs/PUFFER.md` R5), nicht wieder einschalten (unten) |
 | `pipeline entwurf-neu --format short` | compose + Entwurf in einem Schritt |
 | `pipeline sitzungen` | „Session vorbei“ vom Gaming-PC: Short des Abends (Timer) |
 | `pipeline lernbot` | Lern-Bot (Dienst `clip-lernbot`) |
@@ -44,6 +44,19 @@ Musik (NCS / Lern-Bot) ─► pipeline musik ─► Tempo, Beats, Energie ─┤
 
 Alle Befehle halten den Vertrag ein: Logs auf stderr, letzte Zeile auf stdout = eine JSON-Zeile, Exit 0 = ok,
 3 = Speicher/pve-big nicht verfügbar (nichts geweckt), 4 = anderer Schritt läuft.
+
+**`render-entwurf --final` ist Vorläufer v0 und bleibt aus** (Stufe 3, M149). Der erste Fernweg – Auftrag-JSON im
+Speicher, Forced Command `clip-big-steuer final <name>` als Benutzer clips, Prüfung als fremde Eingabe in
+`entwurf.fuehre_final_aus` (Test `test_boese_auftraege_abgewiesen`) – bleibt unverändert im Code. Im Puffer-Betrieb
+bricht er vor dem Wecken ab (`entwurf.final_auf_big`), und so soll es bleiben. Wieder eingeschaltet bräche er Regeln:
+- er weckt pve-big, ohne die Nachtruhe zu prüfen (`big.darf_wecken` prüft keine Uhrzeit, nur Frist und Abschaltung);
+- er hält die Rechen-Sperre des Mini rund eine Stunde (`regie.final_halten_min` 60 plus Wecken) – auch für die Freunde;
+- er übernimmt nur die JSON-Zeile, die Datei selbst prüft der Mini nicht;
+- für NVENC gibt es keinen Rückfall auf den Prozessor;
+- zwei Starts desselben Auftrags beschädigen die Datei still (richtige Länge, aber 11–12 Tsd. Dekodierfehler).
+
+Volle Qualität entsteht heute auf dem Mini (Upload-Fassung 1080×1920, 2-Wochen-Video). Ein künftiger Fern-Rechner folgt
+dem Vertrag v1 in `docs/WORKER.md`.
 
 ## Lern-Bot (Telegram)
 - Neuer Bot beim @BotFather, Token als `LEARN_BOT_TOKEN` in `.env` (nicht der Token des Clip-Bots!).

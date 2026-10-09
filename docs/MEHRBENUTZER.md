@@ -8,8 +8,8 @@ anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl, eigene
 Freunde: `docs/FREUNDE.md`. Stufe 2 („Freunde liefern selbst“, Annahmen ab M85): Schritt 1 Briefkasten auf dem
 vServer (`docs/BRIEFKASTEN.md`), Schritt 2 Abholen am Mini und Schritt 3 Abholen einschalten (unten) sind gebaut –
 eingeschaltet wird je Freund mit `benutzer-anlegen.sh`, Schritt „Briefkasten“. Stufe 3 („Hybrider Render-Manager“,
-Annahmen ab M139): Schritt 1 Laufzeiten messen, Schritt 2 Ausfallsicher und Schritt 3 Florian zuerst (unten) sind
-gebaut.
+Annahmen M139–M152) ist fertig: Schritt 1 Laufzeiten messen, Schritt 2 Ausfallsicher, Schritt 3 Florian zuerst und
+Schritt 4 Vertrag für weitere Rechner (`docs/WORKER.md`, nur Doku) – Stufenbericht unten.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -399,6 +399,98 @@ unterbrochen; keine Konfig, keine Datei, kein Dienst (`sperre.sperre`).
   von Minuten egal. Harter Vortritt erst, wenn `pipeline laufzeiten` es verlangt (Florians n8n-Schritte warten im Median
   über 2 min oder sein Lern-Bot-Bau im p90 über 5 min). Annahme M147.
 
+## Weitere Rechner (Stufe 3, Schritt 4 – nur Doku)
+Der Mini bleibt der einzige Rechner, für Florian und jeden Freund. `docs/WORKER.md` beantwortet die sechs Fragen aus
+Abschnitt D für heute – die Antwort ist immer „Mini“, weil das Übertragen je Short (15–53 s bei 50 Mbit/s) etwa so lange
+dauert wie das Rendern (58–86 s, Container) –, nennt die Auslöser für einen zweiten Rechner und hält den Vertrag v1 für
+Heimserver und Cloud fest: Eingaben mit Prüfsumme, Versuchsnummer gegen späte Ergebnisse, Prüfung am Mini vor der
+Übernahme, eigener Zugang, nur die nötigen Daten, Cloud ab Werk aus mit Monatslimit, Pflicht-Tests. Im Code gibt es
+davon nichts; `render-entwurf --final` bleibt als Vorläufer v0 aus (`docs/REGIE.md`). Annahmen M148–M152.
+
+## Stufenbericht Stufe 3 (09.10.2026)
+Abnahme „Ergebnisse bleiben korrekt bei Worker-Ausfall, Wiederholung oder Verbindungsabbruch; Laufzeiten werden
+gemessen“: erfüllt für den einzigen Rechner, den Mini – Nachweis unten. Die echten Mini-Zahlen kommen erst vor Ort.
+
+**Was wurde tatsächlich implementiert?**
+- **Laufzeiten (Schritt 1):** Alle sieben Stellen, die die Rechen-Sperre nehmen, laufen über `laufzeiten.lauf` und
+  schreiben je Auftrag eine Zeile in die eigene Datenbank (Warten, Rechnen, Ergebnis; beim Lern-Bot-Bau auch Stimmung,
+  Schnitt, Rendern). Das Render-Sidecar merkt sich Rechenzeit, Rückfall, Eingabe-Größe und Länge.
+  `pipeline laufzeiten [--tage 7]` wertet aus, ältere Videos aus Dateizeiten.
+- **Ausfallsicher (Schritt 2):** ffmpeg stirbt mit seinem Aufrufer, fertige Dateien kommen per fsync auf die Platte,
+  bevor sie ihren Namen bekommen (auch die Marke des 2-Wochen-Videos), Rückfall auf den Prozessor beim Schneiden,
+  Zeitgrenzen (`clip-sitzungen` 2 h, Freundes-Timer 1 h statt 2 h).
+- **Florian zuerst (Schritt 3):** weicher Vorrang in `sperre.sperre` – Freunde fragen alle 4–6 s statt jede Sekunde,
+  mit 0–1 s Anlauf; Florian unverändert.
+- **Vertrag für weitere Rechner (Schritt 4, nur Doku):** `docs/WORKER.md`, `render-entwurf --final` als Vorläufer v0,
+  der falsche Satz „wiederholt n8n ihn“ im Update berichtigt.
+- **Bewusst nicht gebaut:** Worker-Auswahl, Fern- und Cloud-Rechner, Cloud-Schalter, zentrale Warteschlange,
+  Segment-Cache, harter Vortritt, Notbremse; der Nachhol-Timer für n8n-Matches wartet auf Florians Ja. Keine neue
+  Tabelle, kein neuer Dienst, Timer, Port oder Paket; n8n-Vertrag, Sperrpfad, Videos und Bot-Texte bleiben gleich.
+
+**Welche Funktionen wurden wiederverwendet?**
+- die eine Rechen-Sperre aus Stufe 1 (`sperre.sperre`, `sperre.pfad`) – jetzt mit Messung und Vorrang, Datei und Pfad
+  gleich;
+- die Tabelle `ereignisse` und das Render-Sidecar `<video>.render.json` – keine Migration;
+- `medien.fuehre_aus` mit dem Hänger-Wächter (180 s ohne Rechenzeit) – das Mitsterben sitzt an dieser einen Stelle;
+- der Rückfall VA-API → Prozessor aus `entwurf.rendere`, jetzt auch in `medien.schneide`;
+- `sitzung._nachholen` (Abend-Video bis 12 h auf dem Prozessor nachholen) fängt den neuen 2-h-Abbruch auf;
+- die Update-Regel „nur unveränderte Dienst-Dateien übernehmen“ in `alles-aktualisieren.sh` – jetzt mit Test;
+- Wiederholung und Idempotenz des Bestands: Timer, Merkliste, `scan --versuche 3`, `render` je Clip, Entwurf über seine
+  Datei;
+- für den Vertrag: Prüfung fremder Aufträge (`fuehre_final_aus`), Forced Command (`clip-big-steuer.sh`,
+  `n8n-lauf.sh`), Lieferschein des Briefkastens, gepinnte Schlüssel (`big.ssh_befehl`).
+
+**Was wurde praktisch geprüft?**
+- **Worker-Ausfall** (`tests/test_abnahme_stufe3.py`, echtes ffmpeg): SIGKILL an die ganze Prozessgruppe mitten im
+  Abend-Video → Sperre frei, kein halbes Video, der nächste Lauf holt auf dem Prozessor nach, genau ein Video ±2 Bilder,
+  der dritte Lauf tut nichts. Verwaistes ffmpeg aus Haupt- und Arbeits-Thread nach höchstens 1 s weg (ohne setpriv
+  lebte es weiter). Rückfall beim Schneiden (`test_medien`).
+- **Wiederholung:** die vorhandenen Tests `test_sitzung`, `test_stufe1`, `test_scan_grenzen`, `test_upload_paket`; in
+  der Abnahme tut der dritte Lauf nichts.
+- **Verbindungsabbruch:** `render --session` mit abreißender Ausgabe → Clips gespeichert, die Wiederholung meldet
+  neu = 0, alle Dateien gleich (SHA-256); beim Freund die Wiederaufnahme im Briefkasten (`test_briefkasten`, Stufe 2).
+- **Laufzeiten** (`test_laufzeiten`): eine Zeile je Lauf, Exit 4 mit Zeile „gesperrt“, ein Schreibfehler ändert weder
+  Exit-Code noch JSON-Zeile, die offene Transaktion eines Bots bleibt offen. Echter `render-entwurf`: Zeile 33,0 s =
+  Sidecar 33,0 s = Dateizeiten 33,0 s.
+- **Vorrang** (`test_sperre_gemeinsam`, echte flock-Sperre): Mit der alten `sperre.py` schlagen die neuen Tests fehl
+  (Gegenprobe); mit echten Prozessen erwischt ein Freund die 1-s-Lücke zwischen zwei n8n-Schritten 4 von 30 statt
+  10 von 10 Mal.
+- **Zum Abschluss:** alle in Stufe 3 neuen oder berührten Testmodule und ihre Nachbarn – 47 Module, 845 Tests, keiner
+  rot. 4 übersprungen, wie immer im Container: zwei Tests mit echtem Whisper und ein Leistungstest (nur mit Schalter),
+  dazu der Briefkasten mit echtem sshd (braucht einen eigenen Namensraum). Die volle Suite läuft in der CI.
+- **Nicht geprüft:** der Mini selbst (echte Renderzeiten, VA-API, setpriv im CT) – das zeigt `pipeline laufzeiten` vor
+  Ort.
+
+**Wie viel schneller oder besser ist das System nachweislich?**
+Schneller wird nichts – ehrlich gesagt. Gemessen im Container (nur als Verhältnis, M152):
+- **Kosten:** setpriv +1,7 ms je ffmpeg-Aufruf, fsync +9 ms (8 MB) bzw. +27 ms (25 MB) je Datei, die `lauf`-Zeile
+  0,8–1,2 ms je Auftrag. Derselbe 720p-Entwurf vorher 69,7 s, nachher 70,7 s (Median aus je 3) – im Rauschen, die
+  Läufe einer Gruppe streuen um 5 s.
+- **Besser, belegt:**
+  - kein verwaistes ffmpeg mehr: nach dem Tod seines Aufrufers nach höchstens 1 s weg. Vorher rechnete es ohne Sperre
+    weiter, und ein Neuversuch konnte still eine kaputte Datei schreiben (richtige Länge, 11–12 Tsd. Dekodierfehler);
+  - eine Panne der Grafikeinheit beim Schneiden kostet kein Match mehr;
+  - ein Hänger im Abend-Video hält die Sperre höchstens 2 h (vorher ohne Grenze), einer in den Timern der Freunde
+    höchstens 1 h (vorher 2 h = genau Florians Wartezeit);
+  - Vorrang: Bei einer Übergabe ist ein Freund in 10 statt 50 % der Fälle vor Florian dran (drei Freunde: 27 statt
+    75 %), die 1-s-Lücke zwischen zwei n8n-Schritten erwischt er in 20 statt 100 % (drei: 49 %). Preis: Ein Freund
+    kommt nach dem Freiwerden im Mittel 2,6 statt 0,5 s später dran;
+  - Laufzeiten sind sichtbar: Vorher stand im Repo keine einzige Renderzeit vom Mini, und Florians n8n-Schritte und
+    jeder Exit 4 hinterließen auf dem Mini keine Spur.
+- **War schon so, jetzt per Test belegt:** Nach einem Absturz mitten im Abend-Video kommt beim nächsten Lauf genau ein
+  richtiges Video; eine abgerissene n8n-Verbindung verliert keinen Clip.
+- **Stromausfall:** geprüft ist, dass erst nach dem fsync umbenannt wird (scheitert er, bleibt der Endname frei); einen
+  echten Stromausfall haben wir nicht nachgestellt.
+
+**Was ist die nächste sinnvolle Erweiterung?**
+1. Messen vor Ort, ohne neuen Code: nach dem Update `pipeline laufzeiten --tage 30` (Vorher-Grundlage aus Dateizeiten),
+   nach einer Woche mit dem ersten aktiven Freund `--tage 7`. Zielwerte: kein Exit 4 bei Florians n8n-Schritten, seine
+   Wartezeit im p90 höchstens ein laufender Freund-Auftrag, keine Haltezeit über 1 h.
+2. Daraus selbst entscheiden: harter Vortritt (Schwellen in M147), Short gleich in Upload-Qualität (ab etwa 30 %
+   Freigabe, M151), ein zweiter Rechner nur bei einem Auslöser aus `docs/WORKER.md`.
+3. Florians Ja oder Nein zum Nachhol-Timer für liegengebliebene n8n-Matches (M148).
+4. Danach Stufe 4: Kampagnenlink je Instanz, neue Zielgrößen versioniert neben dem alten Score.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -429,6 +521,8 @@ Offen: freier Speicher auf dem vServer für den Briefkasten.
    (Schritt 4), Lager für Freunde (Schritt 5), Morgenprüfung kennt die Freunde (Schritt 6); Löschen im Briefkasten erst
    nach Florians Ja.
 3. **Hybrider Render-Manager:** Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für
-   Rechen-Arbeiter. Gebaut: Laufzeiten messen (Schritt 1), Ausfallsicher (Schritt 2), Florian zuerst (Schritt 3).
+   Rechen-Arbeiter. Fertig: Laufzeiten messen (Schritt 1), Ausfallsicher (Schritt 2), Florian zuerst (Schritt 3),
+   Vertrag für weitere Rechner als Doku (Schritt 4, `docs/WORKER.md`); Fern- und Cloud-Rechner erst nach einem
+   Messbefund und Florians Ja (Stufenbericht oben).
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

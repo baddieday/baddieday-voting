@@ -113,6 +113,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - Whisper (Untertitel + Kommentar-Merkmal): Installation von `faster-whisper` freigeben?
 - Highlight-Video: Ordner mit lizenzierter Musik anlegen.
 - Mehrbenutzer (M1): Wie viel Speicher ist auf dem vServer frei (für den Briefkasten der Freunde, Stufe 2)?
+- Stufe 3 (M148): Soll der Mini deine n8n-Matches, die seit über 3 h auf `neu` stehen, selbst nachholen (stündlicher
+  Timer neben n8n)? Ja oder Nein – bis dahin Alarm von n8n und `pipeline process <ID>` von Hand.
+- Stufe 3 (M149): Zweiter Rechner oder Cloud nur nach einem Messbefund aus `pipeline laufzeiten` (Auslöser in
+  `docs/WORKER.md`) – dann: welcher Rechner, bei der Cloud Anbieter, Monatslimit in Euro und Text der Zustimmung.
 
 ## Entscheidungen
 - 2026-09-23: Kein Medal.tv – Nvidia + SteelSeries reichen; Pipeline wählt pro Moment die Aufnahme mit bester Abdeckung.
@@ -672,3 +676,13 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Freund in 10 statt 50 % der Fälle vor dir dran (drei Freunde: 27 statt 75 %), die 1-s-Lücke zwischen zwei
     n8n-Schritten erwischt ein wartender Freund in 20 statt 100 %. Deine Schritte fragen wie bisher sofort und dann
     jede Sekunde; ein laufender Auftrag wird nie unterbrochen. Harter Vortritt erst, wenn `laufzeiten` es zeigt. M147.
+  - Schritt 4 (Vertrag für weitere Rechner, nur Doku) und Abschluss: `docs/WORKER.md` beantwortet die sechs Fragen
+    aus Abschnitt D für heute – der Mini bleibt der einzige Rechner, weil das Hin- und Herschicken eines Shorts
+    (15–53 s) etwa so lange dauert wie das Rendern (58–86 s). Dort stehen auch die Auslöser für einen zweiten Rechner
+    (Abend-Video an 3 Abenden einer Woche über 30 min, oder deine Wartezeit im p90 über 10 min) und der Vertrag v1 für
+    Heimserver und Cloud – gebaut wird er erst mit dem ersten Worker und deinem Ja, die Cloud bleibt aus.
+    `render-entwurf --final` bleibt als Vorläufer v0 aus (`docs/REGIE.md`). Das Update sagte „schlägt er fehl,
+    wiederholt n8n ihn“ – falsch: n8n meldet den Fehler, nachholen mit `pipeline process <ID>`. Stufenbericht in
+    `docs/MEHRBENUTZER.md`: Schneller wird nichts. Neu ist: Abstürze und Stromausfall hinterlassen keine kaputten
+    Dateien, eine Panne der Grafikeinheit beim Schneiden kostet kein Match mehr, du kommst an der Sperre meist zuerst
+    dran, und Laufzeiten sind sichtbar. Echte Mini-Zahlen fehlen noch (`pipeline laufzeiten` vor Ort). M148–M152.
