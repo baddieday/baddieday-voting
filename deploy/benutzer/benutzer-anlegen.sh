@@ -7,7 +7,9 @@
 #   3 Benutzer, Ordner, Konfig · 4 deine Sperrdatei für alle lesbar · 5 Dienst-Vorlagen · 6 Vorab-Prüfung
 #   7 Einrichten in seiner Sandbox (Datenbank, Whisper-Modell, Musik) · 8 Telegram: Einladungslink, er drückt Start
 #   9 Briefkasten (Stufe 2, j/N): Schlüssel, Hostschlüssel, Zeile für den vServer, Probe-Abholung in seiner Sandbox
-#   10 Einschalten (das Abholen nur nach grüner Probe) · 11 Prüfung und Bot-Link
+#   10 Einschalten (das Abholen nur nach grüner Probe)
+#   11 Lager (Stufe 2, j/N, nur bei wachem pve-big): freunde/<name> im Lager, Einhängepunkt, Schalter, Probe der
+#      Bindung in seiner Sandbox, Rundgang clip-lager-freunde.service einmal einschalten · 12 Prüfung und Bot-Link
 #   Zusatz (j/N): deine eigenen Rechte schärfen – nur chmod, nur was pipeline gehört, mit Rückweg-Skript
 # Wiederholbar: Fertiges wird übersprungen, gefragt wird nur, was fehlt. Gelöscht wird nichts. Zugänge stehen nur in
 # <Ordner>/.env (root:clip-<name>, 0640) – nie im Log, nie auf dem Bildschirm, nie auf einer Befehlszeile. Die
@@ -22,6 +24,7 @@ UNITS="${UNITS:-/etc/systemd/system}"
 PUFFER="${PUFFER:-/srv/puffer}"
 FLORIAN_DIR="${FLORIAN_DIR:-/var/lib/clip-pipeline}"
 RECHTE_ABLAGE="${RECHTE_ABLAGE:-/root/benutzer-rechte}"
+LAGER_ABLAGE="${LAGER_ABLAGE:-/root/benutzer-lager}"   # Schritt „Lager“: alte instanz.toml und Rückweg-Skript
 BK_CONF="${BK_CONF:-/etc/clip-briefkasten.conf}"   # Adressen des vServers – für alle Freunde gleich
 HIER="$(cd "$(dirname "$0")" && pwd)"
 ZEIT="$(date +%Y%m%d-%H%M%S)"
@@ -139,7 +142,7 @@ zeige_log() {
 [ ! -d /etc/pve ] || { echo "Das ist der Proxmox-Host – bitte im CT ausführen (pct enter 102)."; exit 1; }
 if [ "$PROBE" = 1 ]; then echo "PROBE: Ich zeige nur, was ich tun würde, und ändere nichts."; fi
 
-sag "1/11 Prüfen: Name, Freunde-Volume, Code, deine Sperre"
+sag "1/12 Prüfen: Name, Freunde-Volume, Code, deine Sperre"
 # Reserviert: Namen, die man mit deinen Diensten oder Ordnern verwechseln würde (clip-bot, clip-pipeline, …)
 RESERVIERT=" pipeline benutzer freund root admin "
 for d in "$PROD"/deploy/systemd/clip-*.service; do
@@ -152,10 +155,10 @@ esac
 getent passwd pipeline >/dev/null || abbruch "Benutzer pipeline fehlt – ist das der CT clips?"
 getent group render >/dev/null || abbruch "Gruppe render fehlt – ohne sie starten die Dienste nicht (Grafikchip). Bitte melden."
 [ -x "$PROD/.venv/bin/pipeline" ] || abbruch "$PROD/.venv/bin/pipeline fehlt – ist die Pipeline installiert?"
-for v in bot scan abend einrichten pruefen koppeln abholen; do
+for v in bot scan abend einrichten pruefen koppeln abholen lager; do
   [ -f "$HIER/clip-freund-$v@.service" ] || abbruch "$HIER/clip-freund-$v@.service fehlt – bitte deploy/benutzer/ vollständig."
 done
-for s in benutzer-pruefen.sh benutzer-befehl.sh; do
+for s in benutzer-pruefen.sh benutzer-befehl.sh lager-freunde.sh clip-lager-freunde.service; do
   [ -f "$HIER/$s" ] || abbruch "$HIER/$s fehlt – bitte deploy/benutzer/ vollständig."
 done
 # Freunde-Volume: ein eigener Speicher – nicht die CT-Platte (deine Datenbank), nicht dein Puffer (M53)
@@ -216,7 +219,7 @@ if ! frage "Freund $NAME jetzt anlegen bzw. vervollständigen (Benutzer $U, Ordn
   echo "Abgebrochen – nichts verändert."; exit 1
 fi
 
-sag "2/11 Zugänge – verdeckt: nichts davon erscheint auf dem Bildschirm oder im Log"
+sag "2/12 Zugänge – verdeckt: nichts davon erscheint auf dem Bildschirm oder im Log"
 TOKEN=""
 EPIC=""
 if hat LEARN_BOT_TOKEN; then echo "Bot-Token: schon da – bleibt"
@@ -241,7 +244,7 @@ else
 fi
 # Seine Telegram-Zahl fragt das Skript nicht ab – die kommt in Schritt 8 über den Einladungslink
 
-sag "3/11 Benutzer $U (ohne Anmeldung), Ordner, Marken, Konfig"
+sag "3/12 Benutzer $U (ohne Anmeldung), Ordner, Marken, Konfig"
 if [ "$NEUER_BENUTZER" = 1 ]; then
   tu useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$U"
 fi
@@ -292,13 +295,13 @@ else
 fi
 setze "$I/instanz.toml" "root:$U" 640
 
-sag "4/11 Deine Sperrdatei: für alle lesbar – so wartet $NAME auf dich und du auf ihn"
+sag "4/12 Deine Sperrdatei: für alle lesbar – so wartet $NAME auf dich und du auf ihn"
 # Fehlt sie, lege ich sie als pipeline an – eine Instanz legt nie eine eigene an (M41)
 if [ ! -e "$SPERRE" ]; then tu runuser -u pipeline -- touch "$SPERRE"; fi
 if [ "$(stat -c %a "$SPERRE" 2>/dev/null || true)" = 644 ]; then echo "   $SPERRE: schon 0644"
 else tu chmod 644 "$SPERRE"; fi
 
-sag "5/11 Dienst-Vorlagen hinlegen (eingeschaltet wird in Schritt 10 nur $NAME)"
+sag "5/12 Dienst-Vorlagen hinlegen (eingeschaltet wird in Schritt 10 nur $NAME)"
 NEU=0
 for q in "$HIER"/clip-freund-*@.service "$HIER"/clip-freund-*@.timer; do
   [ -f "$q" ] || continue
@@ -309,13 +312,13 @@ for q in "$HIER"/clip-freund-*@.service "$HIER"/clip-freund-*@.timer; do
 done
 if [ "$NEU" = 1 ]; then tu systemctl daemon-reload; fi
 
-sag "6/11 Vorab-Prüfung (Rechte, Sperre, Zugänge) – bevor etwas eingeschaltet wird"
+sag "6/12 Vorab-Prüfung (Rechte, Sperre, Zugänge) – bevor etwas eingeschaltet wird"
 if [ "$PROBE" = 1 ]; then echo "   \$ bash $HIER/benutzer-pruefen.sh $NAME --vorab"
 elif ! bash "$HIER/benutzer-pruefen.sh" "$NAME" --vorab < /dev/null; then
   abbruch "die Vorab-Prüfung hat etwas gefunden (siehe ❌) – nichts eingeschaltet. Danach nochmal: bash $0 $NAME"
 fi
 
-sag "7/11 Einrichten in seiner Sandbox: Datenbank, Whisper-Modell (~480 MB), Musik – ein paar Minuten"
+sag "7/12 Einrichten in seiner Sandbox: Datenbank, Whisper-Modell (~480 MB), Musik – ein paar Minuten"
 EINRICHTEN="clip-freund-einrichten@$NAME.service"
 if [ "$PROBE" = 1 ]; then echo "   \$ systemctl start $EINRICHTEN"
 else
@@ -325,7 +328,7 @@ else
   [ "$RC" = 0 ] || abbruch "Einrichten oder die Prüfung in seiner Sandbox ging nicht (siehe oben) – nichts eingeschaltet. Log: journalctl -u $EINRICHTEN -n 50"
 fi
 
-sag "8/11 Telegram: Einladungslink – $NAME tippt ihn an und drückt Start (keine Telegram-Zahl suchen)"
+sag "8/12 Telegram: Einladungslink – $NAME tippt ihn an und drückt Start (keine Telegram-Zahl suchen)"
 # In seiner Sandbox wartet clip-freund-koppeln@ bis zu 15 min auf „/start <code>“ und schreibt seine Zahl nach
 # db/kopplung.json; hier wird sie gelesen und als LEARN_BOT_ALLOWED_USER_ID in seine .env eingetragen (die liest sein
 # Lern-Bot). Je Bot nur ein Empfänger: Ohne Zahl holt sein Bot nie Nachrichten ab, er geht erst in Schritt 10 an.
@@ -384,7 +387,7 @@ else
   fi
 fi
 
-sag "9/11 Briefkasten auf dem vServer (Stufe 2): seine Aufnahmen kommen von selbst"
+sag "9/12 Briefkasten auf dem vServer (Stufe 2): seine Aufnahmen kommen von selbst"
 # docs/BRIEFKASTEN.md. Der PC des Freundes lädt in sein Fach auf deinem vServer, clip-freund-abholen@ holt es alle 2 min
 # über das Tailnet in seinen Puffer. Die Adressen des vServers fragt das Skript einmal für alle Freunde ($BK_CONF, gelesen
 # per awk, nie ausgeführt). Schlüssel und Hostschlüssel liegen in I/briefkasten (Ordner root:clip-<name> 0750, Dateien
@@ -639,7 +642,7 @@ briefkasten() {
 }
 briefkasten
 
-sag "10/11 Einschalten – nur für $NAME"
+sag "10/12 Einschalten – nur für $NAME"
 AN=("clip-freund-scan@$NAME.timer" "clip-freund-abend@$NAME.timer")
 if [ "$BK_AN" = 1 ]; then AN+=("$BK_TIMER"); fi
 if verbunden; then AN+=("$BOT")
@@ -654,7 +657,192 @@ done
 # (startet auch einen, den Schritt 8 angehalten hat)
 if [ "$ENV_NEU" = 1 ] && [ "$BOT_AN" = 0 ] && systemctl is-enabled -q "$BOT" 2>/dev/null; then tu systemctl restart "$BOT"; fi
 
-sag "11/11 Prüfung: ist alles getrennt?"
+sag "11/12 Lager auf pve-big (Stufe 2): seine Aufnahmen für immer, sein Puffer gibt alte frei"
+# docs/MEHRBENUTZER.md „Lager für Freunde“. Sein Unterordner freunde/<name> liegt in deinem Lager (kein neues Dataset,
+# kein neuer Export); clip-freund-lager@<name> kopiert dorthin, wenn dein täglicher Abgleich pve-big ohnehin geweckt hat
+# (Rundgang clip-lager-freunde.service – weckt nie). Danach gibt sein Puffer Rohvideos frei, die älter als 14 Tage und im
+# Lager bestätigt sind (der erste Lauf zählt nur). Eingerichtet wird nur bei wachem pve-big: Ordner und Marke im Lager,
+# Einhängepunkt I/lager (root, leer), Schalter [instanz] lager = true, dann die Probe der Bindung in seiner Sandbox – ist
+# sie rot, geht der Schalter wieder aus. Gelöscht wird nichts; die alte instanz.toml und ein Rückweg liegen in
+# $LAGER_ABLAGE.
+RUNDGANG="clip-lager-freunde.service"
+LAGER_AN=0
+# instanz.toml: stand → an|aus|anders|kaputt · schalten <Datum> → [instanz] lager = true eintragen (nur, wenn das Ergebnis
+# bis auf diesen einen Wert genau die alte Konfig ist; Besitzer und Rechte bleiben) → geschaltet|schon|anders|kaputt
+LAGER_PY="$(cat <<'PY'
+import os, re, sys, tomllib
+modus, pfad = sys.argv[1], sys.argv[2]
+try:
+    with open(pfad, encoding="utf-8") as datei:
+        text = datei.read()
+    alt = tomllib.loads(text)
+except (OSError, ValueError):
+    print("kaputt")
+    sys.exit(0)
+inst = alt.get("instanz")
+wert = inst.get("lager") if isinstance(inst, dict) else None
+if inst is not None and not isinstance(inst, dict):
+    print("kaputt")
+elif modus == "stand":
+    print("an" if wert is True else "aus" if wert is None else "anders")
+elif wert is True:
+    print("schon")
+elif wert is not None:
+    print("anders")
+else:
+    zeile = f"lager = true   # Stufe 2: sein Lager auf pve-big – eingetragen von benutzer-anlegen.sh am {sys.argv[3]}"
+    koepfe = list(re.finditer(r"(?m)^[ \t]*\[[ \t]*instanz[ \t]*\][ \t]*(#.*)?$", text))
+    if inst is None:
+        neu = text + ("\n" if text and not text.endswith("\n") else "") + "\n[instanz]\n" + zeile + "\n"
+    elif len(koepfe) == 1:
+        neu = text[:koepfe[0].end()] + "\n" + zeile + text[koepfe[0].end():]
+    else:
+        neu = None
+    try:
+        gut = neu is not None and tomllib.loads(neu) == {**alt, "instanz": {**(inst or {}), "lager": True}}
+    except ValueError:
+        gut = False
+    if not gut:
+        print("anders")
+        sys.exit(0)
+    st = os.stat(pfad)
+    tmp = f"{pfad}.neu-{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as datei:
+        datei.write(neu)
+    os.chown(tmp, st.st_uid, st.st_gid)
+    os.chmod(tmp, st.st_mode & 0o7777)
+    os.replace(tmp, pfad)
+    print("geschaltet")
+PY
+)"
+# Ergebnis der Probe in seiner Sandbox (Exit-Code und letzte JSON-Zeile von pipeline lager pruefen) -> ok|fehler<TAB>Text
+LAGER_PROBE_PY="$(cat <<'PY'
+import json, sys
+rc, zeile = int(sys.argv[1]), sys.argv[2]
+try:
+    e = json.loads(zeile) if zeile else {}
+except ValueError:
+    e = {}
+e = e if isinstance(e, dict) else {}
+if rc == 0 and e.get("ok") is True:
+    print("ok\tsein Unterordner im Lager ist in seiner Sandbox als " + "".join(z for z in str(e.get("lager", "")) if z.isprintable())[:200] + " eingebunden")
+else:
+    text = e.get("hinweis") or e.get("fehler") or "ohne Ergebnis"
+    print("fehler\t" + "".join(z for z in str(text) if z.isprintable())[:300])
+PY
+)"
+lager() {
+  local stand nfs ausgabe rc ergebnis bewertung sicherung rueck schalten
+  stand="$(python3 -I -c "$LAGER_PY" stand "$I/instanz.toml" 2> /dev/null)" || stand="kaputt"
+  [ -f "$I/instanz.toml" ] || stand="aus"   # nur in der Probe (sonst steht sie seit Schritt 3)
+  if [ "$stand" = an ]; then
+    ordner "$I/lager" root:root 755
+    echo "   Lager: schon eingerichtet – fährt bei deinem Lager-Abgleich mit"
+    LAGER_AN=1
+    if [ "$PROBE" != 1 ] && ! systemctl is-enabled -q "$RUNDGANG" 2> /dev/null; then
+      echo "   ℹ️  Der Rundgang ist aus (von dir ausgeschaltet?) – einschalten: systemctl enable $RUNDGANG"
+    fi
+    return 0
+  fi
+  if [ "$stand" != aus ]; then
+    echo "   ❌ [instanz] lager in $I/instanz.toml ist von Hand gesetzt (nicht true) oder die Datei ist unlesbar – ich ändere nichts, bitte ansehen."
+    return 0
+  fi
+  # Nur bei wachem pve-big (ohne zu wecken nachgesehen): Lager per NFS eingehängt, Port 2049, deine Marke .clip-lager
+  if nfs="$(bash "$HIER/lager-freunde.sh" --nfs 2>&1)"; then
+    echo "   ${nfs##*$'\n'}"
+  elif [ "$PROBE" = 1 ]; then
+    echo "   (Probe: jetzt ${nfs##*$'\n'} – eingerichtet wird erst bei wachem pve-big)"
+  else
+    echo "   Lager: noch aus – jetzt nicht: ${nfs##*$'\n'}."
+    echo "   Eingerichtet wird es bei wachem pve-big (nach deinem 10-Uhr-Abgleich). Dann nochmal: bash $0 $NAME"
+    return 0
+  fi
+  if ! frage "Lager für $NAME einrichten? (Seine Aufnahmen bleiben in deinem Lager; alte Rohvideos verlassen nach 14 Tagen seinen Puffer)"; then
+    echo "   Lager: nicht eingerichtet – seine Rohvideos bleiben im Puffer. Später: bash $0 $NAME"
+    return 0
+  fi
+
+  # 1 freunde/<name> und seine Marke im Lager – nur auf deinem Lager-NFS, nie ein eigenes Dataset
+  printf '   $ bash %s --ordner %s\n' "$HIER/lager-freunde.sh" "$NAME"
+  if [ "$PROBE" != 1 ]; then
+    if ! ausgabe="$(bash "$HIER/lager-freunde.sh" --ordner "$NAME" 2>&1)"; then
+      echo "   ❌ ${ausgabe##*$'\n'} – Lager nicht eingerichtet."; return 0
+    fi
+    printf '%s\n' "$ausgabe" | sed 's/^/   | /'
+  fi
+
+  # 2 Einhängepunkt: leer, root – den bindet nur clip-freund-lager@ (seine anderen Dienste sehen ihn leer)
+  ordner "$I/lager" root:root 755
+  if [ "$PROBE" != 1 ] && [ -n "$(ls -A "$I/lager")" ]; then
+    echo "   ❌ $I/lager ist nicht leer – ich ändere nichts, bitte ansehen."; return 0
+  fi
+
+  # 3 Schalter – vorher die alte instanz.toml sichern, Rückweg dazu
+  if [ "$PROBE" = 1 ]; then
+    echo "   (Probe: würde $I/instanz.toml nach $LAGER_ABLAGE sichern und unter [instanz] lager = true eintragen)"
+  else
+    mkdir -p "$LAGER_ABLAGE"
+    chmod 700 "$LAGER_ABLAGE"
+    sicherung="$LAGER_ABLAGE/instanz-$NAME-vor-lager-$ZEIT.toml"
+    cp -p "$I/instanz.toml" "$sicherung"
+    schalten="$(python3 -I -c "$LAGER_PY" schalten "$I/instanz.toml" "$(date +%d.%m.%Y)" 2> /dev/null)" || schalten="kaputt"
+    if [ "$schalten" != geschaltet ] && [ "$schalten" != schon ]; then
+      echo "   ❌ [instanz] in $I/instanz.toml ließ sich nicht sicher ergänzen ($schalten) – nichts geändert, bitte ansehen."
+      return 0
+    fi
+    echo "   [instanz] lager = true in $I/instanz.toml (vorher gesichert: $sicherung)"
+  fi
+
+  # 4 Probe der Bindung: ein echter Lauf von pipeline lager pruefen in seiner Sandbox mit der Lager-Bindung und ohne Netz
+  #   (wie clip-freund-lager@) – NFS, deine Marke unsichtbar, seine Marke da. Rot: Schalter wieder aus.
+  printf '   $ bash %s --lager %s lager pruefen\n' "$HIER/benutzer-befehl.sh" "$NAME"
+  if [ "$PROBE" = 1 ]; then
+    echo "   (Probe: grün -> der Rundgang nimmt ihn mit; rot -> der Schalter geht wieder aus)"
+  else
+    if ausgabe="$(bash "$HIER/benutzer-befehl.sh" --lager "$NAME" lager pruefen < /dev/null 2>&1)"; then rc=0; else rc=$?; fi
+    printf '%s\n' "$ausgabe" | grep -v '^{' | tail -n 8 | sed 's/^/   | /' || true
+    ergebnis="$(printf '%s\n' "$ausgabe" | grep '^{' | tail -n 1 || true)"
+    bewertung="$(python3 -I -c "$LAGER_PROBE_PY" "$rc" "$ergebnis" 2> /dev/null)" || bewertung=$'fehler\tErgebnis unlesbar'
+    if [ "${bewertung%%$'\t'*}" != ok ]; then
+      cat "$sicherung" > "$I/instanz.toml"
+      echo "   ❌ Probe der Bindung: ${bewertung#*$'\t'} (Exit $rc)"
+      echo "      Häufig: pve-big ging gerade aus · BindPaths mit NFS-Quelle oder PrivateNetwork geht in diesem CT nicht"
+      echo "      (bitte melden) · im Lager liegt unter freunde/$NAME etwas anderes."
+      echo "   Schalter wieder aus – das Lager bleibt aus. Danach nochmal: bash $0 $NAME"
+      return 0
+    fi
+    echo "   ✅ Probe der Bindung: ${bewertung#*$'\t'}"
+    rueck="$LAGER_ABLAGE/zurueck-lager-$NAME-$ZEIT.sh"
+    { printf '#!/usr/bin/env bash\n# Rückweg zu benutzer-anlegen.sh (Schritt Lager, %s): Lager für %s wieder aus (Schalter wie vorher).\n' "$ZEIT" "$NAME"
+      printf '# Seine Daten im Lager (freunde/%s auf pve-big) und der leere Einhängepunkt bleiben. Den Rundgang für alle\n' "$NAME"
+      printf '# schaltet aus: systemctl disable %s\nset -euo pipefail\n' "$RUNDGANG"
+      printf 'cat %q > %q\n' "$sicherung" "$I/instanz.toml"; } > "$rueck"
+    chmod 700 "$rueck"
+    echo "   Rückweg: bash $rueck"
+  fi
+  LAGER_AN=1
+
+  # 5 Rundgang einmal einschalten (für alle Freunde gleich): fährt ab jetzt bei deinem Abgleich mit, weckt nie
+  if [ ! -e "$UNITS/$RUNDGANG" ]; then
+    tu install -m 644 "$HIER/$RUNDGANG" "$UNITS/$RUNDGANG"
+    tu systemctl daemon-reload
+  elif ! cmp -s "$HIER/$RUNDGANG" "$UNITS/$RUNDGANG"; then
+    echo "   ℹ️  $RUNDGANG weicht vom Repo ab (von dir angepasst?) – bleibt. Vergleich: diff $UNITS/$RUNDGANG $HIER/$RUNDGANG"
+  fi
+  if systemctl is-enabled -q "$RUNDGANG" 2> /dev/null; then echo "   $RUNDGANG: schon an"
+  else tu systemctl enable "$RUNDGANG"; fi
+
+  # 6 Optional sofort einmal (im Hintergrund, nur 10–18 Uhr, nur weil pve-big gerade wach ist)
+  if frage "Jetzt einmal ins Lager sichern? (Rundgang im Hintergrund – weckt nie, Starts nur 10–18 Uhr)"; then
+    tu systemctl start --no-block "$RUNDGANG"
+    echo "   mitlesen: journalctl -fu $RUNDGANG"
+  fi
+}
+lager
+
+sag "12/12 Prüfung: ist alles getrennt?"
 if [ "$PROBE" = 1 ]; then echo "   \$ bash $HIER/benutzer-pruefen.sh $NAME"
 elif ! bash "$HIER/benutzer-pruefen.sh" "$NAME" < /dev/null; then
   echo "❌ Die Prüfung hat etwas gefunden (siehe oben). Bis es behoben ist, ausschalten (Daten bleiben):"
@@ -712,5 +900,7 @@ echo "Prüfen:            bash $HIER/benutzer-pruefen.sh $NAME"
 echo "Log seines Bots:   journalctl -u $BOT -f"
 if [ "$BK_AN" = 1 ]; then echo "Log des Abholens:  journalctl -u clip-freund-abholen@$NAME -n 50"
 else echo "Briefkasten:       noch aus – einrichten mit nochmal bash $0 $NAME (Schritt 9, docs/BRIEFKASTEN.md)"; fi
+if [ "$LAGER_AN" = 1 ]; then echo "Lager:             an – fährt bei deinem Abgleich mit (journalctl -u $RUNDGANG -n 50)"
+else echo "Lager:             noch aus – bei wachem pve-big nochmal bash $0 $NAME (Schritt 11)"; fi
 echo "Match nachholen:   bash $HIER/benutzer-befehl.sh $NAME process <ID>"
 echo "Ausschalten:       bash $HIER/benutzer-stilllegen.sh $NAME   (Daten bleiben)"

@@ -9,7 +9,8 @@
 #      clip-publikum), Bots neu starten
 #   4. Probe: Dienste laufen, Datenbank antwortet; Rückweg liegt als Skript bereit
 #   Nur mit Freunden (Mehrbenutzer, docs/MEHRBENUTZER.md): vor dem Umstellen ihre Datenbanken sichern, ihre
-#   Dienst-Vorlagen auf die Platte legen (nie einschalten), laufende Freundes-Bots neu starten. Ohne Freunde: nichts.
+#   Dienst-Vorlagen und den Lager-Rundgang auf die Platte legen (nie einschalten), laufende Freundes-Bots neu starten.
+#   Ohne Freunde: nichts.
 # Weckt pve-big nie, löscht nichts, fasst .env und lokal.toml nicht an. Beliebig oft wiederholbar.
 # Optional:  … | NCS_GENRES=hart bash      (Musik nachladen: techno, hardcore, electronic-rock, dance-rock, midtempo-bass)
 #            … | WARTEN_MIN=30 bash        (länger auf ein laufendes Render warten, Standard 10)
@@ -269,10 +270,13 @@ for d in clip-bot clip-lernbot; do
 done
 
 # Freunde: ihre Dienst-Vorlagen (deploy/benutzer) wie die übrigen Dienste übernehmen, wenn du sie nicht selbst angepasst
-# hast – aber NIE einschalten (das macht nur benutzer-anlegen.sh). Danach laufende Freundes-Bots neu, wie deine Bots.
+# hast – aber NIE einschalten (das macht nur benutzer-anlegen.sh). Dazu der Lager-Rundgang clip-lager-freunde.service
+# (Stufe 2): nur hingelegt – eingeschaltet wird er nur im Schritt Lager von benutzer-anlegen.sh, nie hier. Danach
+# laufende Freundes-Bots neu, wie deine Bots.
 if [ "${#instanzen[@]}" -gt 0 ]; then
   vorlage_neu=0
-  for quelle in "$PROD"/deploy/benutzer/clip-freund-*@.service "$PROD"/deploy/benutzer/clip-freund-*@.timer; do
+  for quelle in "$PROD"/deploy/benutzer/clip-freund-*@.service "$PROD"/deploy/benutzer/clip-freund-*@.timer \
+                "$PROD"/deploy/benutzer/clip-lager-freunde.service; do
     [ -f "$quelle" ] || continue
     name="$(basename "$quelle")"; ziel="$UNITS/$name"
     soll="$(cat "$quelle")"; alt="$(p git -C "$PROD" show "$ALT_PROD:deploy/benutzer/$name" 2>/dev/null)"

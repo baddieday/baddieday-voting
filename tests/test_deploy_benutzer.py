@@ -1,6 +1,9 @@
 """Mehrbenutzer, Stufe 1, Schritt 5–8: Dienst-Vorlagen je Freund mit Sandbox, das Update kennt Freunde, Speicher,
 Freund anlegen (mit Einladungslink) und prüfen. Stufe 2, Schritt 3: Abholen aus dem Briefkasten einschalten (Vorlage
 clip-freund-abholen@ mit Timer, Schritt „Briefkasten“ im Anlege-Skript, Prüfen und Stilllegen kennen das Abholen).
+Stufe 2, Schritt 5: Lager für Freunde (Vorlage clip-freund-lager@ = Sandbox-Block plus genau eine Lager-Bindung, ohne
+Timer; root-Dienst clip-lager-freunde.service hängt an clip-lager.service; Schritt „Lager“ im Anlege-Skript, Prüfen und
+Stilllegen kennen das Lager; das Update legt den Rundgang nur hin).
 
 Fünf Teile:
 - Vorlagen (deploy/benutzer): derselbe Sandbox-Block in jeder Vorlage, eigener Benutzer, eigener Ordner, Florians
@@ -56,6 +59,9 @@ VORLAGEN = [*DIENSTE.values(), *TIMER.values()]
 PIPELINE = "/opt/clip-pipeline/.venv/bin/pipeline"
 INSTANZ = "/var/lib/clip-benutzer/%i"
 BLOCK = re.compile(r"^# --- Sandbox:.*?^# --- Ende Sandbox ---$", flags=re.M | re.S)
+# Stufe 2: die eine Bindung, die über den Sandbox-Block hinausgeht – nur im Lager-Dienst (bewusste Ausnahme)
+LAGER_BINDUNG = "/srv/big/clips/freunde/%i:/var/lib/clip-benutzer/%i/lager"
+RUNDGANG_UNIT = BENUTZER / "clip-lager-freunde.service"
 
 
 def sandbox(pfad: Path) -> str:
@@ -87,8 +93,8 @@ def innen_teil() -> str:
 
 class Vorlagen(unittest.TestCase):
     def test_sandbox_in_jeder_vorlage_woertlich_gleich(self):
-        self.assertLessEqual({"clip-freund-bot", "clip-freund-scan", "clip-freund-abend", "clip-freund-abholen"},
-                             set(DIENSTE))
+        self.assertLessEqual({"clip-freund-bot", "clip-freund-scan", "clip-freund-abend", "clip-freund-abholen",
+                              "clip-freund-lager"}, set(DIENSTE))
         self.assertEqual(set(TIMER), {"clip-freund-scan", "clip-freund-abend", "clip-freund-abholen"})
         bloecke = {d.name: sandbox(d) for d in DIENSTE.values()}
         self.assertEqual(len(set(bloecke.values())), 1, "Sandbox-Block weicht ab")
@@ -120,7 +126,9 @@ class Vorlagen(unittest.TestCase):
                 for schluessel in ("ReadWritePaths", "StateDirectory", "CacheDirectory", "LogsDirectory",
                                    "RuntimeDirectory", "ConfigurationDirectory", "EnvironmentFile"):
                     self.assertNotIn(schluessel, s)
-                self.assertTrue(all(p == INSTANZ or p.startswith(INSTANZ + "/") for p in ohne_minus(s["BindPaths"])))
+                # Bewusste Ausnahme (Stufe 2): genau der Lager-Dienst bindet zusätzlich seinen Unterordner im Lager
+                ausnahme = [LAGER_BINDUNG] if vorlage.name == "clip-freund-lager@.service" else []
+                self.assertEqual([p for p in s["BindPaths"] if p != INSTANZ], ausnahme)
                 self.assertTrue(all(p.endswith(":ro") for p in s["TemporaryFileSystem"]))
                 # keine Pfade oder Zugänge von außen: die Pipeline liest sie selbst aus I/.env und instanz.toml
                 namen = [e.split("=", 1)[0] for e in s["Environment"]]
@@ -190,9 +198,49 @@ class Vorlagen(unittest.TestCase):
         self.assertEqual((s["Type"], s["SuccessExitStatus"], s["IOSchedulingClass"], s["TimeoutStartSec"]),
                          (["oneshot"], ["3 4"], ["idle"], ["2h"]))
         self.assertNotIn("WantedBy", s)
+        # Stufe 2, Schritt 5: Lager – derselbe Abgleich wie bei Florian, ohne Rechen-Sperre, ohne Timer, ohne Netz
+        lager, s = befehle["clip-freund-lager"], lies_unit(DIENSTE["clip-freund-lager"])
+        self.assertEqual((lager.fn, lager.aktion, lager.probelauf), (cli._cmd_lager, "abgleich", False))
+        self.assertFalse(lager.sperren)
+        self.assertEqual((s["Type"], s["SuccessExitStatus"], s["IOSchedulingClass"], s["TimeoutStartSec"],
+                          s["PrivateNetwork"]), (["oneshot"], ["3 4"], ["idle"], ["2h"], ["yes"]))
+        self.assertNotIn("WantedBy", s)
+        self.assertNotIn("clip-freund-lager", TIMER)
         bot = lies_unit(DIENSTE["clip-freund-bot"])
         self.assertEqual((bot["Type"], bot["Restart"], bot["WantedBy"]),
                          (["simple"], ["always"], ["multi-user.target"]))
+
+    def test_lager_vorlage_ist_block_plus_genau_eine_bindung(self):
+        """Isolation (Stufe 2): Außerhalb des Sandbox-Blocks hat die Lager-Vorlage nur ihre Grenzen und genau zwei
+        Zeilen mehr – die eine Bindung seines Unterordners (ohne „-“: fehlt er, startet nichts) und kein Netz. Keine
+        andere Vorlage bindet etwas aus dem Lager oder schaltet das Netz ab."""
+        text = DIENSTE["clip-freund-lager"].read_text(encoding="utf-8")
+        draussen = werte(BLOCK.sub("", text))
+        self.assertEqual(sorted(draussen), ["BindPaths", "Description", "ExecStart", "IOSchedulingClass",
+                                            "PrivateNetwork", "SuccessExitStatus", "TimeoutStartSec", "Type"])
+        self.assertEqual((draussen["BindPaths"], draussen["PrivateNetwork"]), ([LAGER_BINDUNG], ["yes"]))
+        for name, vorlage in DIENSTE.items():
+            if name != "clip-freund-lager":
+                with self.subTest(name):
+                    self.assertNotIn("/srv/big", vorlage.read_text(encoding="utf-8"))
+                    self.assertNotIn("PrivateNetwork", werte(vorlage.read_text(encoding="utf-8")))
+
+    def test_rundgang_haengt_an_florians_abgleich(self):
+        """clip-lager-freunde.service: root, startet mit clip-lager.service (WantedBy, ohne Reihenfolge – sonst
+        liefe er erst nach dem Abgleich und dessen Herunterfahren), 10 h, schreibt nur bei Florian und unter /srv/big.
+        Florians clip-lager.service bleibt unverändert (tests/test_lager_freund.py)."""
+        s = lies_unit(RUNDGANG_UNIT)
+        self.assertEqual(s["Type"], ["oneshot"])
+        self.assertEqual(s["ExecStart"], ["/bin/bash /opt/clip-pipeline/deploy/benutzer/lager-freunde.sh"])
+        self.assertEqual(s["WantedBy"], ["clip-lager.service"])
+        self.assertEqual(s["TimeoutStartSec"], ["10h"])
+        self.assertEqual(s["ReadWritePaths"], ["/var/lib/clip-pipeline /srv/big"])
+        self.assertEqual((s["ProtectSystem"], s["ProtectHome"], s["NoNewPrivileges"]), (["strict"], ["true"], ["true"]))
+        for schluessel in ("User", "After", "Before", "Requires", "BindsTo", "PartOf", "Requisite"):
+            self.assertNotIn(schluessel, s)
+        text = RUNDGANG_UNIT.read_text(encoding="utf-8")
+        self.assertIn("benutzer-anlegen.sh", text)
+        self.assertNotIn("enable --now", text)
 
     def test_timer(self):
         for name, abstand in (("clip-freund-scan", "5min"), ("clip-freund-abend", "10min"),
@@ -218,14 +266,15 @@ class Vorlagen(unittest.TestCase):
         """systemd-analyze verify je Instanz „max“ – ein Tippfehler im Schlüssel wäre sonst nur eine stille Warnung,
         und die Sandbox fehlte. ExecStart zeigt dafür auf /bin/true (den Code gibt es hier nicht unter /opt)."""
         with tempfile.TemporaryDirectory() as ordner:
-            for vorlage in VORLAGEN:
+            for vorlage in (*VORLAGEN, RUNDGANG_UNIT):
                 text = vorlage.read_text(encoding="utf-8").replace(f"ExecStart={PIPELINE}", "ExecStart=/bin/true")
                 (Path(ordner) / vorlage.name).write_text(text, encoding="utf-8")
-            for vorlage in VORLAGEN:
+            for vorlage in (*VORLAGEN, RUNDGANG_UNIT):
                 instanz = Path(ordner) / vorlage.name.replace("@.", "@max.")
                 r = subprocess.run(["systemd-analyze", "verify", str(instanz)], capture_output=True, text=True,
                                    timeout=120)
-                eigene = [z for z in (r.stdout + r.stderr).splitlines() if "clip-freund" in z]
+                eigene = [z for z in (r.stdout + r.stderr).splitlines()
+                          if "clip-freund" in z or "clip-lager-freunde" in z]
                 with self.subTest(vorlage.name):
                     self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                     self.assertEqual(eigene, [])
@@ -253,6 +302,20 @@ erg["oeffne"] = "nur lesen" if fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE == 
 os.close(fd)
 Path(u + "/var/lib/clip-benutzer/max/db/probe.txt").write_text("max")
 erg["eigen"] = "geschrieben"
+print(json.dumps(erg), flush=True)
+"""
+
+# Stufe 2: was der Freund vom Lager sieht (u = Unit-Wurzel); mit einem zweiten Argument schreibt er eine Datei hinein
+SICHT_LAGER = """
+import json, os, sys
+u = sys.argv[1]
+lager = u + "/var/lib/clip-benutzer/max/lager"
+erg = {"lager": sorted(os.listdir(lager)), "oben": sorted(os.listdir(lager + "/..")),
+       "srv": sorted(os.listdir(u + "/srv")), "freunde": sorted(os.listdir(u + "/var/lib/clip-benutzer"))}
+if len(sys.argv) > 2:
+    with open(lager + "/eingang-probe.txt", "w") as datei:
+        datei.write("max")
+    erg["geschrieben"] = True
 print(json.dumps(erg), flush=True)
 """
 
@@ -330,42 +393,57 @@ class KernelNachbau(unittest.TestCase):
         datei(cls.host / "opt/clip-pipeline/config/pipeline.toml", "[sperre]\n", p)
         datei(cls.host / "opt/clip-pipeline/config/lokal.toml", "florian-geheim", p)
         ordner(cls.host / "var/lib/clip-benutzer", modus=0o711)
+        # Florians Lager (im CT das NFS /srv/big/clips) mit den Unterordnern der Freunde. Dort gehört wegen all_squash
+        # alles „clips“; hier darf jeder in seinen eigenen schreiben – getrennt wird nur über den Mount-Namensraum.
+        lager = cls.host / "srv/big/clips"
+        ordner(lager, p)
+        datei(lager / ".clip-lager", "", p)
+        ordner(lager / "eingang", p)
+        datei(lager / "eingang" / "florian.mp4", "florian-geheim", p)
         for name, uid in (("max", FREUND_UID), ("eva", EVA_UID)):
             inst = cls.host / "var/lib/clip-benutzer" / name
             ordner(inst, 0, uid, 0o750)          # root:clip-<name> 0750 wie im Plan
             ordner(inst / "db", uid, modus=0o700)
             datei(inst / "db" / "pipeline.db", f"{name}-geheim", uid, 0o600)
+            ordner(lager / "freunde" / name, uid)
+            datei(lager / "freunde" / name / f".clip-lager-{name}", "", uid)
+        ordner(cls.host / "var/lib/clip-benutzer/max/lager")   # der Einhängepunkt: root, 0755, leer
         ordner(cls.unit)
         ordner(werkzeug)
-        for name, inhalt in (("sicht.py", SICHT), ("sperre_probe.py", SPERRE),
+        for name, inhalt in (("sicht.py", SICHT), ("sperre_probe.py", SPERRE), ("sicht_lager.py", SICHT_LAGER),
                              ("sperre.py", Path(sperre.__file__).read_text(encoding="utf-8"))):
             datei(werkzeug / name, inhalt)
-        cls.sperre_py, cls.sicht_py, cls.probe_py = (str(werkzeug / n) for n in ("sperre.py", "sicht.py",
-                                                                                    "sperre_probe.py"))
+        cls.sperre_py, cls.sicht_py, cls.probe_py, cls.sicht_lager_py = (
+            str(werkzeug / n) for n in ("sperre.py", "sicht.py", "sperre_probe.py", "sicht_lager.py"))
         cls.python = os.path.realpath(sys.executable)
 
     @classmethod
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
-    def mounts(self) -> str:
-        """Die Mount-Befehle des Sandbox-Blocks: tmpfs, eigene Bindungen, Sperrdatei und Startwissen nur lesbar."""
-        s = werte(sandbox(DIENSTE["clip-freund-bot"]).replace("%i", "max"))
+    def mounts(self, vorlage: Path | None = None) -> str:
+        """Die Mount-Befehle des Sandbox-Blocks: tmpfs, eigene Bindungen, Sperrdatei und Startwissen nur lesbar. Mit
+        vorlage alle ihre Schlüssel – bei der Lager-Vorlage also auch die Lager-Bindung (Quelle:Ziel)."""
+        text = sandbox(DIENSTE["clip-freund-bot"]) if vorlage is None else vorlage.read_text(encoding="utf-8")
+        s = werte(text.replace("%i", "max"))
         h, u = (shlex.quote(str(x)) for x in (self.host, self.unit))
         leer = [e.removesuffix(":ro") for e in s["TemporaryFileSystem"]]
         z = ["set -euo pipefail", f"mount --rbind {h} {u}"]
         z += [f"mount -t tmpfs -o mode=0755 tmpfs {u}{p}" for p in leer]
         for p in s["BindPaths"]:
-            z += [f"mkdir -p {u}{p}", f"mount --bind {h}{p} {u}{p}"]
+            quelle, _, ziel = p.removeprefix("-").partition(":")
+            ziel = ziel or quelle
+            z += [f"mkdir -p {u}{ziel}", f"mount --bind {h}{quelle} {u}{ziel}"]
         for p in s["BindReadOnlyPaths"]:
             z += [f"if [ -d {h}{p} ]; then mkdir -p {u}{p}; else touch {u}{p}; fi", f"mount --bind {h}{p} {u}{p}",
                   f"mount -o remount,bind,ro {u}{p}"]
         z += [f"mount -o remount,ro {u}{p}" for p in leer]
         return "\n".join([*z, 'exec "$@"'])
 
-    def als_freund(self, *argumente: str) -> list[str]:
-        return ["timeout", "60", "unshare", "-m", "--propagation", "private", "bash", "-c", self.mounts(), "ns",
-                "setpriv", f"--reuid={FREUND_UID}", f"--regid={FREUND_UID}", "--clear-groups", "--no-new-privs",
+    def als_freund(self, *argumente: str, vorlage: Path | None = None) -> list[str]:
+        netz = ["-n"] if vorlage is not None and werte(vorlage.read_text(encoding="utf-8")).get("PrivateNetwork") else []
+        return ["timeout", "60", "unshare", "-m", *netz, "--propagation", "private", "bash", "-c", self.mounts(vorlage),
+                "ns", "setpriv", f"--reuid={FREUND_UID}", f"--regid={FREUND_UID}", "--clear-groups", "--no-new-privs",
                 "--", self.python, "-I", "-B", *argumente]
 
     def als_florian(self, *argumente: str) -> list[str]:
@@ -399,6 +477,27 @@ class KernelNachbau(unittest.TestCase):
         self.assertEqual(sicht["oeffne"], "nur lesen")            # sperre.oeffne fällt auf O_RDONLY zurück
         self.assertEqual(sicht["eigen"], "geschrieben")           # der eigene Ordner bleibt schreibbar
         self.assertEqual((self.host / "var/lib/clip-benutzer/max/db/probe.txt").read_text(encoding="utf-8"), "max")
+        self.assertEqual(os.listdir(self.unit), [], "Namensraum nicht privat – Mount ist draußen sichtbar")
+
+    def test_lager_dienst_sieht_nur_seinen_unterordner(self):
+        """Stufe 2: Mit der Lager-Vorlage (Sandbox-Block plus genau eine Bindung, ohne Netz) sieht der Freund in
+        I/lager nur seinen Unterordner – nicht Florians Lager, nicht eva; „..“ führt nach I zurück; schreiben darf er
+        dort. Ohne die Bindung (alle anderen Dienste) ist I/lager der leere Einhängepunkt."""
+        r = subprocess.run(self.als_freund(self.sicht_lager_py, str(self.unit), "schreiben",
+                                           vorlage=DIENSTE["clip-freund-lager"]),
+                           capture_output=True, text=True, timeout=90)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        sicht = json.loads(r.stdout.splitlines()[-1])
+        self.assertEqual(sicht["lager"], [".clip-lager-max"])     # weder .clip-lager noch eingang/ noch freunde/
+        self.assertEqual(sicht["oben"], ["db", "lager"])           # „..“ an der Bindung ist I, nicht freunde/
+        self.assertEqual(sicht["srv"], [])                         # das Lager selbst gibt es dort nicht
+        self.assertEqual(sicht["freunde"], ["max"])
+        self.assertEqual((self.host / "srv/big/clips/freunde/max/eingang-probe.txt").read_text(encoding="utf-8"),
+                         "max")
+        r = subprocess.run(self.als_freund(self.sicht_lager_py, str(self.unit)), capture_output=True, text=True,
+                           timeout=90)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout.splitlines()[-1])["lager"], [])
         self.assertEqual(os.listdir(self.unit), [], "Namensraum nicht privat – Mount ist draußen sichtbar")
 
     def test_sperre_wirkt_in_beide_richtungen(self):
@@ -514,11 +613,12 @@ class UpdateMitFreunden(unittest.TestCase):
         sicherung = next(i for i, a in enumerate(aufrufe) if a.startswith("runuser -u clip-max -- python3"))
         umstellen = next(i for i, a in enumerate(aufrufe) if " checkout " in a)
         self.assertLess(sicherung, umstellen)                     # vor dem Umstellen, als clip-max
-        for vorlage in VORLAGEN:
+        for vorlage in (*VORLAGEN, RUNDGANG_UNIT):   # Stufe 2: auch der Lager-Rundgang – nur hingelegt
             with self.subTest(vorlage.name):
                 self.assertEqual((self.units / vorlage.name).read_text(encoding="utf-8"),
                                  vorlage.read_text(encoding="utf-8"))
-        self.assertFalse([a for a in aufrufe if "clip-freund" in a and ("enable" in a or " start " in a)])
+        self.assertFalse([a for a in aufrufe if ("clip-freund" in a or "clip-lager-freunde" in a)
+                          and ("enable" in a or " start " in a)])
         self.assertFalse((self.stub / "an").exists() and "clip-freund" in (self.stub / "an").read_text())
         self.assertIn("systemctl restart clip-freund-bot@max.service", aufrufe)
         self.assertIn("systemctl restart clip-lernbot", aufrufe)  # Florians Bots wie bisher
@@ -538,7 +638,7 @@ class UpdateMitFreunden(unittest.TestCase):
         vorher = sorted(p.relative_to(self.benutzer).as_posix() for p in self.benutzer.rglob("*"))
         r = self.lauf()
         self.assertEqual(sorted(p.relative_to(self.benutzer).as_posix() for p in self.benutzer.rglob("*")), vorher)
-        self.assertFalse([n for n in os.listdir(self.units) if n.startswith("clip-freund")])
+        self.assertFalse([n for n in os.listdir(self.units) if n.startswith(("clip-freund", "clip-lager-freunde"))])
         self.assertFalse([a for a in self.aufrufe() if "clip-freund" in a or "runuser -u clip-" in a])
         self.assertNotIn("clip-freund", (self.t / "sich.zurueck.sh").read_text(encoding="utf-8"))
         for wort in ("Freund", "Vorlage", "Datenbank von", "ohne-marke", "anders", "lost+found"):
@@ -904,7 +1004,12 @@ esac''',
                    '  "briefkasten abholen") printf "%s\\n" "Briefkasten: 0 abgeholt (Attrappe)" "$ABHOLEN_JSON"; '
                    'exit "${ABHOLEN_RC:-0}" ;;\n'
                    '  "briefkasten status") printf "%s\\n" "$STATUS_JSON"; exit 0 ;;\n'
+                   # Stufe 2: Probe der Lager-Bindung (benutzer-befehl.sh --lager … lager pruefen)
+                   '  "lager pruefen") cp "$STUB/systemd-run.argumente" "$STUB/systemd-run.lager"; '
+                   'printf "%s\\n" "Lager: Attrappe" "$LAGER_JSON"; exit "${LAGER_RC:-0}" ;;\n'
                    'esac\nexit "${RUN_RC:-0}"',
+    # Dein Lager (NFS von pve-big) ist nur eingehängt, solange $STUB/nfs da ist (pve-big wach)
+    "findmnt": '[ -f "$STUB/nfs" ] && cat "$STUB/nfs"',
     # Der Briefkasten antwortet über das Tailnet mit seinem Hostschlüssel (HOSTKEY leer: keine Antwort, wie ein toter Port)
     "ssh-keyscan": r'''port=22; while [ $# -gt 1 ]; do [ "$1" = -p ] && port="$2"; shift; done
 [ -n "${HOSTKEY:-}" ] || exit 1
@@ -1030,6 +1135,12 @@ esac
                     "FLORIAN_DIR": str(self.florian), "RECHTE_ABLAGE": str(t / "root/benutzer-rechte"),
                     "TELEGRAM_API": f"http://127.0.0.1:{server.server_address[1]}", "KOPPEL_CODE": KOPPEL_CODE,
                     "BK_CONF": str(t / "etc/clip-briefkasten.conf"), "HOSTKEY": self.hostkey(),
+                    # Stufe 2, Lager: dein Lager in der Scheinwurzel, „pve-big“ antwortet auf dem Port des
+                    # Telegram-Servers (nur ein offener Port), Sicherung und Rückweg in die Scheinwurzel
+                    "LAGER_NFS": str(t / "srv/big/clips"), "NFS_PORT": str(server.server_address[1]),
+                    "LAGER_ABLAGE": str(t / "root/benutzer-lager"),
+                    "LAGER_JSON": json.dumps({"ok": True, "puffer": "/var/lib/clip-benutzer/max/daten",
+                                              "lager": "/var/lib/clip-benutzer/max/lager"}),
                     "ABHOLEN_JSON": json.dumps({"abgeholt": 0, "gb": 0.0, "wartet": 0, "fehler": [],
                                                 "fach_prozent": 1, "vermerkt": 0, "aufgegeben": 0, "bremse": False}),
                     "STATUS_JSON": json.dumps({"aus": False, "host": "100.100.1.1", "abgeholt": 3, "offen": 0,
@@ -1122,6 +1233,12 @@ esac
             "bash /root/briefkasten/briefkasten-freund.sh max --pc '<Schlüssel>' --abholen '<Schlüssel>'",
             f"$ bash {self.hier}/benutzer-befehl.sh max briefkasten abholen",
             "$ systemctl enable --now clip-freund-scan@max.timer", "$ systemctl enable --now clip-freund-abholen@max.timer",
+            # Stufe 2, Schritt „Lager“ – in der Probe auch bei schlafendem pve-big gezeigt, getan wird nichts
+            "eingerichtet wird erst bei wachem pve-big", "? Lager für max einrichten?",
+            f"$ bash {self.hier}/lager-freunde.sh --ordner max", f"$ mkdir {self.inst}/lager",
+            f"$ chown root:root {self.inst}/lager", "unter [instanz] lager = true eintragen",
+            f"$ bash {self.hier}/benutzer-befehl.sh --lager max lager pruefen",
+            "$ systemctl enable clip-lager-freunde.service", "$ systemctl start --no-block clip-lager-freunde.service",
             "Probe fertig – nichts verändert"])
         self.assertEqual(self.aenderungen(), [])
         self.assertFalse([z for z in self.aufrufe().splitlines() if z.startswith(("ssh-keygen", "ssh-keyscan",
@@ -1268,9 +1385,10 @@ esac
     def test_stilllegen_schaltet_nur_aus(self):
         self.anlegen_max()
         vorher = {k: v for k, v in self.zustand().items() if k.startswith("var/lib/clip-benutzer")}
-        # eine Einladung und ein Abholen laufen gerade (Schritt = „activating“ – is-active -q allein sähe sie nicht)
-        (self.stub / "aktivierend").write_text("clip-freund-koppeln@max.service\nclip-freund-abholen@max.service\n",
-                                               encoding="utf-8")
+        # eine Einladung, ein Abholen und ein Lager-Lauf laufen gerade (Schritt = „activating“ – is-active -q allein sähe
+        # sie nicht)
+        (self.stub / "aktivierend").write_text("clip-freund-koppeln@max.service\nclip-freund-abholen@max.service\n"
+                                               "clip-freund-lager@max.service\n", encoding="utf-8")
         with open(self.stub / "an", "a", encoding="utf-8") as an:
             an.write("clip-freund-abholen@max.timer\n")
         self.neu()
@@ -1281,7 +1399,8 @@ esac
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("systemctl disable --now clip-freund-bot@max.service clip-freund-scan@max.timer "
                       "clip-freund-abend@max.timer clip-freund-abholen@max.timer", self.aufrufe())
-        self.assertIn("systemctl stop clip-freund-abholen@max.service clip-freund-koppeln@max.service", self.aufrufe())
+        self.assertIn("systemctl stop clip-freund-abholen@max.service clip-freund-koppeln@max.service "
+                      "clip-freund-lager@max.service", self.aufrufe())
         self.assertEqual({k: v for k, v in self.zustand().items() if k.startswith("var/lib/clip-benutzer")}, vorher)
         self.assertIn("clip-max:", (self.stub / "passwd").read_text(encoding="utf-8"))
         r = self.lauf(STILLLEGEN, "max")
@@ -1419,6 +1538,124 @@ esac
             self.assertIn(satz, r.stdout)
         for z in self.privat():
             self.assertNotIn(z, r.stdout + r.stderr)
+
+    # --- Stufe 2, Schritt 5: Lager ---------------------------------------------------------------------------------
+
+    def lager_wach(self) -> Path:
+        """pve-big ist wach: dein Lager per NFS eingehängt (findmnt-Attrappe), der Port antwortet, deine Marke ist da."""
+        nfs = self.t / "srv/big/clips"
+        nfs.mkdir(parents=True, exist_ok=True)
+        (nfs / ".clip-lager").touch()
+        (self.stub / "nfs").write_text("127.0.0.1:/tank/clips\n", encoding="utf-8")
+        return nfs
+
+    def lager_max(self) -> subprocess.CompletedProcess:
+        """Max ist angelegt, pve-big wach; Schritt „Lager“: j (anlegen), n (Briefkasten), j (Lager), n (nicht sofort)."""
+        self.anlegen_max()
+        self.lager_wach()
+        self.neu()
+        r = self.lauf(ANLEGEN, "max", eingabe="j\nn\nj\nn\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r
+
+    def test_lager_ordner_schalter_probe_dann_rundgang(self):
+        """Normaler Weg: Bei schlafendem pve-big fragt das Skript gar nicht. Bei wachem: Ordner und Marke im Lager,
+        Einhängepunkt (root, leer), Schalter (nur dieser eine Wert, alte Datei gesichert), Probe der Bindung in seiner
+        Sandbox (Lager-Vorlage: genau die Bindung, ohne Netz), erst dann der Rundgang – eingeschaltet, nicht gestartet;
+        „Jetzt einmal sichern?“ startet ihn im Hintergrund. Bei Florian ändert sich nichts. Ein zweiter Lauf fragt
+        nichts mehr, der Rückweg stellt den Schalter zurück."""
+        r = self.anlegen_max()
+        self.assertIn("Lager: noch aus – jetzt nicht: das Lager", r.stdout)
+        self.assertFalse((self.inst / "lager").exists())
+        nfs = self.lager_wach()
+        florian = {k: v for k, v in self.zustand().items() if k.startswith(("var/lib/clip-pipeline", "opt/"))}
+        toml_vorher = (self.inst / "instanz.toml").read_text(encoding="utf-8")
+        self.neu()
+        r = self.lauf(ANLEGEN, "max", eingabe="j\nn\nj\nj\n")   # anlegen, kein Briefkasten, Lager, gleich sichern
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        aufrufe = self.aufrufe()
+        self.assertTrue((nfs / "freunde/max/.clip-lager-max").is_file())
+        lager = self.inst / "lager"
+        self.assertEqual((self.besitzer(lager), stat.S_IMODE(lager.stat().st_mode), os.listdir(lager)),
+                         ("root:root", 0o755, []))
+        neu, alt = (tomllib.loads(t) for t in ((self.inst / "instanz.toml").read_text(encoding="utf-8"), toml_vorher))
+        self.assertEqual(neu.pop("instanz"), {"lager": True})
+        self.assertEqual(neu, alt)                                    # sonst nichts geändert
+        self.assertEqual(stat.S_IMODE((self.inst / "instanz.toml").stat().st_mode), 0o640)
+        ablage = self.t / "root/benutzer-lager"
+        self.assertEqual(next(ablage.glob("instanz-max-vor-lager-*.toml")).read_text(encoding="utf-8"), toml_vorher)
+        argumente = (self.stub / "systemd-run.lager").read_text(encoding="utf-8").splitlines()
+        eigenschaften = [argumente[i + 1] for i, a in enumerate(argumente) if a == "-p"]
+        self.assertIn("BindPaths=/srv/big/clips/freunde/max:/var/lib/clip-benutzer/max/lager", eigenschaften)
+        self.assertIn("PrivateNetwork=yes", eigenschaften)
+        self.assertIn("User=clip-max", eigenschaften)
+        self.assertEqual(argumente[-2:], ["lager", "pruefen"])
+        self.assertEqual((self.units / "clip-lager-freunde.service").read_text(encoding="utf-8"),
+                         RUNDGANG_UNIT.read_text(encoding="utf-8"))
+        assertReihenfolge(self, r.stdout, [f"angelegt: {nfs}/freunde/max", f"[instanz] lager = true in {self.inst}",
+                                           "✅ Probe der Bindung", "$ systemctl enable clip-lager-freunde.service",
+                                           "$ systemctl start --no-block clip-lager-freunde.service"])
+        assertReihenfolge(self, aufrufe, ["systemd-run", "systemctl enable clip-lager-freunde.service",
+                                          "systemctl start --no-block clip-lager-freunde.service"])
+        self.assertNotIn("enable --now clip-lager-freunde", aufrufe)
+        for satz in ("✅ Probe der Bindung", "✅ Rundgang an – fährt bei deinem Lager-Abgleich mit",
+                     "noch nie mitgefahren", "Lager:             an", "Alles getrennt"):
+            self.assertIn(satz, r.stdout)
+        self.assertEqual({k: v for k, v in self.zustand().items() if k.startswith(("var/lib/clip-pipeline", "opt/"))},
+                         florian)
+        self.assertNichtsVerraten(r.stdout, r.stderr, aufrufe)
+
+        # Zweiter Lauf: keine Frage zum Lager, keine Änderung
+        self.neu()
+        r = self.lauf(ANLEGEN, "max", eingabe="j\nn\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Lager: schon eingerichtet", r.stdout)
+        self.assertEqual(self.aenderungen(), ["systemctl start clip-freund-einrichten@max.service"])
+
+        # Rückweg: Schalter wie vorher; seine Daten im Lager bleiben
+        rueckweg = next(ablage.glob("zurueck-lager-max-*.sh"))
+        r = subprocess.run(["bash", str(rueckweg)], capture_output=True, text=True, env=self.env, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((self.inst / "instanz.toml").read_text(encoding="utf-8"), toml_vorher)
+        self.assertTrue((nfs / "freunde/max/.clip-lager-max").is_file())
+
+    def test_lager_probe_rot_schalter_wieder_aus(self):
+        """Wichtigster Fehlerfall: Die Bindung klappt in seiner Sandbox nicht (z. B. kein NFS) – der Schalter geht
+        wieder aus, der Rundgang wird weder hingelegt noch eingeschaltet; das Skript endet trotzdem mit 0."""
+        self.anlegen_max()
+        self.lager_wach()
+        toml_vorher = (self.inst / "instanz.toml").read_text(encoding="utf-8")
+        self.neu()
+        rot = {"fehler": "konfig", "hinweis": "Lager /var/lib/clip-benutzer/max/lager ist kein NFS (nicht eingebunden)"}
+        r = self.lauf(ANLEGEN, "max", eingabe="j\nn\nj\n", LAGER_RC="2", LAGER_JSON=json.dumps(rot))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("❌ Probe der Bindung: Lager /var/lib/clip-benutzer/max/lager ist kein NFS (nicht eingebunden) "
+                      "(Exit 2)", r.stdout)
+        self.assertIn("Schalter wieder aus", r.stdout)
+        self.assertEqual((self.inst / "instanz.toml").read_text(encoding="utf-8"), toml_vorher)
+        self.assertFalse((self.units / "clip-lager-freunde.service").exists())
+        self.assertNotIn("clip-lager-freunde", self.aufrufe())
+        self.assertIn("ℹ️  kein Lager", r.stdout)
+
+    def test_lager_pruefen_und_stilllegen(self):
+        """benutzer-pruefen.sh: ein nicht leerer Einhängepunkt und ein letzter Lager-Lauf mit Fehler sind Befunde;
+        benutzer-stilllegen.sh hält einen laufenden Lager-Lauf an, sein Ordner im Lager bleibt."""
+        self.lager_max()
+        (self.inst / "lager" / "fremd.txt").write_text("x", encoding="utf-8")
+        (self.florian / "lager-freunde.json").write_text(json.dumps({"freunde": {"max": {
+            "ok": False, "exit": 2, "ende": "2026-10-09T10:30:00Z", "zuletzt_ok": None}}}), encoding="utf-8")
+        r = self.lauf(PRUEFEN, "max")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(f"❌ {self.inst}/lager ist nicht leer", r.stdout)
+        self.assertIn("❌ letzter Lager-Lauf", r.stdout)
+        self.assertIn("(Exit 2, noch nie gut)", r.stdout)
+        (self.stub / "aktivierend").write_text("clip-freund-lager@max.service\n", encoding="utf-8")
+        self.neu()
+        r = self.lauf(STILLLEGEN, "max", eingabe="j\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("systemctl stop clip-freund-lager@max.service", self.aufrufe())
+        self.assertIn("Sein Ordner im Lager (freunde/max auf pve-big) bleibt", r.stdout)
+        self.assertTrue((self.t / "srv/big/clips/freunde/max/.clip-lager-max").is_file())
 
     def test_befehl_nur_mit_der_sandbox_der_vorlage(self):
         self.inst.mkdir()

@@ -10,6 +10,7 @@ import ipaddress
 import os
 import re
 import socket
+import stat
 import sys
 import time
 import tomllib
@@ -225,7 +226,8 @@ class Konfig:
 
         Nur stat()/exists – nie Inhalte lesen (NFS OPEN/READ hielte pve-big wach). mit_lager=False prüft nur die
         Puffer-Seite (vor dem Wecken: das Lager nicht anfassen). Mit Lager: schläft pve-big, SpeicherOffline
-        statt am hängenden Mount zu warten."""
+        statt am hängenden Mount zu warten. Instanz eines Freundes mit [instanz] lager = true (Stufe 2, M101): das Lager
+        muss sein per NFS eingebundener Unterordner sein – Florians Marke und freunde/ sind dort nie sichtbar."""
         puffer = self.wurzel
         lager = self.lager_wurzel
         m_puffer = str(self.wert("puffer.markierung", ".clip-puffer"))
@@ -242,6 +244,8 @@ class Konfig:
             raise SpeicherOffline(f"Lager-Host {self._lager_host()} schläft – Lager kann nicht geprüft werden")
         if not lager.is_dir():
             raise KonfigFehler(f"Lager {lager} ([lager].wurzel) gibt es nicht")
+        if self.instanz is not None and self.wert("instanz.lager") is True:
+            _pruefe_lager_des_freundes(lager, str(self.wert("instanz.name", "")))
         if os.path.samefile(puffer, lager):
             raise KonfigFehler(f"Puffer {puffer} und Lager {lager} sind derselbe Ordner – Link /srv/clips prüfen")
         if _dateisystem(puffer) == _dateisystem(lager):
@@ -257,6 +261,48 @@ def _dateisystem(pfad: Path) -> int:
     """Gerätenummer des Dateisystems (st_dev). Eigene Funktion, damit Tests sie ersetzen können
     (zwei Temp-Ordner liegen immer auf demselben Dateisystem)."""
     return os.stat(pfad).st_dev
+
+
+MOUNTINFO = Path("/proc/self/mountinfo")
+NFS_TYPEN = ("nfs", "nfs4")
+FLORIANS_LAGER_MARKE = ".clip-lager"   # Marke an der Wurzel von Florians Lager ([lager].markierung bei ihm)
+
+
+def _mountpunkt(roh: str) -> str:
+    """Einhängepunkt aus /proc/self/mountinfo: Leerzeichen, Tab, Zeilenumbruch und \\ stehen dort als \\040 usw."""
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), roh)
+
+
+def _dateisystem_typ(pfad: Path) -> str | None:
+    """Typ des Dateisystems, das GENAU an pfad eingehängt ist (/proc/self/mountinfo; bei mehreren Einträgen zählt der
+    letzte, der oben liegt) – None, wenn pfad kein Einhängepunkt ist. Eine Bindung zeigt den Typ ihrer Quelle (ein
+    NFS-Unterordner also nfs4). Eigene Funktion, damit Tests sie ersetzen können."""
+    ziel = os.path.realpath(pfad)
+    try:
+        zeilen = MOUNTINFO.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    typ = None
+    for zeile in zeilen:
+        vorn, trenner, hinten = zeile.partition(" - ")
+        felder = vorn.split()
+        if trenner and len(felder) >= 5 and hinten.split() and _mountpunkt(felder[4]) == ziel:
+            typ = hinten.split()[0]
+    return typ
+
+
+def _pruefe_lager_des_freundes(lager: Path, name: str) -> None:
+    """Lager-Weg eines Freundes (Stufe 2, M101): Gültig ist nur sein Unterordner freunde/<name> auf pve-big, den der
+    Dienst clip-freund-lager@<name> per NFS nach I/lager bindet. Überall sonst ist I/lager der leere Einhängepunkt –
+    dann wird nichts kopiert. Nur stat() (pve-big ist auf diesem Weg wach). Sonst KonfigFehler."""
+    typ = _dateisystem_typ(lager)
+    if typ not in NFS_TYPEN:
+        raise KonfigFehler(f"Lager {lager} ist kein NFS ({typ or 'nicht eingebunden'}) – das Lager eines Freundes sieht "
+                           f"nur sein Lager-Dienst clip-freund-lager@{name}. Nichts kopiert.")
+    for fremd in (FLORIANS_LAGER_MARKE, "freunde"):
+        if os.path.lexists(lager / fremd):
+            raise KonfigFehler(f"Im Lager {lager} ist {fremd} sichtbar – das ist Florians Lager, nicht freunde/{name}. "
+                               "Nichts kopiert.")
 
 
 def _vorbei(zeitpunkt: str) -> bool:
@@ -340,9 +386,12 @@ CLAUDE_TOKEN_NAME = "CLAUDE_CODE_OAUTH_TOKEN"
 NICHT_MIT_INSTANZ = ("CLIP_KONFIG", "CLIP_SPEICHER", "CLIP_DATENBANK")
 # instanz.toml: Abschnitt → erlaubte Schlüssel (None = die, die die Repo-pipeline.toml dort kennt)
 INSTANZ_ERLAUBT: dict[str, tuple[str, ...] | None] = {
-    "schnitt": None, "zeit": None, "merkmale.waffen": None, "sperre": ("datei", "warten_s"), "instanz": ("claude",),
+    "schnitt": None, "zeit": None, "merkmale.waffen": None, "sperre": ("datei", "warten_s"),
+    # Stufe 2 (M98): lager = true schaltet sein Lager auf pve-big ein – trägt benutzer-anlegen.sh (Schritt „Lager“) ein
+    "instanz": ("claude", "lager"),
     # Stufe 2 (M93): Briefkasten auf dem vServer – trägt benutzer-anlegen.sh ein; Benutzer und Schlüssel sind fest
     "briefkasten": ("host", "port", "oeffentlich", "drossel_kbit", "loeschen", "karenz_h")}
+ROOT_UID = 0   # dem gehört der Einhängepunkt I/lager außerhalb des Lager-Dienstes (Tests ohne root setzen ihre eigene)
 TAILNET = ipaddress.IPv4Network("100.64.0.0/10")   # Adressen im Tailnet (Tailscale)
 INSTANZ_WARTEN_S = 900   # M7: ein Freund wartet höchstens 15 min auf die Sperre (wenn instanz.toml nichts sagt)
 # Florians Daten und Code: eine Instanz darf weder darin liegen noch sie umfassen (dazu der Code-Ordner PROJEKT)
@@ -450,7 +499,7 @@ def _pruefe_erlaubt(eigen: dict, basis: dict, toml: Path) -> None:
     Lager, pve-big, Hosts, KI-Programm …) ist ein KonfigFehler – kein stilles Übergehen."""
     def nein(was: str) -> KonfigFehler:
         return KonfigFehler(f"{toml}: {was} ist in einer instanz.toml nicht erlaubt (nur [schnitt], [zeit], "
-                            "[merkmale.waffen], [sperre] datei/warten_s, [instanz] claude und [briefkasten])")
+                            "[merkmale.waffen], [sperre] datei/warten_s, [instanz] claude/lager und [briefkasten])")
 
     abschnitte: dict[str, Any] = {}
     for name, inhalt in eigen.items():
@@ -480,9 +529,19 @@ def _erzwinge(daten: dict, eigen: dict, inst: Path, name: str, toml: Path) -> No
     big = daten.setdefault("big", {})
     big.pop("ssh", None)   # ersetzte sonst den ganzen SSH-Aufruf (Test-Schalter)
     big.update(host="", ssh_ziel="", ssh_schluessel="", frist="", zustand_ordner=str(inst / "db"))
-    # Puffer-Betrieb ohne Lager (M10): ein Lager-Pfad, den es nie gibt (I gehört root) – jeder Lager-Zugriff scheitert
-    daten.setdefault("lager", {}).update(wurzel=str(inst / "kein-lager"), warten_s=0)
-    daten.setdefault("puffer", {}).update(freigeben=False, pool_status="")   # bei Freunden wird nichts gelöscht
+    lager_an = eigen.get("instanz", {}).get("lager", False)
+    if not isinstance(lager_an, bool):
+        raise KonfigFehler(f"{toml}: [instanz].lager muss true oder false sein, nicht {lager_an!r}")
+    if lager_an:
+        # Stufe 2 (M98): sein Unterordner freunde/<name> im Lager auf pve-big – nur der Dienst clip-freund-lager@ bindet
+        # ihn nach I/lager (überall sonst ist I/lager der leere Einhängepunkt). Host, MAC und SSH bleiben leer: er weckt
+        # nie. Freigeben im Puffer wie bei Florian (B5: 14 Tage, Kopie im Lager bestätigt, erster Lauf nur Probe).
+        daten.setdefault("lager", {}).update(wurzel=str(inst / "lager"), markierung=f".clip-lager-{name}", warten_s=0)
+        daten.setdefault("puffer", {}).update(freigeben=True, pool_status="")
+    else:
+        # Puffer-Betrieb ohne Lager (M10): ein Lager-Pfad, den es nie gibt (I gehört root) – jeder Lager-Zugriff scheitert
+        daten.setdefault("lager", {}).update(wurzel=str(inst / "kein-lager"), warten_s=0)
+        daten.setdefault("puffer", {}).update(freigeben=False, pool_status="")   # ohne Lager wird nichts gelöscht
     daten.setdefault("aufraeumen", {})["aktiv"] = False
     # Florians claude-Weg bleibt gebremst; ein Freund nutzt nur seinen eigenen Zugang (claude_aufruf, [instanz].claude)
     daten.setdefault("decide", {})["programm"] = ""
@@ -510,7 +569,7 @@ def _erzwinge(daten: dict, eigen: dict, inst: Path, name: str, toml: Path) -> No
         raise KonfigFehler(f"{toml}: [instanz].claude muss ein absoluter Pfad sein, nicht {claude!r}")
     if claude.strip() and (bereich := claude_verboten(claude.strip())):
         raise KonfigFehler(f"{toml}: [instanz].claude liegt unter {bereich} – dort nie (Florians Bereich, Home-Ordner)")
-    daten["instanz"] = {"wurzel": str(inst), "name": name, "claude": claude.strip()}
+    daten["instanz"] = {"wurzel": str(inst), "name": name, "claude": claude.strip(), "lager": lager_an}
     _briefkasten(daten, inst, name, toml)
 
 
@@ -551,12 +610,35 @@ def _briefkasten(daten: dict, inst: Path, name: str, toml: Path) -> None:
 
 
 def _pruefe_pfade(daten: dict, inst: Path) -> None:
-    """Pfadwächter: jeder Datenpfad liegt – aufgelöst, mit allen Links – in I. Den Lager-Pfad gibt es nie."""
+    """Pfadwächter: jeder Datenpfad liegt – aufgelöst, mit allen Links – in I. Ohne Lager-Schalter gibt es den
+    Lager-Pfad nie (M10); mit Schalter ist I/lager ein echter Ordner (M98)."""
     k = Konfig(daten, inst)   # nur zum Lesen per Punkt-Pfad
     pfade = [(n, Path(str(k.wert(n)))) for n in DATENPFADE]
     pfade += [(n, k.wurzel / str(k.wert(n))) for n in IM_PUFFER if k.wert(n)]
     for schluessel, pfad in pfade:
         if not liegt_in(pfad, inst):
             raise KonfigFehler(f"{pfad} ({schluessel}) liegt aufgelöst außerhalb der Instanz {inst} – Link?")
-    if os.path.lexists(k.lager_wurzel):
+    if k.wert("instanz.lager") is True:
+        _pruefe_einhaengepunkt(k.lager_wurzel, inst)
+    elif os.path.lexists(k.lager_wurzel):
         raise KonfigFehler(f"{k.lager_wurzel} gibt es – eine Instanz hat (noch) kein Lager, der Pfad muss fehlen (M10)")
+
+
+def _pruefe_einhaengepunkt(lager: Path, inst: Path) -> None:
+    """[instanz] lager = true (M98): I/lager ist ein echter Ordner – nie ein Link. Ist er nicht eingebunden (alle
+    Dienste außer clip-freund-lager@: dasselbe Dateisystem wie I), gehört er root; anlegen kann ihn nur root
+    (benutzer-anlegen.sh, Schritt „Lager“). Eingebunden liegt dort sein Unterordner auf pve-big – ob das wirklich
+    NFS und der richtige Ordner ist, prüft pruefe_getrennt auf dem Lager-Weg."""
+    try:
+        st = os.lstat(lager)
+        eingebunden = stat.S_ISDIR(st.st_mode) and _dateisystem(lager) != _dateisystem(inst)
+    except FileNotFoundError:
+        raise KonfigFehler(f"{lager} fehlt – [instanz] lager = true braucht diesen Einhängepunkt (benutzer-anlegen.sh, "
+                           "Schritt „Lager“)") from None
+    except OSError as e:   # z. B. das NFS im Lager-Dienst hängt gerade (EIO) – Klartext statt Absturz
+        raise KonfigFehler(f"{lager} nicht lesbar ({e.strerror or type(e).__name__}) – Lager weg?") from None
+    if not stat.S_ISDIR(st.st_mode):
+        raise KonfigFehler(f"{lager} ist kein echter Ordner (Link?) – das Lager wird nur eingebunden, nie verlinkt")
+    if not eingebunden and st.st_uid != ROOT_UID:
+        raise KonfigFehler(f"{lager} gehört nicht root – den Einhängepunkt legt nur benutzer-anlegen.sh an (Schritt "
+                           "„Lager“)")

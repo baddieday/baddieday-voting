@@ -311,7 +311,8 @@ def _cmd_material(args, konfig, con) -> int:
 def _cmd_lager(args, konfig, con) -> int:
     """Puffer ↔ Lager (E19). Exit: 0 ok · 1 Datei-Fehler (Übernahme auch: Konflikt, zu jung) · 2 Aufruf/Konfig ·
     3 Lager offline/nicht geweckt · 4 Lager-Sperre belegt (Gesperrt, in main). Der Probelauf endet ohne Abbruch mit 0,
-    ebenso ein Abgleich, der in der Nachtruhe nicht wecken durfte ("nachtruhe": true).
+    ebenso ein Abgleich, der in der Nachtruhe nicht wecken durfte ("nachtruhe": true). pruefen: 0 alles gut,
+    2 verwechselt oder falscher Ordner, 3 Lager schläft bzw. nicht eingehängt.
     Die Übernahme läuft vor dem Umschalten, also auch ohne [lager]."""
     from . import lager
 
@@ -325,6 +326,13 @@ def _cmd_lager(args, konfig, con) -> int:
             log.info("%s", stand["zeile"])
             _json(stand)
             return 0 if stand["pruefung"] == "ok" else 2
+        if args.aktion == "pruefen":
+            # Nur nachsehen (stat, kurzer TCP-Versuch ohne Wecken): schläft pve-big, SpeicherOffline (Exit 3). Bei einem
+            # Freund (Stufe 2) dazu sein Lager-Weg: NFS, Florians Marke unsichtbar, eigene Marke – benutzer-anlegen.sh
+            # prüft so die Bindung in seiner Sandbox, bevor der Rundgang ihn mitnimmt
+            konfig.pruefe_getrennt()
+            _json({"ok": True, "puffer": str(konfig.wurzel), "lager": str(konfig.lager_wurzel)})
+            return 0
         if args.aktion == "abgleich":
             ergebnis = lager.abgleich(con, konfig, probelauf=args.probelauf)
         else:
@@ -887,12 +895,14 @@ def baue_parser() -> argparse.ArgumentParser:
     s.add_argument("--probelauf", action="store_true", help="nur zeigen, was kopiert würde (weckt nicht)")
     s.set_defaults(fn=_cmd_material, sperren=False)
 
-    s = unter.add_parser("lager", help="Puffer ↔ Lager auf pve-big (E19): abgleich | status | uebernehmen")
+    s = unter.add_parser("lager", help="Puffer ↔ Lager auf pve-big (E19): abgleich | status | pruefen | uebernehmen")
     lager_befehle = s.add_subparsers(dest="aktion", required=True)
     a = lager_befehle.add_parser("abgleich", help="Puffer → Lager mit SHA-256 (weckt pve-big nur, wenn etwas offen "
                                                   "ist – nie in der Nachtruhe)")
     a.add_argument("--probelauf", action="store_true", help="nur zeigen, was offen ist (weckt nicht, kopiert nichts)")
     lager_befehle.add_parser("status", help="offene Dateien, letzter Abgleich, Puffer und Lager frei (weckt nie)")
+    lager_befehle.add_parser("pruefen", help="Puffer und Lager eingehängt und nicht verwechselt? Nur nachsehen, weckt "
+                                             "nie (bei einem Freund: sein Lager-Weg, Stufe 2)")
     a = lager_befehle.add_parser("uebernehmen", help="einmalig Lager → Puffer vor dem Umschalten (docs/PUFFER.md R4/R5)")
     a.add_argument("--von", required=True, help="Lager, z. B. /srv/big/clips")
     a.add_argument("--nach", required=True, help="Puffer, z. B. /srv/puffer")

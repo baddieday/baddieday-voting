@@ -26,6 +26,8 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
     `benutzer-pruefen.sh` (Schritt 7)
   - `clip-freund-koppeln@` – Einladungslink, einmalig, gestartet von `benutzer-anlegen.sh` (Schritt 8)
   - `clip-freund-abholen@` + Timer – alle 2 min `briefkasten abholen` (Stufe 2; an erst nach grüner Probe-Abholung)
+  - `clip-freund-lager@` – ohne Timer, `lager abgleich` mit seinem Unterordner im Lager (Stufe 2; gestartet nur vom
+    Rundgang `clip-lager-freunde.service`, der als root bei Florians Abgleich mitfährt)
 - **Gemeinsam:** nur Florians Sperrdatei `/var/lib/clip-pipeline/pipeline.lock`, dazu Prozessor, Grafikchip und Netz.
 
 ## Ordner (I = `/var/lib/clip-benutzer/<name>`)
@@ -36,6 +38,7 @@ nur eine Sache auf einmal. Bei Florian bleibt alles, wie es ist.
 | I/db | 0700 | `pipeline.db`, `publikum-oauth.json`, `mikro.anstoss`, `big-zustand`, `kopplung.json` (0600); Stufe 2: `briefkasten.json`, `pc-status.json`, `pipeline.briefkasten.lock` |
 | I/daten (= Puffer) | 0700 | `.clip-speicher`, `.clip-puffer`, `eingang/`, `replays/`, `sessions/`, `sitzungen/`, `export/`; Stufe 2: `.abholen/` (Zwischenablage des Abholers) |
 | I/briefkasten (Stufe 2) | `root:clip-<name>` 0750 | Schlüssel `abholen`, `pc` (je mit `.pub`), `known_hosts`, `known_hosts_pc` – alle `root:clip-<name>` 0640: er liest sie, tauschen kann er sie nicht |
+| I/lager (Stufe 2) | root:root 0755, leer | Einhängepunkt: nur im Dienst `clip-freund-lager@` liegt hier sein Unterordner `freunde/<name>` aus dem Lager |
 | I/regie, I/musik, I/material, I/sfx, I/cache | 0700 | I/cache ist auch HOME und Whisper-Cache |
 
 ## Konfig im Instanz-Modus (`CLIP_INSTANZ=I`, umgesetzt in Schritt 2)
@@ -50,11 +53,14 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
   `lokal.toml` werden nie geöffnet. Verboten: `--konfig`, `CLIP_KONFIG`, `CLIP_SPEICHER`, `CLIP_DATENBANK` (Exit 2).
 - **Quellen:** Repo-`pipeline.toml` plus `I/instanz.toml`. Dort erlaubt: `[schnitt]`, `[zeit]`, `[merkmale.waffen]`
   (nur Schlüssel, die die Repo-Konfig dort kennt), `[sperre]` `datei`/`warten_s`, `[instanz]` `claude`, seit Stufe 2
-  `[briefkasten]` (host, port, oeffentlich, drossel_kbit, loeschen, karenz_h – geprüft, siehe unten). Alles andere
-  (Datenbank, Lager, pve-big, Pfade …) ist ein Konfig-Fehler.
+  `[briefkasten]` (host, port, oeffentlich, drossel_kbit, loeschen, karenz_h – geprüft, siehe unten) und `[instanz]`
+  `lager` (true/false, siehe „Lager für Freunde“). Alles andere (Datenbank, Lager-Pfade, pve-big, Pfade …) ist ein
+  Konfig-Fehler.
 - **Erzwungen:** `I/db/pipeline.db`, Puffer `I/daten`, `I/regie`, `I/musik`, `I/material`, `I/sfx`, Zustand von
-  pve-big in `I/db`; kein Host, keine MAC, kein SSH (auch kein Schlüssel); Freigeben im Puffer und Aufräumen aus;
-  Lager-Pfad `I/kein-lager` (darf es nicht geben – jeder Lager-Zugriff scheitert sicher, Puffer-Betrieb ohne Lager).
+  pve-big in `I/db`; kein Host, keine MAC, kein SSH (auch kein Schlüssel); Aufräumen aus. Ohne Lager-Schalter:
+  Freigeben im Puffer aus, Lager-Pfad `I/kein-lager` (darf es nicht geben – jeder Lager-Zugriff scheitert sicher,
+  Puffer-Betrieb ohne Lager). Mit `[instanz] lager = true` (Stufe 2): Lager `I/lager`, Marke `.clip-lager-<name>`,
+  Freigeben wie bei Florian (B5).
 - **Sperre:** `[sperre].datei` ist Pflicht, absolut, außerhalb von I und muss es schon geben (Florians Datei – eine
   Instanz legt nie eine eigene an, auch nicht bei einem Tippfehler, M41). Fehlt `warten_s`, wartet ein Freund 900 s.
 - **Pfadwächter:** Jeder Datenpfad (auch die Unterordner im Puffer) muss aufgelöst in I liegen – ein Link hinaus ist
@@ -227,7 +233,7 @@ Der Freund muss keine Zahl suchen: Er tippt einen Link an und drückt Start.
   sein Bot nie Nachrichten ab (er beendet sich sofort). Das Anlege-Skript hält ihn vorher an (falls doch etwas läuft)
   und schaltet ihn erst nach der Kopplung ein. Meldet Telegram trotzdem einen zweiten Empfänger, bricht koppeln ab,
   ohne etwas zu speichern. Telegram fragt es wie sein Lern-Bot (über IPv4), keine neue Bibliothek.
-- **Im Anlege-Skript** (Schritt 8 von 11): zeigt dir den Link (nur den dieses Laufs), wartet, liest danach als root
+- **Im Anlege-Skript** (Schritt 8 von 12): zeigt dir den Link (nur den dieses Laufs), wartet, liest danach als root
   `kopplung.json` (folgt keinem Link, nur eine Zahl und der Vorname) und hängt die Zahl als
   `LEARN_BOT_ALLOWED_USER_ID` an seine `.env` (bleibt root:clip-<name>, 0640). Strg+C beendet nur das Warten: die
   Einladung gilt weiter, der nächste Lauf übernimmt die Zahl ohne neuen Link.
@@ -295,6 +301,39 @@ M97, M117–M124.
 - **Rückmeldung:** `status/pc-status.json` (was wartet, was übersprungen ist); daraus meldet sein Bot „PC verbunden“,
   eine falsche Zeitzone und Aufnahmen ohne Replay, 📋 zeigt „PC: zuletzt vor … · n unterwegs“.
 
+## Lager für Freunde (Stufe 2, Schritt 5 – umgesetzt)
+„Wie bei dir, mit Lager“: Hat Florians täglicher Abgleich pve-big ohnehin geweckt, fahren die Freunde mit. Ein Freund
+weckt nie. Annahmen M98–M101, M107, M125–M130.
+- **Ort:** im bestehenden Lager `freunde/<name>/` (im CT `/srv/big/clips/freunde/<name>`) mit Marke
+  `.clip-lager-<name>` – kein neues Dataset, kein neuer Export, keine neue Einhängung.
+- **Schalter:** `[instanz] lager = true` plus der leere, root-eigene Einhängepunkt `I/lager`; beides setzt nur
+  `benutzer-anlegen.sh` (Schritt 11 „Lager“, nur bei wachem pve-big). Dann gelten Lager `I/lager`, Marke
+  `.clip-lager-<name>` und Freigeben wie bei Florian; ohne Schalter genau Stufe 1.
+- **Kopieren:** `clip-freund-lager@<name>` (Sandbox-Block plus genau eine Bindung `freunde/<name>` → `I/lager`, ohne
+  Netz, höchstens 2 h) ruft `pipeline lager abgleich` – derselbe Code wie bei Florian: Datenbank sichern, jede Datei mit
+  SHA-256 zurücklesen, Rohdaten nie überschreiben; danach gibt sein Puffer Rohvideos frei, die älter als 14 Tage und im
+  Lager bestätigt sind (erster Lauf nur Probe). Vorher prüft er: `I/lager` ist NFS, Florians Marke und `freunde/` sind
+  dort unsichtbar, seine Marke ist da – sonst nichts kopiert. Seine anderen Dienste sehen nur das leere `I/lager`.
+- **Mitfahren:** `clip-lager-freunde.service` (root) startet zusammen mit Florians `clip-lager.service` und läuft
+  `deploy/benutzer/lager-freunde.sh`: Halten-Marke „freunde“, warten bis Florians Abgleich fertig ist, prüfen ohne Wecken
+  (NFS eingehängt, Port 2049, Florians Marke), dann je Freund mit Lager und laufendem scan-Timer nacheinander, neue
+  Starts nur 10–18 Uhr, mit Herzschlag für clip-leerlauf; am Ende Marke lösen und
+  `/var/lib/clip-pipeline/lager-freunde.json` schreiben. Schläft pve-big: nichts, die Freunde fahren beim nächsten Mal
+  mit (höchstens 7 Tage, wenn Florian nichts Neues hat).
+- **Nachsehen:** `bash deploy/benutzer/lager-freunde.sh --probe` (wer würde mitfahren), `journalctl -u
+  clip-lager-freunde -n 50`, `bash deploy/benutzer/benutzer-befehl.sh <name> lager status`; `benutzer-pruefen.sh` zeigt
+  Einhängepunkt, Rundgang und seinen letzten Lauf. `benutzer-stilllegen.sh` hält auch einen laufenden Lager-Lauf an.
+- **Vor Ort einmal** (bei wachem pve-big, nach dem 10-Uhr-Abgleich): auf pve-big `exportfs -v` (all_squash,
+  anonuid=101000?), im CT `findmnt -no SOURCE,FSTYPE,OPTIONS /srv/big/clips` (nfs4, soft; die Quelle muss vom CT aus
+  erreichbar sein, am besten als IP), dann `benutzer-anlegen.sh <name>`, im Schritt „Lager“ j. Am Tag danach
+  `journalctl -u clip-lager-freunde -n 50` und `benutzer-befehl.sh <name> lager status` – die erste Freigabe ist nur
+  eine Probe.
+- **Rückweg:** für alle `systemctl disable clip-lager-freunde.service`; je Freund das Rückweg-Skript in
+  `/root/benutzer-lager/` (Schalter wie vorher). Seine Daten im Lager bleiben.
+- **Bei Florian:** `lager.py`, `big.py` und `clip-lager.service` unverändert (Test mit Prüfsummen); ohne eingeschalteten
+  Rundgang läuft sein Abgleich genau wie bisher. Neu sichtbar: der Ordner `freunde/` im Lager (auch über sein SMB
+  `[clips]`) und an Tagen mit Freunden ein länger wacher pve-big (nur tagsüber).
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -302,14 +341,13 @@ M97, M117–M124.
 | Speicher, alte Rohvideos? | „Wie bei dir, mit Lager“ | Ab Stufe 2: Rohvideos ins Lager auf pve-big (eigener Unterordner je Freund), im Puffer nach 14 Tagen frei bei bestätigter Kopie (wie B5). In Stufe 1 wird bei Freunden nichts gelöscht |
 | KI für Freunde? | „Eigener Claude-Zugang“ | Jeder Freund mit eigenem Claude-Abo; ohne Zugang bleibt die KI bei ihm aus |
 
-Geplanter Lager-Abgleich ab Stufe 2 (nur geplant): Florians täglicher Abgleich hält pve-big wach; danach läuft je
-Freund ein Abgleich als dessen eigener Benutzer in der Sandbox, der nur seinen eigenen Unterordner sieht. Ein Freund
-weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
+Offen: freier Speicher auf dem vServer für den Briefkasten.
 
 ## Migration
 - Keine Daten werden bewegt, das Schema bleibt. Ohne `CLIP_INSTANZ` und ohne `[sperre].datei` läuft alles wie bisher.
-- Gibt es Freunde, sichert das Update zusätzlich jede Instanz-Datenbank, legt die Vorlagen nur auf die Platte (schaltet
-  sie nie ein) und startet laufende Freundes-Bots neu (umgesetzt, Schritt 5). Florian spielt alles selbst ein; kein
+- Gibt es Freunde, sichert das Update zusätzlich jede Instanz-Datenbank, legt die Vorlagen und den Lager-Rundgang
+  `clip-lager-freunde.service` nur auf die Platte (schaltet sie nie ein) und startet laufende Freundes-Bots neu
+  (umgesetzt, Schritt 5). Florian spielt alles selbst ein; kein
   Auto-Update.
 
 ## Schnittstellen
@@ -323,7 +361,7 @@ weckt nie. Offen: freier Speicher auf dem vServer für den Briefkasten.
 2. **Freunde liefern selbst:** Briefkasten auf dem vServer + kleines Programm für den PC, Lager je Freund mit
    Freigabe nach 14 Tagen, Meldungen an den Freund, Auto-Freigabe und 2-Wochen-Video ohne Clip-Bot. Gebaut:
    Briefkasten (Schritt 1), Abholen am Mini (Schritt 2), Abholen einschalten (Schritt 3), PC-Programm und /pc
-   (Schritt 4); Löschen im Briefkasten erst nach Florians Ja.
+   (Schritt 4), Lager für Freunde (Schritt 5); Löschen im Briefkasten erst nach Florians Ja.
 3. Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für Rechen-Arbeiter.
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

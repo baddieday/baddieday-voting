@@ -1,0 +1,31 @@
+# Freunde fahren bei Florians Lager-Abgleich mit (Mehrbenutzer, Stufe 2, docs/MEHRBENUTZER.md „Lager für Freunde“).
+# Startet zusammen mit clip-lager.service (WantedBy, ohne Reihenfolge – auch beim Nachholen nach einem Neustart) und
+# läuft deploy/benutzer/lager-freunde.sh: Halten-Marke „freunde“ setzen, warten, bis Florians Abgleich fertig ist,
+# prüfen, ob pve-big ohnehin wach ist (nie wecken), dann je Freund mit Lager nacheinander clip-freund-lager@<name>
+# (neue Starts nur 10–18 Uhr, je Freund höchstens 2 h), am Ende Marke lösen. Zusammenfassung:
+# /var/lib/clip-pipeline/lager-freunde.json. Im Lager wird nie etwas gelöscht.
+# Ohne eingeschalteten Rundgang läuft Florians Abgleich genau wie bisher. Eingeschaltet wird er nur über
+# benutzer-anlegen.sh <name> (Schritt „Lager“) – nie vom Update (alles-aktualisieren.sh legt die Datei nur hin).
+# Rückweg: systemctl disable clip-lager-freunde.service
+# Nachsehen ohne Änderung: bash /opt/clip-pipeline/deploy/benutzer/lager-freunde.sh --probe
+# Log ansehen: journalctl -u clip-lager-freunde -n 50
+[Unit]
+Description=Clip-Pipeline: Freunde fahren beim Lager-Abgleich mit (weckt nie)
+
+[Service]
+Type=oneshot
+# Als root: startet die Dienste der Freunde, setzt die Halten-Marke als pipeline (runuser) und legt im Lager nur
+# freunde/<name> mit Marke an
+ExecStart=/bin/bash /opt/clip-pipeline/deploy/benutzer/lager-freunde.sh
+# Florians Abgleich (höchstens 4 h), Starts bis 18 Uhr, je Freund höchstens 2 h
+TimeoutStartSec=10h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# /srv/big statt /srv/big/clips: Das NFS kommt oft erst nach dem Start (wie bei clip-lager.service). Schreiben nur:
+# Halten-Marke und Zusammenfassung bei Florian, freunde/<name> und der Herzschlag im Lager.
+ReadWritePaths=/var/lib/clip-pipeline /srv/big
+
+[Install]
+WantedBy=clip-lager.service

@@ -623,3 +623,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Sein Bot meldet „PC verbunden“, eine falsche Zeitzone und Aufnahmen ohne Replay, 📋 zeigt, wann der PC sich zuletzt
     meldete. Bei dir gibt es `/pc` nicht, `Uebertragung.ps1` bleibt, wie es ist. Vor Ort einmal unter echter
     PowerShell 5.1 mit `-Probe` prüfen (docs/BRIEFKASTEN.md). M94, M97, M117–M124.
+  - Schritt 5 (Lager für Freunde): Hat dein täglicher Abgleich pve-big ohnehin geweckt, fahren Freunde mit Lager mit –
+    `clip-lager-freunde.service` hängt sich an `clip-lager.service`, hält pve-big mit der Marke „freunde“ wach und
+    sichert je Freund nacheinander (neue Starts 10–18 Uhr, höchstens 2 h) seinen Puffer nach `freunde/<name>` in deinem
+    Lager; danach gibt sein Puffer Rohvideos nach 14 Tagen frei wie bei dir. Der Rundgang weckt nie, im Lager wird
+    nichts gelöscht. Einschalten je Freund: `benutzer-anlegen.sh`, Schritt „Lager“ (nur bei wachem pve-big, mit Probe
+    der Bindung; rot = Schalter wieder aus). Dein Lager-Code bleibt Zeichen für Zeichen gleich. M98–M101, M107,
+    M125–M130.

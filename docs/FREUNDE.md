@@ -50,10 +50,17 @@ Nichts mehr – einfach spielen. Das Video kommt etwa 45 Minuten nach deinem let
 bleibt. Machst du ihn gleich aus, kommt es, sobald er wieder an ist. Du drückst nur ✅ oder ❌. Wann sich dein PC
 zuletzt gemeldet hat, steht unter 📋 Stand.
 
+## Deine Aufnahmen bleiben gesichert
+Hat Florian das Lager für dich eingeschaltet, kommen deine Aufnahmen und Replays einmal am Tag zusätzlich auf seinen
+großen Speicher daheim – meist am Tag nach dem Spielen, wenn er dort ohnehin seine eigenen sichert. Dort wird nie
+etwas gelöscht. Erst wenn die Kopie dort nachgeprüft ist und eine Aufnahme älter als 14 Tage ist, macht sie in deiner
+Ecke auf dem Rechner, der deine Videos schneidet, Platz. Deine Videos und Clips bleiben. Du musst dafür nichts tun.
+
 ## Datenschutz
 Deine Aufnahmen können euren Sprachchat enthalten. Sie liegen kurz in deinem Briefkasten auf Florians gemietetem
 Server (unverschlüsselt beim Anbieter; bis Florian das Löschen dort freigibt, auch länger) und dauerhaft auf Florians
-Rechnern daheim. Florian kann technisch hineinschauen, die anderen Freunde nicht.
+Rechnern daheim – mit Lager auch in deinem eigenen Ordner auf seinem großen Speicher, den er über sein Netzlaufwerk
+sehen kann. Florian kann technisch hineinschauen, die anderen Freunde nicht.
 
 ## Claude verbinden (freiwillig)
 Hast du ein eigenes Claude-Abo, kann das Programm damit zusätzlich jedes Video benoten und so schneller lernen. Das
