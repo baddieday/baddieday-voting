@@ -36,6 +36,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   im CT als `/srv/clips`): Der Gaming-PC kopiert per SMB hierher, die Pipeline arbeitet nur hier und weckt nie. Das
   Lager von pve-big ist per NFS eingebunden (`/srv/big/clips`). iGPU für Hardware-Encoding durchgereicht.
 - **vServer (Rechenzentrum):** n8n in Docker, der **Dirigent**. Es werden **keine Videos** dorthin übertragen.
+  Einzige Ausnahme (M106): der Briefkasten der Freunde – eigener SFTP-Dienst auf Port 2222, nur Aufnahmen von Freunden
+  auf dem Durchweg zum Mini, nie durch n8n (`docs/BRIEFKASTEN.md`).
 - **Verbindung:** Tailscale zwischen Gaming-PC, Heimserver, vServer und Handy. n8n steuert den Heimserver per **SSH-Node** über Tailscale, mit eigenem Benutzer `pipeline` und SSH-Schlüssel.
 - **KI-Entscheidungen:** Claude Code headless (`claude -p`) über mein Max-Abo, **kein API-Key**. Nur Leserechte (`--allowedTools "Read"`), Ausgabe als JSON.
 - **Schnittprogramm:** CapCut. CapCut kann keine XML/EDL-Timelines importieren → nummerierte Einzelclips mit ein paar Sekunden Puffer vorne und hinten.
@@ -593,3 +595,13 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   - Prüfung von Schritt 5–9: Das freiwillige Schärfen deiner Rechte fasst nur noch an, was pipeline gehört. Vorher wurde
     eine `lokal.toml`, die root gehört (mit nano als root angelegt), nur noch für root lesbar – alle deine Dienste wären
     beim Start abgestürzt. Jetzt bleibt sie, wie sie ist, und das Skript sagt es. M84.
+- 2026-10-09 (Stufe 2 Mehrbenutzer, „Freunde liefern selbst“ – Plan aus zwei Entwürfen, sechs Schritte; Löschen im
+  Briefkasten erst nach deinem Ja): Freunde laden ihre Aufnahmen in einen Briefkasten auf dem vServer, der Mini holt sie
+  über Tailscale ab, ihr Lager fährt bei deinem täglichen Abgleich mit. Bei dir ändert sich nichts. Annahmen ab M85:
+  `docs/ENTSCHEIDUNGEN.md`, „Mehrbenutzer“.
+  - Schritt 1 (Briefkasten auf dem vServer, nur Skripte): eigener SFTP-Dienst `briefkasten-sshd` auf Port 2222 neben
+    deinem normalen SSH; je Freund ein Fach fester Größe (Standard 20 GB, mindestens 8; das System behält 15 % und
+    10 GB frei). Der PC des Freundes darf nur hochladen, der Mini nur lesen und nur über das Tailnet; Freunde sehen
+    einander nicht; dort wird nichts gelöscht. `deploy/vserver/briefkasten-{einrichten,freund,pruefen}.sh`, je mit
+    `--probe`, j/N und Rückweg; Anleitung mit Abnahme von Hand: `docs/BRIEFKASTEN.md`. Ausnahme zu „keine Videos auf
+    den vServer“: M106. M85–M88.
