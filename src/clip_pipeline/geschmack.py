@@ -292,10 +292,20 @@ def wahl_zeile(stat: dict[str, dict[str, dict]]) -> str | None:
     """„🎯 Wähle ich gerade öfter: Aufbau „Steigerung“ (4 von 4 ✅) · seltener: Aufbau „Kino“ (0 von 4 ✅)“ – None ohne
     klares Bild. Rechnung und Schwelle wie früher „👍 Kommt gut an / 👎 Kommt weniger an“ (Anteil ab 0,6 bzw. bis 0,4,
     je Wahl ab Gewicht 2), nur ehrlich benannt (M162): Das ist die Vorliebe, mit der der Bot wählt – gemischt aus deinen
-    ✅/❌, der vorläufigen Zuschauer-Note und der KI-Note –, kein Beleg, dass etwas ankommt."""
+    ✅/❌, der vorläufigen Zuschauer-Note und der KI-Note –, kein Beleg, dass etwas ankommt.
+    „öfter“ nur die Wahl, die in ihrer Schraube echt vor allen anderen liegt, „seltener“ nur die echt hinterste (M176):
+    Sonst stünden bei lauter ✅ „viel Zeitlupe“ und „wenig Zeitlupe“ beide unter „öfter“ – gewählt wird aber je Video eine."""
     erprobt = [(k, o, w) for k, opt in stat.items() for o, w in opt.items() if w["n"] >= 2]
-    oefter = sorted((x for x in erprobt if _anteil(x[2]) >= 0.6), key=lambda x: -_anteil(x[2]))[:3]
-    seltener = sorted((x for x in erprobt if _anteil(x[2]) <= 0.4), key=lambda x: _anteil(x[2]))[:2]
+
+    def vorn(k: str, o: str) -> bool:
+        return all(_anteil(stat[k][o]) > _anteil(w) for x, w in stat[k].items() if x != o)
+
+    def hinten(k: str, o: str) -> bool:
+        return all(_anteil(stat[k][o]) < _anteil(w) for x, w in stat[k].items() if x != o)
+
+    oefter = sorted((x for x in erprobt if _anteil(x[2]) >= 0.6 and vorn(x[0], x[1])), key=lambda x: -_anteil(x[2]))[:3]
+    seltener = sorted((x for x in erprobt if _anteil(x[2]) <= 0.4 and hinten(x[0], x[1])),
+                      key=lambda x: _anteil(x[2]))[:2]
     teile = [f"{wort}: " + ", ".join(NAMEN[(k, o)] + _bewertet(w) for k, o, w in liste)
              for wort, liste in (("öfter", oefter), ("seltener", seltener)) if liste]
     return "🎯 Wähle ich gerade " + " · ".join(teile) if teile else None

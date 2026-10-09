@@ -207,5 +207,25 @@ class Geschmack(MitSpeicher):
                           "dabei geändert?)", geschmack.wochen_text(self.con, self.konfig))
 
 
+
+class WahlZeile(unittest.TestCase):
+    """Prüfung S4-1 (M176): „🎯 Wähle ich gerade öfter/seltener“ nennt je Schraube höchstens die Wahl, die echt vorn
+    bzw. echt hinten liegt. Vorher stand bei lauter ✅ „öfter: viel Zeitlupe (3 von 3 ✅), wenig Zeitlupe (3 von 3 ✅)“ –
+    gewählt wird aber je Video nur eine."""
+
+    @staticmethod
+    def w(s: float, n: float, ja: int = 0, nein: int = 0) -> dict:
+        return {"s": s, "n": n, "ja": ja, "nein": nein}
+
+    def test_gleichstand_wird_nicht_als_oefter_genannt(self):
+        stat = {"zeitlupe": {"viel": self.w(3, 3, ja=3), "wenig": self.w(3, 3, ja=3)},
+                "tempo": {"schnell": self.w(4, 4, ja=4), "ruhig": self.w(0, 4, nein=4)}}
+        zeile = geschmack.wahl_zeile(stat)
+        self.assertEqual(zeile, "🎯 Wähle ich gerade öfter: schnelle Schnitte (4 von 4 ✅) · seltener: "
+                                "ruhige Schnitte (0 von 4 ✅)")
+        self.assertNotIn("Zeitlupe", zeile)
+        # nur Gleichstand: kein klares Bild, keine Zeile
+        self.assertIsNone(geschmack.wahl_zeile({"zeitlupe": stat["zeitlupe"]}))
+
 if __name__ == "__main__":
     unittest.main()

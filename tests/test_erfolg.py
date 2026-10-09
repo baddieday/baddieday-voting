@@ -174,3 +174,24 @@ class Erfolg(MitSpeicher):
         self.assertIn("1 × keine Wochenzahlen nach 14 Tagen (Zuschauerzahlen werden bei dir noch nicht abgeholt)", text)
         for falsch in ("wartet", "warten", "nicht gefunden"):
             self.assertNotIn(falsch, text)
+
+    def test_ohne_echten_unterschied_ist_nichts_belegt(self):
+        """Prüfung S4-2 (M177): der wichtigste Fehlerfall der Schutzregel. Genug Videos je Seite (20 gegen 20), beide
+        Seiten aus denselben Werten, nur 0,06 auseinander bei einer Streuung um 0,8 – kein Vergleich darf „belegt“
+        sagen. Ein Intervall ohne Breite (nur der Unterschied der Mittelwerte) sagte hier „montage schlechter, story
+        besser, viel Zeitlupe besser“."""
+        werte = (-1.1, -0.6, -0.2, 0.1, 0.4, 0.9, 1.3, -0.9, 0.0, 0.5)
+        einheiten = []
+        for i in range(40):
+            aufbau = "story" if i % 2 else "montage"
+            g = werte[(i // 2) % 10] + (0.06 if aufbau == "story" else 0.0)
+            einheiten.append({"post": i, "dauer": 55.0,
+                              "werte": {"gesamt": g, "bindung": None, "reaktionen": g, "reichweite": 0.0,
+                                        "follower": None, "webseite": None},
+                              "merkmale": {"aufbau": aufbau, "tempo": ("schnell", "ruhig")[(i // 4) % 2],
+                                           "zeitlupe": ("viel", "wenig")[(i // 3) % 2], "laenge": "mittel"}})
+        befunde = erfolg.vergleiche(einheiten)
+        self.assertEqual(len(befunde), erfolg.M)
+        self.assertEqual([b for b in befunde if b["status"] in (erfolg.BESSER, erfolg.SCHLECHTER)], [])
+        story = next(b for b in befunde if (b["merkmal"], b["wahl"]) == ("aufbau", "story"))
+        self.assertEqual((story["n"], story["status"]), ([20, 20], erfolg.KEIN_UNTERSCHIED))

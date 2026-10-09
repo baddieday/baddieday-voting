@@ -721,7 +721,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Lernen, 📋 Stand, Videos, Knöpfe und n8n unverändert. Nachgestellt (echter Bericht, 200 Halbjahre ohne
     echten Unterschied, 3 Shorts je Woche): vorher irgendwann eine Behauptung in 99,5 % der Halbjahre, nachher in
     5,0 %. Stufenbericht: `docs/MEHRBENUTZER.md`. M162, M171–M174.
-  - Prüfung (ein Prüfer, ein kleiner Befund behoben): Bei einem Freund holt niemand Zuschauerzahlen ab –
+  - Prüfung (ein Prüfer, drei kleine Befunde behoben): Bei einem Freund holt niemand Zuschauerzahlen ab –
     `benutzer-befehl.sh <name> erfolg` sagte das oben, darunter aber „warten noch auf ihre Wochenzahlen“ und „nicht
     gefunden?“. Jetzt steht dort durchgehend „nicht gemessen (Zuschauerzahlen werden bei dir noch nicht abgeholt)“ bzw.
-    „noch ohne Wochenzahlen“. Bei dir und im Sonntagsbericht ändert sich nichts. M175.
+    „noch ohne Wochenzahlen“. Bei dir und im Sonntagsbericht ändert sich nichts. M175. Dazu: „🎯 Wähle ich gerade öfter“
+    nennt je Schraube nur die Wahl, die echt vorn liegt (vorher bei lauter ✅ „viel Zeitlupe“ und „wenig Zeitlupe“
+    beide), und ein Test sichert, dass ohne echten Unterschied nie „belegt“ erscheint. M176–M177.
