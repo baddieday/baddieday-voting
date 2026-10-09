@@ -35,7 +35,7 @@ entwuerfe.upload_pfad. Regisseur 2.0 Stufe 3 erweitert baue_paket und entwurf.up
 Sicherung ins Lager) und baut keinen zweiten Weg daneben.
 
 Rendern läuft per asyncio.to_thread mit eigener DB-Verbindung (SQLite-Verbindungen wandern nicht zwischen
-Threads, E9), unter sperre(sperre.pfad(konfig), warten_s=[sperre].warten_s) und höchstens
+Threads, E9), unter der Rechen-Sperre (laufzeiten.lauf, warten_s=[sperre].warten_s) und höchstens
 einmal gleichzeitig (bot_data["paket_arbeitet"]). Nie ins Log: Datei-URLs von Telegram (Token), Chat-IDs.
 
 Zeit: `jetzt` ist auf Modulebene importiert – Tests ersetzen `lernbot_paket.jetzt` (mock.patch.object).
@@ -56,11 +56,11 @@ from datetime import datetime
 from html import escape
 from pathlib import Path, PurePosixPath
 
-from . import caption, db, entwurf, highlight, lernbot, publikum
+from . import caption, db, entwurf, highlight, laufzeiten, lernbot, publikum
 from .bot import aktionen
 from .konfig import Konfig, KonfigFehler
 from .medien import MedienFehler
-from .sperre import Gesperrt, pfad as sperre_pfad, sperre
+from .sperre import Gesperrt
 from .zeit import jetzt  # im Modul importiert, damit Tests `lernbot_paket.jetzt` ersetzen können
 
 log = logging.getLogger("lern-bot")
@@ -284,8 +284,10 @@ def baue_paket(konfig: Konfig, entwurf_id: int, song_in_zeile: bool = False) -> 
             raise MedienFehler(f"Entwurf {entwurf_id} unbekannt")
         liste = json.loads(Path(zeile["schnittliste"]).read_text(encoding="utf-8"))
         text = caption.entwurf_caption(con, liste, konfig, song_in_zeile=song_in_zeile)
-        # Rendern ist ein rechenintensiver Schritt: dieselbe Sperre wie Pipeline und Entwürfe (nur einer gleichzeitig)
-        with sperre(sperre_pfad(konfig), warten_s=float(konfig.wert("sperre.warten_s", 7200))):
+        # Rendern ist ein rechenintensiver Schritt: dieselbe Sperre wie Pipeline und Entwürfe (nur einer gleichzeitig);
+        # danach eine Zeile „lernbot-paket“ (Stufe 3, M139)
+        with laufzeiten.lauf(konfig, "lernbot-paket", ziel=entwurf_id,
+                             warten_s=float(konfig.wert("sperre.warten_s", 7200)), con=con):
             # 2-Wochen-Video (08.10.): aus der fertigen Datei – seine ältesten Szenen gibt der Puffer schon frei
             ergebnis = (highlight.upload_fassung(con, konfig, entwurf_id)
                         or entwurf.upload_fassung(con, konfig, entwurf_id))

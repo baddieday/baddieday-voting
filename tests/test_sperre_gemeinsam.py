@@ -149,6 +149,83 @@ class NurLesen(MitZweiInstanzen):
             self.assertFalse(big._sperre_belegt(self.gemeinsam))
 
 
+class FlorianZuerst(MitZweiInstanzen):
+    """Stufe 3 (M147): Ein Freund (Sperrdatei nur lesend offen, über nur_lesbar) wartet vor dem ersten Versuch 0–1 s und
+    fragt dann alle 4–6 s; Florian (schreibend) wie bisher – sofort, dann jede Sekunde. Echte flock-Sperre: ein zweiter
+    Dateideskriptor hält sie bis zur Sekunde `frei_ab`. Nachgebaut sind nur Uhr und Zufall."""
+
+    ANTEILE = (0.25, 0.75, 0.125, 0.5)   # Zufall als Anteil der Spanne – binär exakt, die Sekunden stimmen genau
+
+    def setUp(self):
+        super().setUp()
+        self.gemeinsam.touch()                                         # Florians Datei gibt es schon
+
+    def warte(self, *, freund: bool, warten_s: float, frei_ab: float):
+        """→ (("bekommen" | "gesperrt", Sekunde), Schlafzeiten, Zufalls-Spannen, Sekunden der Versuche)."""
+        uhr, schlaefe, zufall, versuche = [0.0], [], [], []
+        anteile = iter(self.ANTEILE * 5)
+        halter = ECHT_OPEN(self.gemeinsam, os.O_RDWR)                  # am Ende geschlossen – gibt die Sperre frei
+        belegt = [frei_ab > 0]
+
+        def schlafe(sekunden):
+            schlaefe.append(sekunden)
+            uhr[0] += sekunden
+            if belegt[0] and uhr[0] >= frei_ab:
+                fcntl.flock(halter, fcntl.LOCK_UN)
+                belegt[0] = False
+
+        def gleichverteilt(von, bis):
+            zufall.append((von, bis))
+            return von + (bis - von) * next(anteile)
+
+        echt = sperre_modul._versuche
+
+        def versuch(fd):
+            versuche.append(uhr[0])
+            return echt(fd)
+
+        try:
+            if belegt[0]:
+                fcntl.flock(halter, fcntl.LOCK_EX | fcntl.LOCK_NB)     # ein anderer Auftrag rechnet gerade
+            with mock.patch.object(sperre_modul, "time", SimpleNamespace(monotonic=lambda: uhr[0], sleep=schlafe)), \
+                    mock.patch.object(sperre_modul, "random", SimpleNamespace(uniform=gleichverteilt)), \
+                    mock.patch.object(sperre_modul, "_versuche", side_effect=versuch), \
+                    (nur_lesbar(self.gemeinsam) if freund else contextlib.nullcontext()):
+                try:
+                    with sperre(self.gemeinsam, warten_s=warten_s):
+                        ergebnis = ("bekommen", uhr[0])
+                except Gesperrt:
+                    ergebnis = ("gesperrt", uhr[0])
+        finally:
+            os.close(halter)
+        return ergebnis, schlaefe, zufall, versuche
+
+    def test_freund_fragt_seltener_florian_wie_bisher(self):
+        with self.assertLogs("pipeline", "INFO") as logs:
+            ergebnis, schlaefe, zufall, versuche = self.warte(freund=True, warten_s=900, frei_ab=12)
+        self.assertEqual(ergebnis, ("bekommen", 15.0))
+        self.assertEqual(schlaefe, [0.25, 5.5, 4.25, 5.0])            # 0–1 s Anlauf, dann Schritte von 4–6 s
+        self.assertEqual(zufall, [(0.0, 1.0), (4.0, 6.0), (4.0, 6.0), (4.0, 6.0)])
+        self.assertEqual(versuche, [0.25, 5.75, 10.0, 15.0])
+        self.assertTrue(any("Sperre gewartet 15.0 s" in z for z in logs.output), logs.output)   # die Messzeile bleibt
+        # Florian: erster Versuch sofort, dann jede Sekunde – kein Anlauf, kein Zufall
+        ergebnis, schlaefe, zufall, versuche = self.warte(freund=False, warten_s=7200, frei_ab=3.5)
+        self.assertEqual((ergebnis, schlaefe, zufall), (("bekommen", 4.0), [1, 1, 1, 1], []))
+        self.assertEqual(versuche, [0.0, 1.0, 2.0, 3.0, 4.0])
+        # freie Sperre: Florian nimmt sie im ersten Versuch
+        self.assertEqual(self.warte(freund=False, warten_s=7200, frei_ab=0), (("bekommen", 0.0), [], [], [0.0]))
+
+    def test_freund_an_der_frist_letzter_versuch(self):
+        # nie über die Frist (9 s) hinaus geschlafen; an der Frist ein letzter Versuch, dann Gesperrt wie bisher
+        ergebnis, schlaefe, zufall, versuche = self.warte(freund=True, warten_s=9, frei_ab=float("inf"))
+        self.assertEqual(ergebnis, ("gesperrt", 9.0))
+        self.assertEqual(schlaefe, [0.25, 5.5, 3.25])
+        self.assertEqual(versuche, [0.25, 5.75, 9.0])
+        # warten_s = 0 (Briefkasten, Lager, /paket, Isolationstests): auch beim Freund genau ein Versuch, kein Anlauf
+        self.assertEqual(self.warte(freund=True, warten_s=0, frei_ab=float("inf")),
+                         (("gesperrt", 0.0), [], [], [0.0]))
+
+
 @unittest.skipIf(bot_app is None, "python-telegram-bot fehlt")
 class PaketImClipBot(MitSpeicher):
     """/paket rendert nur unter der Pipeline-Sperre (vorher ganz ohne) – und wartet nicht, der Bot bleibt frei."""

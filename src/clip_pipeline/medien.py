@@ -7,12 +7,19 @@ kein Problem sind.
 
 from __future__ import annotations
 
+import functools
 import json
+import logging
+import os
 import re
+import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 class MedienFehler(RuntimeError):
@@ -24,6 +31,28 @@ class MedienFehler(RuntimeError):
 # Rückfall des Aufrufers (VA-API → CPU) bzw. es gibt einen sichtbaren Fehler statt eines ewigen Wartens.
 STILLSTAND_S = 180.0
 PRUEF_S = 5.0
+
+# ffmpeg stirbt mit seinem Aufrufer (Stufe 3, M143): Stirbt der Python-Prozess (Speicher voll, kill -9, ein n8n-Schritt
+# außerhalb von systemd), rechnete sein ffmpeg sonst verwaist und ohne Sperre weiter – ein zweiter Lauf schriebe dann in
+# denselben Zwischennamen (still kaputte Datei). setpriv (util-linux) setzt den Todes-Signal-Wunsch und ersetzt sich
+# danach durch den Befehl: gleiche PID, der Wächter liest weiter dieselbe Zahl.
+MITSTERBEN = ("setpriv", "--pdeathsig", "KILL", "--")
+
+
+@functools.lru_cache(maxsize=1)
+def _mitsterben() -> tuple[str, ...]:
+    """MITSTERBEN, wenn es hier geht – einmal je Prozess geprüft mit `setpriv --pdeathsig KILL -- true`. Sonst ()
+    und eine Logzeile: Dann läuft alles wie bisher (kein Linux, setpriv fehlt oder ist gesperrt)."""
+    if not sys.platform.startswith("linux"):
+        return ()
+    try:
+        ok = subprocess.run([*MITSTERBEN, "true"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, timeout=10, check=False).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        ok = False
+    if not ok:
+        log.warning("setpriv --pdeathsig geht hier nicht – ffmpeg läuft wie bisher, ohne mit seinem Aufrufer zu enden")
+    return MITSTERBEN if ok else ()
 
 
 def _cpu_ticks(pid: int) -> int | None:
@@ -59,9 +88,18 @@ def fuehre_aus(befehl: list[str], was: str, timeout: float | None = None, *,
 
     Wächter: Alle pruef_s Sekunden wird die CPU-Zeit des Prozesses gelesen; bleibt sie stillstand_s lang gleich,
     hängt er → beenden, MedienFehler „hängt“. stillstand_s=None schaltet den Wächter ab. timeout: harte Grenze.
+    Unter Linux startet der Befehl über `setpriv --pdeathsig KILL --` (_mitsterben): Stirbt dieser Prozess, endet
+    der Befehl sofort mit (Stufe 3, M143).
     Fehler: MedienFehler (Programm fehlt, Zeitlimit, Hänger, Exit ≠ 0 mit den letzten 8 Zeilen von stderr)."""
+    praefix = _mitsterben()
+    # „nicht gefunden“ wie bisher – mit setpriv davor meldete sonst erst setpriv den Fehler (Exit 127)
+    if praefix and shutil.which(str(befehl[0])) is None:
+        raise MedienFehler(f"{was}: Programm {befehl[0]!r} nicht gefunden")
     try:
-        prozess = subprocess.Popen(befehl, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        # Das Todes-Signal hängt am THREAD, der den Prozess startet, nicht am ganzen Prozess (prctl(2)). fuehre_aus
+        # wartet unten im selben Thread, bis der Befehl fertig ist – dieser Thread endet also nie vor ffmpeg, auch im
+        # Lern-Bot (Arbeits-Threads). Deshalb sicher; so lassen: Start und Warten nie auf zwei Threads verteilen.
+        prozess = subprocess.Popen([*praefix, *befehl], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    encoding="utf-8", errors="replace")
     except FileNotFoundError:
         raise MedienFehler(f"{was}: Programm {befehl[0]!r} nicht gefunden") from None
@@ -88,6 +126,29 @@ def fuehre_aus(befehl: list[str], was: str, timeout: float | None = None, *,
         rest = "\n".join(stderr.strip().splitlines()[-8:])
         raise MedienFehler(f"{was} fehlgeschlagen (Exit {prozess.returncode}):\n{rest}")
     return stdout + stderr
+
+
+def uebernehmen(tmp: Path, ziel: Path) -> None:
+    """Fertige Datei an ihren Platz (Stufe 3, M144): erst auf die Platte (fsync), dann umbenennen, dann den Ordner auf
+    die Platte. Nach einem Stromausfall gibt es unter dem Endnamen so nur die ganze Datei oder gar keine – vorher
+    konnte der Name da sein, die Datei aber leer, während die Datenbank „fertig“ sagte. Ein Fehler beim Ordner ist
+    egal (manche Dateisysteme können das nicht); einer bei der Datei oder beim Umbenennen fliegt wie bisher."""
+    # Windows (nur zum Entwickeln): os.fsync ist dort FlushFileBuffers und braucht ein Handle mit Schreibrecht – mit
+    # O_RDONLY käme EBADF, und jedes Rendern endete hier (M153). Linux wie bisher nur lesend.
+    fd = os.open(tmp, os.O_RDWR if sys.platform == "win32" else os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(tmp, ziel)
+    try:
+        fd = os.open(ziel.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
 
 
 def probe(pfad: Path) -> Probe:
@@ -148,6 +209,8 @@ def schneide(
 
     -ss vor -i springt schnell zur Stelle; weil neu kodiert wird, ist der Schnitt trotzdem exakt.
     Mit "-c copy" würde nur an Keyframes geschnitten – bis zu mehreren Sekunden daneben.
+    Scheitert oder hängt h264_vaapi, wird einmal mit libx264 und demselben crf nachgeschnitten (Stufe 3, M145 – wie
+    entwurf.rendere); scheitert auch das oder schon libx264, fliegt der MedienFehler wie bisher.
     """
     ziel.parent.mkdir(parents=True, exist_ok=True)
     tmp = ziel.with_name(ziel.stem + ".tmp" + ziel.suffix)
@@ -161,8 +224,15 @@ def schneide(
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart", str(tmp),
     ]
-    fuehre_aus(befehl, f"Schnitt {ziel.name}")
-    tmp.replace(ziel)  # erst am Ende umbenennen: nie halbfertige Clips
+    try:
+        fuehre_aus(befehl, f"Schnitt {ziel.name}")
+    except MedienFehler as fehler:
+        if encoder != "h264_vaapi":
+            raise
+        log.warning("Schnitt %s: VA-API streikt (%s) – schneide auf der CPU nach", ziel.name,
+                    str(fehler).splitlines()[0])
+        return schneide(quelle, start_s, dauer_s, ziel, fps=fps, encoder="libx264", crf=crf, vaapi_geraet=vaapi_geraet)
+    uebernehmen(tmp, ziel)  # erst am Ende umbenennen: nie halbfertige Clips
 
 
 def _audio_mix(anzahl: int) -> tuple[list[str], list[str]]:
@@ -204,7 +274,7 @@ def vorschau(quelle: Path, ziel: Path, *, max_bytes: int, kurze_seite: int = 720
         fuehre_aus(befehl, f"Vorschau {ziel.name}")
         groesse = tmp.stat().st_size
         if groesse <= max_bytes:
-            tmp.replace(ziel)
+            uebernehmen(tmp, ziel)
             return groesse
         video_kbit = int(kbit * 0.75)
     tmp.unlink(missing_ok=True)

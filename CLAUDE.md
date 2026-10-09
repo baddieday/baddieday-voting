@@ -92,7 +92,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - Musik nur aus einem lokal geprüften Ordner mit Lizenzvermerk je Titel. In Fortnite die lizenzierte Musik ausschalten.
 - `claude -p` zählt gegen meine Abo-Limits; die Regeln dafür können sich ändern.
 - VA-API-Render (iGPU) kann sporadisch hängen (26.09.: Zusammenschnitt, 40 min ohne Fortschritt, Sperre blockiert) →
-  jeder ffmpeg-Aufruf hat einen Wächter (180 s ohne CPU-Zeit = abbrechen), danach rendert der Rückfall auf der CPU.
+  jeder ffmpeg-Aufruf hat einen Wächter (180 s ohne CPU-Zeit = abbrechen), danach rendert der Rückfall auf der CPU
+  (seit 09.10. auch beim Schneiden der Clips). ffmpeg stirbt mit seinem Aufrufer (`setpriv --pdeathsig`), sonst
+  rechnete es nach einem Absturz verwaist ohne Sperre weiter; fertige Dateien kommen per fsync auf die Platte, bevor sie
+  ihren Namen bekommen (`medien.uebernehmen`), sonst kann nach einem Stromausfall eine leere Datei „fertig“ sein.
 
 ## Stufen (grobe Reihenfolge)
 0. Fundament: Proxmox, LXC, Tailscale, SSH-Zugang für n8n (mache ich mit Anleitung selbst)
@@ -110,6 +113,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - Whisper (Untertitel + Kommentar-Merkmal): Installation von `faster-whisper` freigeben?
 - Highlight-Video: Ordner mit lizenzierter Musik anlegen.
 - Mehrbenutzer (M1): Wie viel Speicher ist auf dem vServer frei (für den Briefkasten der Freunde, Stufe 2)?
+- Stufe 3 (M148): Soll der Mini deine n8n-Matches, die seit über 3 h auf `neu` stehen, selbst nachholen (stündlicher
+  Timer neben n8n)? Ja oder Nein – bis dahin Alarm von n8n und `pipeline process <ID>` von Hand.
+- Stufe 3 (M149): Zweiter Rechner oder Cloud nur nach einem Messbefund aus `pipeline laufzeiten` (Auslöser in
+  `docs/WORKER.md`) – dann: welcher Rechner, bei der Cloud Anbieter, Monatslimit in Euro und Text der Zustimmung.
 
 ## Entscheidungen
 - 2026-09-23: Kein Medal.tv – Nvidia + SteelSeries reichen; Pipeline wählt pro Moment die Aufnahme mit bester Abdeckung.
@@ -644,3 +651,43 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Abend-Datei und Lieferschein ab, kam für den Abend nie ein Video (jetzt wird die Datei neu geschrieben); ein
     absichtlich verschachtelter Lieferschein blockierte das Abholen dieses Freundes für immer (jetzt ungültig, nach 3
     Versuchen aufgegeben). M136–M138.
+- 2026-10-09 (Stufe 3 Mehrbenutzer, „Hybrider Render-Manager“ – Plan aus zwei Entwürfen, vier Schritte): Der Mini
+  bleibt der einzige Rechner für dich und die Freunde – Stufe 3 misst zuerst, sichert gegen Ausfälle ab und gibt dir an
+  der Sperre Vorrang; ein zweiter Rechner oder die Cloud kommt erst nach einem Messbefund (Annahmen ab M139:
+  `docs/ENTSCHEIDUNGEN.md`, „Mehrbenutzer“).
+  - Schritt 1 (Laufzeiten messen): Jeder Rechenauftrag unter der Sperre schreibt danach eine Zeile in die eigene
+    Datenbank – wie lange er gewartet und gerechnet hat und ob er geklappt hat (beim Lern-Bot-Bau auch Stimmung, Schnitt
+    und Rendern einzeln); jedes gerenderte Video merkt sich Rechenzeit, ob die Grafikeinheit auf den Prozessor
+    zurückfiel und wie groß das Material war. `pipeline laufzeiten [--tage 7]` (Freund: `benutzer-befehl.sh <name>
+    laufzeiten`) fasst das zusammen: typische und längste Zeiten je Auftrag, Rendern je Grafikeinheit/Prozessor (ältere
+    Videos aus Dateizeiten), ✅ → Upload, Abend → Video und wie oft du ✅ tippst – nur lesen, weckt nie. Am Auftrag
+    ändert sich nichts: n8n-Vertrag, Exit-Codes, JSON-Zeile und offene Transaktionen bleiben, ein Schreibfehler steht
+    nur im Log. M139–M142.
+  - Schritt 2 (Ausfallsicher): Stirbt ein Schritt, endet sein ffmpeg mit – kein Video rechnet mehr heimlich ohne
+    Sperre weiter. Videos, Clips, Vorschauen und die Marke des 2-Wochen-Videos kommen erst ganz auf die Platte, dann
+    unter ihren Namen (nach einem Stromausfall nie eine leere Datei unter dem Endnamen). Streikt die Grafikeinheit beim
+    Schneiden der Clips, schneidet der Prozessor nach, statt das Match zu verlieren. `clip-sitzungen` bricht nach 2 h
+    ab (das Abend-Video holt der nächste Lauf auf dem Prozessor nach), die Timer der Freunde nach 1 h statt 2 h – das
+    Update übernimmt das nur in Dateien, die du nicht selbst angepasst hast. Abnahme-Tests: Absturz mitten im
+    Abend-Video, verwaistes ffmpeg, abgerissene n8n-Verbindung. Ergebnisse und n8n-Vertrag bleiben gleich. M143–M146.
+  - Schritt 3 (Florian zuerst): Warten du und Freunde gleichzeitig auf die Rechen-Sperre, kommst du meist zuerst dran.
+    Freunde fragen nur noch alle 4–6 s statt jede Sekunde und warten vor dem ersten Versuch zufällig bis zu 1 s;
+    erkannt wird ein Freund daran, dass er die Sperrdatei nur lesen darf (nicht fälschbar). Bei einer Übergabe ist ein
+    Freund in 10 statt 50 % der Fälle vor dir dran (drei Freunde: 27 statt 75 %), die 1-s-Lücke zwischen zwei
+    n8n-Schritten erwischt ein wartender Freund in 20 statt 100 %. Deine Schritte fragen wie bisher sofort und dann
+    jede Sekunde; ein laufender Auftrag wird nie unterbrochen. Harter Vortritt erst, wenn `laufzeiten` es zeigt. M147.
+  - Schritt 4 (Vertrag für weitere Rechner, nur Doku) und Abschluss: `docs/WORKER.md` beantwortet die sechs Fragen
+    aus Abschnitt D für heute – der Mini bleibt der einzige Rechner, weil das Hin- und Herschicken eines Shorts
+    (15–53 s) etwa so lange dauert wie das Rendern (58–86 s). Dort stehen auch die Auslöser für einen zweiten Rechner
+    (Abend-Video an 3 Abenden einer Woche über 30 min, oder deine Wartezeit im p90 über 10 min) und der Vertrag v1 für
+    Heimserver und Cloud – gebaut wird er erst mit dem ersten Worker und deinem Ja, die Cloud bleibt aus.
+    `render-entwurf --final` bleibt als Vorläufer v0 aus (`docs/REGIE.md`). Das Update sagte „schlägt er fehl,
+    wiederholt n8n ihn“ – falsch: n8n meldet den Fehler, nachholen mit `pipeline process <ID>`. Stufenbericht in
+    `docs/MEHRBENUTZER.md`: Schneller wird nichts. Neu ist: Abstürze und Stromausfall hinterlassen keine kaputten
+    Dateien, eine Panne der Grafikeinheit beim Schneiden kostet kein Match mehr, du kommst an der Sperre meist zuerst
+    dran, und Laufzeiten sind sichtbar. Echte Mini-Zahlen fehlen noch (`pipeline laufzeiten` vor Ort). M148–M152.
+  - Prüfung (ein Prüfer, zwei kleine Befunde, nichts Blockierendes): Unter Windows (nur zum Entwickeln) endete jedes
+    Rendern beim neuen Auf-die-Platte-Schreiben – behoben, auf dem Mini ändert sich nichts. `clip-sitzungen` bleibt
+    bei 2 h: Wartet es die ganzen 2 h auf die Sperre, beendet systemd es ohne Zeile „gesperrt“ (nichts geht verloren).
+    Länger hieße: Hängt das Abend-Video selbst, endete ein n8n-Schritt, der kurz danach kommt, mit Exit 4
+    (nachgestellt); ein Test hält das fest. M153–M154.

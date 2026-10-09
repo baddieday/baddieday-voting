@@ -44,6 +44,11 @@ class Entwurf(MitRegieMaterial):
         self.assertTrue(sidecar["normiert"], sidecar)
         self.assertLess(sidecar["band"][0], sidecar["band"][1])
         self.assertEqual(len(sidecar["spiel_anteile"]), len(liste["segmente"]))
+        # Stufe 3 (M142): Laufzeit im Sidecar – Sekunden, kein Rückfall, Eingabe-Größe, echte Bildlänge
+        self.assertGreater(sidecar["render_s"], 0)
+        self.assertIs(sidecar["rueckfall"], False)
+        self.assertIsInstance(sidecar["eingabe_mb"], float)
+        self.assertAlmostEqual(sidecar["dauer_s"], d["video"], delta=0.01)
         stems = video.parent / f"kritik-{e['entwurf']}" / "stems.mka"
         self.assertEqual(stems.is_file(), bool(liste.get("musik")))
         return liste
@@ -235,6 +240,8 @@ class VaApi(MitRegieMaterial):
         self.assertIn("hwupload[vout]", vaapi[vaapi.index("-filter_complex") + 1])
         self.assertEqual((r["encoder"], "-vaapi_device" in cpu), ("libx264", False))
         self.assertTrue(Path(r["datei"]).is_file())
+        sidecar = json.loads(Path(r["datei"]).with_suffix(".render.json").read_text())
+        self.assertEqual((sidecar["encoder"], sidecar["rueckfall"]), ("libx264", True))   # Stufe 3: Rückfall vermerkt
 
 
 class FinalPruefung(MitRegieMaterial):

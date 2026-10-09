@@ -12,19 +12,18 @@ import asyncio
 import logging
 from pathlib import Path
 
-from . import db, einstellungen, kalibrierung
+from . import db, einstellungen, kalibrierung, laufzeiten
 from .konfig import Konfig
 
 log = logging.getLogger("pipeline")
 
 
 def baue(konfig: Konfig, sid: str) -> dict:
-    """Bericht im Thread – eigene SQLite-Verbindung, gleiche Sperre wie die Pipeline."""
-    from .sperre import pfad as sperre_pfad, sperre
-
+    """Bericht im Thread – eigene SQLite-Verbindung, gleiche Sperre wie die Pipeline (Zeile „lernbot-kalibrieren“)."""
     con = db.verbinde(konfig.datenbank)
     try:
-        with sperre(sperre_pfad(konfig), warten_s=float(konfig.wert("sperre.warten_s", 7200))):
+        with laufzeiten.lauf(konfig, "lernbot-kalibrieren", ziel=sid,
+                             warten_s=float(konfig.wert("sperre.warten_s", 7200)), con=con, match_id=sid):
             return kalibrierung.bericht(con, konfig, sid)
     finally:
         con.close()

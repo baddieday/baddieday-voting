@@ -11,6 +11,10 @@ Mehrbenutzer (M1, 08.10.): EINE Rechen-Sperre für den ganzen Mini. Wo sie liegt
 [sperre].datei, leer = wie bisher <datenbank>.lock (Florian). Ein Freund hat eine eigene Datenbank, aber dieselbe
 Sperrdatei – sonst rechneten zwei Schritte gleichzeitig. Er darf Florians Datei nur lesen; flock braucht kein
 Schreibrecht, die Sperre wirkt über O_RDONLY genauso (in beide Richtungen).
+
+Florian zuerst (M147, Stufe 3): Wer die Sperrdatei nur lesend offen hat, ist ein Freund (schreibgeschützt eingebunden,
+nicht fälschbar). Er fragt seltener nach der Sperre, so kommt Florian bei einer Übergabe meist zuerst dran – weich: ein
+laufender Auftrag wird nie unterbrochen. Keine Datei, keine Uhrzeit, keine Konfig.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from __future__ import annotations
 import errno
 import logging
 import os
+import random
 import sys
 import time
 from contextlib import contextmanager
@@ -45,6 +50,12 @@ NUR_LESEN = (errno.EACCES, errno.EPERM, errno.EROFS)
 # Sperren, die DIESER Prozess gerade hält. flock auf einem zweiten Dateideskriptor derselben Datei würde auch
 # gegen den eigenen Prozess "belegt" melden – so kann big.pipeline_beschaeftigt() den eigenen Lauf erkennen.
 GEHALTEN: set[str] = set()
+
+# M147: Ein Freund wartet vor dem ersten Versuch zufällig so lange (nur bei warten_s > 0) – sonst schnappte er sich die
+# Sperre in der Lücke zwischen zwei n8n-Schritten oder gleich nach seinem eigenen Lauf wieder –, danach fragt er in
+# diesem zufälligen Abstand. Florian: erster Versuch sofort, dann jede Sekunde (wie bisher).
+FREUND_ANLAUF_S = (0.0, 1.0)
+FREUND_TAKT_S = (4.0, 6.0)
 
 
 def pfad(konfig: Konfig) -> Path:
@@ -113,15 +124,32 @@ def _freigeben(fd: int) -> None:
         fcntl.flock(fd, fcntl.LOCK_UN)
 
 
+def nur_lesend(fd: int) -> bool:
+    """Ist die Sperrdatei nur lesend offen? Das heißt Freund (M147): Florians Prozesse öffnen sie schreibend (sie
+    gehört pipeline), ein Freund hat sie schreibgeschützt eingebunden und kann das nicht fälschen. Windows: nie."""
+    if sys.platform == "win32":
+        return False
+    import fcntl
+
+    return (fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE) == os.O_RDONLY
+
+
 @contextmanager
 def sperre(pfad: Path, warten_s: float = 0.0, melde=None) -> Iterator[None]:
     """Hält die Sperre für die Dauer des with-Blocks. warten_s = 0: sofort aufgeben.
     Danach eine Zeile „Sperre gewartet x s, gehalten y s“ ins Log – die Messgrundlage, wie lange Schritte
-    aufeinander warten (vor und nach dem ersten Freund, M1)."""
+    aufeinander warten (vor und nach dem ersten Freund, M1).
+
+    Florian zuerst (M147): Ein Freund (Datei nur lesend offen) wartet bei warten_s > 0 vor dem ersten Versuch 0–1 s
+    und fragt danach alle 4–6 s statt jede Sekunde – nie über die Frist hinaus, an der Frist ein letzter Versuch, dann
+    Gesperrt wie bisher. Florians Prozesse genau wie bisher."""
     fd = oeffne(pfad)
     try:
         start = time.monotonic()
         ende = start + warten_s
+        freund = warten_s > 0 and nur_lesend(fd)
+        if freund:
+            time.sleep(min(random.uniform(*FREUND_ANLAUF_S), warten_s))
         gemeldet = False
         while not _versuche(fd):
             if time.monotonic() >= ende:
@@ -129,7 +157,10 @@ def sperre(pfad: Path, warten_s: float = 0.0, melde=None) -> Iterator[None]:
             if melde and not gemeldet:
                 melde("warte auf laufenden Schritt …")
                 gemeldet = True
-            time.sleep(1)
+            if freund:
+                time.sleep(max(0.0, min(random.uniform(*FREUND_TAKT_S), ende - time.monotonic())))
+            else:
+                time.sleep(1)
         bekommen = time.monotonic()
         GEHALTEN.add(str(Path(pfad).resolve()))
         try:

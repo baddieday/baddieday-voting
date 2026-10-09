@@ -12,8 +12,9 @@ Description=Clip-Pipeline: Abend-Video von %i (Freund)
 Type=oneshot
 ExecStart=/opt/clip-pipeline/.venv/bin/pipeline sitzungen
 SuccessExitStatus=3 4
-# Hängt etwas, gibt der Lauf die gemeinsame Sperre spätestens nach 2 h wieder frei (wie clip-mikro)
-TimeoutStartSec=2h
+# Hängt etwas, gibt der Lauf die gemeinsame Sperre spätestens nach 1 h wieder frei – kürzer als Florians
+# Wartezeit (2 h), so treibt ein hängender Freund nie einen Schritt von Florian bis Exit 4 (M46, M146)
+TimeoutStartSec=1h
 # --- Sandbox: in jeder Vorlage wörtlich gleich (tests/test_deploy_benutzer.py) ---
 # Eigener Benutzer clip-<name>, nur sein Ordner I = /var/lib/clip-benutzer/<name> (CLIP_INSTANZ). Seine Zugänge liest
 # die Pipeline selbst aus I/.env – kein EnvironmentFile, kein CLIP_PROJEKT. HOME und Caches (Whisper-Modell) in I/cache.

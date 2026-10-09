@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import db, einstellungen, elo
 from .konfig import Konfig
-from .medien import probe, vorschau
+from .medien import probe, uebernehmen, vorschau
 from .verarbeitung import SessionFehler, pruefe_id
 from .zeit import iso, jetzt
 
@@ -231,7 +231,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, hid: str, tage: int) -> di
     # Derselbe Renderer und dieselben harten Grenzen wie bei jedem vollständigen Entwurf.
     entwurf.rendere(liste, tmp, konfig, vollstaendig=True, volle_aufloesung=True, crf=20,
                     max_bytes=2_000_000_000, kbit_max=12000)
-    tmp.replace(video)
+    uebernehmen(tmp, video)
     vorschau_datei = ordner / f"{hid}.vorschau.mp4"
     vorschau(video, vorschau_datei, max_bytes=int(float(konfig.wert("vorschau.max_mb", 48)) * 1_000_000),
              kurze_seite=int(konfig.wert("vorschau.kurze_seite", 720)))
@@ -255,5 +255,9 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, hid: str, tage: int) -> di
              ergebnis["musik"], iso(jetzt()), zeile["id"]),
         )
         db.protokoll(con, "highlight", f"{hid}: {len(clip_ids)} Clips, {ergebnis['dauer']}, Entwurf {zeile['id']}")
-    info_datei.write_text(json.dumps(ergebnis, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Die Marke „fertig“ (oben: idempotent) erst ganz auf der Platte, dann unter ihrem Namen (Stufe 3, M144) – eine
+    # halbe Datei ließ vorher jeden neuen Aufruf mit Exit 1 enden. <hid>.tmp.json lässt der Lager-Abgleich aus.
+    zwischen = info_datei.with_name(f"{hid}.tmp.json")
+    zwischen.write_text(json.dumps(ergebnis, ensure_ascii=False, indent=2), encoding="utf-8")
+    uebernehmen(zwischen, info_datei)
     return ergebnis
