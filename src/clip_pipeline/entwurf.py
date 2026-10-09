@@ -391,9 +391,9 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
             stems_tmp.unlink(missing_ok=True)
         raise ZuGross(f"Entwurf {liste['name']} ist {groesse // 1_000_000} MB groß (Grenze {max_bytes // 1_000_000})",
                       kbit)
-    tmp.replace(ziel)
+    medien.uebernehmen(tmp, ziel)   # mit fsync: nach einem Stromausfall nie ein leeres Video unter dem Endnamen (M144)
     if stems_tmp is not None and stems_tmp.is_file():
-        stems_tmp.replace(stems)
+        medien.uebernehmen(stems_tmp, stems)
     _sidecar(ziel, {**geometrie(liste, b, h, quellen, rahmen), "fps": int(liste["fps"]), "encoder": name, **ton,
                     "stems": str(stems) if mit_stems else None, "render_s": round(time.monotonic() - beginn, 1),
                     "rueckfall": _beginn is not None, "eingabe_mb": _eingabe_mb(befehl), "dauer_s": round(wirklich, 3)})

@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .konfig import Konfig
-from .medien import MedienFehler, fuehre_aus, probe
+from .medien import MedienFehler, fuehre_aus, probe, uebernehmen
 
 B, H = 1080, 1920
 UEBERBLENDUNG = 0.5
@@ -160,7 +160,7 @@ def rendere(clip: Path, ziel: Path, konfig: Konfig, *, layout: str | None = None
         groesse = tmp.stat().st_size
         if groesse <= max_bytes:
             _pruefe_renderdauer(plan, tmp, vollstaendig=vollstaendig)
-            tmp.replace(ziel)
+            uebernehmen(tmp, ziel)
             return groesse
         maxrate = int(maxrate * 0.75)
     tmp.unlink(missing_ok=True)

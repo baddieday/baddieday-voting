@@ -92,7 +92,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - Musik nur aus einem lokal geprüften Ordner mit Lizenzvermerk je Titel. In Fortnite die lizenzierte Musik ausschalten.
 - `claude -p` zählt gegen meine Abo-Limits; die Regeln dafür können sich ändern.
 - VA-API-Render (iGPU) kann sporadisch hängen (26.09.: Zusammenschnitt, 40 min ohne Fortschritt, Sperre blockiert) →
-  jeder ffmpeg-Aufruf hat einen Wächter (180 s ohne CPU-Zeit = abbrechen), danach rendert der Rückfall auf der CPU.
+  jeder ffmpeg-Aufruf hat einen Wächter (180 s ohne CPU-Zeit = abbrechen), danach rendert der Rückfall auf der CPU
+  (seit 09.10. auch beim Schneiden der Clips). ffmpeg stirbt mit seinem Aufrufer (`setpriv --pdeathsig`), sonst
+  rechnete es nach einem Absturz verwaist ohne Sperre weiter; fertige Dateien kommen per fsync auf die Platte, bevor sie
+  ihren Namen bekommen (`medien.uebernehmen`), sonst kann nach einem Stromausfall eine leere Datei „fertig“ sein.
 
 ## Stufen (grobe Reihenfolge)
 0. Fundament: Proxmox, LXC, Tailscale, SSH-Zugang für n8n (mache ich mit Anleitung selbst)
@@ -656,3 +659,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Videos aus Dateizeiten), ✅ → Upload, Abend → Video und wie oft du ✅ tippst – nur lesen, weckt nie. Am Auftrag
     ändert sich nichts: n8n-Vertrag, Exit-Codes, JSON-Zeile und offene Transaktionen bleiben, ein Schreibfehler steht
     nur im Log. M139–M142.
+  - Schritt 2 (Ausfallsicher): Stirbt ein Schritt, endet sein ffmpeg mit – kein Video rechnet mehr heimlich ohne
+    Sperre weiter. Videos, Clips, Vorschauen und die Marke des 2-Wochen-Videos kommen erst ganz auf die Platte, dann
+    unter ihren Namen (nach einem Stromausfall nie eine leere Datei unter dem Endnamen). Streikt die Grafikeinheit beim
+    Schneiden der Clips, schneidet der Prozessor nach, statt das Match zu verlieren. `clip-sitzungen` bricht nach 2 h
+    ab (das Abend-Video holt der nächste Lauf auf dem Prozessor nach), die Timer der Freunde nach 1 h statt 2 h – das
+    Update übernimmt das nur in Dateien, die du nicht selbst angepasst hast. Abnahme-Tests: Absturz mitten im
+    Abend-Video, verwaistes ffmpeg, abgerissene n8n-Verbindung. Ergebnisse und n8n-Vertrag bleiben gleich. M143–M146.

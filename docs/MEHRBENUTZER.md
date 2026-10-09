@@ -8,7 +8,7 @@ anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl, eigene
 Freunde: `docs/FREUNDE.md`. Stufe 2 („Freunde liefern selbst“, Annahmen ab M85): Schritt 1 Briefkasten auf dem
 vServer (`docs/BRIEFKASTEN.md`), Schritt 2 Abholen am Mini und Schritt 3 Abholen einschalten (unten) sind gebaut –
 eingeschaltet wird je Freund mit `benutzer-anlegen.sh`, Schritt „Briefkasten“. Stufe 3 („Hybrider Render-Manager“,
-Annahmen ab M139): Schritt 1 Laufzeiten messen (unten) ist gebaut.
+Annahmen ab M139): Schritt 1 Laufzeiten messen und Schritt 2 Ausfallsicher (unten) sind gebaut.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -125,7 +125,8 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
 ## Dienste je Freund (umgesetzt, Schritt 5)
 - **Vorlagen** in `deploy/benutzer/`: `clip-freund-bot@` (sein Lern-Bot), `clip-freund-scan@` + Timer (alle 5 min ein
   Match), `clip-freund-abend@` + Timer (alle 10 min Abend-Video). `%i` ist der Name. Beide Timer-Dienste: Exit 3/4 kein
-  Fehler (4 = Sperre belegt), nach 2 h ohne Ende abgebrochen – dann ist die gemeinsame Sperre wieder frei.
+  Fehler (4 = Sperre belegt), nach 1 h ohne Ende abgebrochen (seit Stufe 3, vorher 2 h = Florians Wartezeit) – dann ist
+  die gemeinsame Sperre wieder frei.
 - **Sandbox** – derselbe Block in jeder Vorlage (ein Test wacht darüber): Benutzer `clip-<name>`, `CLIP_INSTANZ=I`,
   HOME und Caches in `I/cache`, keine Zugänge über systemd. Alles nur lesbar, `/home` und `/root` gibt es nicht. Leere,
   schreibgeschützte Ordner über `/srv`, `/var/lib/clip-pipeline`, `/var/lib/clip-benutzer` und
@@ -364,6 +365,26 @@ ob er ok, gesperrt oder mit Fehler endete; der Lern-Bot-Bau dazu Stimmung, Schni
   Schreibfehler steht nur im Log. Leere Läufe (unter 1 s) schreiben nichts, „gesperrt“ nur, wer mindestens 60 s warten
   darf. Annahmen M139–M142.
 
+## Ausfallsicher (Stufe 3, Schritt 2 – umgesetzt)
+Stürzt ein Schritt ab, fällt der Strom aus oder reißt die Verbindung, bleibt das Ergebnis richtig; der nächste Lauf
+macht es sauber neu. Anders ist nur das Verhalten im Fehlerfall – Videos, Clips, Schnittlisten, n8n-Vertrag gleich.
+- **ffmpeg stirbt mit:** `medien.fuehre_aus` startet jeden Befehl über `setpriv --pdeathsig KILL --` (einmal je Prozess
+  geprüft; geht es nicht, wie bisher mit einer Logzeile). Stirbt der Python-Prozess (Speicher voll, `kill -9`, ein
+  n8n-Schritt außerhalb von systemd), endet sein ffmpeg sofort – kein verwaistes Rendern ohne Sperre, kein zweiter
+  Schreiber auf dieselbe Zwischendatei.
+- **Fertige Dateien überstehen Stromausfall:** Entwürfe und Stems, Clips (auch Momente und Fails), Vorschauen, Shorts,
+  das 2-Wochen-Video und seine Marke `<id>.json` kommen erst ganz auf die Platte (fsync), dann unter ihren Namen
+  (`medien.uebernehmen`).
+- **CPU-Rückfall beim Schneiden:** Streikt oder hängt VA-API in `medien.schneide`, schneidet libx264 einmal mit
+  demselben crf nach (n8n-render, Nachschnitt, Fails, scan der Freunde).
+- **Zeitgrenzen:** `clip-sitzungen` 2 h (das abgebrochene Abend-Video rendert der nächste Lauf auf der CPU nach), die
+  Timer-Dienste der Freunde 1 h – kürzer als Florians 2 h Wartezeit. Das Update übernimmt beides nur in Dateien, die
+  niemand angepasst hat (sonst „weicht vom Repo ab“).
+- **Abnahme:** `tests/test_abnahme_stufe3.py` – SIGKILL der ganzen Prozessgruppe mitten im Abend-Video (Sperre frei,
+  kein halbes Video, Nachholen auf der CPU, genau ein Video ±2 Bilder, dritter Lauf tut nichts), verwaistes ffmpeg nach
+  höchstens 1 s weg (Haupt- und Arbeits-Thread), abgerissene Ausgabe bei `render` (Clips gespeichert, Wiederholung
+  neu = 0, Dateien gleich). Annahmen M143–M146.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -394,6 +415,6 @@ Offen: freier Speicher auf dem vServer für den Briefkasten.
    (Schritt 4), Lager für Freunde (Schritt 5), Morgenprüfung kennt die Freunde (Schritt 6); Löschen im Briefkasten erst
    nach Florians Ja.
 3. **Hybrider Render-Manager:** Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für
-   Rechen-Arbeiter. Gebaut: Laufzeiten messen (Schritt 1).
+   Rechen-Arbeiter. Gebaut: Laufzeiten messen (Schritt 1), Ausfallsicher (Schritt 2).
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

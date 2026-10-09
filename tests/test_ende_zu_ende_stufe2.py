@@ -45,7 +45,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from clip_pipeline import cli, db, erwartung, konfig as konfig_modul, lernen, mikro, publikum, verarbeitung
+from clip_pipeline import cli, db, erwartung, konfig as konfig_modul, lernen, medien, mikro, publikum, verarbeitung
 from clip_pipeline.merkmale import REPLAY_MERKMALE
 from clip_pipeline.vorbewertung import MERKMALE
 from clip_pipeline.zeit import UTC, iso
@@ -466,8 +466,14 @@ class MicAnstoss(unittest.TestCase):
         fremde = []
 
         def popen(befehl, *args, **kwargs):
-            # ffmpeg/ffprobe laufen echt; alles andere wäre ein unerwarteter Prozess
-            if Path(str(befehl[0])).name not in ("ffmpeg", "ffprobe"):
+            # ffmpeg/ffprobe laufen echt; alles andere wäre ein unerwarteter Prozess. Seit Stufe 3 (M143) startet
+            # medien.fuehre_aus über „setpriv … --“ – das Programm steht danach; die einmalige Probe zählt nicht mit
+            programm = [str(teil) for teil in befehl]
+            if programm[:len(medien.MITSTERBEN)] == list(medien.MITSTERBEN):
+                programm = programm[len(medien.MITSTERBEN):]
+                if programm == ["true"]:
+                    return echt(befehl, *args, **kwargs)
+            if Path(programm[0]).name not in ("ffmpeg", "ffprobe"):
                 fremde.append(befehl)
             return echt(befehl, *args, **kwargs)
 
