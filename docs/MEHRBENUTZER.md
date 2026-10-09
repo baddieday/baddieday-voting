@@ -8,7 +8,8 @@ anlegen und prüfen mit einem Befehl, Einladungslink statt Telegram-Zahl, eigene
 Freunde: `docs/FREUNDE.md`. Stufe 2 („Freunde liefern selbst“, Annahmen ab M85): Schritt 1 Briefkasten auf dem
 vServer (`docs/BRIEFKASTEN.md`), Schritt 2 Abholen am Mini und Schritt 3 Abholen einschalten (unten) sind gebaut –
 eingeschaltet wird je Freund mit `benutzer-anlegen.sh`, Schritt „Briefkasten“. Stufe 3 („Hybrider Render-Manager“,
-Annahmen ab M139): Schritt 1 Laufzeiten messen und Schritt 2 Ausfallsicher (unten) sind gebaut.
+Annahmen ab M139): Schritt 1 Laufzeiten messen, Schritt 2 Ausfallsicher und Schritt 3 Florian zuerst (unten) sind
+gebaut.
 
 **Kurz:** Jeder Freund bekommt eine eigene, abgeschlossene Kopie der Pipeline – eigener Bot in Telegram, eigener
 Speicher, er lernt nur aus seinen eigenen Videos. Geteilt wird nur die Rechen-Sperre: Der Mini rechnet weiter immer
@@ -85,8 +86,8 @@ Florians Konfig (M42). Vorlagen: `config/instanz.beispiel.toml`, `.env.example` 
    und `/opt/clip-pipeline/config`; eingebunden werden nur I, die Sperrdatei (nur lesen) und `pipeline.toml`.
    Florians Datenbank, claude, Schlüssel, Puffer, Lager und andere Freunde gibt es dort gar nicht.
 4. **Geheimnisse:** gehören root. Je Freund ein eigener Bot-Token und genau eine erlaubte Telegram-ID.
-5. **Aufträge:** eine Sperre; Freunde warten höchstens 15 min, dann übernimmt der nächste Timer-Lauf. n8n erreicht nur
-   Florian.
+5. **Aufträge:** eine Sperre; Freunde warten höchstens 15 min, dann übernimmt der nächste Timer-Lauf, und fragen
+   seltener nach ihr als Florian (Stufe 3, „Florian zuerst“). n8n erreicht nur Florian.
 
 ## Eine Rechen-Sperre (umgesetzt, Schritt 1)
 - `sperre.pfad(konfig)` ist die einzige Stelle, die den Pfad bestimmt: `[sperre].datei`, leer = wie bisher
@@ -385,6 +386,19 @@ macht es sauber neu. Anders ist nur das Verhalten im Fehlerfall – Videos, Clip
   höchstens 1 s weg (Haupt- und Arbeits-Thread), abgerissene Ausgabe bei `render` (Clips gespeichert, Wiederholung
   neu = 0, Dateien gleich). Annahmen M143–M146.
 
+## Florian zuerst (Stufe 3, Schritt 3 – umgesetzt)
+Warten Florian und ein Freund gleichzeitig auf die Rechen-Sperre, kommt Florian meist zuerst dran. Freund ist, wer die
+Sperrdatei nur lesen darf (bei ihm schreibgeschützt eingebunden, also nicht fälschbar). Er wartet vor dem ersten Versuch
+zufällig bis zu 1 s und fragt danach nur alle 4–6 s statt jede Sekunde – nie über seine Frist hinaus, an der Frist ein
+letzter Versuch. Florians Schritte fragen wie bisher sofort und dann jede Sekunde. Ein laufender Auftrag wird nie
+unterbrochen; keine Konfig, keine Datei, kein Dienst (`sperre.sperre`).
+- **Wirkung** (der echte Code mit nachgebauter Uhr): Bei einer Übergabe ist ein Freund in 10 statt 50 % der Fälle vor
+  Florian dran (drei Freunde: 27 statt 75 %). Die 1-s-Lücke zwischen zwei n8n-Schritten erwischt ein wartender Freund in
+  20 statt 100 % (drei: 49 %); mit echten Prozessen 4 von 30 statt 10 von 10.
+- **Preis:** Freunde kommen nach dem Freiwerden im Mittel gut 2 s später dran, bei freier Sperre 0,5 s – bei Aufträgen
+  von Minuten egal. Harter Vortritt erst, wenn `pipeline laufzeiten` es verlangt (Florians n8n-Schritte warten im Median
+  über 2 min oder sein Lern-Bot-Bau im p90 über 5 min). Annahme M147.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -415,6 +429,6 @@ Offen: freier Speicher auf dem vServer für den Briefkasten.
    (Schritt 4), Lager für Freunde (Schritt 5), Morgenprüfung kennt die Freunde (Schritt 6); Löschen im Briefkasten erst
    nach Florians Ja.
 3. **Hybrider Render-Manager:** Warteschlange vor der Sperre (Vorrang, Laufzeit-Protokoll), Auftrags-Vertrag für
-   Rechen-Arbeiter. Gebaut: Laufzeiten messen (Schritt 1), Ausfallsicher (Schritt 2).
+   Rechen-Arbeiter. Gebaut: Laufzeiten messen (Schritt 1), Ausfallsicher (Schritt 2), Florian zuerst (Schritt 3).
 4. Kampagnenlink je Instanz; neue Zielgrößen versioniert neben dem alten Score.
 5. Liga je Instanz-Datenbank.

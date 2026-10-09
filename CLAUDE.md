@@ -666,3 +666,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     ab (das Abend-Video holt der nächste Lauf auf dem Prozessor nach), die Timer der Freunde nach 1 h statt 2 h – das
     Update übernimmt das nur in Dateien, die du nicht selbst angepasst hast. Abnahme-Tests: Absturz mitten im
     Abend-Video, verwaistes ffmpeg, abgerissene n8n-Verbindung. Ergebnisse und n8n-Vertrag bleiben gleich. M143–M146.
+  - Schritt 3 (Florian zuerst): Warten du und Freunde gleichzeitig auf die Rechen-Sperre, kommst du meist zuerst dran.
+    Freunde fragen nur noch alle 4–6 s statt jede Sekunde und warten vor dem ersten Versuch zufällig bis zu 1 s;
+    erkannt wird ein Freund daran, dass er die Sperrdatei nur lesen darf (nicht fälschbar). Bei einer Übergabe ist ein
+    Freund in 10 statt 50 % der Fälle vor dir dran (drei Freunde: 27 statt 75 %), die 1-s-Lücke zwischen zwei
+    n8n-Schritten erwischt ein wartender Freund in 20 statt 100 %. Deine Schritte fragen wie bisher sofort und dann
+    jede Sekunde; ein laufender Auftrag wird nie unterbrochen. Harter Vortritt erst, wenn `laufzeiten` es zeigt. M147.
