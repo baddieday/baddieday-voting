@@ -133,7 +133,9 @@ def uebernehmen(tmp: Path, ziel: Path) -> None:
     die Platte. Nach einem Stromausfall gibt es unter dem Endnamen so nur die ganze Datei oder gar keine – vorher
     konnte der Name da sein, die Datei aber leer, während die Datenbank „fertig“ sagte. Ein Fehler beim Ordner ist
     egal (manche Dateisysteme können das nicht); einer bei der Datei oder beim Umbenennen fliegt wie bisher."""
-    fd = os.open(tmp, os.O_RDONLY)
+    # Windows (nur zum Entwickeln): os.fsync ist dort FlushFileBuffers und braucht ein Handle mit Schreibrecht – mit
+    # O_RDONLY käme EBADF, und jedes Rendern endete hier (M153). Linux wie bisher nur lesend.
+    fd = os.open(tmp, os.O_RDWR if sys.platform == "win32" else os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:

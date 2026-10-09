@@ -211,6 +211,21 @@ class Vorlagen(unittest.TestCase):
         self.assertEqual((bot["Type"], bot["Restart"], bot["WantedBy"]),
                          (["simple"], ["always"], ["multi-user.target"]))
 
+    def test_florians_timer_mit_sperre_enden_vor_seiner_wartezeit(self):
+        """Prüfung K2 (M154): clip-sitzungen und clip-mikro nehmen die Rechen-Sperre und enden spätestens nach
+        [sperre].warten_s (TimeoutStartSec zählt ab dem Start, mit dem Warten). Hängt so ein Lauf mit der Sperre,
+        bekommt ein n8n-Schritt, der danach kommt, sie noch vor seiner Frist. Bewusst nicht länger: Mit 2 h + x endete
+        ein n8n-Schritt, der in den ersten x nach einem Hänger kommt, mit Exit 4 (nachgestellt mit der echten Sperre).
+        Preis: Wer die ganzen 2 h nur wartet, endet durch systemd statt mit Exit 4, ohne Zeile „gesperrt“."""
+        warten = KONFIG["sperre"]["warten_s"]
+        einheit = {"h": 3600, "min": 60, "s": 1}
+        for name in ("clip-sitzungen.service", "clip-mikro.service"):
+            spanne = lies_unit(DEPLOY / "systemd" / name)["TimeoutStartSec"][0]
+            with self.subTest(name):
+                self.assertRegex(spanne, r"^(\d+(h|min|s))+$")
+                self.assertLessEqual(sum(int(z) * einheit[e] for z, e in re.findall(r"(\d+)(h|min|s)", spanne)),
+                                     warten)
+
     def test_lager_vorlage_ist_block_plus_genau_eine_bindung(self):
         """Isolation (Stufe 2): Außerhalb des Sandbox-Blocks hat die Lager-Vorlage nur ihre Grenzen und genau zwei
         Zeilen mehr – die eine Bindung seines Unterordners (ohne „-“: fehlt er, startet nichts) und kein Netz. Keine

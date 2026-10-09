@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import unittest
@@ -69,6 +70,25 @@ class Uebernehmen(unittest.TestCase):
             medien.uebernehmen(self.tmp, self.ziel)
         self.assertFalse(self.ziel.exists())        # nie eine halbe Datei unter dem Endnamen
         self.assertTrue(self.tmp.exists())
+
+    @unittest.skipIf(sys.platform == "win32", "nachgestellt über fcntl – unter Windows gilt der echte Fall")
+    def test_windows_fsync_braucht_schreibrecht(self):
+        """Prüfung K1 (M153): Unter Windows ist os.fsync FlushFileBuffers, und das scheitert auf einem nur lesend
+        geöffneten Handle (EBADF) – jedes Rendern endete dort, bevor die Datei ihren Namen bekam. Nachgestellt: fsync
+        wie unter Windows. Der Ordner bleibt nur lesbar; sein Fehler zählt wie bisher nicht."""
+        import errno
+        import fcntl
+
+        def fsync_wie_windows(fd):
+            if (fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE) == os.O_RDONLY:
+                raise OSError(errno.EBADF, "Bad file descriptor")
+
+        with mock.patch.object(medien.sys, "platform", "win32"), \
+                mock.patch.object(medien.os, "fsync", side_effect=fsync_wie_windows) as fsync:
+            medien.uebernehmen(self.tmp, self.ziel)
+        self.assertEqual(fsync.call_count, 2)
+        self.assertEqual(self.ziel.read_bytes(), b"video")
+        self.assertFalse(self.tmp.exists())
 
 
 class SchnittRueckfall(unittest.TestCase):

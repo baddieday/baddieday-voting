@@ -686,3 +686,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     `docs/MEHRBENUTZER.md`: Schneller wird nichts. Neu ist: Abstürze und Stromausfall hinterlassen keine kaputten
     Dateien, eine Panne der Grafikeinheit beim Schneiden kostet kein Match mehr, du kommst an der Sperre meist zuerst
     dran, und Laufzeiten sind sichtbar. Echte Mini-Zahlen fehlen noch (`pipeline laufzeiten` vor Ort). M148–M152.
+  - Prüfung (ein Prüfer, zwei kleine Befunde, nichts Blockierendes): Unter Windows (nur zum Entwickeln) endete jedes
+    Rendern beim neuen Auf-die-Platte-Schreiben – behoben, auf dem Mini ändert sich nichts. `clip-sitzungen` bleibt
+    bei 2 h: Wartet es die ganzen 2 h auf die Sperre, beendet systemd es ohne Zeile „gesperrt“ (nichts geht verloren).
+    Länger hieße: Hängt das Abend-Video selbst, endete ein n8n-Schritt, der kurz danach kommt, mit Exit 4
+    (nachgestellt); ein Test hält das fest. M153–M154.

@@ -458,6 +458,9 @@ gemessen“: erfüllt für den einzigen Rechner, den Mini – Nachweis unten. Di
 - **Zum Abschluss:** alle in Stufe 3 neuen oder berührten Testmodule und ihre Nachbarn – 47 Module, 845 Tests, keiner
   rot. 4 übersprungen, wie immer im Container: zwei Tests mit echtem Whisper und ein Leistungstest (nur mit Schalter),
   dazu der Briefkasten mit echtem sshd (braucht einen eigenen Namensraum). Die volle Suite läuft in der CI.
+- **Prüfung danach** (ein Prüfer): zwei kleine Befunde, keiner blockierend – fsync unter Windows behoben (M153); die
+  2-h-Grenze von `clip-sitzungen` bleibt gleich der Wartezeit, die Folge ist dokumentiert und per Test festgehalten
+  (M154).
 - **Nicht geprüft:** der Mini selbst (echte Renderzeiten, VA-API, setpriv im CT) – das zeigt `pipeline laufzeiten` vor
   Ort.
 
