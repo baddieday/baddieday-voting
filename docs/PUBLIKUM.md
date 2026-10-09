@@ -148,11 +148,40 @@ Nach dem täglichen Lauf (10:00) kommt höchstens **eine** Meldung am Tag, nur w
 eine zweite Zeile das. Holt der Timer einen verpassten Lauf nachts nach, hält der Lern-Bot die Meldung bis zum
 Ende der Ruhezeit (08:00) zurück; andere Lern-Bot-Meldungen (Abendstand, Fehler) kommen wie bisher sofort.
 
+### 7. Erfolg ehrlich messen (`pipeline erfolg`, Stufe 4, 09.10.)
+Im CT als `pipeline`: `/opt/clip-pipeline/bin/pipeline erfolg` – für einen Freund `bash deploy/benutzer/benutzer-befehl.sh
+<name> erfolg`. Nur nachsehen: keine Sperre, weckt nie, über n8n nicht erreichbar; Bots, Lernen und Videos bleiben gleich.
+- **Zwei Zahlen, zwei Zwecke.** Belegt wird nur mit der festen Wochen-Note (Abschnitt 4: einmal um Tag 7, nie
+  überschrieben). Die Zuschauer-Note in `/publikum`, mit der der Bot Aufbau, Tempo und Zeitlupe lernt, ändert sich mit
+  jeder Messung – sie ist zum Ausprobieren da, nicht als Beweis. KI-Note, Cutter-Note und deine ✅/❌ zählen hier nie.
+- **Drei Ziele, getrennt.** Zuschauer (wie lange geschaut wird · Reaktionen je View · Reichweite – die Wochen-Note),
+  neue Follower, Besuche auf clip-battle.de. Jedes ist „gemessen“, „zu wenig Vergleich“, „wartet“ oder „nicht gemessen“
+  mit Grund – nie eine 0. Heute auf TikTok: wie lange geschaut wird und Follower nicht (die TikTok-Schnittstelle
+  liefert beides nicht je Video), clip-battle.de zählt noch nicht. Gesamt = gewichteter Mittelwert nur über die
+  gemessenen Ziele (`[erfolg.gewichte]` 0,5/0,2/0,3), heute also die Zuschauer-Note.
+- **Was zählt.** Jedes hochgeladene Short je Plattform einmal (Fassungen eines Videos einmal, ein Crosspost auf jeder
+  Plattform für sich). Nicht gezählt, mit Grund: die ersten 5 je Plattform (nur Vergleich), Wochenzahl nicht aus Tag
+  4–10, Fail-Videos, das 2-Wochen-Video, Clips aus dem Clip-Bot, weitere Fassungen. Ohne Wochenzahlen „wartet“ ein Video
+  bis 14 Tage nach dem Upload, danach zählt es nicht (nicht hochgeladen oder nicht gefunden?).
+- **Vergleich.** 9 feste Strategien je Plattform: 4 Aufbauten (je gegen die anderen), schnelle gegen ruhige Schnitte,
+  viel gegen wenig Zeitlupe, Länge unter 45 / 45–60 / über 60 s. „Belegt“ erst ab 8 Videos je Seite, bei ähnlicher
+  Länge (höchstens 15 % Unterschied) und nur, wenn der Unterschied sehr wahrscheinlich kein Zufall ist (1 % Irrtum,
+  aufgeteilt auf die 9 Vergleiche). Sonst „noch zu wenig Videos – frühestens nach k weiteren“ oder „noch kein
+  Unterschied sicher“. „Kommt besser an“ heißt: hängt zusammen – nicht: macht besser.
+- **Ehrlich erwartet** (bei 3 hochgeladenen Shorts pro Woche): ein erster Vergleich frühestens nach etwa 7 Wochen
+  (Tempo, Zeitlupe) bzw. 12 (Aufbau); ein doppelter Unterschied ist im Median nach etwa 16 Wochen belegt, 30 % besser
+  binnen eines Jahres nur in etwa jedem zweiten Fall. Schaut man jede Woche nach, steht ohne echten Unterschied in etwa
+  4 von 100 Halbjahren irgendwann ein falsches „belegt“ da (nachgerechnet, M161).
+- **Ausgabe:** Text nach stderr, eine JSON-Zeile nach stdout (`version`, `gewichte`, `m`, je Plattform `einheiten`,
+  `wartet`, `nicht_gezaehlt`, `ziele`, `teilziele`, `vergleich`, `befunde`). Exit 0; kaputte `[erfolg.gewichte]` (keine
+  Zahl, negativ, Summe 0, unbekannter Name) Exit 2. Der Sonntagsbericht bekommt die Zeile erst mit Schritt 2.
+
 ## Befehle
 
 | Wo | Befehl | Was |
 |---|---|---|
 | CT | `pipeline publikum bewerten` | Scores aller fälligen Posts setzen (Timer `clip-publikum`, 10:00); weckt nie, keine Pipeline-Sperre |
+| CT | `pipeline erfolg` | nur nachsehen: Ziele mit Status und belegter Strategievergleich aus den Wochen-Noten (Abschnitt 7) |
 | Lern-Bot | `/publikum [anzahl]` | letzte Posts mit Zahlen und Score |
 | Lern-Bot | `/link <entwurf> <url>` | Post zu einem Entwurf anlegen bzw. Link korrigieren |
 | Lern-Bot | Foto mit `#17` · Text `#17 1240 61 6.8 34` (optional `3 5 2` dahinter) | Zahlen per Screenshot bzw. von Hand |
@@ -179,6 +208,7 @@ Beispiel in `config/lokal.beispiel.toml`). `pipeline …` liest die Konfig bei j
 | `[publikum].mindest_alter_tage` | `3` | jüngere Messungen zählen nicht für den Score |
 | `[publikum].fenster` | `20` | so viele zuletzt bewertete Posts bilden die Vergleichsbasis |
 | `[publikum].paar_abstand` | `0.5` | (ab Stufe 2) Mindestabstand zweier Scores, damit daraus ein Lern-Paar wird |
+| `[erfolg.gewichte]` | `0.5` / `0.2` / `0.3` | Zuschauer / Follower / Webseite in `pipeline erfolg` – zählt nur, was gemessen ist; keine Zahl, negativ oder Summe 0 → Exit 2 |
 | `[publikum].max_paare` | `200` | (ab Stufe 2) höchstens so viele jüngste Publikums-Paare |
 | `[publikum].upload_ordner` | `"export"` | Ordner der Upload-Fassungen im Puffer (`/srv/puffer/export/<name>/`) |
 | `[publikum.gewichte].wiedergabe` | `0.5` | Gewicht der Wiedergabe im Score |

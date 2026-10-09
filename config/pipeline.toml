@@ -416,6 +416,15 @@ engagement = 0.005
 # (ln 1,1 ≈ 0,095) – kleinere Unterschiede in der Reichweite sind Zufall der TikTok-Verteilung.
 reichweite = 0.1
 
+[erfolg.gewichte]
+# `pipeline erfolg` (Stufe 4, M157): Gesamt = gewichteter Mittelwert über die Ziele, die für ein Video wirklich gemessen
+# sind – ein fehlendes Ziel zählt nie als 0. Heute ist auf TikTok nur „zuschauer“ gemessen (die Wochen-Note); die
+# Gewichtung wirkt erst mit dem zweiten gemessenen Ziel. Ändern nur in lokal.toml, kein Knopf. Keine Zahl, negativ oder
+# Summe 0 → Exit 2. Die Lerner rechnen in Stufe 4 nicht damit (M163).
+zuschauer = 0.5
+follower = 0.2
+webseite = 0.3
+
 [datenbank]
 # Liegt auf dem Mini (immer an), nicht auf dem Speicher.
 pfad = "/var/lib/clip-pipeline/pipeline.db"

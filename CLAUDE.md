@@ -117,6 +117,12 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Timer neben n8n)? Ja oder Nein – bis dahin Alarm von n8n und `pipeline process <ID>` von Hand.
 - Stufe 3 (M149): Zweiter Rechner oder Cloud nur nach einem Messbefund aus `pipeline laufzeiten` (Auslöser in
   `docs/WORKER.md`) – dann: welcher Rechner, bei der Cloud Anbieter, Monatslimit in Euro und Text der Zustimmung.
+- Stufe 4 (M157, M165–M170), gebündelt: (1) Darf clip-battle.de einen Zähler bekommen (nur Aufrufe je Video-Code und
+  Tag, ohne Cookie und IP) – ja oder nein, und wer macht vorher die Rechtsprüfung? (2) YouTube verbinden (eigene
+  Google-App, nur Leserechte – dann wären „wie lange geschaut wird“ und neue Abos je Video messbar)? (3) TikTok-Follower
+  als Wochenwert (einmal neu zustimmen)? (4) Passt Zuschauer 0,5 · Follower 0,2 · Webseite 0,3 zu „clip-battle.de
+  bewerben ist das Hauptziel“? (5) Wie viele Shorts lädst du pro Woche wirklich hoch (danach richtet sich, wann der
+  erste Vergleich kommt)?
 
 ## Entscheidungen
 - 2026-09-23: Kein Medal.tv – Nvidia + SteelSeries reichen; Pipeline wählt pro Moment die Aufnahme mit bester Abdeckung.
@@ -691,3 +697,18 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     bei 2 h: Wartet es die ganzen 2 h auf die Sperre, beendet systemd es ohne Zeile „gesperrt“ (nichts geht verloren).
     Länger hieße: Hängt das Abend-Video selbst, endete ein n8n-Schritt, der kurz danach kommt, mit Exit 4
     (nachgestellt); ein Test hält das fest. M153–M154.
+- 2026-10-09 (Stufe 4 Mehrbenutzer, „Qualitäts- und Erfolgsmessung“ – Plan aus zwei Entwürfen; Abnahme: „belegbare
+  Unterschiede zwischen Strategien, ohne fehlende Daten zu erfinden“): **Erfolg ehrlich messen.** Der Zähler auf
+  clip-battle.de und der Video-Code in der Caption kommen erst nach deinem Ja (offene Fragen); bis dahin bleiben
+  clip-battle.de, Captions, Bots, Lernen und n8n, wie sie sind. Annahmen ab M155: `docs/ENTSCHEIDUNGEN.md`, „Mehrbenutzer“.
+  - Schritt 1 (`pipeline erfolg`, nur nachsehen, `docs/PUBLIKUM.md` Abschnitt 7): drei Ziele getrennt – Zuschauer (die
+    feste Wochen-Note), neue Follower, Besuche auf clip-battle.de; was fehlt, heißt „nicht gemessen“ mit Grund, nie 0
+    (auf TikTok heute: wie lange geschaut wird, Follower und clip-battle.de). Jedes hochgeladene Short zählt je
+    Plattform einmal (Fassungen einmal, die ersten 5 sind nur Vergleich). Verglichen werden 9 feste Strategien (4
+    Aufbauten, Tempo, Zeitlupe, 3 Längen); „belegt“ erst ab 8 Videos je Seite und nur, wenn es sehr wahrscheinlich kein
+    Zufall ist. KI-Note und ✅/❌ zählen dafür nie. Gewichte `[erfolg.gewichte]` 0,5/0,2/0,3, nur in der Konfig. Freund:
+    `benutzer-befehl.sh <name> erfolg`. Gemessen: ohne echten Unterschied behauptete der Wochenbericht schon nach 8
+    Videos einen Verlierer (Versuch E), `erfolg` nie; bei wöchentlichem Nachsehen ein falsches „belegt“ in 3,6 % der
+    Halbjahre (6,3 % im Jahr); doppelte Reaktionen in 100 % binnen eines Jahres belegt, im Median nach 16 Wochen
+    (bei 3 Shorts je Woche). 300 Posts in 15 ms. Die Zeile für den Sonntagsbericht ist fertig, eingehängt wird sie mit
+    Schritt 2. M155–M161, M163–M170.
