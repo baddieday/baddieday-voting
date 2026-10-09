@@ -373,6 +373,48 @@ class FlorianUnveraendert(MitSpeicher):
         self.assertIsNone(self.konfig.instanz)
 
 
+# --- Stufe 2: Briefkasten (M93) ----------------------------------------------------------------------------------
+
+class Briefkasten(MitInstanzen):
+    """[briefkasten] in der instanz.toml: geprüft, Benutzer und Schlüssel fest, mit host ist auto_abend aus. Eine
+    Instanz ohne den Abschnitt bleibt genau wie in Stufe 1."""
+
+    def schreibe(self, zusatz: str) -> None:
+        (self.max / "instanz.toml").write_text(f'[sperre]\ndatei = "{self.sperrdatei}"\n{zusatz}\n', encoding="utf-8")
+
+    def test_ohne_briefkasten_wie_stufe_1(self):
+        k = self.lade(self.max)
+        self.assertEqual((k.wert("briefkasten.host"), k.wert("sitzungen.auto_abend")), ("", True))
+        ausgabe = io.StringIO()
+        with als_instanz(self.max), contextlib.redirect_stdout(ausgabe), contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(["briefkasten", "abholen"])
+        self.assertEqual((code, json.loads(ausgabe.getvalue().strip())["aus"]), (0, True))
+        con = db.verbinde(k.datenbank)
+        self.addCleanup(con.close)
+        self.assertIsNone(con.execute("SELECT 1 FROM sqlite_master WHERE name = 'abholung'").fetchone())
+
+    def test_werte_geprueft_benutzer_und_schluessel_fest(self):
+        self.schreibe('[briefkasten]\nhost = "100.101.1.2"\nport = 2223\noeffentlich = "vserver.example.org"\n'
+                      "drossel_kbit = 0")
+        k = self.lade(self.max)
+        self.assertEqual([k.wert(f"briefkasten.{n}") for n in ("host", "port", "benutzer", "schluessel", "known_hosts")],
+                         ["100.101.1.2", 2223, "bk-max", str(self.max / "briefkasten" / "abholen"),
+                          str(self.max / "briefkasten" / "known_hosts")])
+        self.assertEqual((k.wert("sitzungen.auto_abend"), k.wert("sitzungen.ruhe_min")), (False, 45))
+        for zeile, muster in (('host = "vserver.example.org"', "kein Name"), ('host = "8.8.8.8"', "Tailnet"),
+                              ('port = "2222"', "ganze Zahl"), ("drossel_kbit = -1", "ganze Zahl"),
+                              ("loeschen = true", "Florians Ja"), ('benutzer = "bk-eva"', "nicht erlaubt"),
+                              ('schluessel = "/tmp/fremd"', "nicht erlaubt")):
+            self.schreibe(f'[briefkasten]\n{zeile}' if zeile.startswith("host") else
+                          f'[briefkasten]\nhost = "100.101.1.2"\n{zeile}')
+            with self.subTest(zeile=zeile), self.assertRaisesRegex(KonfigFehler, muster):
+                self.lade(self.max)
+        self.schreibe('[briefkasten]\nhost = "100.101.1.2"')
+        (self.max / "briefkasten").symlink_to(self.eva / "db")   # Link aus der Instanz hinaus: Pfadwächter
+        with self.assertRaisesRegex(KonfigFehler, "außerhalb der Instanz"):
+            self.lade(self.max)
+
+
 # --- Migration: ohne CLIP_INSTANZ alles wie vorher ---------------------------------------------------------------
 
 class Migration(unittest.TestCase):

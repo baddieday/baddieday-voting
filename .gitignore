@@ -5,6 +5,10 @@
 publikum-oauth.json
 .publikum-oauth-*.tmp
 windows/uebertragung.psd1
+# PC-Programm eines Freundes (Stufe 2): seine echte Konfig und sein Schlüssel kommen nur aus seinem Bot (/pc)
+windows/freund.psd1
+windows/pc
+windows/known_hosts
 config/lokal.toml
 
 # Python
