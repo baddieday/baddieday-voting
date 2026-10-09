@@ -743,3 +743,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Unterschied eine falsche Krönung in 1,2 % der Jahre, doppelte Reaktionen im Median nach 17 Wochen gekrönt; 2 Jahre
     Geschichte in 0,15 s. Der erfolg-Teil bleibt Zeichen für Zeichen gleich; Bericht, 📋, Videos und n8n unverändert.
     M178–M186.
+  - Schritt 2 (Liga im Lern-Bot, `docs/SO-GEHTS.md` „Der Sonntagsbericht“): Statt der 📊-Zeile stehen sonntags 🥇 bester
+    Aufbau (in der Woche der Krönung auch ohne Video), 🧪 was ausprobiert wurde – mit Namen –, 🏅 Level und Erfahrung
+    und 🔜 das nächste Ziel; gibt es einen besten Aufbau, nennt 🎯 keinen Aufbau mehr. 📋 hat eine Liga-Zeile, sobald
+    Zahlen ankommen; deine ✅/❌-Zahl steht in der 🧠-Zeile („Zuschauern (läuft)“). Freunde ohne Zahlenabruf: keine
+    Liga-Zeilen und keine wöchentliche 🧠-Zeile mehr. /lernstand (nur /experte): die Liga oben, das Publikums-Modell ohne
+    Version und Prozent. Aufbau-Versuche bleiben sichtbar, auch wenn das Publikums-Modell Feinwerte nachsteuert –
+    nachgestellt: Wahl und Lernen in 60 Entwürfen gleich, sichtbare Versuche 3 → 14. Videos, Knöpfe und n8n unverändert.
+    M187–M192.

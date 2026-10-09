@@ -340,8 +340,8 @@ class KI(MitInstanzen):
         which.assert_called_once_with("claude", path=claude_aufruf.SUCHPFAD)
         con = db.verbinde(k.datenbank)
         self.addCleanup(con.close)
-        self.assertIn("· KI-Note (kommt mit dem nächsten Video) · Zuschauern (noch kein Video ausgewertet)",
-                      geschmack.lehrer_zeile(con, k))
+        self.assertIn("· KI-Note (kommt mit dem nächsten Video) · Zuschauern (holt bei dir noch niemand ab)",
+                      geschmack.lehrer_zeile(con, k))   # Stufe 5 (M190): bei ihm holt niemand Zahlen ab
 
     def test_token_aus_env_wirkt_ohne_neustart_und_bleibt_aus_der_umgebung(self):
         k = self.lade(self.max)

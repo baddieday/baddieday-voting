@@ -30,6 +30,11 @@ in den 7 Tagen davor fertig geworden). Level je Strategie nur aus der Erfahrung 
 nie. Vertrauen in Worten (M184), die Spanne von–bis nur für /experte und `pipeline erfolg`, nie Prozent.
 Versuche (M186): bewusst Neues der 7 Tage vor dem Abruf (geschmack.experiment und der Versuch des Publikums-Modells),
 je Video einmal, mit einfachen Namen; nach einer Krönung heißen Videos mit anderem Aufbau Herausforderer.
+
+Im einfachen Modus (Stufe 5, Schritt 2, M187–M191): Sonntagsbericht (geschmack.wochen_text mit neu_zeilen,
+bester_zeile, versuche_zeile, level_zeile, ziel_zeile) und eine Zeile in 📋 (stand_zeile) – beides erst, wenn auf der
+Hauptplattform Zuschauerzahlen ankommen (zahlen_kommen_an); 🧪 auch ohne Zahlen. Unter /experte: text() oben in
+/lernstand.
 """
 
 from __future__ import annotations
@@ -72,6 +77,27 @@ def level(videos: int) -> int:
     return 1 + sum(1 for s in STUFEN if videos >= s)
 
 
+def hauptplattform(konfig: Konfig) -> str | None:
+    """Die erste Plattform aus [publikum].plattformen (heute TikTok) – nur auf ihr rechnet die Liga (M179)."""
+    plattformen = publikum.post_plattformen(konfig)
+    return plattformen[0] if plattformen else None
+
+
+def zahlen_kommen_an(con: sqlite3.Connection, konfig: Konfig, bis: datetime | None = None) -> bool:
+    """Kommen auf der Hauptplattform Zuschauerzahlen an? Eine Messung eines Shorts genügt (M189) – dieselbe Zählung wie
+    stand()["messungen"], nur billig (eine Zeile, ohne Netz). Danach schalten die Liga-Zeilen in Bericht und 📋, nicht
+    danach, ob jemand ein Freund ist (M190)."""
+    haupt = hauptplattform(konfig)
+    if not haupt:
+        return False
+    sql, werte = ("SELECT 1 FROM posts p JOIN publikum_messungen m ON m.post_id = p.id "
+                  "WHERE p.plattform = ? AND p.art = 'entwurf'"), [haupt]
+    if bis is not None:
+        sql += " AND m.gemessen_utc <= ?"
+        werte.append(iso(bis))
+    return con.execute(sql + " LIMIT 1", werte).fetchone() is not None
+
+
 # --- Stichtage -----------------------------------------------------------------------------------------------------
 
 def _sonntag(tag, zonen_name: str) -> datetime:
@@ -103,8 +129,7 @@ def _grundlage(con: sqlite3.Connection, konfig: Konfig, bis: datetime) -> dict:
     """Die eine Abfrage: Hauptplattform, Gewichte und die erfolg-Einheiten (mit Fassungen) als Kandidaten mit
     Zeitpunkten, nach fertig sortiert. Unlesbare Zeitpunkte zählen nicht (Grund „Score-Teile unlesbar“)."""
     w = erfolg.gewichte(konfig)
-    plattformen = publikum.post_plattformen(konfig)
-    haupt = plattformen[0] if plattformen else None
+    haupt = hauptplattform(konfig)
     pl = erfolg.einheiten(con, konfig, bis, w).get(haupt) if haupt else None
     pl = pl or {"einheiten": [], "fassungen": [], "wartet": 0, "weg": Counter()}
     weg = Counter(pl["weg"])
@@ -325,7 +350,8 @@ def stand(con: sqlite3.Connection, konfig: Konfig, bis: datetime | None = None) 
       erfahrung {gesamt, neu, basis [x, 5], aufbau, tempo, zeitlupe, laenge} (bis bis) · seit_kroenung {gesamt, aufbau}
       level {merkmal: {wahl: 1…5}} · vertrauen {aufbau: Befund mit Wort} · feinheiten [Befunde Tempo, Zeitlupe, Länge]
       ziel (das nächste Ziel) · versuche {von, bis, liste, herausforderer} · messungen (Posts der Hauptplattform mit
-      Zahlen) · nicht_gezaehlt, wartet (wie `pipeline erfolg` zum Zeitpunkt bis).
+      Zahlen) · offen (Ziele, die bei keinem gezählten Video gemessen sind: bindung, follower, webseite – für „Noch nicht
+      gemessen“ unter einem neuen 🥇) · nicht_gezaehlt, wartet (wie `pipeline erfolg` zum Zeitpunkt bis).
     KonfigFehler bei kaputten [erfolg.gewichte] oder [publikum]-Werten."""
     bis = bis or jetzt()
     g = _grundlage(con, konfig, bis)
@@ -382,7 +408,10 @@ def stand(con: sqlite3.Connection, konfig: Konfig, bis: datetime | None = None) 
         "feinheiten": [_befund(b, wort=_wort(b, bester, seit_text, wo)) for b in alle if b["merkmal"] != "aufbau"],
         "ziel": _ziel(befunde, bester, vorn, max(0, publikum.MINDEST_BASIS - bewertet)),
         "versuche": _versuche(con, haupt, bis, bester, seit),
-        "messungen": messungen, "nicht_gezaehlt": dict(sorted(g["weg"].items())), "wartet": g["wartet"],
+        "messungen": messungen,
+        "offen": [ziel for ziel in ("bindung", "follower", "webseite")
+                  if not any(e["status"][ziel] == erfolg.GEMESSEN for e in einheiten)],
+        "nicht_gezaehlt": dict(sorted(g["weg"].items())), "wartet": g["wartet"],
     }
 
 
@@ -392,9 +421,15 @@ def _datum(wert: str, zonen_name: str) -> str:
     return utc_zu_lokal(aus_iso(wert), zonen_name).strftime("%d.%m.")
 
 
+def _heute(st: dict) -> bool:
+    """Wurde der beste Aufbau am Tag von bis gekrönt (Sonntagsbericht in der Krönungswoche)? Dann „ab heute“."""
+    return bool(st["seit"]) and (utc_zu_lokal(aus_iso(st["seit"]), st["zeitzone"]).date()
+                                 == utc_zu_lokal(aus_iso(st["bis"]), st["zeitzone"]).date())
+
+
 def ziel_text(st: dict) -> str:
     """Das nächste Ziel in einem Satz, z. B. „Erster Vergleich der Aufbauten frühestens nach 19 weiteren Videos mit
-    Zuschauerzahlen.“"""
+    Zuschauerzahlen.“ – für `pipeline erfolg` und (mit 🔜 davor) den Sonntagsbericht."""
     z, bester = st["ziel"], st["bester"]
     seit = _datum(st["seit"], st["zeitzone"]) if st["seit"] else ""
     if z["art"] == "erster_vergleich":
@@ -402,14 +437,16 @@ def ziel_text(st: dict) -> str:
                 f"Video{'s' if z['fehlen'] != 1 else ''} mit Zuschauerzahlen.")
     if z["art"] == "herausforderer":
         if not sum(z["n"]):
-            return (f"Kann ein anderer Aufbau {name('aufbau', bester)} schlagen? Es zählen nur Videos ab dem {seit} – "
+            ab = "heute" if _heute(st) else f"dem {seit}"
+            return (f"Kann ein anderer Aufbau {name('aufbau', bester)} schlagen? Es zählen nur Videos ab {ab} – "
                     f"frühestens nach {z['fehlen']} weiteren.")
-        return (f"{name('aufbau', z['aufbau'])} gegen {name('aufbau', bester)}: {z['n'][0]} und {z['n'][1]} von je "
-                f"{erfolg.MINDESTENS} Videos seit dem {seit} – frühestens nach {z['fehlen']} weiteren.")
+        a, b = z["n"]   # „5 von 8“ – steht der beste Aufbau selbst noch unter 8 seit der Krönung: „5 und 3 von je 8“
+        stand_ = f"{a} von {erfolg.MINDESTENS}" if b >= erfolg.MINDESTENS else f"{a} und {b} von je {erfolg.MINDESTENS}"
+        return f"{name('aufbau', z['aufbau'])} gegen {name('aufbau', bester)}: {stand_} Videos seit dem {seit}"   # „14.06.“
     a, b = z["n"]
     if z["art"] == "vorn" and bester is None:
         return (f"Aufbau {name('aufbau', z['aufbau'])} liegt diesmal vorn ({a} gegen {b} Videos) – bestätigt es sich "
-                "am nächsten Sonntag mit neuen Zahlen, wird er der beste Aufbau.")
+                "am nächsten Sonntag mit neuen Zahlen, wird er dein bester Aufbau.")
     if z["art"] == "vorn":
         return (f"{name('aufbau', z['aufbau'])} liegt diesmal vor {name('aufbau', bester)} ({a} gegen {b} Videos seit "
                 f"dem {seit}) – bestätigt es sich am nächsten Sonntag mit neuen Zahlen, löst er ihn ab.")
@@ -419,8 +456,95 @@ def ziel_text(st: dict) -> str:
             "noch kein Unterschied sicher.")
 
 
+def _wie(st: dict, krone: dict, plattform: str | None = None) -> str:
+    """Wie ein Aufbau bester wurde: „kommt bei den Zuschauern besser an als die anderen Aufbauten“ bzw. „hat „erzählt“
+    auf Videos seit dem 07.03. geschlagen“ – mit plattform (Bericht) „… bei den Zuschauern auf TikTok besser an …“."""
+    if krone["vorher"] is None:
+        wo = "bei den Zuschauern" if krone["ziele"] == ["zuschauer"] else "insgesamt"
+        return f"kommt {wo}{f' auf {plattform}' if plattform else ''} besser an als die anderen Aufbauten"
+    kronen = [v for v in st["verlauf"] if v["art"] == "bester"]
+    davor = kronen[kronen.index(krone) - 1]
+    return f"hat {name('aufbau', krone['vorher'])} auf Videos seit dem {_datum(davor['stichtag'], st['zeitzone'])} geschlagen"
+
+
+# --- Zeilen für den einfachen Modus (Stufe 5, Schritt 2) -------------------------------------------------------------
+# Ohne Prozent und Fachbegriffe; „belegt“ heißt nur, was die Liga gekrönt hat (M188). 🥇 bester Aufbau · 🏅 Level und
+# Erfahrung · 🔜 nächstes Ziel · 🧪 ausprobiert.
+
+def neu_zeilen(st: dict) -> list[str]:
+    """Krönung oder Ablösung genau am letzten Stichtag: „🥇 Neuer bester Aufbau: „erzählt“ – kommt bei den Zuschauern
+    auf TikTok besser an als die anderen Aufbauten (14 gegen 27 Videos, zwei Sonntage nacheinander), sehr wahrscheinlich
+    kein Zufall.“ und darunter „Noch nicht gemessen: …“ (nur hier, M188). [] ohne ein solches Ereignis."""
+    k = st["ereignis"]
+    if not k:
+        return []
+    wie = _wie(st, k, PLATTFORM_NAMEN.get(st["plattform"], st["plattform"]))
+    zeilen = [f"🥇 Neuer bester Aufbau: {name('aufbau', k['aufbau'])} – {wie} ({k['n'][0]} gegen {k['n'][1]} Videos, "
+              "zwei Sonntage nacheinander), sehr wahrscheinlich kein Zufall."]
+    if st["offen"]:
+        zeilen.append("Noch nicht gemessen: " + ", ".join(erfolg.OFFEN_NAMEN[z] for z in st["offen"]) + ".")
+    return zeilen
+
+
+def bester_zeile(st: dict) -> str | None:
+    """„🥇 Bester Aufbau: „erzählt“ (belegt seit 07.03.)“ – None ohne besten Aufbau."""
+    if not st["bester"]:
+        return None
+    return f"🥇 Bester Aufbau: {name('aufbau', st['bester'])} (belegt seit {_datum(st['seit'], st['zeitzone'])})"
+
+
+def versuche_zeile(st: dict) -> str | None:
+    """🧪 mit Namen statt „n× bewusst etwas Neues“: „🧪 Ausprobiert: Aufbau „Kino“ (1×) · Musik lauter (1×)“; nach einer
+    Krönung „🧪 Herausforderer diese Woche: Aufbau „Steigerung“ (1×) · „Kino“ (1×)“, dahinter, was sonst neu war.
+    Gezählt wird je Video einmal (gezeigt). None, wenn nichts bewusst neu war."""
+    vs = st["versuche"]
+    teile = [f"{v['name']} ({v['gezeigt']}×)" for v in vs["liste"]]
+    if not vs["herausforderer"]:
+        return "🧪 Ausprobiert: " + " · ".join(teile) if teile else None
+    namen = [f"{geschmack.NAMEN[('aufbau', o)] if i == 0 else name('aufbau', o)} ({n}×)"
+             for i, (o, n) in enumerate(vs["herausforderer"].items())]
+    rest = [f"{v['name']} ({v['gezeigt']}×)" for v in vs["liste"]   # Aufbau-Versuche sind schon Herausforderer
+            if not (v["quelle"] == "geschmack" and v["knopf"] == "aufbau")]
+    return "🧪 Herausforderer diese Woche: " + " · ".join(namen) + (" · dazu ausprobiert: " + " · ".join(rest)
+                                                                     if rest else "")
+
+
+def level_zeile(st: dict) -> str:
+    """„🏅 Level 2 – vergleicht · Erfahrung: 31 Videos mit fertigen Zuschauerzahlen (+3)“ – mit bestem Aufbau kürzer
+    („Erfahrung: 41 Videos (+3)“, der 🥇-Satz sagt schon, woher), am Anfang mit „die ersten 5 sind nur der Vergleich“."""
+    e = st["erfahrung"]
+    zeile = f"🏅 Level {st['liga_level']} – {st['liga_stufe']} · Erfahrung: {_videos(e['gesamt'])}"
+    if not st["bester"]:
+        zeile += " mit fertigen Zuschauerzahlen"
+    if e["basis"][0] < e["basis"][1]:
+        zeile += f" (die ersten {e['basis'][1]} sind nur der Vergleich: {e['basis'][0]} von {e['basis'][1]})"
+    elif e["neu"]:
+        zeile += f" (+{e['neu']})"
+    return zeile
+
+
+def ziel_zeile(st: dict) -> str:
+    """„🔜 …“ – das nächste Ziel (ziel_text)."""
+    return f"🔜 {ziel_text(st)}"
+
+
+def stand_zeile(st: dict) -> str:
+    """Die eine Liga-Zeile in 📋 (M189): „🏅 Level 2 – vergleicht · 31 Videos mit Zuschauerzahlen · bester Aufbau noch
+    nicht belegt“ bzw. „🥇 Bester Aufbau: „erzählt“ (belegt seit 07.03.) · Level 3 · 41 Videos mit Zuschauerzahlen“."""
+    e = st["erfahrung"]
+    videos = f"{_videos(e['gesamt'])} mit Zuschauerzahlen"
+    if st["bester"]:
+        return f"{bester_zeile(st)} · Level {st['liga_level']} · {videos}"
+    if e["basis"][0] < e["basis"][1]:
+        videos += f" (die ersten {e['basis'][1]} sind nur der Vergleich: {e['basis'][0]} von {e['basis'][1]})"
+    return f"🏅 Level {st['liga_level']} – {st['liga_stufe']} · {videos} · bester Aufbau noch nicht belegt"
+
+
+# --- Der ganze Abschnitt (pipeline erfolg, /lernstand unter /experte) -------------------------------------------------
+
 def text(st: dict) -> str:
-    """Der Abschnitt „Regie-Liga“ für `pipeline erfolg` (stderr) – ohne Fachbegriffe, ohne Prozent."""
+    """Der Abschnitt „Regie-Liga“ für `pipeline erfolg` (stderr) und oben in /lernstand (nur /experte, M192) – ohne
+    Fachbegriffe, ohne Prozent; die Spanne von–bis steht nur hier."""
     zonen_name = st["zeitzone"]
     kopf = f"🥇 Regie-Liga (Version {st['version']})"
     if st["plattform"] is None:
@@ -430,16 +554,11 @@ def text(st: dict) -> str:
               "fertige Wochenzahlen der Hauptplattform – nie KI-Note, ✅/❌ oder Zeit."]
     if st["abruf"]:
         zeilen.append(f"⚠️ {st['abruf']}")
-    kronen = [v for v in st["verlauf"] if v["art"] == "bester"]
     if st["bester"]:
-        k = kronen[-1]
-        wo = "bei den Zuschauern" if k["ziele"] == ["zuschauer"] else "insgesamt"
-        wie = (f"kommt {wo} besser an als die anderen Aufbauten" if k["vorher"] is None else
-               f"hat {name('aufbau', k['vorher'])} auf Videos seit dem {_datum(kronen[-2]['stichtag'], zonen_name)} "
-               "geschlagen")
+        k = [v for v in st["verlauf"] if v["art"] == "bester"][-1]
         zeilen.append(f"Bester Aufbau: {name('aufbau', st['bester'])} – belegt seit {_datum(st['seit'], zonen_name)}: "
-                      f"{wie} ({k['n'][0]} gegen {k['n'][1]} Videos, zwei Sonntage nacheinander), sehr wahrscheinlich "
-                      "kein Zufall.")
+                      f"{_wie(st, k)} ({k['n'][0]} gegen {k['n'][1]} Videos, zwei Sonntage nacheinander), sehr "
+                      "wahrscheinlich kein Zufall.")
     else:
         zeilen.append("Bester Aufbau: noch keiner belegt.")
     e = st["erfahrung"]

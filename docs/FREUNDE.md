@@ -12,6 +12,9 @@ niemand zu sehen, auch nicht die anderen Freunde. (Florian betreibt den Rechner 
   gut* – ein Tipp, was nicht passt (zu kurz, langweilig, zu wild, Musik), dann kommt eine neue Fassung.
 - Reichen die starken Szenen eines Abends nicht, kommt „kein Video, weil …“ – lieber kein Video als ein langweiliges.
 - **Es lernt dich kennen:** Aus deinen ✅ und ❌ merkt sich das Programm, wie dir deine Videos gefallen – nur deine.
+  Was bei Zuschauern belegt am besten ankommt (bester Aufbau, Level), braucht Zuschauerzahlen – die holt Florians
+  Programm bei dir noch nicht ab. Bis dahin sagt dir dein Bot sonntags, was er ausprobiert hat, und unter 📋 steht
+  „Zuschauern (holt bei dir noch niemand ab)“.
 
 ## Was du einmal tust
 1. Schick Florian deine **Epic-Konto-ID** (epicgames.com → Konto → Kontoinformationen, 32 Zeichen) – daran erkennt

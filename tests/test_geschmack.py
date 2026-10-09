@@ -132,15 +132,16 @@ class Geschmack(MitSpeicher):
         self.assertIn("🎯 Wähle ich gerade seltener: Aufbau „erzählt“, ruhige Schnitte", text)
 
     def test_wochenbericht_kommt_auch_wenn_erfolg_scheitert(self):
-        """Stufe 4: Ein Fehler in erfolg (hier kaputte [erfolg.gewichte]) kostet den Sonntagsbericht nie – er kommt ohne
-        📊-Zeile, der Fehler steht im Log."""
+        """Stufe 4/5: Ein Fehler in erfolg bzw. der Regie-Liga (hier kaputte [erfolg.gewichte]) kostet den Sonntagsbericht
+        nie – er kommt ohne Liga-Zeilen, der Fehler steht im Log."""
         self.entwurf({"aufbau": "story", "tempo": "ruhig", "zeitlupe": "viel"}, daumen=1)
         self.konfig.daten["erfolg"] = {"gewichte": {"zuschauer": -1, "follower": 0.2, "webseite": 0.3}}
         with self.assertLogs("pipeline", "ERROR") as protokoll:
             text = geschmack.wochen_text(self.con, self.konfig)
         self.assertTrue(text.startswith("🧠 Deine Woche"), text)
         self.assertIn("📏 Deine Regeln gelten weiter", text)
-        self.assertNotIn("📊", text)
+        for weg in ("📊", "🏅", "🔜"):
+            self.assertNotIn(weg, text)
         self.assertIn("[erfolg.gewichte].zuschauer", protokoll.output[0])
 
     def test_einfacher_modus_nutzt_geschmack_und_regeln_gehen_vor(self):
@@ -154,6 +155,20 @@ class Geschmack(MitSpeicher):
                   "seg_min_faktor": 1.25, "max_lupen": 8}
         wahl = geschmack.nur_wirksame(vorher, {**vorher, "seg_min_faktor": 1.4}, self.konfig)
         self.assertEqual((wahl.get("tempo"), wahl["experiment"], wahl["aufbau"]), (None, None, "kino"))
+        # Stufe 5 (M187): steuert es nur einen Feinwert des Aufbaus nach (Musikpegel), bleiben Aufbau und Versuch
+        # stehen – 🧪 nennt ihn. Gelernt wird genau wie vorher, als nur_wirksame den Aufbau strich (Rückfall auf den Stil)
+        vorher = {"stil": "kino", "musik_pegel": 0.3,
+                  "geschmack": {"aufbau": "kino", "tempo": "ruhig", "zeitlupe": "viel", "experiment": "aufbau"}}
+        wahl = geschmack.nur_wirksame(vorher, {**vorher, "musik_pegel": 0.5}, self.konfig)
+        self.assertEqual((wahl["aufbau"], wahl["experiment"], wahl.get("uebersteuert")), ("kino", "aufbau", None))
+        vorher_m187 = {"tempo": "ruhig", "zeitlupe": "viel", "experiment": None, "uebersteuert": ["aufbau"]}
+        eid, statistik = self.entwurf(wahl, daumen=1, ki=80), []
+        for gespeichert in (vorher_m187, wahl):   # so stand es bis Stufe 5 in den Parametern · so steht es jetzt
+            self.con.execute("UPDATE entwuerfe SET parameter = ? WHERE id = ?",
+                             (json.dumps({"stil": "kino", "geschmack": gespeichert}), eid))
+            statistik.append(geschmack.statistik(self.con))
+        self.assertEqual(statistik[0], statistik[1])
+        self.assertIn("🧪 Ausprobiert: Aufbau „Kino“ (1×)", geschmack.wochen_text(self.con, self.konfig))
         # 08.10.: ein alter fester Stil aus ⚙️ friert das Aufbau-Lernen im einfachen Modus nicht mehr ein
         p, _ = regie_lernen.aktuelle(self.con, einstellungen.anwenden(self.con, self.konfig), "short")
         fest = next(s for s in ("kino", "story") if s != p["stil"])
@@ -200,7 +215,7 @@ class Geschmack(MitSpeicher):
         tiktok = {k: "" for k in ("TIKTOK_ACCESS_TOKEN", "TIKTOK_REFRESH_TOKEN", "TIKTOK_CLIENT_KEY",
                                   "TIKTOK_CLIENT_SECRET")}
         with mock.patch.dict(os.environ, tiktok):
-            self.assertIn("🧠 Lernt aus: deinen ✅/❌ · KI-Note (läuft) · Zuschauern (TikTok nicht verbunden – "
+            self.assertIn("🧠 Lernt aus: deinen ✅/❌ (1) · KI-Note (läuft) · Zuschauern (TikTok nicht verbunden – "
                           "einmal /tiktok)", geschmack.wochen_text(self.con, self.konfig))
         with mock.patch.dict(os.environ, {**tiktok, "TIKTOK_ACCESS_TOKEN": "t"}):     # verbunden, Zahlen fehlen trotzdem
             self.assertIn("Zuschauern (1 ✅-Video nach 3 Tagen noch ohne Zahlen – nicht hochgeladen oder den Text "

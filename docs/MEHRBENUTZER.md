@@ -582,8 +582,8 @@ rechnet einmal je Woche. Besser, belegt:
 
 **Was ist die nächste sinnvolle Erweiterung?**
 1. Vor Ort, ohne neuen Code: nach dem Update einmal `pipeline erfolg` (für einen Freund `benutzer-befehl.sh <name>
-   erfolg`) und sonntags den Bericht ansehen; 📋 Stand muss „Zuschauern (n Videos ausgewertet)“ zeigen, sonst einmal
-   /tiktok.
+   erfolg`) und sonntags den Bericht ansehen; 📋 Stand muss „Zuschauern (n Videos ausgewertet)“ zeigen (seit Stufe 5:
+   „Zuschauern (läuft)“), sonst einmal /tiktok.
 2. Florians Antworten auf die gebündelten Fragen (CLAUDE.md, „Offene Fragen“): Zähler auf clip-battle.de mit
    Rechtsprüfung → Video-Code und Abruf (PR 3–5); YouTube verbinden (PR 6 – wie lange geschaut wird und neue Abos je
    Video würden messbar); TikTok-Follower als Wochenwert (PR 7); Gewichte; Shorts je Woche.

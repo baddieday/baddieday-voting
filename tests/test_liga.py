@@ -1,4 +1,5 @@
 """Mehrbenutzer, Stufe 5, PR 1 (M178–M185): Regie-Liga – bester Aufbau nur mit Beleg, reine Rechnung, nur lesen.
+PR 2 (M186–M191, die letzten beiden Tests): dieselbe Liga im Sonntagsbericht und in 📋 Stand.
 
 Abnahme (Florian): „Benutzer können nachvollziehen, was das System ausprobiert und tatsächlich gelernt hat.“
 Echter Weg wie tests/test_erfolg.py (post_anlegen, speichere_messung, bewerte_alle → eingefrorene Wochen-Note), aber
@@ -14,7 +15,7 @@ import json
 from datetime import datetime, timedelta
 from unittest import mock
 
-from clip_pipeline import autonom, cli, db, erfolg, geschmack, liga, publikum
+from clip_pipeline import autonom, cli, db, erfolg, geschmack, lernbot, liga, publikum, publikum_adapter
 from clip_pipeline.zeit import UTC, aus_iso, iso
 
 from tests.hilfen import MitSpeicher
@@ -231,3 +232,113 @@ class Liga(MitSpeicher):
         self.assertEqual((code, daten["liga"], daten["plattformen"]["tiktok"]["einheiten"]),
                          (0, {"fehler": "RuntimeError: kaputt"}, 0))
         self.assertIn("Regie-Liga: nicht gerechnet", text)
+
+    # --- PR 2 (M186–M191): die Liga im einfachen Modus – Sonntagsbericht (geschmack.wochen_text) und 📋 Stand
+    # (lernbot.stand_kurz). Kein 📊, kein „n× bewusst“, keine Prozentzahl; „belegt“ heißt nur, was die Liga gekrönt hat
+
+    def bericht(self, woche: int) -> list[str] | None:
+        """Der Sonntagsbericht eine halbe Stunde nach dem Stichtag am Ende von Woche `woche` (Zeilen)."""
+        text = geschmack.wochen_text(self.con, self.konfig, self.stichtag(woche) + timedelta(minutes=30))
+        if text is not None:
+            self.assertLessEqual(len(text.splitlines()), 8, text)      # höchstens 8 Zeilen (🧠 fehlt hier)
+            for weg in ("📊", "bewusst", "%"):
+                self.assertNotIn(weg, text)
+            self.assertTrue(text.splitlines()[-1].startswith("📏 Deine Regeln gelten weiter:"), text)
+        return text.splitlines()[:-1] if text is not None else None    # ohne 📏 – das prüfen eigene Tests
+
+    def test_drei_phasen_im_sonntagsbericht_und_im_stand(self):
+        self.wochen(16, lambda i, a: 2.0 if a == "story" else 1.0)    # „erzählt“ mit doppelten Reaktionen
+        # Phase 1 – sammelt: Zahlen kommen an, gezählt wird noch nichts; 🧪 nennt die Versuche mit Namen
+        self.assertEqual(self.bericht(2), [
+            "🧠 Deine Woche (08.03.–15.03.)", "🎬 3 Videos · 0 ✅ · 0 ❌",
+            "🤔 Noch kein klares Bild – ich probiere weiter selbst aus.",
+            "🧪 Ausprobiert: Aufbau „Steigerung“ (1×) · Aufbau „schnelle Montage“ (1×)",
+            "🏅 Level 1 – sammelt · Erfahrung: 0 Videos mit fertigen Zuschauerzahlen (die ersten 5 sind nur der "
+            "Vergleich: 3 von 5)",
+            "🔜 Erster Vergleich der Aufbauten frühestens nach 18 weiteren Videos mit Zuschauerzahlen."])
+        # Phase 2 – vergleicht, nichts belegt (31 Videos); eine Woche vor der Krönung nur „liegt diesmal vorn“
+        self.assertEqual(self.bericht(13)[3:], [
+            "🧪 Ausprobiert: Aufbau „schnelle Montage“ (1×)",
+            "🏅 Level 2 – vergleicht · Erfahrung: 31 Videos mit fertigen Zuschauerzahlen (+3)",
+            "🔜 Noch kein Aufbau kommt sicher besser an – jedes weitere Video macht den Vergleich genauer."])
+        self.assertEqual(self.bericht(14)[-1], "🔜 Aufbau „erzählt“ liegt diesmal vorn (8 gegen 26 Videos) – bestätigt "
+                                               "es sich am nächsten Sonntag mit neuen Zahlen, wird er dein bester Aufbau.")
+        # Phase 3 – Krönungswoche: 🥇 mit „Noch nicht gemessen“ darunter, ohne 🎯/🤔 – auch wenn ✅ und KI-Note
+        # gerade „schnelle Montage“ und ruhige Schnitte vorziehen
+        krone = self.bericht(15)
+        self.assertEqual(krone, [
+            "🧠 Deine Woche (07.06.–14.06.)", "🎬 3 Videos · 0 ✅ · 0 ❌",
+            "🥇 Neuer bester Aufbau: „erzählt“ – kommt bei den Zuschauern auf TikTok besser an als die anderen Aufbauten "
+            "(9 gegen 28 Videos, zwei Sonntage nacheinander), sehr wahrscheinlich kein Zufall.",
+            "Noch nicht gemessen: wie lange geschaut wird, neue Follower, Besuche auf clip-battle.de.",
+            "🧪 Ausprobiert: Aufbau „Steigerung“ (1×)",
+            "🏅 Level 3 – bester Aufbau belegt · Erfahrung: 37 Videos (+3)",
+            "🔜 Kann ein anderer Aufbau „erzählt“ schlagen? Es zählen nur Videos ab heute – frühestens nach 16 weiteren."])
+        self.vorliebe_fuer_montage()                    # dazu ✅ für alle Videos mit ruhigen Schnitten (siehe entwurf)
+        ruhig = [eid for i, eid in enumerate(self.eids) if (i // 4) % 2]
+        self.con.execute(f"UPDATE entwurf_bewertungen SET daumen = 1 WHERE entwurf_id IN ({','.join('?' * len(ruhig))})",
+                         ruhig)
+        vorliebe = geschmack.wahl_zeile(geschmack.statistik(self.con))
+        self.assertIn("öfter: Aufbau „schnelle Montage“", vorliebe)
+        self.assertIn("ruhige Schnitte", vorliebe)
+        self.assertEqual(self.bericht(15)[2:], krone[2:])
+        # Danach: 🥇 belegt seit …, 🎯 nennt keinen Aufbau mehr (kein Widerspruch), 🤔 entfällt, 🧪 die Herausforderer
+        danach = self.bericht(16)
+        self.assertEqual(danach[2], "🥇 Bester Aufbau: „erzählt“ (belegt seit 14.06.)")
+        self.assertTrue(danach[3].startswith("🎯 Wähle ich gerade öfter: ruhige Schnitte"), danach)
+        self.assertIn("🧪 Herausforderer diese Woche: Aufbau „schnelle Montage“ (1×) · „Kino“ (1×) · „Steigerung“ (1×)",
+                      danach)
+        self.assertFalse([z for z in danach if z.startswith("🤔") or (z.startswith("🎯") and "Aufbau" in z)], danach)
+        self.assertEqual(danach[-2:], ["🏅 Level 3 – bester Aufbau belegt · Erfahrung: 40 Videos (+3)",
+                                       "🔜 Kann ein anderer Aufbau „erzählt“ schlagen? Es zählen nur Videos ab dem "
+                                       "14.06. – frühestens nach 16 weiteren."])
+
+        # 📋: höchstens 6 Zeilen, eine Liga-Zeile; die Zahl der Videos mit Zuschauerzahlen steht genau einmal da, die
+        # Zahl deiner ✅/❌ in der 🧠-Zeile
+        with mock.patch.object(publikum_adapter, "tiktok_verbunden", return_value=True):
+            stand = lernbot.stand_kurz(self.con, self.konfig).splitlines()
+        self.assertLessEqual(len(stand), 6, stand)
+        # 40: die Videos der letzten Woche haben (bis heute) keine fertige Wochen-Note – sie zählen nie
+        self.assertIn("🥇 Bester Aufbau: „erzählt“ (belegt seit 14.06.) · Level 3 · 40 Videos mit Zuschauerzahlen", stand)
+        self.assertEqual(stand[-1], "🧠 Lernt aus: deinen ✅/❌ (48) · KI-Note (kommt mit dem nächsten Video) · "
+                                    "Zuschauern (läuft)")
+        self.assertEqual(sum(z.count("Videos mit") for z in stand), 1)
+        self.assertNotIn("ausgewertet", "\n".join(stand))
+
+        # Krönungswoche ohne Video: der Bericht kommt trotzdem (M191) – in der Woche danach ohne Video wieder Ruhe
+        self.neu()
+        self.wochen(14, lambda i, a: 2.0 if a == "story" else 1.0)
+        self.wochen(2)
+        ohne = self.bericht(15)
+        self.assertEqual(ohne[1:3], ["🎬 Diese Woche kein neues Video", krone[2]])
+        self.assertEqual(ohne[-2:], krone[-2:])
+        self.assertIsNone(self.bericht(16))
+
+    def test_freund_ohne_abruf_und_fehler_der_liga(self):
+        # Freund ohne Zahlenabruf: 🧪 ja, aber weder 🥇/🏅/🔜 noch die wöchentliche 🧠-Zeile (M190) – obwohl seine
+        # ✅-Posts nach 3 Tagen keine Zahlen haben (vorher stand sie deshalb jede Woche da)
+        self.konfig.daten["instanz"] = {"wurzel": str(self.tmp), "name": "max"}
+        self.wochen(16, lambda i, a: 2.0 if a == "story" else 1.0, messen=False)
+        self.assertGreater(geschmack.ohne_zahlen(self.con, self.stichtag(16)), 0)
+        self.assertEqual(self.bericht(16), [
+            "🧠 Deine Woche (14.06.–21.06.)", "🎬 3 Videos · 0 ✅ · 0 ❌",
+            "🤔 Noch kein klares Bild – ich probiere weiter selbst aus.",
+            "🧪 Ausprobiert: Aufbau „schnelle Montage“ (1×) · Aufbau „Steigerung“ (1×)"])
+        stand = lernbot.stand_kurz(self.con, self.konfig)
+        self.assertTrue(stand.endswith("· Zuschauern (holt bei dir noch niemand ab)"), stand)
+        for weg in ("🏅", "🥇", "Level"):
+            self.assertNotIn(weg, stand)
+
+        # Wirft die Liga einen Fehler, kommen Bericht und 📋 trotzdem – ohne Liga-Zeilen, der Grund steht im Log
+        self.neu()
+        self.wochen(3, lambda i, a: 2.0 if a == "story" else 1.0)
+        self.assertIn("🏅 Level 1 – sammelt", "\n".join(self.bericht(3)))
+        with mock.patch.object(liga, "stand", side_effect=RuntimeError("kaputt")):
+            with self.assertLogs("pipeline", "ERROR") as protokoll:
+                ohne_liga = self.bericht(3)
+            with self.assertLogs("lern-bot", "ERROR"):
+                stand = lernbot.stand_kurz(self.con, self.konfig)
+        self.assertEqual(ohne_liga, ["🧠 Deine Woche (15.03.–22.03.)", "🎬 3 Videos · 0 ✅ · 0 ❌",
+                                     "🤔 Noch kein klares Bild – ich probiere weiter selbst aus."])
+        self.assertIn("RuntimeError: kaputt", protokoll.output[0])
+        self.assertTrue(stand.startswith("📋 Stand") and "🏅" not in stand, stand)

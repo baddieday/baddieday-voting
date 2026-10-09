@@ -203,7 +203,8 @@ nie, über n8n nicht erreichbar. Er zeigt, was der Bot ausprobiert und was er wi
   vermessen ist, nie „besser“. Liga-Level: 1 sammelt · 2 vergleicht · 3 bester Aufbau belegt · je Ablösung eins mehr;
   es sinkt nie.
 - **Vertrauen in Worten:** „noch k Videos“, „kein Unterschied sicher“, „liegt diesmal vorn“, „belegt seit …“ – nie eine
-  Prozentzahl. Die Spanne (von–bis) steht nur hier. Darunter das nächste Ziel (🔜) und der Verlauf mit Datum.
+  Prozentzahl. Die Spanne (von–bis) steht nur hier und unter /experte in /lernstand. Darunter das nächste Ziel (🔜) und
+  der Verlauf mit Datum.
 - **Ausprobiert (🧪):** was in den letzten 7 Tagen bewusst neu war (Aufbau, Tempo, Zeitlupe, Musik, Länge …), je Video
   einmal, mit „gezeigt · hochgeladen · mit Zahlen“; nach einer Krönung auch die Herausforderer.
 - **Nachrechenbar:** Nichts wird gespeichert. Jeder Aufruf spielt alle Sonntage aus den festen Wochen-Noten nach und
@@ -213,9 +214,12 @@ nie, über n8n nicht erreichbar. Er zeigt, was der Bot ausprobiert und was er wi
   Reaktionen wird im Median nach etwa 17 Wochen bester Aufbau (25 %: 15, 75 %: 21); ohne echten Unterschied passiert
   das fälschlich in etwa 1 von 100 Jahren (nachgestellt mit dem echten Code: 1,2 % im ersten Jahr, 1,7 % in zwei).
   Beim Freund ohne Zahlenabruf bleibt die Liga leer.
+- **Im Lern-Bot (Schritt 2):** Im Sonntagsbericht ersetzt die Liga die 📊-Zeile – 🥇 bester Aufbau (in der Woche der
+  Krönung mit „Noch nicht gemessen“), 🧪 Versuche mit Namen, 🏅 Level und Erfahrung, 🔜 nächstes Ziel; 📋 hat eine
+  Liga-Zeile, sobald Zahlen ankommen. Unter /experte steht dieser Abschnitt oben in /lernstand. So sieht es aus:
+  `docs/SO-GEHTS.md`, „Der Sonntagsbericht“. Die Videos wählt der Bot noch wie bisher.
 - **Fehler:** Kann die Liga nicht rechnen, steht `liga.fehler` in der JSON-Zeile und der Grund im Log; der übrige
-  Bericht und der Exit bleiben. Noch nicht im Sonntagsbericht und in 📋 – das kommt im nächsten Schritt; die Videos
-  wählt der Bot wie bisher.
+  Bericht und der Exit bleiben. Im Lern-Bot kommen Sonntagsbericht und 📋 dann ohne Liga-Zeilen.
 
 ## Befehle
 

@@ -26,11 +26,12 @@ Reihenfolge (Montage und Kino haben beide den Bogen) und das andere Tempo, das s
 Die KI schaut sich jedes gesendete Video danach im Hintergrund an (ki_nachtragen, Lern-Bot-Schleife) – das Video
 kommt dadurch nicht später. Sonntags ab 18 Uhr fasst wochen_text die Woche zusammen (Lern-Meldung woche:<JJJJ-Www>).
 Ehrliche Sätze (Mehrbenutzer Stufe 4, M162): „🎯 Wähle ich gerade öfter/seltener“ ist die Zahl, mit der der Bot wählt
-(früher „👍 Kommt gut an / 👎 Kommt weniger an“) – kein Beleg. Was bei den Zuschauern belegt besser ankommt, sagt nur
-die 📊-Zeile aus erfolg (feste Wochenzahlen, Mindestzahl, Zufall herausgerechnet); sie ersetzt „👀 Bei den Zuschauern
-kommt gut an“, das schon ein einziges Video mit vorläufiger Note zum Favoriten machte.
+(früher „👍 Kommt gut an / 👎 Kommt weniger an“) – kein Beleg. Was bei den Zuschauern belegt besser ankommt, sagt seit
+Stufe 5 (M188) nur die Regie-Liga (liga.py): 🥇 bester Aufbau (zwei Sonntage nacheinander belegt), 🏅 Level und
+Erfahrung, 🔜 nächstes Ziel, 🧪 was ausprobiert wurde – mit Namen. Sie ersetzt die 📊-Zeile und „n× bewusst etwas
+Neues“; gibt es einen besten Aufbau, nennt 🎯 keinen Aufbau mehr.
 Wer gerade lehrt – deine ✅/❌, die KI-Note, die Zuschauer – sagt lehrer_zeile (08.10.): in 📋 Stand immer, im
-Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat.
+Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat (nie beim Freund, bei dem niemand Zahlen abholt, M190).
 """
 
 from __future__ import annotations
@@ -70,9 +71,9 @@ def _wahl_aus(parameter_json: str | None) -> dict:
     except (TypeError, ValueError):
         return {}
     wahl = dict(p.get("geschmack") or {})
-    # Alte Entwürfe: nur der Stil ist bekannt. Greift auch, wenn das Publikums-Modell nur einen Feinwert des Aufbaus
-    # nachsteuerte (Musikpegel, Hektik, Einstieg …, nur_wirksame) – Reihenfolge und Bildgröße blieben die des Stils;
-    # sonst lernte niemand mehr den Aufbau, sobald das Publikums-Modell Zahlen hat (N77)
+    # Alte Entwürfe: nur der Stil ist bekannt. Greift auch bei Entwürfen bis Stufe 5, in denen nur_wirksame den Aufbau
+    # strich, weil das Publikums-Modell nur einen Feinwert nachsteuerte (Musikpegel, Hektik, Einstieg …) – Reihenfolge und
+    # Bildgröße blieben die des Stils; sonst lernte niemand mehr den Aufbau (N77). Seit M187 bleibt er dann stehen
     if "aufbau" not in wahl and p.get("stil") in KNOEPFE["aufbau"]:
         wahl["aufbau"] = p["stil"]
     return {k: v for k, v in wahl.items() if k in KNOEPFE and v in KNOEPFE[k]}
@@ -219,10 +220,12 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict, anders:
     return p
 
 
-# Welche Parameter zu welcher Schraube gehören – ändert sie danach jemand (Publikums-Modell), zählt die Schraube nicht
-GEHOERT = {"aufbau": ("stil", "reihenfolge", "rahmen_zoom", "hook_staerkster", "beats_pro_schnitt", "effekt_hektik",
-                      "musik_pegel"),
-           "tempo": ("seg_min_faktor",), "zeitlupe": ("max_lupen",)}
+# Welche Parameter zu welcher Schraube gehören – ändert sie danach jemand (Publikums-Modell), zählt die Schraube nicht.
+# Zum Aufbau gehören nur Stil, Reihenfolge und Bildgröße (M187): Steuert das Publikums-Modell nur Feinwerte nach
+# (Einstieg, Beats, Hektik, Musikpegel), bleiben Aufbau und Versuch stehen – sonst fehlten in 🧪 rund 70 % der
+# Aufbau-Versuche. Gezählt wurde der Aufbau dann schon vorher (Rückfall auf den Stil in _wahl_aus, N77): Lernen und
+# Videos ändern sich dadurch nicht
+GEHOERT = {"aufbau": ("stil", "reihenfolge", "rahmen_zoom"), "tempo": ("seg_min_faktor",), "zeitlupe": ("max_lupen",)}
 
 
 def nur_wirksame(vorher: dict, nachher: dict, konfig: Konfig) -> dict:
@@ -311,22 +314,71 @@ def wahl_zeile(stat: dict[str, dict[str, dict]]) -> str | None:
     return "🎯 Wähle ich gerade " + " · ".join(teile) if teile else None
 
 
-def erfolg_zeile(con: sqlite3.Connection, konfig: Konfig, bis) -> str | None:
-    """Die 📊-Zeilen aus `pipeline erfolg` (Mehrbenutzer Stufe 4): je Plattform mit fertigen Wochenzahlen eine Zeile
-    („📊 Zuschauer (TikTok): 4 Videos mit fertigen Wochenzahlen – ein erster Vergleich frühestens nach 12 weiteren.“
-    bzw. „📊 Belegt (TikTok, 41 Videos): …“), darunter, was noch nicht gemessen wird. None ohne fertige Wochenzahlen und
-    beim Freund ohne Abruf (M169). Ein Fehler darin kostet den Wochenbericht nie – er steht nur im Log."""
+def _liga(con: sqlite3.Connection, konfig: Konfig, bis) -> dict | None:
+    """Die Regie-Liga zum Zeitpunkt bis (liga.stand) – None bei einem Fehler: Der kostet den Wochenbericht nie, er steht
+    nur im Log (kaputte [erfolg.gewichte], unlesbare Zeilen …; `pipeline erfolg` zeigt ihn genauer)."""
     try:
-        from . import erfolg   # hier, nicht oben: erfolg liest geschmack (Import-Kreis); im try, wie jeder Fehler darin
+        from . import liga   # hier, nicht oben: liga liest geschmack (Import-Kreis); im try, wie jeder Fehler darin
 
-        return erfolg.zeile_einfach(erfolg.auswertung(con, konfig, bis))
-    except Exception:   # noqa: BLE001 – kaputte [erfolg.gewichte], unlesbare Zeilen …: der Bericht kommt trotzdem
-        log.exception("Wochenbericht ohne Zeile „📊“ (pipeline erfolg zeigt den Fehler)")
+        return liga.stand(con, konfig, bis)
+    except Exception:   # noqa: BLE001 – der Bericht kommt trotzdem, nur ohne Liga-Zeilen
+        log.exception("Wochenbericht ohne Regie-Liga (pipeline erfolg zeigt den Fehler)")
         return None
 
 
+# M191: In einer Woche ohne Video kommt der Bericht nur, wenn an diesem Stichtag ein Aufbau gekrönt oder abgelöst wurde.
+# Ob das so ist, steht nach dem Stichtag fest (spätere Wochen-Noten tragen eine spätere Zeit) – die Lern-Bot-Schleife
+# fragt alle 30 s, gerechnet (und ein Fehler geloggt) wird je Datenbank und Stichtag nur einmal
+_OHNE_EREIGNIS: set[tuple[str, str]] = set()
+
+
+def _liga_ereignis(con: sqlite3.Connection, konfig: Konfig, bis) -> dict | None:
+    """liga.stand, aber nur, wenn am letzten Stichtag gekrönt oder abgelöst wurde und Zahlen ankommen – sonst None."""
+    from . import liga
+
+    schluessel = (str(konfig.datenbank),
+                  iso(liga.letzter_stichtag(bis, str(konfig.wert("zeit.zeitzone", "Europe/Berlin")))))
+    if schluessel in _OHNE_EREIGNIS:
+        return None
+    st = _liga(con, konfig, bis)
+    if st is None or not st.get("ereignis") or not st.get("messungen"):
+        _OHNE_EREIGNIS.add(schluessel)
+        return None
+    return st
+
+
+def _liga_block(st: dict | None) -> dict:
+    """Die Liga-Zeilen für wochen_text: oben (🥇, in der Woche einer Krönung oder Ablösung dazu „Noch nicht gemessen“),
+    versuche (🧪), unten (🏅, 🔜). 🥇/🏅/🔜 erst, wenn auf der Hauptplattform Zuschauerzahlen ankommen (M190); 🧪 immer.
+    Ein Fehler darin kostet den Bericht nie – dann keine Liga-Zeilen, der Grund steht im Log."""
+    leer = {"oben": [], "versuche": None, "unten": [], "bester": False, "neu": False}
+    if st is None:
+        return leer
+    try:
+        from . import liga
+
+        zahlen = st["messungen"] > 0
+        neu = liga.neu_zeilen(st) if zahlen else []
+        bester = bool(zahlen and st["bester"])
+        return {"oben": neu or ([liga.bester_zeile(st)] if bester else []), "versuche": liga.versuche_zeile(st),
+                "unten": [liga.level_zeile(st), liga.ziel_zeile(st)] if zahlen else [], "bester": bester,
+                "neu": bool(neu)}
+    except Exception:   # noqa: BLE001 – unerwartete Daten in der Liga: der Bericht kommt trotzdem
+        log.exception("Wochenbericht ohne Regie-Liga (pipeline erfolg zeigt den Fehler)")
+        return leer
+
+
 def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None:
-    """„🧠 Deine Woche …“ – None, wenn in den letzten 7 Tagen kein Video kam (dann Ruhe)."""
+    """„🧠 Deine Woche …“ – None, wenn in den letzten 7 Tagen kein Video kam (dann Ruhe), außer an diesem Stichtag wurde
+    ein Aufbau gekrönt oder abgelöst (M191, dann „🎬 Diese Woche kein neues Video“).
+    Reihenfolge (Stufe 5, M188): Kopf · 🎬 · 🥇 · 🎯/🤔 · 🧪 · 🏅 · 🔜 · [🧠] · 📏 – höchstens 8 Zeilen, dazu 🧠, wenn
+    Zahlen fehlen. Der Liga-Block (liga.py) ersetzt die 📊-Zeile und „n× bewusst etwas Neues“:
+      🥇 nur mit bestem Aufbau; in der Woche der Krönung oder Ablösung „Neuer bester Aufbau …“ und darunter „Noch nicht
+         gemessen“, 🎯 entfällt dann. Danach nennt 🎯 keinen Aufbau mehr, und 🤔 entfällt (kein Widerspruch zu 🥇).
+      🧪 mit Namen – auch beim Freund, auch ohne Zahlen (es ist das Ausprobieren des Bots).
+      🏅/🔜 und 🥇 erst, wenn auf der Hauptplattform Zuschauerzahlen ankommen (M190, nicht „ist Freund“).
+    🧠 (wer lehrt) nur, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat – nie beim Freund, bei dem niemand Zahlen
+    abholt (M190: sonst stünde sie dort jede Woche)."""
     bis = bis or jetzt()
     von = bis - timedelta(days=7)
     woche = [z for z in con.execute(
@@ -334,30 +386,35 @@ def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None
              LEFT JOIN entwurf_bewertungen b ON b.entwurf_id = e.id LEFT JOIN kritiken k ON k.entwurf_id = e.id
             WHERE e.format = 'short' AND e.status IN ('gesendet', 'bewertet') AND e.erstellt >= ? AND e.erstellt < ?""",
         (iso(von), iso(bis)))]
-    if not woche:
+    block = _liga_block(_liga(con, konfig, bis) if woche else _liga_ereignis(con, konfig, bis))
+    if not woche and not block["neu"]:
         return None
     zone = konfig.wert("zeit.zeitzone", "Europe/Berlin")
     ja = sum(1 for z in woche if z["daumen"] == 1)
     nein = sum(1 for z in woche if z["daumen"] == -1)
     ki = [float(z["ki_score"]) for z in woche if z["ki_score"] is not None]
     zeilen = [f"🧠 Deine Woche ({utc_zu_lokal(von, zone):%d.%m.}–{utc_zu_lokal(bis, zone):%d.%m.})",
-              f"🎬 {len(woche)} Video{'s' if len(woche) != 1 else ''} · {ja} ✅ · {nein} ❌"
-              + (f" · KI-Note im Schnitt {sum(ki) / len(ki):.0f}" if ki else "")]
-    # 08.10.: ohne klares Bild keine Bitte an dich
-    zeilen.append(wahl_zeile(statistik(con)) or "🤔 Noch kein klares Bild – ich probiere weiter selbst aus.")
-    if belegt := erfolg_zeile(con, konfig, bis):   # Stufe 4: nur fertige Wochenzahlen, „belegt“ erst mit Mindestzahl
-        zeilen.append(belegt)
-    neu = sum(1 for z in woche if ((json.loads(z["parameter"] or "{}") or {}).get("geschmack") or {}).get("experiment"))
-    if neu:
-        zeilen.append(f"🧪 {neu}× bewusst etwas Neues ausprobiert.")
-    if ohne_zahlen(con, bis):   # 08.10.: Zahlen fehlen – wer lehrt gerade, und was kannst nur du tun?
+              (f"🎬 {len(woche)} Video{'s' if len(woche) != 1 else ''} · {ja} ✅ · {nein} ❌"
+               + (f" · KI-Note im Schnitt {sum(ki) / len(ki):.0f}" if ki else "")) if woche else
+              "🎬 Diese Woche kein neues Video", *block["oben"]]
+    if not block["neu"]:   # 08.10.: ohne klares Bild keine Bitte an dich; mit bestem Aufbau nennt 🎯 keinen Aufbau (M188)
+        stat = statistik(con)
+        if not block["bester"]:
+            zeilen.append(wahl_zeile(stat) or "🤔 Noch kein klares Bild – ich probiere weiter selbst aus.")
+        elif wahl := wahl_zeile({k: v for k, v in stat.items() if k != "aufbau"}):
+            zeilen.append(wahl)
+    zeilen += [*filter(None, [block["versuche"]]), *block["unten"]]
+    # 08.10.: Zahlen fehlen – wer lehrt gerade, und was kannst nur du tun? Beim Freund holt niemand Zahlen ab (wie
+    # erfolg.abruf_hinweis): keine wöchentliche Zeile (M190)
+    if konfig.instanz is None and ohne_zahlen(con, bis):
         zeilen.append(lehrer_zeile(con, konfig, bis))
     zeilen.append(regeln.regeln_zeile(con, konfig).replace("📏 Deine Regeln:", "📏 Deine Regeln gelten weiter:"))
     return "\n".join(zeilen)
 
 
 def wochenbericht(con: sqlite3.Connection, konfig: Konfig, jetzt_utc=None) -> bool:
-    """Sonntags ab 18 Uhr (Ortszeit) einmal je Woche die Lern-Meldung woche:<JJJJ-Www>. True = neu angelegt."""
+    """Sonntags ab 18 Uhr (Ortszeit) einmal je Woche die Lern-Meldung woche:<JJJJ-Www> – auch ohne Video, wenn an diesem
+    Stichtag ein Aufbau gekrönt oder abgelöst wurde (M191). True = neu angelegt."""
     jetzt_utc = jetzt_utc or jetzt()
     lokal = utc_zu_lokal(jetzt_utc, konfig.wert("zeit.zeitzone", "Europe/Berlin"))
     if lokal.isoweekday() != 7 or lokal.hour < 18:
@@ -422,24 +479,29 @@ def ohne_zahlen(con: sqlite3.Connection, bis=None) -> int:
 
 
 def lehrer_zeile(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str:
-    """„🧠 Lernt aus: deinen ✅/❌ · KI-Note (läuft) · Zuschauern (4 Videos ausgewertet)“ – in 📋 Stand immer, im
-    Wochenbericht, wenn ein ✅-Video nach 3 Tagen keine Zahlen hat. Fehlt etwas, das nur du einmal tun kannst (Claude
-    anmelden, TikTok verbinden), steht es hier – ohne Netz, nur aus Datenbank, .env und Token-Datei.
-    Freund (M1): kein TikTok-Hinweis (in Stufe 1 holt bei ihm niemand Zahlen ab); ohne eigenen Claude-Zugang
-    „KI-Note: aus – verbinde dein Claude mit /claude“ (Schritt 9) statt des Anmelde-Hinweises für Florian."""
-    from . import autonom, claude_aufruf, publikum_adapter   # hier, nicht oben: geschmack bleibt leicht
+    """„🧠 Lernt aus: deinen ✅/❌ (24) · KI-Note (läuft) · Zuschauern (läuft)“ – in 📋 Stand immer, im Wochenbericht,
+    wenn ein ✅-Video nach 3 Tagen keine Zahlen hat. Fehlt etwas, das nur du einmal tun kannst (Claude anmelden, TikTok
+    verbinden), steht es hier – ohne Netz, nur aus Datenbank, .env und Token-Datei.
+    Stufe 5 (M189): Die Zahl deiner ✅/❌ steht hier (vorher eine eigene Zeile in 📋); bei den Zuschauern keine zweite
+    Videozahl mehr („16 ausgewertet“ neben „11 mit fertigen Zahlen“), sondern „läuft“, sobald auf der Hauptplattform
+    Zahlen ankommen – wie viele zählen, sagt die Liga-Zeile darüber. Sonst „noch keine Zahlen da“ bzw. der Hinweis.
+    Freund (M1): kein TikTok-Hinweis; holt bei ihm niemand Zahlen ab: „holt bei dir noch niemand ab“ (M190) – kommen
+    später Zahlen an, „läuft“ wie bei Florian; ohne eigenen Claude-Zugang „KI-Note: aus – verbinde dein Claude mit
+    /claude“ (Schritt 9) statt des Anmelde-Hinweises für Florian."""
+    from . import claude_aufruf, liga, publikum_adapter   # hier, nicht oben: geschmack bleibt leicht (liga: Kreis)
 
     freund = konfig.instanz is not None
-    n = autonom.ueberblick(con)["ausgewertet"]
-    teile = [f"{n} Video{'s' if n != 1 else ''} ausgewertet"] if n else []
-    if freund:
-        pass
+    du = con.execute("SELECT COUNT(*) FROM entwurf_bewertungen b JOIN entwuerfe e ON e.id = b.entwurf_id").fetchone()[0]
+    zahlen = liga.zahlen_kommen_an(con, konfig, bis)
+    if freund:   # wie erfolg.abruf_hinweis: bei einem Freund holt niemand Zahlen ab (M169)
+        zuschauer = "läuft" if zahlen else "holt bei dir noch niemand ab"
     elif not publikum_adapter.tiktok_verbunden(konfig):
-        teile.append("TikTok nicht verbunden – einmal /tiktok")
+        zuschauer = "TikTok nicht verbunden – einmal /tiktok"
     elif fehlen := ohne_zahlen(con, bis):
-        teile.append(f"{fehlen} ✅-Video{'s' if fehlen != 1 else ''} nach 3 Tagen noch ohne Zahlen – nicht "
+        zuschauer = (f"{fehlen} ✅-Video{'s' if fehlen != 1 else ''} nach 3 Tagen noch ohne Zahlen – nicht "
                      "hochgeladen oder den Text dabei geändert?")   # N45: der wahrscheinliche Grund
-    zuschauer = ", ".join(teile) or "noch kein Video ausgewertet"
+    else:
+        zuschauer = "läuft" if zahlen else "noch keine Zahlen da"
     if not claude_aufruf.ki_moeglich(konfig):
         ki = "KI-Note: aus – verbinde dein Claude mit /claude"
     else:
@@ -447,5 +509,5 @@ def lehrer_zeile(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str:
         if freund and stand.startswith("fehlt"):
             stand = "fehlt – eigener Claude-Zugang klappt nicht, neu verbinden mit /claude"
         ki = f"KI-Note ({stand})"
-    return f"🧠 Lernt aus: deinen ✅/❌ · {ki} · Zuschauern ({zuschauer})"
+    return f"🧠 Lernt aus: deinen ✅/❌ ({du}) · {ki} · Zuschauern ({zuschauer})"
 
