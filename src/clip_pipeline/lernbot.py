@@ -291,11 +291,27 @@ def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row
     return "\n".join(teile)[:1000]
 
 
+def modell_videos(con: sqlite3.Connection, liste: dict) -> int | None:
+    """Aus wie vielen Videos das Publikums-Modell gelernt hatte, als der Entwurf entstand (lernstaende.datenmenge seiner
+    Version) – None ohne Modell oder wenn die Zeile fehlt. Für „🧠 Feinwerte (Tendenzen, nicht belegt) aus n Videos“."""
+    version = ((liste.get("parameter") or {}).get("autonom") or {}).get("version")
+    if not isinstance(version, int) or isinstance(version, bool) or version <= 0:
+        return None
+    try:
+        z = con.execute("SELECT datenmenge FROM lernstaende WHERE version = ?", (version,)).fetchone()
+    except sqlite3.Error:
+        return None
+    return int(z[0]) if z else None
+
+
 def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None,
-                 erwartung: float | None = None, kritik_text: str | None = None, kurz: bool = False) -> str:
+                 erwartung: float | None = None, kritik_text: str | None = None, kurz: bool = False,
+                 feinwerte_videos: int | None = None) -> str:
     """Bildunterschrift eines Entwurfs (HTML, höchstens 1000 Zeichen).
 
     kurz (einfacher Modus): entwurf_text_einfach – ohne Publikums-Lernstand, Stil, Look, Kritik und Erwartung.
+    feinwerte_videos (Experten-Modus, Stufe 5): „🧠 Feinwerte (Tendenzen, nicht belegt) aus n Videos“ statt
+    „Lernstand v… · Vertrauen … %“ (lernbot.modell_videos).
 
     erwartung: festgeschriebene Wahrscheinlichkeit für 👍 (erwartung.gespeichert) oder None → „Erwartung: noch
     keine“ (Spec §10.5). Die Zeile steht VOR den Hinweisen: Die Hinweise können lang sein, und alles hinter Zeichen
@@ -317,8 +333,10 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
             zeile += f" · {a['ohne_datei']} ohne Datei"
         teile.append(zeile)
     auto = (liste.get("parameter") or {}).get("autonom") or {}
-    if auto.get("version"):
-        teile.append(f"🧠 Publikum: Lernstand v{auto['version']} · Vertrauen {round(100 * auto.get('confidence', 0))} %")
+    if auto.get("version"):   # Stufe 5 (M192): ohne Version und Prozent – beides sah bei Zufall genauso aus
+        teile.append("🧠 Feinwerte (Tendenzen, nicht belegt)" + (f" aus {feinwerte_videos} Video"
+                                                                 f"{'s' if feinwerte_videos != 1 else ''}"
+                                                                 if feinwerte_videos else ""))
         if exp := auto.get("exploration"):
             teile.append("🔎 Gezielter Versuch: " + escape(exp["hypothese"]))
     else:
@@ -346,25 +364,51 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
     return "\n".join(teile)[:1000]  # Bildunterschrift: max. 1024 Zeichen
 
 
-def autonom_text(con: sqlite3.Connection) -> str:
-    """/lernstand (Experten-Modus; auch der Kopf von 📋 Stand dort). Mehrbenutzer Stufe 4 (M171): Was das
-    Publikums-Modell gerade sieht, steht als „Tendenzen (nicht belegt)“ da – es nennt sie schon ab einem kleinen
-    Gewicht, ohne Mindestzahl (bei reinem Zufall nach 16 Videos in jedem zweiten Fall). Belegt ist nur, was
-    `pipeline erfolg` zeigt. Die Rechnung bleibt (autonom.ueberblick)."""
+def feinwerte_text(con: sqlite3.Connection) -> str:
+    """Das Publikums-Modell (stellt Länge, Schnitt-Takt, Einstieg und Musik fein ein) als „🧠 Feinwerte (Tendenzen,
+    nicht belegt) aus n Videos“ – Stufe 5 (M192): ohne „Lernstand v…“ und „Vertrauen x %“, die bei Zufall genauso
+    aussahen wie bei echtem Unterschied (v218 · 19 % gegen v234 · 19 %), und nie „Champion“. n = Videos, aus denen das
+    Modell gelernt hat. Es nennt Tendenzen schon ab einem kleinen Gewicht, ohne Mindestzahl (M171) – belegt ist nur,
+    was die Regie-Liga zeigt. Die Rechnung bleibt (autonom.ueberblick)."""
     stand = autonom.ueberblick(con)
-    version = stand.get("version")
-    zeilen = ["🧠 AUTONOMES LERNEN",
-              f"Veröffentlichte Videos: {stand['veroeffentlicht']}",
-              f"Ausgewertete Videos: {stand['ausgewertet']}",
-              f"Aktueller Lernstand: v{version}" if version else "Aktueller Lernstand: Startwissen",
-              f"Vertrauen: {round(100 * stand['confidence'])} %"]
-    if stand.get("erkenntnisse"):
-        zeilen += ["", "Tendenzen (nicht belegt) – belegt ist nur, was pipeline erfolg zeigt:",
-                   *[f"• {e}" for e in stand["erkenntnisse"][:3]]]
+    modell = autonom.champion(con)
+    if modell is None:
+        zeilen = ["🧠 Feinwerte (Tendenzen, nicht belegt): noch keine – ab den ersten Videos mit Zuschauerzahlen lerne "
+                  "ich dazu."]
     else:
-        zeilen += ["", "Noch keine belastbare Publikumstendenz. Mit weiteren gemessenen Videos lerne ich dazu."]
-    zeilen += ["", "Bewertungen sind optional. Neue Publikumszahlen lösen das Lernen automatisch aus."]
+        n = int(modell["datenmenge"])
+        zeilen = [f"🧠 Feinwerte (Tendenzen, nicht belegt) aus {n} Video{'s' if n != 1 else ''}:",
+                  *([f"• {e}" for e in stand["erkenntnisse"][:3]] if stand.get("erkenntnisse") else
+                    ["Noch keine Tendenz. Mit weiteren gemessenen Videos lerne ich dazu."])]
+    zeilen.append("Belegt ist nur, was die Regie-Liga zeigt. Bewertungen sind optional; neue Zuschauerzahlen lösen das "
+                  "Lernen automatisch aus.")
     return "\n".join(zeilen)
+
+
+def autonom_text(con: sqlite3.Connection, konfig: Konfig) -> str:
+    """/lernstand (Experten-Modus; auch der Kopf von 📋 Stand dort). Stufe 5 (M192): oben die Regie-Liga wie in
+    `pipeline erfolg` (je Aufbau Erfahrung, Level und Stand mit Spanne, Verlauf, Feinheiten, Versuche, nicht gezählte
+    Videos), darunter das Publikums-Modell (feinwerte_text). Ein Fehler der Liga steht nur im Log."""
+    from . import liga   # hier, nicht oben: wie die anderen Lese-Module
+
+    try:
+        oben = liga.text(liga.stand(con, konfig))
+    except Exception:   # noqa: BLE001 – /lernstand kommt trotzdem
+        log.exception("/lernstand ohne Regie-Liga (pipeline erfolg zeigt den Fehler)")
+        oben = "🥇 Regie-Liga: nicht gerechnet – der Fehler steht im Log."
+    return f"{oben}\n\n{feinwerte_text(con)}"
+
+
+def liga_zeile(con: sqlite3.Connection, konfig: Konfig) -> str | None:
+    """Die Liga-Zeile in 📋 (Stufe 5, M189) – erst, wenn auf der Hauptplattform Zuschauerzahlen ankommen (eine Messung
+    genügt, M190). Ein Fehler der Liga kostet 📋 nie: dann keine Zeile, der Grund steht im Log."""
+    from . import liga
+
+    try:
+        return liga.stand_zeile(liga.stand(con, konfig)) if liga.zahlen_kommen_an(con, konfig) else None
+    except Exception:   # noqa: BLE001
+        log.exception("📋 ohne Liga-Zeile (pipeline erfolg zeigt den Fehler)")
+        return None
 
 
 def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
@@ -372,12 +416,12 @@ def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
     07.10. (Florian: „fehlerhafte Texte“): ✅/❌ wie die Knöpfe; ohne die Zeile zur Moment-Formel („noch 7
     Bewertungen bis zum Lernen“ neben „11 von dir“ las sich wie ein Widerspruch), ohne Zähler und Version.
     08.10.: Die letzte Zeile sagt ehrlich, wer lehrt (geschmack.lehrer_zeile) – auch, ob KI-Note oder TikTok noch
-    eine einmalige Anmeldung brauchen; sie ersetzt „🧠 Gelernt aus …“ und „📊 Publikum: … ausgewertet“."""
+    eine einmalige Anmeldung brauchen; sie ersetzt „🧠 Gelernt aus …“ und „📊 Publikum: … ausgewertet“.
+    Stufe 5 (M189): höchstens 6 Zeilen – 📋 · 📏 · ⏱️ · 🎮 · Liga-Zeile (🏅 bzw. 🥇, erst wenn Zuschauerzahlen ankommen)
+    · 🧠. Die Zahl deiner ✅/❌ steht jetzt in der 🧠-Zeile, die Zahl der Videos mit Zuschauerzahlen nur in der
+    Liga-Zeile. Beim Freund mit PC-Programm hängt cmd_stand wie seit Stufe 2 die 💻-Zeile an (dann bis 7)."""
     konfig = einstellungen.anwenden(con, konfig)
-    zeilen = regie_lernen.bewertungen(con, mit_ki=False)
-    gut = sum(1 for z in zeilen if z["daumen"] > 0)
-    teile = ["📋 Stand", regeln.regeln_zeile(con, konfig),
-             f"✅/❌ von dir: {len(zeilen)} ({gut} ✅ · {len(zeilen) - gut} ❌)"]
+    teile = ["📋 Stand", regeln.regeln_zeile(con, konfig)]
     if not regeln.ziel_regel(con, konfig):   # 08.10.: ohne „macht daraus eine feste Länge“ – die Länge wählt der Bot
         p, _ = regie_lernen.aktuelle(con, konfig, "short")
         fmt = regie_lernen.format_regeln(konfig, "short")[0]
@@ -387,6 +431,8 @@ def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
                                                            "hast" if mindestens > 0 else "die Länge wähle ich selbst"))
     if abend := letzter_abend_zeile(con, konfig):
         teile.append(abend)
+    if liga := liga_zeile(con, konfig):
+        teile.append(liga)
     teile.append(geschmack.lehrer_zeile(con, konfig))   # deine ✅/❌, KI-Note, Zuschauer – ohne Netz
     return "\n".join(teile)
 
@@ -426,13 +472,13 @@ def version() -> tuple[str, str] | None:
         return None
 
 
-def stand_satz(con: sqlite3.Connection) -> str:
+def stand_satz(con: sqlite3.Connection, konfig: Konfig) -> str:
     e = con.execute("SELECT COUNT(*) AS n FROM entwuerfe").fetchone()
     daumen = con.execute(
         "SELECT SUM(CASE WHEN daumen > 0 THEN 1 ELSE 0 END) AS gut, COUNT(*) AS n FROM entwurf_bewertungen").fetchone()
     momente = con.execute("SELECT COUNT(*) FROM momente").fetchone()[0]
     tracks = con.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-    text = (autonom_text(con) + f"\n\n📋 Stand: {momente} Momente mit Stimmung, {tracks} Musiktitel, "
+    text = (autonom_text(con, konfig) + f"\n\n📋 Stand: {momente} Momente mit Stimmung, {tracks} Musiktitel, "
             f"{e['n'] or 0} Entwürfe. {daumen['n'] or 0} freiwillige Bewertungen als Start- und Zusatzwissen.")
     # B5: Transparenz, was der Auto-Filter schon allein entschieden hat (0, solange [lernbot].auto_schwelle aus ist)
     if auto := con.execute("SELECT COUNT(*) FROM entwuerfe WHERE auto_verworfen IS NOT NULL").fetchone()[0]:
@@ -703,7 +749,9 @@ async def _sende_entwuerfe(app) -> int:
             log.exception("Erwartung für Entwurf #%s nicht festgeschrieben", z["id"])
             wert = None
         experte = experte_an(con, konfig)
-        text = entwurf_text(z, _liste(z), erwartung=wert, kritik_text=kritik.kritik_zeile(con, z["id"]), kurz=not experte)
+        liste = _liste(z)
+        text = entwurf_text(z, liste, erwartung=wert, kritik_text=kritik.kritik_zeile(con, z["id"]), kurz=not experte,
+                            feinwerte_videos=modell_videos(con, liste))
         abend = _abend_zu(con, z["id"])
         if kopf := _kopf(con, konfig, z["id"], experte):   # wofür das Video ist, steht ganz oben
             text = (kopf + text)[:1000]
@@ -806,7 +854,7 @@ def abendstand(con: sqlite3.Connection, konfig: Konfig, zeit: datetime | None = 
     if (lokal.hour, lokal.minute) < (stunde, minute):
         return False
     return db.lern_meldung(con, f"abend:{lokal:%Y-%m-%d}",
-                           stand_satz(con) if experte_an(con, konfig) else stand_kurz(con, konfig))
+                           stand_satz(con, konfig) if experte_an(con, konfig) else stand_kurz(con, konfig))
 
 
 def blick_auf_leerlauf(app) -> None:
@@ -1085,14 +1133,16 @@ async def cmd_stand(update, context) -> None:
     from . import lernbot_pc
 
     con, konfig = context.bot_data["con"], context.bot_data["konfig"]
-    text = stand_satz(con) if experte_an(con, konfig) else stand_kurz(con, konfig)
+    text = stand_satz(con, konfig) if experte_an(con, konfig) else stand_kurz(con, konfig)
     if pc := lernbot_pc.pc_zeile(con, konfig):   # Freund mit Briefkasten (Stufe 2): wann sein PC sich zuletzt meldete
         text += f"\n{pc}"
-    await update.effective_message.reply_text(text)
+    for stueck in stuecke(text):   # /experte: mit der Regie-Liga oben kann es länger als eine Nachricht werden
+        await update.effective_message.reply_text(stueck)
 
 
 async def cmd_lernstand(update, context) -> None:
-    await update.effective_message.reply_text(autonom_text(context.bot_data["con"]))
+    for stueck in stuecke(autonom_text(context.bot_data["con"], context.bot_data["konfig"])):   # Liga oben: kann lang werden
+        await update.effective_message.reply_text(stueck)
 
 
 async def cmd_warum(update, context) -> None:
@@ -1353,9 +1403,11 @@ async def bei_klick(update, context) -> None:
             context.application.create_task(neuer_entwurf(context.application, naechstes_ziel(zeile)))
     gespeichert = time.monotonic()
     try:
-        await query.edit_message_caption(caption=entwurf_text(zeile, _liste(zeile), bewertung,
+        liste = _liste(zeile)
+        await query.edit_message_caption(caption=entwurf_text(zeile, liste, bewertung,
                                                               erwartung=erwartung.gespeichert(con, "entwurf", eid),
-                                                              kritik_text=kritik.kritik_zeile(con, eid), kurz=not experte),
+                                                              kritik_text=kritik.kritik_zeile(con, eid), kurz=not experte,
+                                                              feinwerte_videos=modell_videos(con, liste)),
                                          parse_mode="HTML",
                                          reply_markup=_markup(knoepfe) if knoepfe else None)
     except Exception as fehler:  # „message is not modified“ beim Doppelklick ist normal; alles andere ins Log

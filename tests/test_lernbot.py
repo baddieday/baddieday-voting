@@ -92,9 +92,9 @@ class LernBot(MitRegieMaterial):
         self.assertIn(f"g:{eid}:hektisch", knoepfe)                     # die sechs Regel-Gründe (Stufe 1)
         text = lernbot.stand_kurz(self.con, self.konfig)
         self.assertTrue(text.startswith("📋 Stand\n📏 Deine Regeln: Länge automatisch"))
-        self.assertIn("✅/❌ von dir: 1 (0 ✅ · 1 ❌)", text)
+        self.assertIn("🧠 Lernt aus: deinen ✅/❌ (1) · ", text)                  # Stufe 5: die Zahl steht in 🧠
         self.assertIn("⏱️ Shorts gerade 45 s – die Länge wähle ich selbst", text)   # 08.10.: ohne „feste Länge“
-        self.assertLessEqual(len(text.splitlines()), 10)
+        self.assertLessEqual(len(text.splitlines()), 6)
         from clip_pipeline import einstellungen
 
         einstellungen.setze(self.con, "regie.short_mindestens_s", 65.0)          # ⚙️ vom 06.10.: bleibt dein Wort
@@ -117,13 +117,14 @@ class LernBot(MitRegieMaterial):
         nicht = "Zuschauern (TikTok nicht verbunden – einmal /tiktok)"
         with mock.patch.dict(os.environ, nur_app):
             text = lernbot.stand_kurz(self.con, self.konfig)
-            self.assertTrue(text.endswith(f"🧠 Lernt aus: deinen ✅/❌ · KI-Note (kommt mit dem nächsten Video) · {nicht}"))
+            self.assertTrue(text.endswith(f"🧠 Lernt aus: deinen ✅/❌ (0) · KI-Note (kommt mit dem nächsten Video) · "
+                                          f"{nicht}"))
             pfad = publikum_adapter.cache_pfad(self.konfig)
             pfad.write_text("{kaputt", encoding="utf-8")                        # Token-Datei unlesbar: kein Absturz
             self.assertIn(nicht, lernbot.stand_kurz(self.con, self.konfig))
             publikum_adapter.schreibe_cache(pfad, {"client_key": "key", "seed": publikum_adapter.ANMELDUNG,
                                                    "refresh_token": "r"})      # per /tiktok verbunden
-            self.assertIn("Zuschauern (noch kein Video ausgewertet)", lernbot.stand_kurz(self.con, self.konfig))
+            self.assertIn("Zuschauern (noch keine Zahlen da)", lernbot.stand_kurz(self.con, self.konfig))
 
     def test_bildunterschrift_zaehler_und_gelernt(self):
         zeile = {"id": 7}
@@ -145,7 +146,7 @@ class LernBot(MitRegieMaterial):
         update = SimpleNamespace(callback_query=q, effective_message=q.message)
         asyncio.run(lernbot.bei_kurzknopf(update, self.context))
         self.assertEqual(q.antworten, [None])                                   # Spinner sofort weg
-        self.assertTrue(gesendet[0].startswith("🧠 AUTONOMES LERNEN"))
+        self.assertTrue(gesendet[0].startswith("🥇 Regie-Liga"))                 # Stufe 5: die Liga oben
         q = FakeQuery("k:0:zusammenschnitt")
         asyncio.run(lernbot.bei_kurzknopf(SimpleNamespace(callback_query=q, effective_message=None), self.context))
         self.assertEqual((q.antworten, len(self.aufgaben)), (["🎬 Zusammenschnitt kommt …"], 1))
@@ -493,8 +494,12 @@ class EntwurfText(unittest.TestCase):
         self.assertIn("🎯 nur Spielabend 27.10.", lernbot.entwurf_text({"id": 7}, liste, kurz=True))
         liste["auswahl"]["nachschub"] = ["b"]    # Prüfung 08.10.: mit Szenen früherer Abende stimmt „nur …“ nicht
         self.assertNotIn("🎯", lernbot.entwurf_text({"id": 7}, liste, kurz=True))
-        voll = lernbot.entwurf_text({"id": 7}, liste, erwartung=0.8, kritik_text="🧐 Cutter 61")
+        voll = lernbot.entwurf_text({"id": 7}, liste, erwartung=0.8, kritik_text="🧐 Cutter 61", feinwerte_videos=16)
         self.assertIn("🔮", voll)                                               # Experten-Modus wie bisher
+        # Stufe 5 (M192): das Publikums-Modell ohne Version und Prozent – beides sah bei Zufall genauso aus
+        self.assertIn("🧠 Feinwerte (Tendenzen, nicht belegt) aus 16 Videos\n", voll)
+        for weg in ("Lernstand v", "Vertrauen"):
+            self.assertNotIn(weg, voll)
 
     def test_knoepfe_gruende_reihen(self):
         eid = 10 ** 12
@@ -618,7 +623,7 @@ class ErwartungImLernBot(MitErwartung):
 
         update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
         asyncio.run(lernbot.cmd_lernstand(update, self.context))
-        self.assertTrue(antworten[0].startswith("🧠 AUTONOMES LERNEN"))
+        self.assertTrue(antworten[0].startswith("🥇 Regie-Liga"))
         self.assertIn("Bewertungen sind optional", antworten[0])
 
     def test_lernstand_ohne_quote_unveraendert(self):
@@ -629,7 +634,7 @@ class ErwartungImLernBot(MitErwartung):
 
         update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply_text))
         asyncio.run(lernbot.cmd_lernstand(update, self.context))
-        self.assertEqual(antworten, [lernbot.autonom_text(self.con)])
+        self.assertEqual(antworten, [lernbot.autonom_text(self.con, self.konfig)])
 
 
 @unittest.skipIf(lernbot is None, "python-telegram-bot fehlt")

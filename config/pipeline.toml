@@ -339,6 +339,11 @@ clips_zeigen = false
 # (seit 08.10., je Video doppelt) und der KI-Note.
 # mut = wie oft ein Video bewusst etwas Neues probiert: 0.15 vorsichtig · 0.33 ausgewogen · 0.5 mutig
 mut = 0.5
+# Mehrbenutzer Stufe 5 (M193): Hat die Regie-Liga einen besten Aufbau belegt (zweimal nacheinander bei den
+# Zuschauern besser, `pipeline erfolg`), nimmt der Bot ihn im einfachen Modus statt des Zufallszugs – „mutig“, „nie
+# dreimal“, 🥱 und deine Regeln gehen weiter vor (etwa 6 von 10 Videos). Vor der ersten Krönung ändert das nichts.
+# false = wählt wie vor Stufe 5 (nur in lokal.toml umstellen, kein Knopf; danach `systemctl restart clip-lernbot`)
+champion_standard = true
 
 [lernbot]
 # Experten-Modus (06.10.): aus = ein Knopf, 👍/👎, vier Einstellungen; an = alle Knöpfe, Befehle und Details.
