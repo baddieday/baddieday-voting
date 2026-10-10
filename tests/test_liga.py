@@ -1,5 +1,6 @@
 """Mehrbenutzer, Stufe 5, PR 1 (M178–M185): Regie-Liga – bester Aufbau nur mit Beleg, reine Rechnung, nur lesen.
 PR 2 (M186–M191, die letzten beiden Tests): dieselbe Liga im Sonntagsbericht und in 📋 Stand.
+PR 3 (M193): Die Wirkung auf die Wahl prüft tests/test_geschmack.py mit denselben Daten (LigaDaten).
 
 Abnahme (Florian): „Benutzer können nachvollziehen, was das System ausprobiert und tatsächlich gelernt hat.“
 Echter Weg wie tests/test_erfolg.py (post_anlegen, speichere_messung, bewerte_alle → eingefrorene Wochen-Note), aber
@@ -25,7 +26,9 @@ AUFBAUTEN = ("story", "montage", "kino", "steigerung")
 ZONE = "Europe/Berlin"
 
 
-class Liga(MitSpeicher):
+class LigaDaten(MitSpeicher):
+    """Nur die Daten (ohne Tests) – auch für tests/test_geschmack.py (Schritt 3: bester Aufbau als Standard)."""
+
     def setUp(self):
         super().setUp()
         self.konfig.daten["publikum"].update(plattformen=["tiktok"], alter_tage=7, mindest_alter_tage=3, fenster=20)
@@ -120,6 +123,8 @@ class Liga(MitSpeicher):
         self.assertEqual(len(zeilen), 1, zeilen)                        # genau eine JSON-Zeile (Vertrag)
         return code, json.loads(zeilen[0]), log.getvalue()
 
+
+class Liga(LigaDaten):
     def test_echter_unterschied_wird_nach_zwei_sonntagen_bester_aufbau(self):
         self.wochen(16, lambda i, a: 2.0 if a == "story" else 1.0)    # 48 TikTok-Shorts, „erzählt“ doppelte Reaktionen
         self.wochen(2)                                                 # bis alle Wochen-Noten fest sind
@@ -264,12 +269,13 @@ class Liga(MitSpeicher):
         self.assertEqual(self.bericht(14)[-1], "🔜 Aufbau „erzählt“ liegt diesmal vorn (8 gegen 26 Videos) – bestätigt "
                                                "es sich am nächsten Sonntag mit neuen Zahlen, wird er dein bester Aufbau.")
         # Phase 3 – Krönungswoche: 🥇 mit „Noch nicht gemessen“ darunter, ohne 🎯/🤔 – auch wenn ✅ und KI-Note
-        # gerade „schnelle Montage“ und ruhige Schnitte vorziehen
+        # gerade „schnelle Montage“ und ruhige Schnitte vorziehen. Schritt 3 (M193): ab jetzt ist er Standard
         krone = self.bericht(15)
         self.assertEqual(krone, [
             "🧠 Deine Woche (07.06.–14.06.)", "🎬 3 Videos · 0 ✅ · 0 ❌",
             "🥇 Neuer bester Aufbau: „erzählt“ – kommt bei den Zuschauern auf TikTok besser an als die anderen Aufbauten "
-            "(9 gegen 28 Videos, zwei Sonntage nacheinander), sehr wahrscheinlich kein Zufall.",
+            "(9 gegen 28 Videos, zwei Sonntage nacheinander), sehr wahrscheinlich kein Zufall. Ab jetzt nehme ich ihn "
+            "meistens, die anderen fordern ihn heraus – welcher, entscheiden auch deine ✅/❌. Deine Regeln gehen vor.",
             "Noch nicht gemessen: wie lange geschaut wird, neue Follower, Besuche auf clip-battle.de.",
             "🧪 Ausprobiert: Aufbau „Steigerung“ (1×)",
             "🏅 Level 3 – bester Aufbau belegt · Erfahrung: 37 Videos (+3)",

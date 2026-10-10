@@ -65,6 +65,13 @@ Senden anschaut (zählt ein Drittel so viel wie du). Dein Grund unter ❌ zählt
 werden nicht dem Aufbau angelastet. Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen
 immer vor.**
 
+Steht ein **bester Aufbau** fest (🥇 im Sonntagsbericht, frühestens nach etwa zwei Monaten), nimmt der Bot ihn ab dann
+meistens – in etwa 6 von 10 Videos. Die anderen fordern ihn weiter heraus: Bei etwa jedem sechsten Video probiert er
+bewusst einen anderen Aufbau, und nach zwei Videos mit dem besten kommt nie ein drittes hintereinander – welcher dann
+kommt, entscheiden deine ✅/❌ mit. „🥱 Langweilig“ und deine Regeln gehen weiter vor; Tempo, Zeitlupe, Musik und
+Szenen wechseln wie bisher. Bis dahin wählt er genau wie bisher. Abschalten geht nur in der Datei (`[geschmack]
+champion_standard = false` in `lokal.toml`, danach den Lern-Bot neu starten), nicht im Bot.
+
 ## Der Sonntagsbericht
 Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung der Woche – nur, wenn es Videos gab, oder wenn an diesem Sonntag
 ein neuer bester Aufbau feststeht. Beispiel nach gut drei Monaten:
@@ -81,8 +88,10 @@ ein neuer bester Aufbau feststeht. Beispiel nach gut drei Monaten:
   nacheinander, mit genug Videos auf beiden Seiten (je mindestens 8 hochgeladene Shorts mit fertigen Zahlen nach etwa
   einer Woche; die ersten 5 sind nur Vergleich) und sehr wahrscheinlich kein Zufall. Ablösen kann ihn nur ein Aufbau,
   der ihn direkt schlägt, und nur mit Videos, die nach seiner Krönung hochgeladen wurden. KI-Note und deine ✅/❌ zählen
-  dafür nie. In der Woche, in der er feststeht, steht darunter, was es gar nicht gibt (heute: wie lange geschaut wird,
-  neue Follower, Besuche auf clip-battle.de) – das steht nie als 0 da.
+  dafür nie. In der Woche, in der er feststeht, sagt die Zeile auch, was sich ändert: „Ab jetzt nehme ich ihn meistens,
+  die anderen fordern ihn heraus – welcher, entscheiden auch deine ✅/❌. Deine Regeln gehen vor.“ (siehe „Was der Bot
+  selbst lernt“). Darunter steht, was es gar nicht gibt (heute: wie lange geschaut wird, neue Follower, Besuche auf
+  clip-battle.de) – das steht nie als 0 da. Gezählt wird immer der Aufbau, den ein Video wirklich hatte.
 - **🎯 Wähle ich gerade öfter / seltener:** was der Bot im Moment bevorzugt – sein Ausprobieren aus deinen ✅/❌, den
   vorläufigen Zahlen und der KI-Note, kein Beweis. Gibt es einen besten Aufbau, nennt diese Zeile keinen Aufbau mehr.
 - **🧪 Ausprobiert:** was er diese Woche bewusst anders gemacht hat, mit Namen; nach einer Krönung die Herausforderer.

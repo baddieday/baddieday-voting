@@ -751,3 +751,13 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Version und Prozent. Aufbau-Versuche bleiben sichtbar, auch wenn das Publikums-Modell Feinwerte nachsteuert –
     nachgestellt: Wahl und Lernen in 60 Entwürfen gleich, sichtbare Versuche 3 → 14. Videos, Knöpfe und n8n unverändert.
     M187–M192.
+  - Schritt 3 (bester Aufbau wird Standard, `docs/REGIE.md`; Abnahme und Stufenbericht in `docs/MEHRBENUTZER.md`): Hat
+    die Liga einen Aufbau gekrönt, nimmt ihn der Bot im einfachen Modus beim Short statt des Zufallszugs – „mutig“, „nie
+    dreimal“, 🥱 und deine Regeln gehen vor, also etwa 6 von 10 Shorts; der 🥇-Satz der Krönungswoche sagt es. Bis zur
+    ersten Krönung, mit `[geschmack] champion_standard = false` (nur `lokal.toml`) und bei einem Fehler der Liga wählt er
+    Zeichen für Zeichen wie vorher (Test: je 40 Wahlen gleich wie main). Nachgestellt mit dem echten Code: ohne echten
+    Unterschied eine falsche Krönung in 1,1 % der Jahre (2000 Läufe), zwei gleich gute Aufbauten wechseln danach in 0,4 %
+    von 2 Jahren, doppelte Reaktionen im Median nach 17 Wochen gekrönt. Im echten Weg (DB-Weg, 100 und 40 Jahre): bis zur
+    Krönung Zeichen für Zeichen dieselben Videos wie vorher, danach „erzählt“ in 61 statt 55 % der Shorts und 3,6 % mehr
+    Reaktionen je Aufruf; ohne echten Unterschied 2 von 100 Jahren falsch gekrönt. Gegenprobe: alle 7 Fehler aus dem Plan
+    und 8 weitere machen einen Test rot. Nebenbei behoben: ein älterer Test flackerte (Millisekunden-Grenze). M193–M195.

@@ -212,12 +212,18 @@ nie, über n8n nicht erreichbar. Er zeigt, was der Bot ausprobiert und was er wi
   `[erfolg.gewichte]` ändert, rechnet die Geschichte neu; Version und Gewichte stehen in der JSON-Zeile.
 - **Ehrlich erwartet** (3 hochgeladene Shorts pro Woche): Level 2 nach etwa 12–14 Wochen. Ein Aufbau mit doppelten
   Reaktionen wird im Median nach etwa 17 Wochen bester Aufbau (25 %: 15, 75 %: 21); ohne echten Unterschied passiert
-  das fälschlich in etwa 1 von 100 Jahren (nachgestellt mit dem echten Code: 1,2 % im ersten Jahr, 1,7 % in zwei).
+  das fälschlich in etwa 1 von 100 Jahren (nachgestellt mit dem echten Code: 1,2 % im ersten Jahr, 1,7 % in zwei; mit
+  2000 Läufen in Schritt 3: 1,1 % und 1,8 %).
   Beim Freund ohne Zahlenabruf bleibt die Liga leer.
 - **Im Lern-Bot (Schritt 2):** Im Sonntagsbericht ersetzt die Liga die 📊-Zeile – 🥇 bester Aufbau (in der Woche der
   Krönung mit „Noch nicht gemessen“), 🧪 Versuche mit Namen, 🏅 Level und Erfahrung, 🔜 nächstes Ziel; 📋 hat eine
   Liga-Zeile, sobald Zahlen ankommen. Unter /experte steht dieser Abschnitt oben in /lernstand. So sieht es aus:
-  `docs/SO-GEHTS.md`, „Der Sonntagsbericht“. Die Videos wählt der Bot noch wie bisher.
+  `docs/SO-GEHTS.md`, „Der Sonntagsbericht“.
+- **Wirkung (Schritt 3, M193):** Erst nach der ersten Krönung nimmt der Bot im einfachen Modus beim Short den besten
+  Aufbau statt des Zufallszugs – „mutig“, „nie dreimal“, 🥱 und deine Regeln gehen vor, also etwa 6 von 10 Shorts; der
+  🥇-Satz der Krönungswoche sagt es. Bis dahin, mit `[geschmack] champion_standard = false` (nur `lokal.toml`) und unter
+  /experte wählt er wie bisher. Gezählt wird immer der Aufbau, den ein Video wirklich hatte (`docs/REGIE.md`, „Bester
+  Aufbau als Standard“).
 - **Fehler:** Kann die Liga nicht rechnen, steht `liga.fehler` in der JSON-Zeile und der Grund im Log; der übrige
   Bericht und der Exit bleiben. Im Lern-Bot kommen Sonntagsbericht und 📋 dann ohne Liga-Zeilen.
 

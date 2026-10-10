@@ -18,6 +18,12 @@ Alte Bewertungen zählen sofort für den Aufbau (der Stil steht schon in den Par
 
 Wahl: Thompson-Sampling je Schraube; „mutig“ (geschmack.mut, Standard 0,5): bei jedem zweiten Video wird eine Schraube
 bewusst auf ihre am wenigsten erprobte Einstellung gestellt (Experiment). Derselbe Aufbau nie dreimal hintereinander.
+Bester Aufbau als Standard (Mehrbenutzer Stufe 5, M193): Hat die Regie-Liga einen Aufbau gekrönt (bei den Zuschauern
+an zwei Sonntagen nacheinander belegt besser, liga.champion), ersetzt er im einfachen Modus beim Short nur den
+Thompson-Zug des Aufbaus – gezogen wird trotzdem, alle Zufallszahlen bleiben dieselben. „Mutig“ (der am wenigsten
+erprobte Herausforderer), „nie dreimal“ (der Herausforderer mit dem besten Anteil aus ✅/❌, vorläufiger Note und KI),
+🥱 und deine Regeln gehen weiter vor; so kommt er in etwa 6 von 10 Videos. Bis zur ersten Krönung, mit
+[geschmack].champion_standard = false, unter /experte und bei einem Fehler der Liga wählt der Bot genau wie vorher.
 Nach ❌ → 🥱 (07.10., „das gleiche Video mit anderen Schnitten“): die neue Fassung bekommt einen Aufbau mit ANDERER
 Reihenfolge (Montage und Kino haben beide den Bogen) und das andere Tempo, das sich wirklich spürbar unterscheidet
 (_anders). Ein fester Stil ([regie].stil) gilt nur noch im Experten-Modus – im einfachen ist er fest „auto“
@@ -165,15 +171,41 @@ def _anders(anders: dict, aufbauten: list[str], basis_seg: float) -> tuple[str, 
     return next((o for o in aufbauten if aenderung(o) >= SPUERBAR - 1e-9), max(aufbauten, key=aenderung)), tempo
 
 
+def champion_standard(con: sqlite3.Connection, konfig: Konfig) -> bool:
+    """Wird ein belegter bester Aufbau Standard (M193)? Nur im einfachen Modus und mit [geschmack].champion_standard
+    (Standard an; abschalten nur in der Konfig, kein Knopf). Unter /experte wählt stile.py bzw. ein fester Stil."""
+    return bool(konfig.wert("geschmack.champion_standard", True)) and not einstellungen.experte(con, konfig)
+
+
+def bester_aufbau(con: sqlite3.Connection, konfig: Konfig, fmt: str = "short") -> str | None:
+    """Der belegte beste Aufbau der Regie-Liga („story“ …), wenn er für diesen Entwurf Standard ist – sonst None: vor
+    der ersten Krönung, bei Zusammenschnitten, unter /experte, mit champion_standard = false. Ein Fehler der Liga
+    kostet die Wahl nie – dann None (= die Wahl wie vor Stufe 5), der Grund steht im Log."""
+    if fmt != "short" or not champion_standard(con, konfig):
+        return None
+    try:
+        from . import liga   # hier, nicht oben: liga und erfolg lesen geschmack (Import-Kreis)
+
+        bester = liga.champion(con, konfig)
+    except Exception:   # noqa: BLE001 – der Entwurf kommt trotzdem, mit der Wahl wie vor der ersten Krönung
+        log.exception("Aufbau ohne Regie-Liga gewählt (pipeline erfolg zeigt den Fehler)")
+        return None
+    return bester if bester in KNOEPFE["aufbau"] else None
+
+
 def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str = "short", anders: dict | None = None,
            basis_seg: float = 1.0) -> dict:
     """Die drei Schrauben für den nächsten Entwurf (plus "experiment": welche bewusst neu probiert wird, sonst None).
     Deterministisch je Entwurf (Zufall aus Format und Anzahl der Entwürfe).
     anders (🥱, regeln.neue_fassung): Aufbau mit anderer Reihenfolge und anderes Tempo als das abgelehnte Video
-    (_anders, basis_seg = gelernter Segmentfaktor vor Stil und Tempo); die Zeitlupe bleibt frei."""
+    (_anders, basis_seg = gelernter Segmentfaktor vor Stil und Tempo); die Zeitlupe bleibt frei.
+    Bester Aufbau (M193, bester_aufbau): Er steht statt des Thompson-Zugs vorn – auch in der Reihe, aus der 🥱 wählt –,
+    "champion" vermerkt ihn. Gezogen wird trotzdem, damit Tempo, Zeitlupe, „mutig“ und „nie dreimal“ dieselben
+    Zufallszahlen bekommen wie ohne ihn; ohne besten Aufbau ist die Wahl Zeichen für Zeichen die von vorher."""
     n = con.execute("SELECT COUNT(*) FROM entwuerfe WHERE format = ?", (fmt,)).fetchone()[0]
     zufall = random.Random(f"geschmack:{fmt}:{n}")
     stat = statistik(con, fmt)
+    bester = bester_aufbau(con, konfig, fmt)
     wahl: dict = {}
     reihe_aufbau: list[str] = []
     for knopf, optionen in KNOEPFE.items():
@@ -182,6 +214,9 @@ def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str = "short", anders: 
         wahl[knopf] = zuege[0][1]
         if knopf == "aufbau":
             reihe_aufbau = [o for _, o in zuege]
+            if bester:   # ersetzt nur den Zug: deine ✅/❌ wählen ab jetzt den Herausforderer (mutig, nie dreimal, 🥱)
+                reihe_aufbau = [bester, *(o for o in reihe_aufbau if o != bester)]
+                wahl[knopf] = bester
     experiment = None
     if zufall.random() < float(konfig.wert("geschmack.mut", MUT_STANDARD)):
         knopf = zufall.choice(sorted(KNOEPFE))
@@ -202,6 +237,8 @@ def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str = "short", anders: 
     if fest in stile.STILE:                                # fester Stil (nur /experte; einfach: „auto“) geht vor
         wahl["aufbau"] = fest
         experiment = None if experiment == "aufbau" else experiment
+    if bester:                                             # unter welchem besten Aufbau das Video entstand
+        wahl["champion"] = bester
     wahl["experiment"] = experiment
     return wahl
 
@@ -347,9 +384,10 @@ def _liga_ereignis(con: sqlite3.Connection, konfig: Konfig, bis) -> dict | None:
     return st
 
 
-def _liga_block(st: dict | None) -> dict:
+def _liga_block(st: dict | None, standard: bool = False) -> dict:
     """Die Liga-Zeilen für wochen_text: oben (🥇, in der Woche einer Krönung oder Ablösung dazu „Noch nicht gemessen“),
     versuche (🧪), unten (🏅, 🔜). 🥇/🏅/🔜 erst, wenn auf der Hauptplattform Zuschauerzahlen ankommen (M190); 🧪 immer.
+    standard: der beste Aufbau wird Standard (champion_standard, M193) – dann sagt es der neue 🥇-Satz.
     Ein Fehler darin kostet den Bericht nie – dann keine Liga-Zeilen, der Grund steht im Log."""
     leer = {"oben": [], "versuche": None, "unten": [], "bester": False, "neu": False}
     if st is None:
@@ -358,7 +396,7 @@ def _liga_block(st: dict | None) -> dict:
         from . import liga
 
         zahlen = st["messungen"] > 0
-        neu = liga.neu_zeilen(st) if zahlen else []
+        neu = liga.neu_zeilen(st, standard) if zahlen else []
         bester = bool(zahlen and st["bester"])
         return {"oben": neu or ([liga.bester_zeile(st)] if bester else []), "versuche": liga.versuche_zeile(st),
                 "unten": [liga.level_zeile(st), liga.ziel_zeile(st)] if zahlen else [], "bester": bester,
@@ -386,7 +424,8 @@ def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None
              LEFT JOIN entwurf_bewertungen b ON b.entwurf_id = e.id LEFT JOIN kritiken k ON k.entwurf_id = e.id
             WHERE e.format = 'short' AND e.status IN ('gesendet', 'bewertet') AND e.erstellt >= ? AND e.erstellt < ?""",
         (iso(von), iso(bis)))]
-    block = _liga_block(_liga(con, konfig, bis) if woche else _liga_ereignis(con, konfig, bis))
+    block = _liga_block(_liga(con, konfig, bis) if woche else _liga_ereignis(con, konfig, bis),
+                        champion_standard(con, konfig))
     if not woche and not block["neu"]:
         return None
     zone = konfig.wert("zeit.zeitzone", "Europe/Berlin")

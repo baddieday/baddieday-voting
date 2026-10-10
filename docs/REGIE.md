@@ -408,6 +408,20 @@ nötig sind sie nicht.
   Stil und wie viele Urteile vom KI-Cutter kamen.
 - Das **Publikum** (`autonom.py`) bleibt das Hauptsignal, sobald veröffentlichte Videos Zahlen haben.
 
+## Bester Aufbau als Standard (Mehrbenutzer Stufe 5, 09.10.)
+Nur im einfachen Modus und nur beim Short (`geschmack.waehle`, M193). Hat die Regie-Liga (`liga.py`, `pipeline erfolg`)
+einen Aufbau gekrönt – bei den Zuschauern an zwei Sonntagen nacheinander belegt besser –, steht er statt des
+Thompson-Zugs vorn. Gezogen wird trotzdem: Tempo, Zeitlupe und „mutig“ bekommen dieselben Zufallszahlen wie ohne ihn.
+- „Mutig“ trifft den Aufbau in etwa jedem 6. Video → der am wenigsten erprobte Herausforderer.
+- „Nie dreimal“ → der Herausforderer mit dem besten Anteil aus ✅/❌, vorläufiger Zuschauer-Note und KI-Note.
+- 🥱 (andere Reihenfolge, anderes Tempo) und deine Regeln gehen vor. Unter /experte wird er nie Standard.
+- So kommt er in etwa 6 von 10 Shorts. `parameter.geschmack.champion` vermerkt am Entwurf, unter welchem besten Aufbau
+  er entstand. Für Liga und Lernen zählt weiter der Aufbau, den das Video wirklich hatte.
+- Vor der ersten Krönung, mit `[geschmack] champion_standard = false` (nur `lokal.toml`, kein Knopf) und bei einem
+  Fehler der Liga (nur Log) wählt der Bot Zeichen für Zeichen wie vorher. Der 🥇-Satz der Krönungswoche sagt nur dann
+  „Ab jetzt nehme ich ihn meistens …“, wenn das auch stimmt.
+- Nachweis (Nachstellungen, Gegenprobe): `docs/MEHRBENUTZER.md`, „Stufenbericht Stufe 5“.
+
 ## Cutter-Maßstab 1.0 – Profi-Kritik am fertigen Video (30.09.)
 
 Florian: „mach die Schnittregeln professionell“. Die Handwerksregeln von Regisseur 3.0 lasen nur den Plan und

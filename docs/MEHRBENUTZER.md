@@ -591,6 +591,171 @@ rechnet einmal je Woche. Besser, belegt:
    Lerner bekommen reife Werte und die Gewichte; gegen das wöchentliche Nachsehen eine strengere Regel (z. B. „belegt
    in zwei Wochen nacheinander“).
 
+## Regie-Liga (Stufe 5, Schritt 1–3 – umgesetzt)
+- **Liga rechnen (Schritt 1):** `pipeline erfolg` hat den Abschnitt „Regie-Liga“ (JSON `liga`) – reine Rechnung aus den
+  festen Wochen-Noten, keine Tabelle, kein neuer Befehl. Sonntags 18 Uhr wird entschieden: Ein Aufbau wird bester
+  Aufbau, wenn er an zwei Sonntagen nacheinander belegt besser ankommt als die anderen; ablösen kann ihn nur einer, der
+  ihn direkt schlägt, und nur mit Videos ab der Krönung. Dazu Erfahrung und Level, Liga-Level, das nächste Ziel und die
+  Versuche der Woche mit Namen. Erklärung: `docs/PUBLIKUM.md`, Abschnitt 8.
+- **Im Lern-Bot (Schritt 2):** Sonntagsbericht mit 🥇 bester Aufbau, 🧪 Versuche mit Namen, 🏅 Level und Erfahrung, 🔜
+  nächstes Ziel statt 📊 und „n× bewusst“; 📋 mit einer Liga-Zeile, sobald Zahlen ankommen; /lernstand (nur /experte)
+  mit der Liga oben. Für Florian: `docs/SO-GEHTS.md`, „Der Sonntagsbericht“.
+- **Bester Aufbau wird Standard (Schritt 3):** erst nach der ersten Krönung, nur im einfachen Modus beim Short: Er
+  ersetzt den Zufallszug, „mutig“, „nie dreimal“, 🥱 und deine Regeln gehen vor – etwa 6 von 10 Shorts. Abschalten nur in
+  `lokal.toml` (`[geschmack] champion_standard = false`). `docs/REGIE.md`, „Bester Aufbau als Standard“.
+- **Freunde:** dieselben Regeln in ihrer eigenen Datenbank. Ohne Zahlenabruf bleibt ihre Liga leer (keine 🥇/🏅/🔜, keine
+  wöchentliche 🧠-Zeile); `benutzer-befehl.sh <name> erfolg` zeigt sie. Annahmen M178–M195.
+
+## Stufenbericht Stufe 5 (09.10.2026)
+Abnahme „Benutzer können nachvollziehen, was das System ausprobiert und tatsächlich gelernt hat“: erfüllt im Code, in
+Tests und Nachstellungen – Nachweis unten. Auf Florians echten Daten ist noch nichts gelernt: Ein bester Aufbau braucht je
+Seite mindestens 8 hochgeladene Shorts mit fertigen Zahlen und zwei Sonntage nacheinander. Ehrlich erwartet nach dem
+Update: Level 1–2 und „noch zu wenig Videos“; ein echter Beleg frühestens nach einigen Monaten.
+
+**Was wurde tatsächlich implementiert?**
+- **Schritt 1 – Liga rechnen** (`liga.py`, neu; `erfolg.py`; `cli.py`): Stichtag Sonntag 18 Uhr; Krönung nur, wenn
+  derselbe Aufbau an zwei Sonntagen nacheinander „belegt besser“ ist; Ablösung nur paarweise und nur mit Videos ab der
+  Krönung; Erfahrung nur aus gezählten Videos mit fertiger Wochen-Note; Level je Strategie (8/16/32/64 Videos),
+  Liga-Level aus Ereignissen, Vertrauen in Worten, nächstes Ziel, Versuche der 7 Tage mit Namen. Ausgabe in `pipeline
+  erfolg` (Text und JSON `liga`); ein Fehler der Liga steht als `liga.fehler`, der Exit bleibt.
+- **Schritt 2 – Liga im Lern-Bot** (`geschmack.py`, `lernbot.py`): Sonntagsbericht mit 🥇 · 🧪 · 🏅 · 🔜 (höchstens 8
+  Zeilen, auch in einer Woche ohne Video, wenn gekrönt wurde); 📋 mit Liga-Zeile und der ✅/❌-Zahl in der 🧠-Zeile;
+  /lernstand und Experten-Bildunterschrift ohne „Lernstand v…“ und Prozent. `GEHOERT["aufbau"]` nur noch Stil,
+  Reihenfolge, Bildgröße – Aufbau-Versuche bleiben sichtbar, Lernen und Videos unverändert.
+- **Schritt 3 – bester Aufbau als Standard** (`geschmack.bester_aufbau`, `geschmack.waehle`, `[geschmack]
+  champion_standard`): ersetzt nach der ersten Krönung nur den Zufallszug; alle anderen Zufallszahlen bleiben gleich;
+  Vermerk `parameter.geschmack.champion`; ein Fehler der Liga → Wahl wie vorher. Der 🥇-Satz sagt es, wenn es gilt.
+- **Bewusst nicht gebaut:** Kronen für Tempo, Zeitlupe und Länge; Humor als fünfter Aufbau (offene Frage); „Aufbauten
+  unverfälscht“ (erst nach Messung, M194); eine Tabelle für Wochenurteile; eine Zeile „wird besser“; „belegt schlechter“
+  im einfachen Bericht. Keine neue Tabelle, Migration, Dienst, Timer, Befehl oder Knopf; n8n-Vertrag, `n8n-lauf.sh`,
+  Clip-Bot, Captions, Videos und Knöpfe unverändert.
+
+**Welche Funktionen wurden wiederverwendet?**
+- `erfolg.einheiten` (eine Abfrage, Fassungen einmal, Crosspost nur auf der Hauptplattform), `erfolg.vergleiche` und die
+  neue `erfolg.paarweise` mit denselben Konstanten, `erfolg.groesste_gruppe`, `erfolg.abruf_hinweis`;
+- die feste Wochen-Note (`publikum.bewerte_alle`, `score_fuer`) und `publikum.post_plattformen`;
+- aus `geschmack.py`: `_wahl_aus`, `KNOEPFE`, `NAMEN`, `statistik`, die Thompson-Ziehung, „mutig“, „nie dreimal“
+  (`stile._letzte`), `_anders` (🥱), `wochenbericht` mit `lern_meldungen`, `wahl_zeile`, `lehrer_zeile`;
+- `szenen._ersetzt` (Fassungen), `autonom.exploration` (Versuche des Publikums-Modells), `lernbot.stand_kurz` und
+  `lernbot.autonom_text`; Zeit und Zonen aus `zeit.py`. Nur die Standardbibliothek, kein neues Paket.
+
+**Was wurde praktisch geprüft?**
+- **Tests** (feste Zahlen): `tests/test_liga.py` (Liga rechnen mit Fehlerfällen, Bericht in drei Phasen, Freund ohne
+  Abruf) und `tests/test_geschmack.py`, Klasse `BesterAufbau` (30 Entwürfe mit bestem Aufbau; ohne Krone, bei einem
+  Fehler der Liga, abgeschaltet und unter /experte je 40 Wahlen gleich wie der Code von main). Zum Abschluss 25
+  Module mit 531 Tests, keiner rot: die in Stufe 5 neuen oder berührten (`test_liga`, `test_geschmack`, `test_erfolg`,
+  `test_lernbot`, `test_instanz`) und ihre Nachbarn (`test_lernbot_paket`, `test_lernbot_pc`, `test_lernbot_zahlen`,
+  `test_publikum`, `test_publikum_cli`, `test_publikum_adapter`, `test_ende_zu_ende_publikum`, `test_stufe1`,
+  `test_autonom`, `test_einstellungen`, `test_entwurf`, `test_kritik_stile`, `test_regie`, `test_szenen`,
+  `test_effekte_plan`, `test_sitzung`, `test_warum`, `test_n8n_einstieg`, `test_keine_secrets`,
+  `test_secrets_dateien`). Die volle Suite läuft in der CI.
+  Ein älterer Test flackerte (in etwa 1 von 75 Läufen lagen Entwurf und Bericht in derselben Millisekunde) – behoben,
+  danach 0 von 150 Läufen rot.
+- **Gegenprobe** (Wegwerf, je ein eingebauter Fehler in einer Kopie): alle 7 Fehler aus dem Plan (Krönung ohne zweiten
+  Sonntag · alte Videos zählen nach der Krönung · Erfahrung aus gebauten statt gemessenen Videos · Erfahrung wächst mit
+  der Zeit · bester Aufbau aus ✅/❌ und KI · Fassung doppelt · Ablösung „gegen den Rest“) und 8 weitere zu Schritt 3
+  (Standard schon vor der Krönung · Standard schlägt „mutig“ und „nie dreimal“ · Standard ohne Ziehen · Fehler der Liga
+  kostet die Wahl · Schalter wirkungslos · Standard unter /experte · 🥇-Satz verspricht trotz Abschalten · kein Vermerk)
+  machen je mindestens einen Test rot. Schritt 1 und 2 hatten eigene Gegenproben (8 und 12 Fehler, alle rot).
+- **Schneller Weg** (Wegwerf, echter Liga- und Score-Code; Sonntag für Sonntag nachgespielt und in allen Läufen gleich
+  `liga._nachspielen`; 3 Shorts je Woche, vor der Krönung jeder Aufbau gleich wahrscheinlich, danach wie
+  `geschmack.waehle` nachgebildet):
+
+  | Fall | Läufe | Ergebnis |
+  |---|---|---|
+  | kein Unterschied | 2000 × 2 Jahre | falsche erste Krönung 1,1 % im 1. Jahr, 1,8 % in 2 Jahren (Ziel ≤ 2 %) |
+  | zwei gleich gute (Montage und erzählt ×2) | 1000 × 2 Jahre | immer einer der beiden gekrönt (Median Woche 25), nie ein anderer; danach ein unbegründeter Wechsel in 0,4 % (Ziel ≤ 1 %) |
+  | „erzählt“ ×2 | 1000 × 2 Jahre | gekrönt in 100 % im 1. Jahr, Median Woche 17 (25 %: 14, 75 %: 22), nie falsch, nie abgelöst |
+  | „erzählt“ ×1,6 | 400 × 2 Jahre | gekrönt in 96,5 % im 1. Jahr, Median Woche 26 (25 %: 19, 75 %: 36) |
+
+- **DB-Weg** (Wegwerf, der echte Weg in einer Wegwerf-Datenbank: `regie_lernen.aktuelle` mit Publikums-Modell und
+  `nur_wirksame`, `regeln.anwenden`, Post, Abruf an Tag 1/3/5/7/10/14, Wochen-Noten viermal je Woche um 10 Uhr,
+  Sonntagsbericht; keine ✅/❌, keine KI-Note; „vorher“ = `champion_standard = false` auf denselben Seeds): ohne
+  Unterschied, 100 Jahre: falsche erste Krönung in 2 von 100 (2,0 %, ±2,7; Woche 24 und 34 – im Rahmen des schnellen
+  Wegs). Auf denselben Daten nannte die alte 📊-Zeile aus Stufe 4 in 4 von 100 Jahren etwas „belegt“ (23 von 5200 Wochen,
+  auch ruhige Schnitte und wenig Zeitlupe), und der Stand des Publikums-Modells wechselte Ø 20,8-mal im Jahr (9–39).
+  Erfahrung im Median 16 / 40 / 70 / 148 Videos in Woche 8 / 16 / 26 / 52; Liga-Level in Woche 52 bei 98 Läufen 2, bei
+  den 2 falsch gekrönten 3. Mit „erzählt“ ×2, 40 Jahre: gekrönt 40 von 40, Median Woche 16 (25 %: 13, 75 %: 21), nie
+  falsch, nie abgelöst. Vorher und nachher waren bis einschließlich der Krönungswoche Zeichen für Zeichen gleich (40 von
+  40, ebenso die 2 falsch gekrönten Läufe ohne Unterschied); danach kam „erzählt“ in 60,9 statt 55,5 % der Shorts, mit
+  98,8 statt 95,4 ‰ Reaktionen je Aufruf (je Lauf im Mittel +3,6 %, mehr in 34 von 40). Alle 9464 Sonntagsberichte:
+  höchstens 8 Zeilen, kein „%“, kein „belegt“ ohne besten Aufbau. Ein erster Durchlauf hatte einen Fehler in der Uhr der
+  Nachstellung (die Liga las die echte Uhr und nahm so einen Sonntag vorweg) – „nachher“ ist neu gerechnet; „vorher“
+  fragt die Liga nie und blieb gültig.
+- **Leseprobe** – Auszug aus den Sonntagsberichten des DB-Wegs, Wochen 8, 16, 26 und 52 (Liga-Zeilen; dazu kommen
+  Kopf, 🎬, 🎯/🤔, die übrigen 🧪-Zeilen und 📏 – nie mehr als 8 Zeilen):
+  ```
+  Ohne Unterschied (keine Krönung)
+  W8   🏅 Level 1 – sammelt · Erfahrung: 16 Videos mit fertigen Zuschauerzahlen (+3)
+       🔜 Erster Vergleich der Aufbauten frühestens nach 3 weiteren Videos mit Zuschauerzahlen.
+  W16  🏅 Level 2 – vergleicht · Erfahrung: 40 Videos mit fertigen Zuschauerzahlen (+3)
+       🔜 Noch kein Aufbau kommt sicher besser an – jedes weitere Video macht den Vergleich genauer.
+  W26  🧪 Ausprobiert: Musik lauter (1×) · schnelle Schnitte (1×)
+       🏅 Level 2 – vergleicht · Erfahrung: 70 Videos mit fertigen Zuschauerzahlen (+3)   (🔜 wie W16)
+  W52  🏅 Level 2 – vergleicht · Erfahrung: 148 Videos mit fertigen Zuschauerzahlen (+3)  (🔜 wie W16)
+       (jede Woche dazu „🤔 Noch kein klares Bild – ich probiere weiter selbst aus.“)
+
+  „erzählt“ mit doppelten Reaktionen (gekrönt in Woche 16)
+  W8   wie oben, „frühestens nach 2 weiteren Videos“
+  W16  🥇 Neuer bester Aufbau: „erzählt“ – kommt bei den Zuschauern auf TikTok besser an als die anderen Aufbauten
+          (12 gegen 28 Videos, zwei Sonntage nacheinander), sehr wahrscheinlich kein Zufall. Ab jetzt nehme ich ihn
+          meistens, die anderen fordern ihn heraus – welcher, entscheiden auch deine ✅/❌. Deine Regeln gehen vor.
+       Noch nicht gemessen: wie lange geschaut wird, neue Follower, Besuche auf clip-battle.de.
+       🏅 Level 3 – bester Aufbau belegt · Erfahrung: 40 Videos (+3)
+       🔜 Kann ein anderer Aufbau „erzählt“ schlagen? Es zählen nur Videos ab heute – frühestens nach 16 weiteren.
+  W26  🥇 Bester Aufbau: „erzählt“ (belegt seit 26.04.)
+       🧪 Herausforderer diese Woche: Aufbau „Steigerung“ (1×) · dazu ausprobiert: schnellere Schnitte (1×)
+       🏅 Level 3 – bester Aufbau belegt · Erfahrung: 70 Videos (+3)
+       🔜 „Steigerung“ gegen „erzählt“: 9 gegen 17 Videos seit dem 26.04. – noch kein Unterschied sicher.
+  W52  🥇 Bester Aufbau: „erzählt“ (belegt seit 26.04.)
+       🧪 Herausforderer diese Woche: Aufbau „Kino“ (1×) · dazu ausprobiert: viel Zeitlupe (1×) · ruhigere Effekte (1×)
+       🏅 Level 3 – bester Aufbau belegt · Erfahrung: 148 Videos (+3)
+       🔜 „Steigerung“ gegen „erzählt“: 26 gegen 64 Videos seit dem 26.04. – noch kein Unterschied sicher.
+  ```
+- **Laufzeit:** 2 Jahre Geschichte (312 Shorts, davon 307 gezählt, 106 Sonntage, „erzählt“ gekrönt; ruhiger
+  Rechner): `liga.champion` 69 ms, die Wahl eines Shorts mit Standard 80 ms statt 3 ms ohne (der Unterschied ist die
+  Liga), der ganze Weg bis zu den Parametern (`regie_lernen.aktuelle`) 73 ms – je Median. Im DB-Weg unter Last (4 Läufe
+  parallel) je Short im Median 17 ms, höchstens 0,3 s. Kein zusätzliches Rendern.
+- **Nicht geprüft:** Florians echte Zahlen; ein echter Sonntag mit Krönung (frühestens in Monaten); Freunde mit
+  Zahlenabruf (gibt es noch nicht).
+
+**Wie viel schneller oder besser ist das System nachweislich?**
+Schneller wird nichts: Die Wahl eines Shorts braucht mit der Liga etwa 0,08 s mehr (2 Jahre Geschichte), kein
+zusätzliches Rendern. Besser, belegt:
+- **Was ausprobiert wurde, steht mit Namen da:** vorher „🧪 n× bewusst etwas Neues ausprobiert“ ohne Inhalt, und rund
+  70 % der Aufbau-Versuche fehlten schon im Vermerk; jetzt „🧪 Ausprobiert: Aufbau „Kino“ (1×) · Musik lauter (1×)“, nach
+  einer Krönung „Herausforderer diese Woche“ – sichtbar 14 von 14 Aufbau-Versuchen statt 3 (Schritt 2, 60 Entwürfe,
+  Lernen gleich).
+- **Was gelernt wurde, ist ein belegtes Ereignis – kaum noch falsche Gewinner:** Ohne echten Unterschied wechselte der
+  Stand des Publikums-Modells im DB-Weg Ø 21-mal im Jahr, und /lernstand zeigte jeden Wechsel als neue Version mit Prozent
+  („v218 · 19 %“ sah bei Zufall aus wie bei echtem Unterschied); die alte 📊-Zeile behauptete auf denselben Daten in 4 von
+  100 Jahren etwas (Stufe 4 gemessen: 6,3 % der Jahre, auch Tempo, Zeitlupe und „schlechter“). Jetzt heißt „belegt“ nur
+  noch „gekrönt“: falsch in 1,1 % der Jahre (schneller Weg, 2000 Läufe; DB-Weg 2 von 100), nie für Tempo oder Zeitlupe,
+  nie gegen 🎯, nie mit Prozent.
+- **Echte Unterschiede werden gefunden:** doppelte Reaktionen in 100 % binnen eines Jahres gekrönt (Median Woche 16–17),
+  ×1,6 in 96,5 % (Woche 26); zwei gleich gute Aufbauten wechseln danach nur in 0,4 % von 2 Jahren.
+- **… und genutzt (Schritt 3):** Nach der Krönung kommt der beste Aufbau in etwa 6 von 10 Shorts. Gegen die heutige Wahl
+  (DB-Weg, gepaart): 60,9 statt 55,5 % „erzählt“ und 3,6 % mehr Reaktionen je Aufruf (mehr in 34 von 40 Läufen). Gegen
+  gleich verteilte Aufbauten (schneller Weg): 61 statt 25 % und 28 % (×2) bzw. 18 % (×1,6) mehr Reaktionen.
+- **Freunde:** keine Dauerzeile mehr (🧠 vorher in 3 von 3 Wochen, jetzt 0).
+- **Ehrlich:** Der Gewinn durch den Standard ist klein, weil die heutige Wahl einen klar besseren Aufbau schon von selbst
+  bevorzugt (55 % im DB-Weg) – der Nutzen ist vor allem, dass die Wahl jetzt einem Beleg folgt und man das sieht. Ein
+  Beleg braucht Monate: bei 3 Shorts je Woche frühestens etwa Woche 9, bei doppelten Reaktionen im Median Woche 16–17,
+  bei kleinen Unterschieden oft über ein Jahr, ohne echten Unterschied nie. Eine falsche Krönung (1–2 % im Jahr) macht
+  nur einen gleich guten Aufbau zum Standard. Gemessen wird nur die Zuschauer-Note auf TikTok; wie lange geschaut wird,
+  neue Follower und Besuche auf clip-battle.de (das Hauptziel) fehlen noch (Stufe 4, Florians Ja). Alle Zahlen sind
+  Größenordnungen aus Nachstellungen (angenommene TikTok-Raten, alle Videos hochgeladen, keine ✅/❌ und keine KI-Note).
+
+**Was ist die nächste sinnvolle Erweiterung?**
+1. Vor Ort, ohne neuen Code: Update einspielen, einmal `pipeline erfolg` (für einen Freund `benutzer-befehl.sh <name>
+   erfolg`), sonntags den Bericht ansehen. Weiter hochladen und den Text unverändert einfügen – nur so bekommt die Liga
+   Erfahrung.
+2. Florians Antworten (CLAUDE.md, „Offene Fragen“): Shorts je Woche, Humor als fünfter Aufbau, Zuschauerzahlen der
+   Freunde; aus Stufe 4 YouTube verbinden und der Zähler auf clip-battle.de – dann hätte die Liga mehr Ziele als die
+   Zuschauer-Note, und clip-battle.de (das Hauptziel) zählte mit.
+3. „Aufbauten unverfälscht“ nur nach dem Auslöser in M194 (nach etwa 6 Monaten kein Aufbau belegt, Feinwerte in über
+   der Hälfte der Videos nachgesteuert) – dann mit Vorher/Nachher wie hier.
+
 ## Florians Antworten (08.10.) und was daraus folgt
 | Frage | Antwort | Folge |
 |---|---|---|
@@ -627,4 +792,6 @@ Offen: freier Speicher auf dem vServer für den Briefkasten.
 4. **Erfolg ehrlich messen:** neue Zielgrößen versioniert neben dem alten Score, belegter Strategievergleich. Fertig:
    `pipeline erfolg` (Schritt 1), ehrliche Sätze im Sonntagsbericht, in /lernstand und /publikum (Schritt 2);
    Kampagnenlink je Instanz (Zähler auf clip-battle.de) erst nach Florians Ja und Rechtsprüfung (Stufenbericht oben).
-5. Liga je Instanz-Datenbank.
+5. **Regie-Liga je Instanz-Datenbank:** bester Aufbau nur mit Beleg, Erfahrung nur aus Zuschauerzahlen, Versuche mit
+   Namen. Fertig: Liga rechnen (Schritt 1), Liga im Lern-Bot (Schritt 2), bester Aufbau als Standard nach der ersten
+   Krönung (Schritt 3, Stufenbericht oben).

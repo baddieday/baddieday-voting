@@ -35,6 +35,9 @@ Im einfachen Modus (Stufe 5, Schritt 2, M187–M191): Sonntagsbericht (geschmack
 bester_zeile, versuche_zeile, level_zeile, ziel_zeile) und eine Zeile in 📋 (stand_zeile) – beides erst, wenn auf der
 Hauptplattform Zuschauerzahlen ankommen (zahlen_kommen_an); 🧪 auch ohne Zahlen. Unter /experte: text() oben in
 /lernstand.
+Wirkung (Stufe 5, Schritt 3, M193): Im einfachen Modus ersetzt der beste Aufbau (champion) beim Short den Thompson-Zug
+in geschmack.waehle – erst nach der ersten Krönung, abschaltbar mit [geschmack].champion_standard = false. Die Liga
+selbst bleibt reine Rechnung: Sie zählt nur, was ein hochgeladenes Video wirklich hatte, egal warum es gewählt wurde.
 """
 
 from __future__ import annotations
@@ -214,7 +217,7 @@ def _nachspielen(kandidaten: list[dict], tage: list[datetime]) -> dict:
 
 def champion(con: sqlite3.Connection, konfig: Konfig) -> str | None:
     """Der belegte beste Aufbau („montage“, „story“ …) oder None – dieselbe Rechnung wie stand(), einmal je Aufruf,
-    ohne die Teile für die Anzeige (für geschmack.waehle, Stufe 5 PR 3)."""
+    ohne die Teile für die Anzeige (für geschmack.bester_aufbau, Stufe 5 Schritt 3; für 2 Jahre etwa 0,15 s)."""
     bis = jetzt()
     g = _grundlage(con, konfig, bis)
     if not g["kandidaten"]:
@@ -471,16 +474,23 @@ def _wie(st: dict, krone: dict, plattform: str | None = None) -> str:
 # Ohne Prozent und Fachbegriffe; „belegt“ heißt nur, was die Liga gekrönt hat (M188). 🥇 bester Aufbau · 🏅 Level und
 # Erfahrung · 🔜 nächstes Ziel · 🧪 ausprobiert.
 
-def neu_zeilen(st: dict) -> list[str]:
+# Stufe 5, Schritt 3 (M193): nur, wenn der beste Aufbau wirklich Standard wird (geschmack.champion_standard)
+STANDARD_SATZ = ("Ab jetzt nehme ich ihn meistens, die anderen fordern ihn heraus – welcher, entscheiden auch deine "
+                 "✅/❌. Deine Regeln gehen vor.")
+
+
+def neu_zeilen(st: dict, standard: bool = False) -> list[str]:
     """Krönung oder Ablösung genau am letzten Stichtag: „🥇 Neuer bester Aufbau: „erzählt“ – kommt bei den Zuschauern
     auf TikTok besser an als die anderen Aufbauten (14 gegen 27 Videos, zwei Sonntage nacheinander), sehr wahrscheinlich
-    kein Zufall.“ und darunter „Noch nicht gemessen: …“ (nur hier, M188). [] ohne ein solches Ereignis."""
+    kein Zufall.“ – mit standard (er wird im einfachen Modus Standard, M193) dahinter STANDARD_SATZ – und darunter
+    „Noch nicht gemessen: …“ (nur hier, M188). [] ohne ein solches Ereignis."""
     k = st["ereignis"]
     if not k:
         return []
     wie = _wie(st, k, PLATTFORM_NAMEN.get(st["plattform"], st["plattform"]))
     zeilen = [f"🥇 Neuer bester Aufbau: {name('aufbau', k['aufbau'])} – {wie} ({k['n'][0]} gegen {k['n'][1]} Videos, "
-              "zwei Sonntage nacheinander), sehr wahrscheinlich kein Zufall."]
+              "zwei Sonntage nacheinander), sehr wahrscheinlich kein Zufall."
+              + (f" {STANDARD_SATZ}" if standard else "")]
     if st["offen"]:
         zeilen.append("Noch nicht gemessen: " + ", ".join(erfolg.OFFEN_NAMEN[z] for z in st["offen"]) + ".")
     return zeilen

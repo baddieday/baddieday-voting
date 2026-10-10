@@ -1,16 +1,22 @@
 """Stufe 2 des Umbaus (07.10., Florian: „Lernen zurück“ – aus ✅/❌ und KI-Urteil, mutig, Wochenbericht):
-Aufbau, Tempo und Zeitlupe lernt geschmack.py; deine Regeln gehen danach immer vor."""
+Aufbau, Tempo und Zeitlupe lernt geschmack.py; deine Regeln gehen danach immer vor.
+Mehrbenutzer Stufe 5, Schritt 3 (M193, Klasse BesterAufbau): der belegte beste Aufbau als Standard."""
 
+import contextlib
+import copy
 import json
 import os
+import random
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from clip_pipeline import db, einstellungen, geschmack, regie_lernen
+from clip_pipeline import db, einstellungen, geschmack, liga, regie_lernen, stile
+from clip_pipeline.konfig import Konfig
 from clip_pipeline.zeit import iso, jetzt
 
 from tests.hilfen import MitSpeicher
+from tests.test_liga import LigaDaten
 
 
 class Geschmack(MitSpeicher):
@@ -25,11 +31,13 @@ class Geschmack(MitSpeicher):
         super().tearDown()
 
     def entwurf(self, wahl, daumen=None, gruende=(), ki=None, experiment=None, erstellt=None):
+        """Ohne erstellt eine Sekunde vor jetzt: wochen_text zählt nur Entwürfe vor seinem „jetzt“ – lag der letzte in
+        derselben Millisekunde, fehlte er (ein Test flackerte so in etwa 1 von 75 Läufen)."""
         self.n += 1
         p = {"stil": wahl.get("aufbau"), "geschmack": {**wahl, "experiment": experiment}}
         eid = self.con.execute("""INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, datei, erstellt)
                                   VALUES (?, 'short', '/x.json', ?, 'gesendet', '/x.mp4', ?)""",
-                               (f"e{self.n}", json.dumps(p), iso(erstellt or jetzt()))).lastrowid
+                               (f"e{self.n}", json.dumps(p), iso(erstellt or jetzt() - timedelta(seconds=1)))).lastrowid
         if daumen is not None:
             self.con.execute("INSERT INTO entwurf_bewertungen (entwurf_id, daumen, gruende, erstellt, geaendert) "
                              "VALUES (?, ?, ?, ?, ?)",
@@ -241,6 +249,152 @@ class WahlZeile(unittest.TestCase):
         self.assertNotIn("Zeitlupe", zeile)
         # nur Gleichstand: kein klares Bild, keine Zeile
         self.assertIsNone(geschmack.wahl_zeile({"zeitlupe": stat["zeitlupe"]}))
+
+
+def waehle_main(con, konfig, fmt="short", anders=None, basis_seg=1.0):
+    """geschmack.waehle, wie es auf main bad7ce9 stand (vor Stufe 5, Schritt 3) – Zeile für Zeile kopiert, nur mit
+    „geschmack.“/„stile.“ vor den Helfern, die unverändert sind. Der Fehlerfall vergleicht die neue Wahl damit."""
+    n = con.execute("SELECT COUNT(*) FROM entwuerfe WHERE format = ?", (fmt,)).fetchone()[0]
+    zufall = random.Random(f"geschmack:{fmt}:{n}")
+    stat = geschmack.statistik(con, fmt)
+    wahl: dict = {}
+    reihe_aufbau: list[str] = []
+    for knopf, optionen in geschmack.KNOEPFE.items():
+        zuege = sorted(((zufall.betavariate(1 + stat[knopf][o]["s"], 1 + stat[knopf][o]["n"] - stat[knopf][o]["s"]), o)
+                        for o in optionen), reverse=True)
+        wahl[knopf] = zuege[0][1]
+        if knopf == "aufbau":
+            reihe_aufbau = [o for _, o in zuege]
+    experiment = None
+    if zufall.random() < float(konfig.wert("geschmack.mut", geschmack.MUT_STANDARD)):
+        knopf = zufall.choice(sorted(geschmack.KNOEPFE))
+        andere = [o for o in geschmack.KNOEPFE[knopf] if o != wahl[knopf]]
+        wahl[knopf] = min(andere, key=lambda o: (stat[knopf][o]["n"], zufall.random()))
+        experiment = knopf
+    letzte = stile._letzte(con, fmt)
+    if len(letzte) == 2 and letzte[0] == letzte[1] == wahl["aufbau"]:   # nie dreimal derselbe Aufbau
+        wahl["aufbau"] = max((o for o in geschmack.KNOEPFE["aufbau"] if o != wahl["aufbau"]),
+                             key=lambda o: (stat["aufbau"][o]["s"] + 1) / (stat["aufbau"][o]["n"] + 2))
+    fest = str(konfig.wert("regie.stil", "auto") or "auto")
+    if anders:                                                           # 🥱: sichtbar anders geschnitten
+        aufbauten = ([fest] if fest in stile.STILE else
+                     [o for o in reihe_aufbau if stile.STILE[o]["reihenfolge"] != anders.get("reihenfolge")] or reihe_aufbau)
+        wahl["aufbau"], wahl["tempo"] = geschmack._anders(anders, aufbauten, basis_seg)
+        wahl["anders_als"] = anders.get("anders_als")
+        experiment = None if experiment in ("aufbau", "tempo") else experiment
+    if fest in stile.STILE:                                # fester Stil (nur /experte; einfach: „auto“) geht vor
+        wahl["aufbau"] = fest
+        experiment = None if experiment == "aufbau" else experiment
+    wahl["experiment"] = experiment
+    return wahl
+
+
+class BesterAufbau(LigaDaten):
+    """Mehrbenutzer Stufe 5, Schritt 3 (M193): Hat die Regie-Liga einen Aufbau gekrönt, ersetzt er im einfachen Modus
+    nur den Thompson-Zug – „mutig“, „nie dreimal“, 🥱 und deine Regeln bleiben. Daten wie tests/test_liga.py:
+    48 TikTok-Shorts, „erzählt“ mit doppelten Reaktionen, gekrönt am Sonntag der 15. Woche (14.06.)."""
+
+    def setUp(self):
+        super().setUp()
+        self.konfig.daten["regie"]["stil"] = "auto"            # /experte im Fehlerfall: Thompson statt festem Stil
+        self.wochen(16, lambda i, a: 2.0 if a == "story" else 1.0)
+        self.wochen(2)
+        with db.transaktion(self.con):                          # deine ✅ für Kino, ❌ für Montage und Steigerung
+            for i, eid in enumerate(self.eids):
+                if (aufbau := ("story", "montage", "kino", "steigerung")[i % 4]) != "story":
+                    self.con.execute("INSERT INTO entwurf_bewertungen (entwurf_id, daumen, gruende, erstellt, geaendert) "
+                                     "VALUES (?, ?, '[]', ?, ?)", (eid, 1 if aufbau == "kino" else -1, iso(jetzt()),
+                                                                   iso(jetzt())))
+        self.gebaut = 0
+
+    def bauen(self, wahl: dict) -> int:
+        """Den Entwurf zur Wahl anlegen – wie der Lern-Bot (Stil und Wahl in den Parametern); eine Sekunde vor jetzt,
+        damit ihn der Sonntagsbericht sicher in dieser Woche zählt (wie Geschmack.entwurf)."""
+        self.gebaut += 1
+        return self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, datei, erstellt) "
+                                "VALUES (?, 'short', '/x.json', ?, 'gesendet', '/x.mp4', ?)",
+                                (f"neu{self.gebaut}", json.dumps({"stil": wahl["aufbau"], "geschmack": wahl}),
+                                 iso(jetzt() - timedelta(seconds=1)))).lastrowid
+
+    @staticmethod
+    def gaehn(wahl: dict, eid: int) -> dict:
+        """🥱 an dieses Video (regeln.neue_fassung): Reihenfolge und Tempo, wie sie wirkten."""
+        return {"reihenfolge": stile.STILE[wahl["aufbau"]]["reihenfolge"], "tempo": wahl["tempo"],
+                "seg_min_faktor": 1.0, "anders_als": eid}
+
+    def test_bester_aufbau_wird_standard_und_herausforderer_bleiben(self):
+        k = einstellungen.anwenden(self.con, self.konfig)              # einfacher Modus
+        self.assertEqual(liga.champion(self.con, k), "story")
+        wahlen, eid = [], None
+        for i in range(30):
+            anders = self.gaehn(wahlen[-1], eid) if i in (9, 19) else None
+            vorher = waehle_main(self.con, k, anders=anders)              # derselbe Stand, Code von main
+            letzte = stile._letzte(self.con, "short")
+            wahl = geschmack.waehle(self.con, k, anders=anders)
+            # Gezogen wird wie vorher: Tempo, Zeitlupe und „mutig“ bekommen dieselben Zufallszahlen
+            self.assertEqual({s: wahl[s] for s in ("tempo", "zeitlupe", "experiment")},
+                             {s: vorher[s] for s in ("tempo", "zeitlupe", "experiment")}, i)
+            self.assertEqual(wahl["champion"], "story")
+            if anders:                                                    # 🥱 geht vor: andere Reihenfolge
+                self.assertNotEqual(stile.STILE[wahl["aufbau"]]["reihenfolge"], anders["reihenfolge"], i)
+            elif wahl["experiment"] == "aufbau":                          # mutig: ein Herausforderer
+                self.assertNotEqual(wahl["aufbau"], "story", i)
+            elif letzte == ["story", "story"]:                            # nie dreimal: der mit deinen ✅
+                self.assertEqual(wahl["aufbau"], "kino", i)
+            else:
+                self.assertEqual(wahl["aufbau"], "story", i)
+            wahlen.append(wahl)
+            eid = self.bauen(wahl)
+        folge = [w["aufbau"] for w in wahlen]
+        self.assertFalse([j for j in range(2, 30) if folge[j - 2] == folge[j - 1] == folge[j]], folge)
+        # meistens „erzählt“ (hier 18 von 30), die anderen fordern ihn heraus – Kino am öftesten (deine ✅)
+        self.assertGreaterEqual(folge.count("story"), 15)
+        self.assertGreaterEqual(30 - folge.count("story"), 6)
+        self.assertEqual(max(("montage", "kino", "steigerung"), key=folge.count), "kino")
+        # Der echte Weg (regie_lernen.aktuelle mit Publikums-Modell und nur_wirksame) vermerkt ihn am Entwurf
+        p, _ = regie_lernen.aktuelle(self.con, k, "short")
+        self.assertEqual((p["geschmack"]["champion"], p["stil"]), ("story", p["geschmack"]["aufbau"]))
+        # Sonntagsbericht: 🥇 steht da, 🎯 nennt keinen Aufbau mehr, kein 🤔
+        text = geschmack.wochen_text(self.con, k)
+        self.assertIn("🥇 Bester Aufbau: „erzählt“ (belegt seit 14.06.)", text)
+        self.assertFalse([z for z in text.splitlines() if z.startswith("🤔") or (z.startswith("🎯") and "Aufbau" in z)],
+                         text)
+
+    def test_ohne_krone_bei_fehler_abgeschaltet_und_unter_experte_wie_vorher(self):
+        k = einstellungen.anwenden(self.con, self.konfig)
+        aus = copy.deepcopy(k.daten)
+        aus["geschmack"]["champion_standard"] = False
+        k_aus = Konfig(daten=aus, quelle=k.quelle)
+        faelle = (("ohne besten Aufbau – „erzählt“ liegt erst vorn", k,
+                   mock.patch.object(liga, "jetzt", return_value=self.stichtag(14) + timedelta(hours=1))),
+                  ("Fehler der Liga", k, mock.patch.object(liga, "champion", side_effect=RuntimeError("kaputt"))),
+                  ("champion_standard = false", k_aus, mock.patch.object(liga, "champion", return_value="story")),
+                  ("/experte", None, mock.patch.object(liga, "champion", return_value="story")))
+        wahl = eid = None
+        for titel, kk, patch in faelle:
+            with self.subTest(titel), patch as ersatz:
+                if kk is None:
+                    einstellungen.setze(self.con, "lernbot.experte", True)
+                    kk = einstellungen.anwenden(self.con, self.konfig)
+                with self.assertLogs("pipeline", "ERROR") if titel == "Fehler der Liga" else contextlib.nullcontext():
+                    for i in range(40):                                     # 40 Wahlen in Folge gleich wie auf main
+                        anders = self.gaehn(wahl, eid) if i % 10 == 9 else None
+                        vorher = waehle_main(self.con, kk, anders=anders)
+                        wahl = geschmack.waehle(self.con, kk, anders=anders)
+                        self.assertEqual(wahl, vorher, (titel, i))
+                        eid = self.bauen(wahl)
+                        if i % 4 == 3:                                      # deine ✅/❌ ändern die Statistik weiter
+                            self.con.execute("INSERT INTO entwurf_bewertungen (entwurf_id, daumen, gruende, "
+                                             "erstellt, geaendert) VALUES (?, ?, '[]', ?, ?)",
+                                             (eid, 1 if wahl["tempo"] == "ruhig" else -1, iso(jetzt()), iso(jetzt())))
+                if titel in ("champion_standard = false", "/experte"):
+                    ersatz.assert_not_called()                              # abgeschaltet: die Liga wird nicht gefragt
+        # Ehrlich: Ist der beste Aufbau abgeschaltet, sagt der 🥇-Satz der Krönungswoche auch nicht „nehme ich meistens“
+        einstellungen.zuruecksetzen(self.con, "lernbot.experte")
+        krone = geschmack.wochen_text(self.con, k_aus, self.stichtag(15) + timedelta(minutes=30))
+        self.assertIn("sehr wahrscheinlich kein Zufall.\n", krone)
+        self.assertNotIn("Ab jetzt nehme ich ihn meistens", krone)
+
 
 if __name__ == "__main__":
     unittest.main()
