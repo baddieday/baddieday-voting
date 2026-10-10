@@ -114,12 +114,16 @@ class Erfolg(MitSpeicher):
         self.assertIn("📊 Belegt (TikTok, 43 Videos): Aufbau „erzählt“ kommt bei den Zuschauern besser an als die "
                       "anderen Aufbauten (10 gegen 33 Videos) – sehr wahrscheinlich kein Zufall.", zeile)
         self.assertIn("Noch nicht gemessen: wie lange geschaut wird, neue Follower, Besuche auf clip-battle.de.", zeile)
-        # Sonntagsbericht (Schritt 2): dieselben Zeilen statt „👀 Bei den Zuschauern …“. Was der Bot nach den KI-Noten
-        # gerade öfter wählt (hier „schnelle Montage“), heißt so (🎯) – belegt ist nur, was die Zuschauer zeigen
-        bericht = geschmack.wochen_text(self.con, self.konfig, START + timedelta(days=2 * 47 + 1))
-        self.assertIn(zeile, bericht)
+        # Sonntagsbericht (Stufe 5, M188): Statt der 📊-Zeile spricht die Regie-Liga. Alle Wochen-Noten wurden hier am
+        # selben Sonntag fest – am ersten Stichtag danach liegt „erzählt“ nur vorn, „belegt“ erst nach zwei Sonntagen.
+        # Was der Bot nach den KI-Noten gerade öfter wählt (hier „schnelle Montage“), heißt so (🎯)
+        with db.transaktion(self.con):   # ein Video in dieser Woche – sonst kommt kein Bericht
+            self.entwurf(48, "kino", ende + timedelta(days=5))
+        bericht = geschmack.wochen_text(self.con, self.konfig, ende + timedelta(days=7))
+        self.assertIn("🔜 Aufbau „erzählt“ liegt diesmal vorn (10 gegen 33 Videos) – bestätigt es sich am nächsten "
+                      "Sonntag mit neuen Zahlen, wird er dein bester Aufbau.", bericht)
         self.assertIn("🎯 Wähle ich gerade öfter: Aufbau „schnelle Montage“", bericht)
-        for behauptung in ("👀", "Kommt gut an", "Kommt weniger an"):
+        for behauptung in ("👀", "Kommt gut an", "Kommt weniger an", "📊", "Belegt", "🥇"):
             self.assertNotIn(behauptung, bericht)
 
     def test_zu_wenig_videos_behauptet_nichts_und_kaputte_gewichte_enden_mit_exit_2(self):

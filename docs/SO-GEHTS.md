@@ -1,4 +1,4 @@
-# So geht's (Stand 08.10.2026)
+# So geht's (Stand 09.10.2026)
 
 ## Was von selbst passiert
 1. Du zockst. Kommt 45 Minuten lang kein neues Match dazu, gilt der Abend als vorbei (am PC musst du nichts
@@ -65,23 +65,52 @@ Senden anschaut (zählt ein Drittel so viel wie du). Dein Grund unter ❌ zählt
 werden nicht dem Aufbau angelastet. Bei jedem zweiten Video probiert er bewusst etwas Neues. **Deine Regeln gehen
 immer vor.**
 
-## Der Sonntagsbericht
-Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung der Woche (nur, wenn es Videos gab):
-- **🎯 Wähle ich gerade öfter / seltener:** was der Bot im Moment bevorzugt – sein Ausprobieren, kein Beweis. Das
-  kann anfangs auch etwas anderes sein als das, was die Zuschauer belegt mögen.
-- **📊 Zuschauer:** was bei den Zuschauern wirklich besser ankommt. „Belegt“ steht dort erst, wenn beide Seiten genug
-  Videos haben (je mindestens 8 hochgeladene Shorts mit fertigen Zahlen nach etwa einer Woche, die ersten 5 je
-  Plattform sind nur Vergleich) und der Unterschied sehr wahrscheinlich kein Zufall ist. Vorher steht dort, wie viele
-  Videos noch fehlen, oder „noch kein Unterschied sicher“. Ohne fertige Zahlen fehlt die Zeile ganz. KI-Note und deine
-  ✅/❌ zählen dafür nie.
-- **Noch nicht gemessen:** was es gar nicht gibt (heute: wie lange geschaut wird, neue Follower, Besuche auf
-  clip-battle.de) – das steht nie als 0 da.
-- dazu, was er bewusst ausprobiert hat (🧪) und dass deine Regeln weiter gelten.
+Steht ein **bester Aufbau** fest (🥇 im Sonntagsbericht, frühestens nach etwa zwei Monaten), nimmt der Bot ihn ab dann
+meistens – in etwa 6 von 10 Videos. Die anderen fordern ihn weiter heraus: Bei etwa jedem sechsten Video probiert er
+bewusst einen anderen Aufbau, und nach zwei Videos mit dem besten kommt nie ein drittes hintereinander – welcher dann
+kommt, entscheiden deine ✅/❌ mit. „🥱 Langweilig“ und deine Regeln gehen weiter vor; Tempo, Zeitlupe, Musik und
+Szenen wechseln wie bisher. Bis dahin wählt er genau wie bisher. Abschalten geht nur in der Datei (`[geschmack]
+champion_standard = false` in `lokal.toml`, danach den Lern-Bot neu starten), nicht im Bot.
 
-Ehrlich: Bei etwa 3 hochgeladenen Shorts pro Woche kommt ein erster Vergleich frühestens nach etwa 7 Wochen; ein
-Aufbau mit doppelt so vielen Reaktionen ist im Mittel nach rund 4 Monaten belegt, kleine Unterschiede oft erst nach
-einem Jahr oder nie. „Noch zu wenig Videos“ ist also kein Stillstand – der Bot lernt in der Zeit weiter. Genauer im CT:
-`pipeline erfolg` (Erklärung in `docs/PUBLIKUM.md`, Abschnitt 7).
+## Der Sonntagsbericht
+Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung der Woche – nur, wenn es Videos gab, oder wenn an diesem Sonntag
+ein neuer bester Aufbau feststeht. Beispiel nach gut drei Monaten:
+```
+🧠 Deine Woche (21.02.–28.02.)
+🎬 3 Videos · 2 ✅ · 0 ❌ · KI-Note im Schnitt 71
+🎯 Wähle ich gerade öfter: Aufbau „Steigerung“ (5 von 6 ✅) · seltener: Aufbau „Kino“ (1 von 4 ✅)
+🧪 Ausprobiert: ruhige Schnitte (1×) · Länge 55 s (1×)
+🏅 Level 2 – vergleicht · Erfahrung: 31 Videos mit fertigen Zuschauerzahlen (+3)
+🔜 Noch kein Aufbau kommt sicher besser an – jedes weitere Video macht den Vergleich genauer.
+📏 Deine Regeln gelten weiter: Shorts mindestens 55 s · Effekte ruhig · nur starke Szenen
+```
+- **🥇 Bester Aufbau:** steht erst da, wenn ein Aufbau bei den Zuschauern belegt besser ankommt – zweimal nacheinander
+  an Sonntagen mit neuen Zahlen, mit genug Videos auf beiden Seiten (je mindestens 8 hochgeladene Shorts mit fertigen
+  Zahlen nach etwa einer Woche; die ersten 5 sind nur Vergleich) und sehr wahrscheinlich kein Zufall. Ablösen kann ihn
+  nur ein Aufbau, der ihn direkt schlägt, und nur mit Videos, die nach seiner Krönung hochgeladen wurden. KI-Note und
+  deine ✅/❌ zählen dafür nie. In der Woche, in der er feststeht, sagt die Zeile auch, was sich ändert: „Ab jetzt nehme
+  ich ihn meistens, die anderen fordern ihn heraus – welcher, entscheiden auch deine ✅/❌. Deine Regeln gehen vor.“
+  (siehe „Was der Bot selbst lernt“). Darunter steht, was es gar nicht gibt (heute: wie lange geschaut wird, neue
+  Follower, Besuche auf clip-battle.de) – das steht nie als 0 da. Gezählt wird immer der Aufbau, den ein Video wirklich
+  hatte.
+- **🎯 Wähle ich gerade öfter / seltener:** was der Bot im Moment bevorzugt – sein Ausprobieren aus deinen ✅/❌, den
+  vorläufigen Zahlen und der KI-Note, kein Beweis. Gibt es einen besten Aufbau, nennt diese Zeile keinen Aufbau mehr.
+- **🧪 Ausprobiert:** was er diese Woche bewusst anders gemacht hat, mit Namen; nach einer Krönung die Herausforderer.
+- **🏅 Level und Erfahrung:** Level 1 sammelt · 2 vergleicht (ein Aufbau hat genug Videos für einen Vergleich) · 3 bester
+  Aufbau belegt · 4, 5 … noch besseren Aufbau gefunden. Das Level sinkt nie. Erfahrung sind nur Videos mit fertigen
+  Zuschauerzahlen, „(+3)“ die dieser Woche – nie Zeit, Tippen, ✅/❌ oder KI-Note.
+- **🔜 Nächstes Ziel:** wie viele Videos bis zum ersten Vergleich fehlen, ob ein Aufbau gerade vorn liegt (dann entscheidet
+  der nächste Sonntag mit neuen Zahlen), wie weit ein Herausforderer ist – oder dass dein bester Aufbau vorn bleibt,
+  weil die Herausforderer bisher nicht an ihn herankommen.
+- dazu, dass deine Regeln weiter gelten.
+
+Ehrlich (bei etwa 3 hochgeladenen Shorts pro Woche): Erfahrung zählt ab etwa Woche 3, danach etwa 3 Videos pro Woche;
+Level 2 nach etwa 3 Monaten. Ein Aufbau mit doppelt so vielen Reaktionen wird im Mittel nach rund 4 Monaten dein bester
+Aufbau, kleine Unterschiede oft erst nach einem Jahr, ohne echten Unterschied nie. Monatelang Level 1 oder 2 ist also kein
+Stillstand – der Bot lernt in der Zeit aus deinen ✅/❌ und den vorläufigen Zahlen weiter. Eine Zeile „wird besser“ gibt
+es bewusst nicht: Die Zuschauer-Note misst jedes Video an deinen letzten 20; werden alle besser, sieht man es dort nicht,
+und eine solche Zeile läge bei Zufall oft daneben. Genauer im CT: `pipeline erfolg` (Erklärung in `docs/PUBLIKUM.md`,
+Abschnitte 7 und 8); unter /experte steht dasselbe oben in /lernstand.
 
 ## Knöpfe
 - **🎬 Neues Video** – jederzeit von Hand, aus deinem neuesten Spielabend, zuerst mit Szenen, die du noch nicht
@@ -91,9 +120,11 @@ einem Jahr oder nie. „Noch zu wenig Videos“ ist also kein Stillstand – der
   reicht – sobald du wieder spielst, kommt ein neues. Baut er gerade, kommt das laufende Video
   (endet eine neue Fassung ohne Video, baut er danach deins); geht es schief, versucht er es nach 10 Minuten selbst
   noch einmal.
-- **📋 Stand** – deine Regeln, was beim letzten Abend passiert ist und woraus er gerade lernt („🧠 Lernt aus: deinen
-  ✅/❌ · KI-Note (läuft) · Zuschauern (…)“). Steht dort „TikTok nicht verbunden – einmal /tiktok“ oder „Claude-Anmeldung
-  nötig“, fehlt ein einmaliger Schritt, den nur du machen kannst; sonst musst du nichts tun. Die Zuschauerzahlen holt
+- **📋 Stand** – deine Regeln, was beim letzten Abend passiert ist, sobald Zuschauerzahlen ankommen dein Level bzw.
+  dein bester Aufbau („🏅 Level 2 – vergleicht · 31 Videos mit Zuschauerzahlen · bester Aufbau noch nicht belegt“), und
+  woraus er gerade lernt („🧠 Lernt aus: deinen ✅/❌ (24) · KI-Note (läuft) · Zuschauern (läuft)“). Steht dort „TikTok
+  nicht verbunden – einmal /tiktok“ oder „Claude-Anmeldung nötig“, fehlt ein einmaliger Schritt, den nur du machen
+  kannst; sonst musst du nichts tun. Die Zuschauerzahlen holt
   er jeden Tag um 10 Uhr selbst (das Update richtet das ein). Fehlen bei einem ✅-Video nach 3 Tagen noch die Zahlen,
   steht dieselbe Zeile auch in der Zusammenfassung am Sonntag.
 - **/experte** – alle alten Knöpfe, Details und ⚙️ Einstellungen ein- oder ausschalten.

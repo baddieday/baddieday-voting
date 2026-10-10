@@ -123,6 +123,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   als Wochenwert (einmal neu zustimmen)? (4) Passt Zuschauer 0,5 · Follower 0,2 · Webseite 0,3 zu „clip-battle.de
   bewerben ist das Hauptziel“? (5) Wie viele Shorts lädst du pro Woche wirklich hoch (danach richtet sich, wann der
   erste Vergleich kommt)?
+- Stufe 5 (M178, M169): (1) Soll Humor/Überraschung (Twist mit 1–2 lustigen Szenen) als fünfter Aufbau in den einfachen
+  Modus? Dann kämen Fail-Szenen in „🎬 Neues Video“, und die Liga würde langsamer – ohne Antwort bleibt es bei vier.
+  (2) Sollen die Zuschauerzahlen deiner Freunde abgeholt werden? Bis dahin bleibt ihre Liga leer.
 
 ## Entscheidungen
 - 2026-09-23: Kein Medal.tv – Nvidia + SteelSeries reichen; Pipeline wählt pro Moment die Aufnahme mit bester Abdeckung.
@@ -727,3 +730,42 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     „noch ohne Wochenzahlen“. Bei dir und im Sonntagsbericht ändert sich nichts. M175. Dazu: „🎯 Wähle ich gerade öfter“
     nennt je Schraube nur die Wahl, die echt vorn liegt (vorher bei lauter ✅ „viel Zeitlupe“ und „wenig Zeitlupe“
     beide), und ein Test sichert, dass ohne echten Unterschied nie „belegt“ erscheint. M176–M177.
+- 2026-10-09 (Stufe 5 Mehrbenutzer, „Regie-Liga“ – Plan aus zwei Entwürfen, drei Schritte; Abnahme: „Benutzer können
+  nachvollziehen, was das System ausprobiert und tatsächlich gelernt hat“): **Bester Aufbau nur mit Beleg.** Erfahrung
+  zählt nur Videos mit fertigen Zuschauerzahlen, nie Zeit, Tippen, ✅/❌ oder KI-Note; bis zur ersten Krönung wählt der
+  Bot genau wie heute. Annahmen ab M178: `docs/ENTSCHEIDUNGEN.md`, „Mehrbenutzer“.
+  - Schritt 1 (Liga rechnen, nur nachsehen, `docs/PUBLIKUM.md` Abschnitt 8): `pipeline erfolg` hat jetzt den Abschnitt
+    „Regie-Liga“ (JSON `liga`) – kein neuer Befehl, keine Tabelle, nichts gespeichert. Sonntags um 18 Uhr wird
+    entschieden: Ein Aufbau wird bester Aufbau, wenn er an zwei Sonntagen nacheinander belegt besser ankommt als die
+    anderen; ablösen kann ihn nur einer, der ihn direkt schlägt, und nur mit Videos ab der Krönung. Dazu Erfahrung und
+    Level je Aufbau, Tempo, Zeitlupe und Länge, Liga-Level (sammelt · vergleicht · bester Aufbau belegt), Vertrauen in
+    Worten, das nächste Ziel und was in 7 Tagen ausprobiert wurde. Nachgestellt mit dem echten Code: ohne echten
+    Unterschied eine falsche Krönung in 1,2 % der Jahre, doppelte Reaktionen im Median nach 17 Wochen gekrönt; 2 Jahre
+    Geschichte in 0,15 s. Der erfolg-Teil bleibt Zeichen für Zeichen gleich; Bericht, 📋, Videos und n8n unverändert.
+    M178–M186.
+  - Schritt 2 (Liga im Lern-Bot, `docs/SO-GEHTS.md` „Der Sonntagsbericht“): Statt der 📊-Zeile stehen sonntags 🥇 bester
+    Aufbau (in der Woche der Krönung auch ohne Video), 🧪 was ausprobiert wurde – mit Namen –, 🏅 Level und Erfahrung
+    und 🔜 das nächste Ziel; gibt es einen besten Aufbau, nennt 🎯 keinen Aufbau mehr. 📋 hat eine Liga-Zeile, sobald
+    Zahlen ankommen; deine ✅/❌-Zahl steht in der 🧠-Zeile („Zuschauern (läuft)“). Freunde ohne Zahlenabruf: keine
+    Liga-Zeilen und keine wöchentliche 🧠-Zeile mehr. /lernstand (nur /experte): die Liga oben, das Publikums-Modell ohne
+    Version und Prozent. Aufbau-Versuche bleiben sichtbar, auch wenn das Publikums-Modell Feinwerte nachsteuert –
+    nachgestellt: Wahl und Lernen in 60 Entwürfen gleich, sichtbare Versuche 3 → 14. Videos, Knöpfe und n8n unverändert.
+    M187–M192.
+  - Schritt 3 (bester Aufbau wird Standard, `docs/REGIE.md`; Abnahme und Stufenbericht in `docs/MEHRBENUTZER.md`): Hat
+    die Liga einen Aufbau gekrönt, nimmt ihn der Bot im einfachen Modus beim Short statt des Zufallszugs – „mutig“, „nie
+    dreimal“, 🥱 und deine Regeln gehen vor, also etwa 6 von 10 Shorts; der 🥇-Satz der Krönungswoche sagt es. Bis zur
+    ersten Krönung, mit `[geschmack] champion_standard = false` (nur `lokal.toml`) und bei einem Fehler der Liga wählt er
+    Zeichen für Zeichen wie vorher (Test: je 40 Wahlen gleich wie main). Nachgestellt mit dem echten Code: ohne echten
+    Unterschied eine falsche Krönung in 1,1 % der Jahre (2000 Läufe), zwei gleich gute Aufbauten wechseln danach in 0,4 %
+    von 2 Jahren, doppelte Reaktionen im Median nach 17 Wochen gekrönt. Im echten Weg (DB-Weg, 100 und 40 Jahre): bis zur
+    Krönung Zeichen für Zeichen dieselben Videos wie vorher, danach „erzählt“ in 61 statt 55 % der Shorts und 3,6 % mehr
+    Reaktionen je Aufruf; ohne echten Unterschied 2 von 100 Jahren falsch gekrönt. Gegenprobe: alle 7 Fehler aus dem Plan
+    und 8 weitere machen einen Test rot. Nebenbei behoben: ein älterer Test flackerte (Millisekunden-Grenze). M193–M195.
+  - Prüfung (ein Prüfer; ein blockierender und drei kleine Befunde, alle behoben): Nach einer Krönung stand unter 🔜
+    „noch kein Unterschied sicher“, obwohl der beste Aufbau sicher besser ankam – jetzt „„erzählt“ bleibt vorn – „Kino“
+    kommt bisher nicht an ihn heran (…)“, sonst der Vergleich, der wirklich noch offen ist (nachgestellt: vorher in 803
+    von 1430 Sonntagsberichten nach der Krönung falsch, jetzt in keinem). Ein Herausforderer bestätigt sich nur noch
+    mit neuen Videos in genau seinem Vergleich (vorher reichte die neue Note eines dritten Aufbaus): Bei einem echten
+    Wechsel kommen 7 von 234 Ablösungen eine Woche später, zwei gleich gute wechseln in 0,3 statt 0,4 %, sonst gleich.
+    🥇 sagt „zweimal nacheinander“ statt „zwei Sonntage nacheinander“; 📋 hat beim Freund mit PC-Programm bis 7 Zeilen
+    (nur Doku). M196–M197.
