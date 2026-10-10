@@ -761,3 +761,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Krönung Zeichen für Zeichen dieselben Videos wie vorher, danach „erzählt“ in 61 statt 55 % der Shorts und 3,6 % mehr
     Reaktionen je Aufruf; ohne echten Unterschied 2 von 100 Jahren falsch gekrönt. Gegenprobe: alle 7 Fehler aus dem Plan
     und 8 weitere machen einen Test rot. Nebenbei behoben: ein älterer Test flackerte (Millisekunden-Grenze). M193–M195.
+  - Prüfung (ein Prüfer; ein blockierender und drei kleine Befunde, alle behoben): Nach einer Krönung stand unter 🔜
+    „noch kein Unterschied sicher“, obwohl der beste Aufbau sicher besser ankam – jetzt „„erzählt“ bleibt vorn – „Kino“
+    kommt bisher nicht an ihn heran (…)“, sonst der Vergleich, der wirklich noch offen ist (nachgestellt: vorher in 803
+    von 1430 Sonntagsberichten nach der Krönung falsch, jetzt in keinem). Ein Herausforderer bestätigt sich nur noch
+    mit neuen Videos in genau seinem Vergleich (vorher reichte die neue Note eines dritten Aufbaus): Bei einem echten
+    Wechsel kommen 7 von 234 Ablösungen eine Woche später, zwei gleich gute wechseln in 0,3 statt 0,4 %, sonst gleich.
+    🥇 sagt „zweimal nacheinander“ statt „zwei Sonntage nacheinander“; 📋 hat beim Freund mit PC-Programm bis 7 Zeilen
+    (nur Doku). M196–M197.

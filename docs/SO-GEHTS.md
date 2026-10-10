@@ -84,14 +84,15 @@ ein neuer bester Aufbau feststeht. Beispiel nach gut drei Monaten:
 🔜 Noch kein Aufbau kommt sicher besser an – jedes weitere Video macht den Vergleich genauer.
 📏 Deine Regeln gelten weiter: Shorts mindestens 55 s · Effekte ruhig · nur starke Szenen
 ```
-- **🥇 Bester Aufbau:** steht erst da, wenn ein Aufbau bei den Zuschauern belegt besser ankommt – an zwei Sonntagen
-  nacheinander, mit genug Videos auf beiden Seiten (je mindestens 8 hochgeladene Shorts mit fertigen Zahlen nach etwa
-  einer Woche; die ersten 5 sind nur Vergleich) und sehr wahrscheinlich kein Zufall. Ablösen kann ihn nur ein Aufbau,
-  der ihn direkt schlägt, und nur mit Videos, die nach seiner Krönung hochgeladen wurden. KI-Note und deine ✅/❌ zählen
-  dafür nie. In der Woche, in der er feststeht, sagt die Zeile auch, was sich ändert: „Ab jetzt nehme ich ihn meistens,
-  die anderen fordern ihn heraus – welcher, entscheiden auch deine ✅/❌. Deine Regeln gehen vor.“ (siehe „Was der Bot
-  selbst lernt“). Darunter steht, was es gar nicht gibt (heute: wie lange geschaut wird, neue Follower, Besuche auf
-  clip-battle.de) – das steht nie als 0 da. Gezählt wird immer der Aufbau, den ein Video wirklich hatte.
+- **🥇 Bester Aufbau:** steht erst da, wenn ein Aufbau bei den Zuschauern belegt besser ankommt – zweimal nacheinander
+  an Sonntagen mit neuen Zahlen, mit genug Videos auf beiden Seiten (je mindestens 8 hochgeladene Shorts mit fertigen
+  Zahlen nach etwa einer Woche; die ersten 5 sind nur Vergleich) und sehr wahrscheinlich kein Zufall. Ablösen kann ihn
+  nur ein Aufbau, der ihn direkt schlägt, und nur mit Videos, die nach seiner Krönung hochgeladen wurden. KI-Note und
+  deine ✅/❌ zählen dafür nie. In der Woche, in der er feststeht, sagt die Zeile auch, was sich ändert: „Ab jetzt nehme
+  ich ihn meistens, die anderen fordern ihn heraus – welcher, entscheiden auch deine ✅/❌. Deine Regeln gehen vor.“
+  (siehe „Was der Bot selbst lernt“). Darunter steht, was es gar nicht gibt (heute: wie lange geschaut wird, neue
+  Follower, Besuche auf clip-battle.de) – das steht nie als 0 da. Gezählt wird immer der Aufbau, den ein Video wirklich
+  hatte.
 - **🎯 Wähle ich gerade öfter / seltener:** was der Bot im Moment bevorzugt – sein Ausprobieren aus deinen ✅/❌, den
   vorläufigen Zahlen und der KI-Note, kein Beweis. Gibt es einen besten Aufbau, nennt diese Zeile keinen Aufbau mehr.
 - **🧪 Ausprobiert:** was er diese Woche bewusst anders gemacht hat, mit Namen; nach einer Krönung die Herausforderer.
@@ -99,7 +100,8 @@ ein neuer bester Aufbau feststeht. Beispiel nach gut drei Monaten:
   Aufbau belegt · 4, 5 … noch besseren Aufbau gefunden. Das Level sinkt nie. Erfahrung sind nur Videos mit fertigen
   Zuschauerzahlen, „(+3)“ die dieser Woche – nie Zeit, Tippen, ✅/❌ oder KI-Note.
 - **🔜 Nächstes Ziel:** wie viele Videos bis zum ersten Vergleich fehlen, ob ein Aufbau gerade vorn liegt (dann entscheidet
-  der nächste Sonntag mit neuen Zahlen) oder wie weit ein Herausforderer ist.
+  der nächste Sonntag mit neuen Zahlen), wie weit ein Herausforderer ist – oder dass dein bester Aufbau vorn bleibt,
+  weil die Herausforderer bisher nicht an ihn herankommen.
 - dazu, dass deine Regeln weiter gelten.
 
 Ehrlich (bei etwa 3 hochgeladenen Shorts pro Woche): Erfahrung zählt ab etwa Woche 3, danach etwa 3 Videos pro Woche;

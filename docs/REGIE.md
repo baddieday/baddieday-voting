@@ -410,7 +410,7 @@ nötig sind sie nicht.
 
 ## Bester Aufbau als Standard (Mehrbenutzer Stufe 5, 09.10.)
 Nur im einfachen Modus und nur beim Short (`geschmack.waehle`, M193). Hat die Regie-Liga (`liga.py`, `pipeline erfolg`)
-einen Aufbau gekrönt – bei den Zuschauern an zwei Sonntagen nacheinander belegt besser –, steht er statt des
+einen Aufbau gekrönt – bei den Zuschauern zweimal nacheinander belegt besser –, steht er statt des
 Thompson-Zugs vorn. Gezogen wird trotzdem: Tempo, Zeitlupe und „mutig“ bekommen dieselben Zufallszahlen wie ohne ihn.
 - „Mutig“ trifft den Aufbau in etwa jedem 6. Video → der am wenigsten erprobte Herausforderer.
 - „Nie dreimal“ → der Herausforderer mit dem besten Anteil aus ✅/❌, vorläufiger Zuschauer-Note und KI-Note.

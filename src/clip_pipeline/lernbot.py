@@ -419,7 +419,7 @@ def stand_kurz(con: sqlite3.Connection, konfig: Konfig) -> str:
     eine einmalige Anmeldung brauchen; sie ersetzt „🧠 Gelernt aus …“ und „📊 Publikum: … ausgewertet“.
     Stufe 5 (M189): höchstens 6 Zeilen – 📋 · 📏 · ⏱️ · 🎮 · Liga-Zeile (🏅 bzw. 🥇, erst wenn Zuschauerzahlen ankommen)
     · 🧠. Die Zahl deiner ✅/❌ steht jetzt in der 🧠-Zeile, die Zahl der Videos mit Zuschauerzahlen nur in der
-    Liga-Zeile."""
+    Liga-Zeile. Beim Freund mit PC-Programm hängt cmd_stand wie seit Stufe 2 die 💻-Zeile an (dann bis 7)."""
     konfig = einstellungen.anwenden(con, konfig)
     teile = ["📋 Stand", regeln.regeln_zeile(con, konfig)]
     if not regeln.ziel_regel(con, konfig):   # 08.10.: ohne „macht daraus eine feste Länge“ – die Länge wählt der Bot

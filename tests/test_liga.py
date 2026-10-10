@@ -1,6 +1,7 @@
 """Mehrbenutzer, Stufe 5, PR 1 (M178–M185): Regie-Liga – bester Aufbau nur mit Beleg, reine Rechnung, nur lesen.
 PR 2 (M186–M191, die letzten beiden Tests): dieselbe Liga im Sonntagsbericht und in 📋 Stand.
 PR 3 (M193): Die Wirkung auf die Wahl prüft tests/test_geschmack.py mit denselben Daten (LigaDaten).
+Prüfung (M196, M197): bestätigt nur mit neuen Videos im Vergleich; 🔜 nach der Krönung ohne falsches „kein Unterschied“.
 
 Abnahme (Florian): „Benutzer können nachvollziehen, was das System ausprobiert und tatsächlich gelernt hat.“
 Echter Weg wie tests/test_erfolg.py (post_anlegen, speichere_messung, bewerte_alle → eingefrorene Wochen-Note), aber
@@ -13,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
@@ -193,6 +195,10 @@ class Liga(LigaDaten):
         st = self.stand(36)
         self.assertEqual([(v["art"], v["aufbau"]) for v in st["verlauf"] if v["art"] == "bester"], [("bester", "story")])
         self.assertEqual((st["bester"], st["vertrauen"]["kino"]["wort"]), ("story", "kein Unterschied sicher"))
+        # 🔜 nennt den offenen Vergleich – nicht „schnelle Montage“, die belegt schlechter ist (Prüfung, M197)
+        self.assertEqual(st["vertrauen"]["montage"]["status"], erfolg.SCHLECHTER)
+        self.assertEqual(liga.ziel_text(st), "„Kino“ gegen „erzählt“: 15 gegen 15 Videos seit dem 14.06. – noch kein "
+                                             "Unterschied sicher.")
         frisch = [e for e in erfolg.einheiten(self.con, self.konfig, self.sonntage[-1])["tiktok"]["einheiten"]
                   if aus_iso(e["gepostet"]) > aus_iso(st["seit"])]
         gegen_rest = {b["wahl"]: b["status"] for b in erfolg.vergleiche(frisch) if b["merkmal"] == "aufbau"}
@@ -274,7 +280,7 @@ class Liga(LigaDaten):
         self.assertEqual(krone, [
             "🧠 Deine Woche (07.06.–14.06.)", "🎬 3 Videos · 0 ✅ · 0 ❌",
             "🥇 Neuer bester Aufbau: „erzählt“ – kommt bei den Zuschauern auf TikTok besser an als die anderen Aufbauten "
-            "(9 gegen 28 Videos, zwei Sonntage nacheinander), sehr wahrscheinlich kein Zufall. Ab jetzt nehme ich ihn "
+            "(9 gegen 28 Videos, zweimal nacheinander), sehr wahrscheinlich kein Zufall. Ab jetzt nehme ich ihn "
             "meistens, die anderen fordern ihn heraus – welcher, entscheiden auch deine ✅/❌. Deine Regeln gehen vor.",
             "Noch nicht gemessen: wie lange geschaut wird, neue Follower, Besuche auf clip-battle.de.",
             "🧪 Ausprobiert: Aufbau „Steigerung“ (1×)",
@@ -320,6 +326,23 @@ class Liga(LigaDaten):
         self.assertEqual(ohne[-2:], krone[-2:])
         self.assertIsNone(self.bericht(16))
 
+    def test_bester_bleibt_vorn_statt_kein_unterschied(self):
+        # Prüfung (M197): Nach der Krönung kommt „erzählt“ weiter doppelt so gut an, jeder Herausforderer ist belegt
+        # schlechter. 🔜 sagt das ohne dieses Wort (das steht nur in pipeline erfolg und unter /experte) – vorher stand
+        # dort „noch kein Unterschied sicher“, in pipeline erfolg direkt unter „belegt schlechter als „erzählt““
+        self.wochen(30, lambda i, a: 2.0 if a == "story" else 1.0)
+        st = self.stand(30)
+        self.assertEqual({o: st["vertrauen"][o]["status"] for o in ("montage", "kino", "steigerung")},
+                         dict.fromkeys(("montage", "kino", "steigerung"), erfolg.SCHLECHTER))
+        ziel = ("🔜 „erzählt“ bleibt vorn – „schnelle Montage“ kommt bisher nicht an ihn heran (11 gegen 10 Videos seit "
+                "dem 14.06.).")
+        self.assertEqual(self.bericht(30)[-1], ziel)
+        text = liga.text(st).splitlines()
+        self.assertIn(ziel, text)
+        self.assertIn("  „schnelle Montage“: 21 Videos (seit dem 14.06.: 11) · Level 3 · belegt schlechter als "
+                      "„erzählt“ (Spanne −2,43 bis −1,01)", text)
+        self.assertFalse([z for z in text if z.startswith("🔜") and "kein Unterschied" in z], text)
+
     def test_freund_ohne_abruf_und_fehler_der_liga(self):
         # Freund ohne Zahlenabruf: 🧪 ja, aber weder 🥇/🏅/🔜 noch die wöchentliche 🧠-Zeile (M190) – obwohl seine
         # ✅-Posts nach 3 Tagen keine Zahlen haben (vorher stand sie deshalb jede Woche da)
@@ -348,3 +371,52 @@ class Liga(LigaDaten):
                                      "🤔 Noch kein klares Bild – ich probiere weiter selbst aus."])
         self.assertIn("RuntimeError: kaputt", protokoll.output[0])
         self.assertTrue(stand.startswith("📋 Stand") and "🏅" not in stand, stand)
+
+
+class NurMitNeuenVideosBestaetigt(unittest.TestCase):
+    """Prüfung (M196): Ein Kandidat bestätigt sich nur, wenn sich eine Seite seines Vergleichs geändert hat – reine
+    Rechnung (liga._nachspielen) über feste Einheiten, ohne Datenbank."""
+
+    def test_neue_note_eines_dritten_aufbaus_bestaetigt_nicht(self):
+        s0 = liga.letzter_stichtag(datetime(2026, 3, 8, 20, tzinfo=UTC), ZONE)   # Sonntag 08.03., 18 Uhr
+        kandidaten: list[dict] = []
+
+        def video(aufbau: str, wert: float, gepostet: datetime, fertig: datetime) -> None:
+            nr = len(kandidaten) + 1
+            e = {"post": nr, "familie": nr, "gepostet": iso(gepostet), "fertig": iso(fertig), "dauer": 55.0,
+                 "abdeckung": ("zuschauer",), "merkmale": {"aufbau": aufbau}, "werte": {"gesamt": wert}}
+            kandidaten.append({"fertig": fertig, "gepostet": gepostet, "e": e, "ordnung": (e["gepostet"], nr)})
+
+        def bis(tage: int) -> dict:
+            kandidaten.sort(key=lambda k: (k["fertig"], k["e"]["post"]))
+            return liga._nachspielen(kandidaten, liga.stichtage(kandidaten[0]["fertig"],
+                                                                s0 + timedelta(days=tage, hours=1), ZONE))
+
+        # „erzählt“ liegt am 08.03. vorn und wird am 15.03. mit zwei neuen Videos bester Aufbau
+        for i in range(12):
+            for a in AUFBAUTEN:
+                video(a, (1.0 if a == "story" else 0.0) + 0.05 * ((i * 7 + len(a)) % 5), s0 - timedelta(days=20),
+                      s0 - timedelta(days=2))
+        video("story", 1.1, s0 - timedelta(days=10), s0 + timedelta(days=3))
+        video("kino", 0.1, s0 - timedelta(days=10), s0 + timedelta(days=3))
+        s1 = s0 + timedelta(days=7)
+        # Danach je 8 neue Videos: Kino deutlich besser als „erzählt“ – am 05.04. liegt Kino vorn
+        for i in range(8):
+            video("kino", 1.0 + 0.05 * (i % 5), s1 + timedelta(days=1 + i), s1 + timedelta(days=8 + i))
+            video("story", 0.05 * ((i * 3) % 5), s1 + timedelta(days=1 + i), s1 + timedelta(days=8 + i))
+        vorn = bis(28)
+        self.assertEqual((vorn["bester"], vorn["vorn"]["wahl"], vorn["vorn"]["n"]), ("story", "kino", [8, 8]))
+
+        # In der Woche danach ist nur die Note einer „schnellen Montage“ neu: Kino gegen „erzählt“ hat dieselben
+        # Videos – kein zweiter Beleg, Kino bleibt nur vorn (vorher löste Kino hier „erzählt“ ab)
+        video("montage", 0.3, s0 + timedelta(days=29), s0 + timedelta(days=33))
+        gleich = bis(35)
+        self.assertEqual(gleich["bester"], "story")
+        self.assertEqual((gleich["vorn"]["wahl"], gleich["verlauf"]), ("kino", vorn["verlauf"]))
+
+        # Mit je einem neuen Video von Kino und „erzählt“ bestätigt es sich: Ablösung am 19.04.
+        video("kino", 1.1, s0 + timedelta(days=36), s0 + timedelta(days=40))
+        video("story", 0.1, s0 + timedelta(days=36), s0 + timedelta(days=40))
+        neu = bis(42)
+        self.assertEqual((neu["bester"], neu["verlauf"][-1]["stichtag"][:10], neu["verlauf"][-1]["n"],
+                          neu["verlauf"][-1]["vorher"]), ("kino", "2026-04-19", [9, 9], "story"))

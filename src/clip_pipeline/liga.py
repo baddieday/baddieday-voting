@@ -14,14 +14,17 @@ hochgeladene, deren Note schon fest war – wie erfolg damals). Jedes Nachsehen 
 Verlauf. Wer [publikum.gewichte] oder [erfolg.gewichte] ändert, rechnet die Geschichte neu – Version und Gewichte stehen
 in jeder Ausgabe.
 
-Regel (M180, M181):
-  1. Noch kein bester Aufbau (kein Startwert): erfolg.vergleiche nennt denselben Aufbau an zwei Stichtagen
-     nacheinander „belegt besser als die anderen Aufbauten“ – der 📊-Satz aus Stufe 4.
-  2. Bester Aufbau C seit Stichtag T: Ein anderer Aufbau X löst ab, wenn erfolg.paarweise(X, C) an zwei Stichtagen
-     nacheinander „belegt besser“ ergibt – nur mit Videos, die nach T hochgeladen wurden, auf beiden Seiten. Die Videos
+Regel (M180, M181, M196):
+  1. Noch kein bester Aufbau (kein Startwert): erfolg.vergleiche nennt denselben Aufbau zweimal nacheinander „belegt
+     besser als die anderen Aufbauten“ – der 📊-Satz aus Stufe 4.
+  2. Bester Aufbau C seit Stichtag T: Ein anderer Aufbau X löst ab, wenn erfolg.paarweise(X, C) zweimal nacheinander
+     „belegt besser“ ergibt – nur mit Videos, die nach T hochgeladen wurden, auf beiden Seiten. Die Videos
      der Krönung verteidigen nie, „gegen den Rest“ löst nie ab, „schlechter“ stürzt nie.
-  Mehrere Kandidaten: der mit dem größten Unterschied. Ein Stichtag ohne neue fertige Wochen-Note entscheidet nichts –
-  sonst bestätigte sich ein Kandidat mit denselben Videos ein zweites Mal.
+  Mehrere Kandidaten: der mit dem größten Unterschied. „Zweimal nacheinander“ heißt an zwei Stichtagen, an denen sich
+  genau dieser Vergleich geändert hat: Bestätigt wird nur, wenn seit dem „vorn“ auf mindestens einer Seite andere
+  Videos stehen – sonst bestätigte sich ein Kandidat mit denselben Videos ein zweites Mal (nach einer Krönung etwa,
+  weil nur die Note eines dritten Aufbaus neu ist, M196). Ein Stichtag ganz ohne neue fertige Wochen-Note entscheidet
+  ohnehin nichts (M182).
 
 Erfahrung (M183) = gezählte Einheiten bis zum Abrufzeitpunkt (je Aufbau, Tempo, Zeitlupe, Länge und gesamt; „neu“ =
 in den 7 Tagen davor fertig geworden). Level je Strategie nur aus der Erfahrung (1 unter 8 · 2 ab 8 · 3 ab 16 · 4 ab
@@ -164,17 +167,30 @@ def _einheiten(aktiv: dict[int, dict]) -> list[dict]:
     return [k["e"] for k in sorted(aktiv.values(), key=lambda k: k["ordnung"])]
 
 
-def _urteile(einheiten: list[dict], bester: str | None, seit: datetime | None) -> tuple[dict[str, dict], list[str]]:
+def _urteile(einheiten: list[dict], bester: str | None,
+             seit: datetime | None) -> tuple[dict[str, dict], list[str], list[dict]]:
     """Je Aufbau der Befund: ohne besten Aufbau aus erfolg.vergleiche (eine gegen die anderen), sonst paarweise gegen
-    ihn – beide Seiten nur mit Videos, die nach seit hochgeladen wurden. Dazu die Ziele der verglichenen Gruppe."""
+    ihn – beide Seiten nur mit Videos, die nach seit hochgeladen wurden. Dazu die Ziele und die Einheiten der
+    verglichenen Gruppe (daraus _seiten)."""
     if bester is None:   # genau der 📊-Satz aus Stufe 4 – nur ohne die beschreibenden Teilziele
         ziele, gruppe = erfolg.groesste_gruppe(einheiten)
-        return {b["wahl"]: b for b in erfolg.vergleiche(gruppe, ("aufbau",), teilziele=False)}, list(ziele)
+        return {b["wahl"]: b for b in erfolg.vergleiche(gruppe, ("aufbau",), teilziele=False)}, list(ziele), gruppe
     frisch = [e for e in einheiten if aus_iso(e["gepostet"]) > seit]
     ziele, gruppe = erfolg.groesste_gruppe(frisch)
     seite = {o: [e for e in gruppe if e["merkmale"].get("aufbau") == o] for o in AUFBAUTEN}
     return ({o: {"merkmal": "aufbau", "wahl": o, "gegen": bester, **erfolg.paarweise(seite[o], seite[bester])}
-             for o in AUFBAUTEN if o != bester}, list(ziele))
+             for o in AUFBAUTEN if o != bester}, list(ziele), gruppe)
+
+
+def _seiten(gruppe: list[dict], befund: dict) -> tuple[frozenset, frozenset]:
+    """Die Posts beider Seiten eines Aufbau-Vergleichs aus _urteile – wie erfolg.vergleiche (gegen „rest“: alle
+    anderen Aufbauten) bzw. paarweise gegen den besten Aufbau. Gleiche Seiten ergeben in einem Nachspielen dasselbe
+    Urteil (die Werte jeder Einheit stehen fest): Damit bestätigt sich kein Kandidat mit denselben Videos (M196)."""
+    wahl, gegen = befund["wahl"], befund["gegen"]
+    a = frozenset(e["post"] for e in gruppe if e["merkmale"].get("aufbau") == wahl)
+    b = frozenset(e["post"] for e in gruppe if (e["merkmale"].get("aufbau") not in (None, wahl) if gegen == "rest"
+                                                else e["merkmale"].get("aufbau") == gegen))
+    return a, b
 
 
 def _kandidat(befunde: dict[str, dict]) -> dict | None:
@@ -192,7 +208,7 @@ def _nachspielen(kandidaten: list[dict], tage: list[datetime]) -> dict:
     """Stichtag für Stichtag: Krönung, Ablösung, Kandidat (vorn). verlauf: je Stichtag mit Kandidat ein Eintrag
     „vorn“, je Krönung oder Ablösung einer „bester“. aktiv: die gezählten Einheiten am letzten Stichtag."""
     aktiv: dict[int, dict] = {}
-    i, bester, seit, vorn, vergleicht, verlauf = 0, None, None, None, None, []
+    i, bester, seit, vorn, vorn_seiten, vergleicht, verlauf = 0, None, None, None, None, None, []
     for stichtag in tage:
         neu = False
         while i < len(kandidaten) and kandidaten[i]["fertig"] <= stichtag:
@@ -200,17 +216,20 @@ def _nachspielen(kandidaten: list[dict], tage: list[datetime]) -> dict:
             i += 1
         if not neu:        # nichts Neues fertig: dieser Sonntag entscheidet nichts, ein Kandidat bleibt vorläufig
             continue
-        befunde, ziele = _urteile(_einheiten(aktiv), bester, seit)
+        befunde, ziele, gruppe = _urteile(_einheiten(aktiv), bester, seit)
         if vergleicht is None and any(b["status"] != erfolg.ZU_WENIG for b in befunde.values()):
             vergleicht = stichtag
         kandidat = _kandidat(befunde)
+        seiten = _seiten(gruppe, kandidat) if kandidat is not None else None
         if kandidat is not None and vorn is not None and kandidat["wahl"] == vorn["wahl"]:
+            if seiten == vorn_seiten:   # neu war nur etwas außerhalb dieses Vergleichs: kein zweiter Beleg (M196)
+                continue
             verlauf.append(_eintrag(stichtag, "bester", kandidat, ziele, vorher=bester))
-            bester, seit, vorn = kandidat["wahl"], stichtag, None
+            bester, seit, vorn, vorn_seiten = kandidat["wahl"], stichtag, None, None
             continue
         if kandidat is not None:
             verlauf.append(_eintrag(stichtag, "vorn", kandidat, ziele))
-        vorn = kandidat
+        vorn, vorn_seiten = kandidat, seiten
     return {"aktiv": aktiv, "rest": kandidaten[i:], "bester": bester, "seit": seit, "vorn": vorn,
             "vergleicht": vergleicht, "verlauf": verlauf}
 
@@ -258,7 +277,9 @@ def _befund(befund: dict, **mehr) -> dict:
 
 def _ziel(befunde: dict[str, dict], bester: str | None, vorn: dict | None, basis_fehlt: int) -> dict:
     """Das nächste Ziel: einen Kandidaten bestätigen, den ersten Vergleich erreichen, Herausforderer sammeln oder den
-    Vergleich genauer machen."""
+    Vergleich genauer machen. Mit bestem Aufbau „genauer“ nur bei einem offenen Vergleich (kein Unterschied, nicht
+    vergleichbar); ist jeder verglichene Herausforderer belegt schlechter, „bleibt_vorn“ – vorher stand dort „noch kein
+    Unterschied sicher“, obwohl der beste Aufbau sicher besser ankam (Prüfung, M197)."""
     if vorn is not None:
         return {"art": "vorn", "aufbau": vorn["wahl"], "gegen": vorn["gegen"], "n": vorn["n"]}
     werte = list(befunde.values())
@@ -267,7 +288,15 @@ def _ziel(befunde: dict[str, dict], bester: str | None, vorn: dict | None, basis
         if bester is None:
             return {"art": "erster_vergleich", "fehlen": b["fehlen"] + basis_fehlt}
         return {"art": "herausforderer", "aufbau": b["wahl"], "gegen": bester, "n": b["n"], "fehlen": b["fehlen"]}
-    b = max((b for b in werte if b["status"] != erfolg.ZU_WENIG), key=lambda b: sum(b["n"]))
+    verglichen = [b for b in werte if b["status"] != erfolg.ZU_WENIG]
+    if bester is not None:
+        offen = [b for b in verglichen if b["status"] in (erfolg.KEIN_UNTERSCHIED, erfolg.NICHT_VERGLEICHBAR)]
+        schlechter = [b for b in verglichen if b["status"] == erfolg.SCHLECHTER]
+        if not offen and schlechter:
+            b = max(schlechter, key=lambda b: sum(b["n"]))
+            return {"art": "bleibt_vorn", "aufbau": b["wahl"], "gegen": b["gegen"], "n": b["n"]}
+        verglichen = offen or verglichen
+    b = max(verglichen, key=lambda b: sum(b["n"]))
     return {"art": "genauer", "aufbau": b["wahl"], "gegen": b["gegen"], "n": b["n"]}
 
 
@@ -352,7 +381,8 @@ def stand(con: sqlite3.Connection, konfig: Konfig, bis: datetime | None = None) 
       Ablösung genau am letzten Stichtag) · verlauf
       erfahrung {gesamt, neu, basis [x, 5], aufbau, tempo, zeitlupe, laenge} (bis bis) · seit_kroenung {gesamt, aufbau}
       level {merkmal: {wahl: 1…5}} · vertrauen {aufbau: Befund mit Wort} · feinheiten [Befunde Tempo, Zeitlupe, Länge]
-      ziel (das nächste Ziel) · versuche {von, bis, liste, herausforderer} · messungen (Posts der Hauptplattform mit
+      ziel (das nächste Ziel, art: erster_vergleich · vorn · herausforderer · genauer · bleibt_vorn) ·
+      versuche {von, bis, liste, herausforderer} · messungen (Posts der Hauptplattform mit
       Zahlen) · offen (Ziele, die bei keinem gezählten Video gemessen sind: bindung, follower, webseite – für „Noch nicht
       gemessen“ unter einem neuen 🥇) · nicht_gezaehlt, wartet (wie `pipeline erfolg` zum Zeitpunkt bis).
     KonfigFehler bei kaputten [erfolg.gewichte] oder [publikum]-Werten."""
@@ -455,6 +485,9 @@ def ziel_text(st: dict) -> str:
                 f"dem {seit}) – bestätigt es sich am nächsten Sonntag mit neuen Zahlen, löst er ihn ab.")
     if bester is None:
         return "Noch kein Aufbau kommt sicher besser an – jedes weitere Video macht den Vergleich genauer."
+    if z["art"] == "bleibt_vorn":   # belegt schlechter – das Wort nur in pipeline erfolg und unter /experte (M188)
+        return (f"{name('aufbau', bester)} bleibt vorn – {name('aufbau', z['aufbau'])} kommt bisher nicht an ihn heran "
+                f"({a} gegen {b} Videos seit dem {seit}).")
     return (f"{name('aufbau', z['aufbau'])} gegen {name('aufbau', bester)}: {a} gegen {b} Videos seit dem {seit} – "
             "noch kein Unterschied sicher.")
 
@@ -481,15 +514,16 @@ STANDARD_SATZ = ("Ab jetzt nehme ich ihn meistens, die anderen fordern ihn herau
 
 def neu_zeilen(st: dict, standard: bool = False) -> list[str]:
     """Krönung oder Ablösung genau am letzten Stichtag: „🥇 Neuer bester Aufbau: „erzählt“ – kommt bei den Zuschauern
-    auf TikTok besser an als die anderen Aufbauten (14 gegen 27 Videos, zwei Sonntage nacheinander), sehr wahrscheinlich
+    auf TikTok besser an als die anderen Aufbauten (14 gegen 27 Videos, zweimal nacheinander), sehr wahrscheinlich
     kein Zufall.“ – mit standard (er wird im einfachen Modus Standard, M193) dahinter STANDARD_SATZ – und darunter
-    „Noch nicht gemessen: …“ (nur hier, M188). [] ohne ein solches Ereignis."""
+    „Noch nicht gemessen: …“ (nur hier, M188). [] ohne ein solches Ereignis. „Zweimal nacheinander“, nicht „zwei
+    Sonntage“: Dazwischen können Sonntage ohne neue Zahlen liegen (M196)."""
     k = st["ereignis"]
     if not k:
         return []
     wie = _wie(st, k, PLATTFORM_NAMEN.get(st["plattform"], st["plattform"]))
     zeilen = [f"🥇 Neuer bester Aufbau: {name('aufbau', k['aufbau'])} – {wie} ({k['n'][0]} gegen {k['n'][1]} Videos, "
-              "zwei Sonntage nacheinander), sehr wahrscheinlich kein Zufall."
+              "zweimal nacheinander), sehr wahrscheinlich kein Zufall."
               + (f" {STANDARD_SATZ}" if standard else "")]
     if st["offen"]:
         zeilen.append("Noch nicht gemessen: " + ", ".join(erfolg.OFFEN_NAMEN[z] for z in st["offen"]) + ".")
@@ -567,7 +601,7 @@ def text(st: dict) -> str:
     if st["bester"]:
         k = [v for v in st["verlauf"] if v["art"] == "bester"][-1]
         zeilen.append(f"Bester Aufbau: {name('aufbau', st['bester'])} – belegt seit {_datum(st['seit'], zonen_name)}: "
-                      f"{_wie(st, k)} ({k['n'][0]} gegen {k['n'][1]} Videos, zwei Sonntage nacheinander), sehr "
+                      f"{_wie(st, k)} ({k['n'][0]} gegen {k['n'][1]} Videos, zweimal nacheinander), sehr "
                       "wahrscheinlich kein Zufall.")
     else:
         zeilen.append("Bester Aufbau: noch keiner belegt.")

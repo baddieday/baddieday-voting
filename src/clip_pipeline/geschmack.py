@@ -19,7 +19,7 @@ Alte Bewertungen zählen sofort für den Aufbau (der Stil steht schon in den Par
 Wahl: Thompson-Sampling je Schraube; „mutig“ (geschmack.mut, Standard 0,5): bei jedem zweiten Video wird eine Schraube
 bewusst auf ihre am wenigsten erprobte Einstellung gestellt (Experiment). Derselbe Aufbau nie dreimal hintereinander.
 Bester Aufbau als Standard (Mehrbenutzer Stufe 5, M193): Hat die Regie-Liga einen Aufbau gekrönt (bei den Zuschauern
-an zwei Sonntagen nacheinander belegt besser, liga.champion), ersetzt er im einfachen Modus beim Short nur den
+zweimal nacheinander belegt besser, liga.champion), ersetzt er im einfachen Modus beim Short nur den
 Thompson-Zug des Aufbaus – gezogen wird trotzdem, alle Zufallszahlen bleiben dieselben. „Mutig“ (der am wenigsten
 erprobte Herausforderer), „nie dreimal“ (der Herausforderer mit dem besten Anteil aus ✅/❌, vorläufiger Note und KI),
 🥱 und deine Regeln gehen weiter vor; so kommt er in etwa 6 von 10 Videos. Bis zur ersten Krönung, mit
@@ -33,7 +33,7 @@ Die KI schaut sich jedes gesendete Video danach im Hintergrund an (ki_nachtragen
 kommt dadurch nicht später. Sonntags ab 18 Uhr fasst wochen_text die Woche zusammen (Lern-Meldung woche:<JJJJ-Www>).
 Ehrliche Sätze (Mehrbenutzer Stufe 4, M162): „🎯 Wähle ich gerade öfter/seltener“ ist die Zahl, mit der der Bot wählt
 (früher „👍 Kommt gut an / 👎 Kommt weniger an“) – kein Beleg. Was bei den Zuschauern belegt besser ankommt, sagt seit
-Stufe 5 (M188) nur die Regie-Liga (liga.py): 🥇 bester Aufbau (zwei Sonntage nacheinander belegt), 🏅 Level und
+Stufe 5 (M188) nur die Regie-Liga (liga.py): 🥇 bester Aufbau (zweimal nacheinander belegt), 🏅 Level und
 Erfahrung, 🔜 nächstes Ziel, 🧪 was ausprobiert wurde – mit Namen. Sie ersetzt die 📊-Zeile und „n× bewusst etwas
 Neues“; gibt es einen besten Aufbau, nennt 🎯 keinen Aufbau mehr.
 Wer gerade lehrt – deine ✅/❌, die KI-Note, die Zuschauer – sagt lehrer_zeile (08.10.): in 📋 Stand immer, im

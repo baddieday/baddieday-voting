@@ -193,18 +193,20 @@ nie, über n8n nicht erreichbar. Er zeigt, was der Bot ausprobiert und was er wi
 - **Was zählt?** Nur die festen Wochen-Noten der Hauptplattform (die erste in `[publikum].plattformen`, heute TikTok),
   genau die Videos, die Abschnitt 7 zählt: je Video einmal, die ersten 5 nur Vergleich. Nie KI-Note, ✅/❌, Zeit oder
   wie oft du nachsiehst.
-- **Bester Aufbau (🥇):** Entschieden wird nur sonntags um 18 Uhr. Ist derselbe Aufbau an zwei Sonntagen nacheinander
-  „belegt besser als die anderen Aufbauten“ (der 📊-Satz aus Abschnitt 7), wird er der beste Aufbau – einen Startwert
-  gibt es nicht. Ein anderer löst ihn nur ab, wenn er ihn direkt schlägt: nur mit Videos, die nach der Krönung
-  hochgeladen wurden, wieder an zwei Sonntagen nacheinander. „Schlechter“ stürzt nie. Kommt an einem Sonntag keine neue
-  Wochen-Note dazu, entscheidet er nichts.
+- **Bester Aufbau (🥇):** Entschieden wird nur sonntags um 18 Uhr. Ist derselbe Aufbau zweimal nacheinander „belegt
+  besser als die anderen Aufbauten“ (der 📊-Satz aus Abschnitt 7), wird er der beste Aufbau – einen Startwert gibt es
+  nicht. Ein anderer löst ihn nur ab, wenn er ihn direkt schlägt: nur mit Videos, die nach der Krönung hochgeladen
+  wurden, wieder zweimal nacheinander. „Schlechter“ stürzt nie. „Zweimal nacheinander“ heißt an zwei Sonntagen, an
+  denen genau dieser Vergleich neue Wochen-Noten bekam: Ein Sonntag ohne neue Note entscheidet nichts, und nach einer
+  Krönung bestätigt die Note eines dritten Aufbaus keinen Herausforderer (M196).
 - **Erfahrung und Level (🏅):** Erfahrung = Videos mit fertigen Zuschauerzahlen (dazu, wie viele in den letzten 7 Tagen
   dazukamen). Level je Strategie: 1 unter 8 · 2 ab 8 · 3 ab 16 · 4 ab 32 · 5 ab 64 Videos – sagt nur, wie gut sie
   vermessen ist, nie „besser“. Liga-Level: 1 sammelt · 2 vergleicht · 3 bester Aufbau belegt · je Ablösung eins mehr;
   es sinkt nie.
 - **Vertrauen in Worten:** „noch k Videos“, „kein Unterschied sicher“, „liegt diesmal vorn“, „belegt seit …“ – nie eine
   Prozentzahl. Die Spanne (von–bis) steht nur hier und unter /experte in /lernstand. Darunter das nächste Ziel (🔜) und
-  der Verlauf mit Datum.
+  der Verlauf mit Datum. Ist nach einer Krönung jeder verglichene Herausforderer belegt schlechter, sagt 🔜 „„erzählt“
+  bleibt vorn – „Kino“ kommt bisher nicht an ihn heran (…)“ statt „noch kein Unterschied sicher“ (M197).
 - **Ausprobiert (🧪):** was in den letzten 7 Tagen bewusst neu war (Aufbau, Tempo, Zeitlupe, Musik, Länge …), je Video
   einmal, mit „gezeigt · hochgeladen · mit Zahlen“; nach einer Krönung auch die Herausforderer.
 - **Nachrechenbar:** Nichts wird gespeichert. Jeder Aufruf spielt alle Sonntage aus den festen Wochen-Noten nach und

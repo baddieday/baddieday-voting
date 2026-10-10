@@ -540,7 +540,7 @@ def zeile_einfach(bericht: dict) -> str | None:
     """Die 📊-Zeile aus Stufe 4: je Plattform mit fertigen Wochenzahlen eine Zeile, darunter, was noch nicht gemessen
     wird. None ohne solche Videos und bei einem Freund (bei ihm holt niemand Zahlen ab, M169). Seit Stufe 5 (M188) steht
     sie nicht mehr im Sonntagsbericht – dort sagt die Regie-Liga (liga.py), was belegt ist; „belegt“ erst nach zwei
-    Sonntagen. Bleibt zum Vergleich und für die Tests. Beispiele:
+    Sonntagen mit neuen Zahlen. Bleibt zum Vergleich und für die Tests. Beispiele:
       „📊 Zuschauer (TikTok): 4 Videos mit fertigen Wochenzahlen – ein erster Vergleich frühestens nach 12 weiteren.“
       „📊 Zuschauer (TikTok, 23 Videos): noch kein Unterschied sicher.“
       „📊 Belegt (TikTok, 41 Videos): Aufbau „erzählt“ kommt bei den Zuschauern besser an als die anderen Aufbauten
