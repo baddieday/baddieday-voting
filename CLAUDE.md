@@ -769,3 +769,8 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Wechsel kommen 7 von 234 Ablösungen eine Woche später, zwei gleich gute wechseln in 0,3 statt 0,4 %, sonst gleich.
     🥇 sagt „zweimal nacheinander“ statt „zwei Sonntage nacheinander“; 📋 hat beim Freund mit PC-Programm bis 7 Zeilen
     (nur Doku). M196–M197.
+- 2026-10-14: **CT `clips` mit fester IP** (`192.168.178.93/24`, Gateway `.1`) statt DHCP. Anlass: Ausfall 10.–14.10. – der
+  Mini ging am 10.10. 16:50 hart aus (Strom?) und kam nicht von selbst wieder; nach dem Einschalten hatte `nic1` bis
+  21:53 keinen Link, der CT fragte DHCP nur einmal beim Start (ifupdown, `dhclient -1`) und blieb ohne IPv4 – beide
+  Bots scheiterten ~800× an der Namensauflösung. Alte Konfig: `/root/102.conf.vor-fester-ip-*` auf pve-mini.
+  Offen: BIOS des Mini „Restore on AC Power Loss = Power On“; Warnung, wenn der Mini nicht antwortet (die Bots laufen ja auf ihm).
