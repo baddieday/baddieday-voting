@@ -769,3 +769,16 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Wechsel kommen 7 von 234 Ablösungen eine Woche später, zwei gleich gute wechseln in 0,3 statt 0,4 %, sonst gleich.
     🥇 sagt „zweimal nacheinander“ statt „zwei Sonntage nacheinander“; 📋 hat beim Freund mit PC-Programm bis 7 Zeilen
     (nur Doku). M196–M197.
+- 2026-10-14: **CT `clips` mit fester IP** (`192.168.178.93/24`, Gateway `.1`) statt DHCP. Anlass: Ausfall 10.–14.10. – der
+  Mini ging am 10.10. 16:50 hart aus (Strom?) und kam nicht von selbst wieder; nach dem Einschalten hatte `nic1` bis
+  21:53 keinen Link, der CT fragte DHCP nur einmal beim Start (ifupdown, `dhclient -1`) und blieb ohne IPv4 – beide
+  Bots scheiterten ~800× an der Namensauflösung. Alte Konfig: `/root/102.conf.vor-fester-ip-*` auf pve-mini.
+  Offen: BIOS des Mini „Restore on AC Power Loss = Power On“; Warnung, wenn der Mini nicht antwortet (die Bots laufen ja auf ihm).
+- 2026-10-16 (Florian: „Pool ansehen – was kann weg?“, dann „VM 150 und 200 … radikal … oder auf pve-big auslagern, dann
+  die VMs entfernen bis auf debian-docker“): **Thin-Pool des Mini von 85 % auf 31 %.** VM 101 (Home Assistant), 150
+  (Ubuntu-ai) und 200 (Windows 11, BitLocker) liegen als **geschützte Sicherung auf PBS** (`pbs-big` auf pve-big, 16.10.;
+  jede Platte zurückgelesen und Bit für Bit mit dem Original verglichen) und sind von pve-mini entfernt – Wiederherstellen
+  in Proxmox unter pbs-big → Sicherungen → Wiederherstellen. VM 100 (debian-docker) ist unverändert. Die **Systemplatte
+  von CT 102** hat jetzt 32 statt 16 GB: Dort liegen Datenbank und Entwürfe des Lern-Bots (regie/, 6,7 GB), frei waren nur
+  noch 3,7 GB, und die Morgenprüfung misst diese Platte nicht. Auf pve-mini lief noch der Code vom 08.10. früh, die
+  Freigabe alter Rohvideos (B5) wirkt erst nach dem nächsten Update. Proxmox hat keinen Sicherungs-Job (nur Hand-Sicherungen).
