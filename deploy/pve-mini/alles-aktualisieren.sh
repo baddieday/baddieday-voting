@@ -6,7 +6,7 @@
 #   2. Holen: origin/main (Produktion) und den neuesten Sprint-Stand (Lern-Bot)
 #   3. Warten, bis kein Render läuft (Pipeline-Sperre, höchstens WARTEN_MIN), dann unter der Sperre umstellen:
 #      /opt/clip-pipeline → main, /opt/clip-regie → neuester Stand, neue Dienste (clip-mikro, clip-sitzungen,
-#      clip-publikum), Bots neu starten
+#      clip-publikum, clip-scan), Bots neu starten
 #   4. Probe: Dienste laufen, Datenbank antwortet; Rückweg liegt als Skript bereit
 #   Nur mit Freunden (Mehrbenutzer, docs/MEHRBENUTZER.md): vor dem Umstellen ihre Datenbanken sichern, ihre
 #   Dienst-Vorlagen und den Lager-Rundgang auf die Platte legen (nie einschalten), laufende Freundes-Bots neu starten.
@@ -218,7 +218,8 @@ pakete "$PROD" "$ALT_PROD" "$ZIEL_PROD"
 p timeout 120 "$PROD/.venv/bin/pipeline" status >/dev/null 2>&1 || echo "⚠️  pipeline status meldet einen Fehler (Probe unten zeigt mehr)"
 
 # systemd-Dienste: geänderte übernehmen, wenn du sie nicht selbst angepasst hast; neue nur clip-mikro (Mic-Schritt),
-# clip-sitzungen (Abend-Video) und clip-publikum (Zuschauerzahlen: TikTok-Abruf und Datenbank, keine Sperre, weckt nie).
+# clip-sitzungen (Abend-Video), clip-publikum (Zuschauerzahlen: TikTok-Abruf und Datenbank, keine Sperre, weckt nie) und
+# clip-scan (deine Matches ohne n8n, M148).
 # clip-aufraeumen bleibt immer aus („Nie löschen“). Der Lern-Bot läuft aus $REGIE, falls es den gibt.
 lernbot_form() { if [ "$MIT_REGIE" = 1 ]; then sed "s#/opt/clip-pipeline#$REGIE#g" | { getent group render >/dev/null && cat || sed "/^SupplementaryGroups=/d"; }; else cat; fi; }
 neu_an=(); eigen=(); geaendert=0
@@ -244,7 +245,8 @@ for quelle in "$PROD"/deploy/systemd/*.service "$PROD"/deploy/systemd/*.timer "$
     fi
   else
     # 07.10.: ohne clip-sitzungen kam nie ein Abend-Video · 08.10.: ohne clip-publikum nie Zuschauerzahlen
-    case "$name" in clip-mikro.*|clip-sitzungen.*|clip-publikum.*)
+    # 22.10.: ohne clip-scan blieb jedes Match liegen, wenn n8n den Mini nicht erreichte (DEY 6 Tage aus dem Tailnet)
+    case "$name" in clip-mikro.*|clip-sitzungen.*|clip-publikum.*|clip-scan.*)
       printf "%s\n" "$soll" > "$ziel"; geaendert=1; echo "Dienst neu: $rel"
       case "$name" in *.path|*.timer) neu_an+=("$name");; esac;;
     esac
@@ -255,9 +257,9 @@ if [ "${#neu_an[@]}" -gt 0 ]; then
   systemctl enable -q --now "${neu_an[@]}" && echo "eingeschaltet: ${neu_an[*]}"
   echo "systemctl disable --now ${neu_an[*]}" >> "$SICH.zurueck.sh"
 fi
-# Abend-Video (07.10.) und Zuschauerzahlen (08.10.): diese Timer müssen laufen – auch wenn sie schon installiert, aber
-# nie eingeschaltet waren. Einen von dir angepassten Timer (oben „weicht vom Repo ab“) fasst das Update nicht an.
-for t in clip-sitzungen.timer clip-publikum.timer; do
+# Abend-Video (07.10.), Zuschauerzahlen (08.10.) und Matches ohne n8n (22.10.): diese Timer müssen laufen – auch
+# wenn sie schon installiert, aber nie eingeschaltet waren. Einen von dir angepassten Timer (oben „weicht vom Repo ab“) fasst das Update nicht an.
+for t in clip-sitzungen.timer clip-publikum.timer clip-scan.timer; do
   case " ${eigen[*]} " in *" $t "*) continue;; esac
   if systemctl cat "$t" >/dev/null 2>&1 && ! systemctl is-enabled -q "$t" 2>/dev/null; then
     systemctl enable -q --now "$t" && echo "eingeschaltet: $t"
