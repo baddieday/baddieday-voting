@@ -186,6 +186,23 @@ gut_ab = 60                # KI-Note ab hier zählt als 👍 im Regie-Lernen, da
 schwelle = 50              # darunter sortiert der Lern-Bot den Entwurf still aus und baut neu (0 = aus)
 prompt = "templates/kritik-prompt.txt"
 
+[nachtschicht]
+# Fassungen im Wettbewerb (22.10., nachtschicht.py; Florian: „ML soll den Schnitt autonom verbessern … Voten nur noch
+# optional“): Im einfachen Modus entsteht jedes Abend-Video und jedes 🎬 aus mehreren Fassungen – die erste wie gelernt,
+# die weiteren mit je einer anderen Stellschraube (Aufbau, Tempo, Zeitlupe, Länge, Anlauf, Song). Alle werden gemessen
+# (Cutter-Maßstab), die besten zwei blind vom KI-Cutter verglichen, die Siegerin kommt zu dir. Jeder KI-Vergleich lehrt
+# Aufbau/Tempo/Zeitlupe (geschmack) und den Maßstab (massstab). Nie bei 🔥 Viral, dem 2-Wochen-Video, neuen Fassungen
+# nach ❌ oder unter /experte.
+an = true
+fassungen = 4             # Fassungen je Video, die erste eingerechnet (1 = aus, wie bisher)
+max_minuten = 25          # danach keine weitere Fassung mehr – der Wettbewerb läuft unter den fertigen
+frei_gb = 3.0             # unter so viel freiem Platz im Regie-Ordner keine weitere Fassung
+ki = true                 # Paarvergleich der besten zwei durch claude -p (nur Leserechte); sonst entscheidet die Messung
+ki_pro_tag = 8            # höchstens so viele Paarvergleiche am Tag (zählt gegen das Abo)
+ki_sicherheit = 0.55      # darunter gilt der Vergleich als unentschieden: die Messung entscheidet, gelernt wird nicht
+timeout_s = 180
+prompt = "templates/paarvergleich-prompt.txt"
+
 [regie.ton]
 # Ton-Hygiene im Renderer (30.09., Cutter-Maßstab R1/R3): jedes fertige Video wird in zwei Pässen (loudnorm) auf
 # diese Lautheit und diesen True Peak angeglichen – Entwurf, Upload-Fassung und Final (entwurf.normalisiere_ton)

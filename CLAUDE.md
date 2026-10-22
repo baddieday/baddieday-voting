@@ -788,3 +788,19 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Anlass: DEY war ~6 Tage nicht im Tailnet, und Samba im CT lauschte seit dem Ausfall am 14.10. nur auf 127.0.0.1
   (smbd startete vor der festen IP; Neustart behebt es) – die Matches vom 20.–22.10. blieben liegen und wurden von Hand
   nachgeholt. Nebenbefund: `decide` aus n8n hatte nie eine Claude-Anmeldung (kein Clip mit KI-Beschreibung).
+- 2026-10-22 (Nachtschicht; Florian: der Schnitt soll sich autonom verbessern, Voten nur noch optional, der Mini darf
+  dafür voll laufen, Stimmen der Mitspieler kommen raus): **Fassungen im Wettbewerb** (`nachtschicht.py`). Im einfachen
+  Modus entsteht jedes Abend-Video und jedes 🎬 aus `[nachtschicht].fassungen` (4) Fassungen: die erste wie gelernt, die
+  weiteren mit je einer anderen Stellschraube (Aufbau, Tempo, Zeitlupe, Länge ±10 s innerhalb deiner Grenze, Anlauf,
+  Song – im Wechsel). Alle werden gemessen (Cutter-Maßstab ohne KI), die besten zwei blind vom KI-Cutter verglichen
+  (`kritik.ki_paarvergleich`, Schema `paarvergleich`, höchstens 8 am Tag), die Siegerin kommt zu dir („🥊 Beste von 4
+  Fassungen · KI-Cutter: …“), die anderen siehst du nie (`auto_verworfen = 'nachtschicht:…'`, nichts gelöscht).
+  **Lernen ohne dein Tippen:** jeder KI-Vergleich (`wettbewerbe`, quelle `ki`) lehrt `geschmack` (nur die Schrauben, in
+  denen sich die beiden unterscheiden; Gewicht 0,34 × Sicherheit) und `massstab` (als blindes KI-Paar). Die Messung
+  selbst lehrt nie (Zirkelschluss). Dein ✅/❌ zählt weiter dreimal so viel, das Publikum geht vor beiden. Grenzen: nie
+  bei 🔥 Viral, 2-Wochen-Video, neuen Fassungen nach ❌ oder unter /experte; keine weitere Fassung nach 25 min oder
+  unter 3 GB frei; alles unter der einen Rechen-Sperre; eine verwaiste erste Fassung gibt `aufraeumen` nach 90 min
+  frei. Sonntags eine 🥊-Zeile (Videos, Fassungen, KI-Vergleiche, bevorzugte Schraube). **DEY rechnet nicht** – der
+  Mini reicht, auf DEY liegen weiter keine Videos; die Chat-Tonspur verlässt den Mini nie (schon so: Stimmen nur, wenn
+  der Moment sie braucht, sonst Spur 0). Ehrlich: Ohne TikTok (`/tiktok`) lernt der Bot vom KI-Cutter und von dir,
+  nicht vom Publikum. Annahmen W1–W12: `docs/ENTSCHEIDUNGEN.md`, „Nachtschicht“.

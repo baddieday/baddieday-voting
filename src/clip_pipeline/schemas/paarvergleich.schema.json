@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Paarvergleich zweier Fassungen desselben Videos (nachtschicht.py, kritik.ki_paarvergleich)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sieger", "sicherheit", "gruende", "begruendung"],
+  "properties": {
+    "sieger": {"enum": ["a", "b"]},
+    "sicherheit": {"type": "number", "minimum": 0.5, "maximum": 1.0},
+    "gruende": {"type": "array", "maxItems": 4, "uniqueItems": true,
+                "items": {"enum": ["hektisch", "lang", "kurz", "langweilig", "effekte_viel", "action", "abgeschnitten", "musik"]}},
+    "begruendung": {"type": "string", "maxLength": 200}
+  }
+}

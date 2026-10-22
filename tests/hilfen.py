@@ -52,6 +52,8 @@ class MitSpeicher(unittest.TestCase):
         self.konfig.daten.setdefault("lernbot", {})["quelle"] = "alle"
         # Auto-Freigabe im Clip-Bot (30.09.): aus, damit alte Tests unverändert bleiben – neue Tests schalten sie an
         self.konfig.daten.setdefault("auto_freigabe", {})["modus"] = "aus"
+        # Nachtschicht (22.10.): aus – sonst baute jeder Short im einfachen Modus vier Fassungen; test_nachtschicht schaltet an
+        self.konfig.daten.setdefault("nachtschicht", {})["an"] = False
         for name in ("eingang", "replays", "sessions", "highlights", "musik", "archiv", "papierkorb"):
             self.konfig.ordner(name).mkdir(parents=True, exist_ok=True)
         (self.konfig.wurzel / ".clip-speicher").touch()

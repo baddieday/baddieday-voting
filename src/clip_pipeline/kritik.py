@@ -372,6 +372,64 @@ def bewerte(con: sqlite3.Connection, konfig: Konfig, entwurf_id: int, *, neu_mes
             "tor": tor["text"] if tor else None, **details}
 
 
+# --- Paarvergleich (Nachtschicht, 22.10.) --------------------------------------------------------------------------
+
+PAAR_SCHEMA = "paarvergleich"
+
+
+def _paar_vorlage(konfig: Konfig) -> str:
+    pfad = konfig.projektpfad(str(konfig.wert("nachtschicht.prompt", "templates/paarvergleich-prompt.txt")))
+    return pfad.read_text(encoding="utf-8")
+
+
+def paar_version(konfig: Konfig) -> str:
+    """sha256(Prompt + Schema)[:12] des Paarvergleichs – steht an jedem Vergleich (wettbewerbe.ki_version)."""
+    text = _paar_vorlage(konfig) + json.dumps(schema.lade(PAAR_SCHEMA), sort_keys=True)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _paare_heute(con: sqlite3.Connection) -> int:
+    return con.execute("SELECT COUNT(*) FROM wettbewerbe WHERE quelle = 'ki' AND substr(erstellt, 1, 10) = ?",
+                       (iso(jetzt())[:10],)).fetchone()[0]
+
+
+def ki_paarvergleich(con: sqlite3.Connection, konfig: Konfig, a_id: int, b_id: int,
+                     ordner: Path) -> tuple[dict | None, str | None]:
+    """Zwei fertige Fassungen blind vor dem KI-Cutter (nachtschicht.wettbewerb): im Ordner nur a/ und b/ mit
+    Kontaktbogen, Wellenform und plan.json – keine Noten, keine Messwerte (Spec §5.1 Regel 1 gilt auch hier).
+    (Urteil, Hinweis) wie ki_urteil: Urteil None bei aus ([nachtschicht].ki), Freund ohne Zugang, Tageslimit
+    ([nachtschicht].ki_pro_tag, gezählt in wettbewerbe), fehlendem Video oder wenn Claude scheitert. Das Urteil:
+    sieger "a"/"b", sicherheit 0,5–1, gruende (GRUENDE: was der Verliererin fehlt), begruendung (ein Satz)."""
+    if not konfig.wert("nachtschicht.ki", True) or not claude_aufruf.ki_moeglich(konfig):
+        return None, None
+    if _paare_heute(con) >= int(konfig.wert("nachtschicht.ki_pro_tag", 8)):
+        return None, "KI-Cutter: Tageslimit für Vergleiche erreicht – die Messung entscheidet"
+    for name, eid in (("a", a_id), ("b", b_id)):
+        z = con.execute("SELECT * FROM entwuerfe WHERE id = ?", (eid,)).fetchone()
+        if z is None or not z["datei"] or not Path(z["datei"]).is_file():
+            return None, f"KI-Cutter: Video #{eid} fehlt – die Messung entscheidet"
+        liste = _mit_beats(con, json.loads(Path(z["schnittliste"]).read_text(encoding="utf-8")))
+        video, unter = Path(z["datei"]), ordner / name
+        unter.mkdir(parents=True, exist_ok=True)
+        try:
+            zeiten = bilder_zeiten(liste, medien.probe(video).dauer_s or None)
+            kontaktbogen(video, unter, liste, zeiten)
+        except medien.MedienFehler as fehler:
+            return None, f"KI-Cutter: kein Kontaktbogen für #{eid} ({str(fehler)[:60]})"
+        wellenform(video, unter)
+        (unter / "plan.json").write_text(json.dumps(plan(liste, zeiten), ensure_ascii=False, indent=1),
+                                         encoding="utf-8")
+    antwort = claude_aufruf.frage_json(konfig, _paar_vorlage(konfig), ordner, schema_name=PAAR_SCHEMA,
+                                       timeout_s=float(konfig.wert("nachtschicht.timeout_s", 180)))
+    try:
+        claude_aufruf.protokolliere(con, PAAR_SCHEMA, antwort)
+    except Exception:  # Zählen ist Nebensache
+        log.exception("Paarvergleich protokollieren")
+    if antwort.daten is None:
+        return None, f"KI-Cutter: {antwort.hinweis}"
+    return antwort.daten, None
+
+
 def kritik_zeile(con: sqlite3.Connection, entwurf_id: int) -> str | None:
     """Für die Bildunterschrift: „🧐 Cutter 64/100 · schwächstes: Leerlauf 0,42 (0:21–0:26 ohne Aktion) · Hook 0,55
     (erste Aktion bei 2,9 s)“, mit Tor „🧐 Cutter 40/100 · Tor: Blitze 7/s (Grenze 3)“ (None ohne Kritik)."""

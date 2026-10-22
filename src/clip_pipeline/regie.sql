@@ -164,3 +164,20 @@ CREATE TABLE IF NOT EXISTS sperren (
     erstellt   TEXT NOT NULL,
     PRIMARY KEY (art, schluessel)
 );
+
+-- Nachtschicht (22.10., nachtschicht.py): Fassungen im Wettbewerb. Eine Zeile je Vergleich – quelle 'ki' = blinder
+-- Paarvergleich des KI-Cutters (kritik.ki_paarvergleich; lehrt geschmack und massstab), 'messung' = die Siegerin lag nach
+-- dem Cutter-Maßstab vor dieser Fassung (nur Anzeige, lehrt nie – Zirkelschluss). video = die Fassung, die zu dir kam.
+CREATE TABLE IF NOT EXISTS wettbewerbe (
+    id          INTEGER PRIMARY KEY,
+    video       INTEGER NOT NULL REFERENCES entwuerfe (id),
+    sieger      INTEGER NOT NULL REFERENCES entwuerfe (id),
+    verlierer   INTEGER NOT NULL REFERENCES entwuerfe (id),
+    quelle      TEXT NOT NULL,                 -- 'ki' · 'messung'
+    sicherheit  REAL,                          -- KI: 0,5 (Münzwurf) bis 1
+    gruende     TEXT NOT NULL DEFAULT '[]',    -- JSON: was der Verliererin fehlt (regie_lernen.GRUENDE)
+    text        TEXT,                          -- KI: ein Satz, warum die Siegerin gewinnt
+    ki_version  TEXT,                          -- kritik.paar_version (Prompt + Schema)
+    erstellt    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS wettbewerbe_video ON wettbewerbe (video);
