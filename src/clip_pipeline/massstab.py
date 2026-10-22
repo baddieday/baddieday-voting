@@ -9,7 +9,9 @@ voller Batch, deterministisch.
 Lehrer (Paare):
   - KI-Cutter  kritiken.ki_score, gleiche ki_version, gleiches Format, ≤ 14 Tage, |ΔK| ≥ 10. Still verworfene
                Entwürfe zählen mit (sonst wäre die Auswahl zensiert). Darf tonmix und beat_sync nicht verschieben –
-               die KI hört nichts (Maske aus kriterien.KRITERIEN[k]["ki_maske"]).
+               die KI hört nichts (Maske aus kriterien.KRITERIEN[k]["ki_maske"]). Dazu seit 22.10. die blinden
+               Paarvergleiche der Nachtschicht (wettbewerbe, quelle 'ki', Sicherheit ≥ WETTBEWERB_SICHERHEIT) als
+               KI-Paare mit derselben Maske – 'messung'-Zeilen (die eigene Note) nie.
   - du         👍 gegen 👎 im gleichen Format, ≤ 7 Tage (regie_lernen.bewertungen(mit_ki=False)); ein 👎 nur mit
                Inhalts-Gründen (Musik, getroffen) sagt nichts über den Schnitt und bildet kein Paar (🥱 langweilig
                zählt seit 07.10. als Urteil über den Schnitt).
@@ -52,6 +54,7 @@ DU_FENSTER_TAGE = 7
 DU_MAX_PAARE = 400          # Deckel für die Rechenzeit (Round-Robin verteilt die Paare über alle 👍)
 KI_NACHBARN = 8             # je Entwurf höchstens so viele spätere Partner (hält die Paarzahl linear)
 KI_PRUEF_PAARE = 8          # ab so vielen Publikumspaaren mit KI-Note auf beiden Seiten wird der KI-Cutter geprüft
+WETTBEWERB_SICHERHEIT = 0.55   # Nachtschicht: ein unsicherer Paarvergleich (≈ Münzwurf) lehrt nicht
 GEMESSEN_MIN = kriterien.GEMESSEN_MIN
 
 # Standard wie config/pipeline.toml [regie.massstab]
@@ -153,6 +156,22 @@ def _ki_paare(entwuerfe: dict[int, dict], e: dict) -> list[MassPaar]:
     return paare
 
 
+def _wettbewerb_paare(con: sqlite3.Connection, entwuerfe: dict[int, dict]) -> list[MassPaar]:
+    """Nachtschicht (22.10.): die blinden Paarvergleiche des KI-Cutters (wettbewerbe, quelle 'ki') als KI-Paare –
+    beide Fassungen am Video gemessen, gleiches Format, Sicherheit ≥ WETTBEWERB_SICHERHEIT, Maske wie die KI-Note.
+    Liest nur die Lehrer-Spalten sieger/verlierer/sicherheit (Regel 2) – 'messung' ist die eigene Note und lehrt nie."""
+    maske = frozenset(k for k, v in kriterien.KRITERIEN.items() if v["ki_maske"])
+    paare = []
+    for z in con.execute("SELECT sieger, verlierer, sicherheit FROM wettbewerbe WHERE quelle = 'ki' ORDER BY id"):
+        a, b = entwuerfe.get(int(z["sieger"])), entwuerfe.get(int(z["verlierer"]))
+        if a is None or b is None or a["fmt"] != b["fmt"]:
+            continue
+        if float(z["sicherheit"] if z["sicherheit"] is not None else 0.5) < WETTBEWERB_SICHERHEIT:
+            continue
+        paare.append(_paar(a, b, "ki", 1.0, maske))
+    return paare
+
+
 def _du_paare(con: sqlite3.Connection, entwuerfe: dict[int, dict]) -> list[MassPaar]:
     gut: dict[str, list[dict]] = {}
     schlecht: dict[str, list[dict]] = {}
@@ -228,7 +247,7 @@ def _sammle(con: sqlite3.Connection, konfig: Konfig | None) -> tuple[list[MassPa
     if len(pruef) >= KI_PRUEF_PAARE:
         q_ki = sum(1.0 if a > b else 0.5 if a == b else 0.0 for a, b in pruef) / len(pruef)
         a_ki = max(0.0, min(1.0, (q_ki - 0.5) / 0.2))
-    ki = _ki_paare(entwuerfe, e)
+    ki = _ki_paare(entwuerfe, e) + _wettbewerb_paare(con, entwuerfe)
     g_ki = 0.5 * (1 - pi) * a_ki * min(1.0, e["ki_budget"] / len(ki)) if ki else 0.0
     for p in ki:
         p.gewicht = g_ki

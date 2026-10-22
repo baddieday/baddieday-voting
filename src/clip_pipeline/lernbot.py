@@ -34,6 +34,7 @@ from pathlib import Path
 from . import (autonom, big, db, einstellungen, entwurf, erwartung, geschmack, highlight, kriterien, kritik, laufzeiten,
                lernen, massstab, musik, regeln, regie, regie_lernen, stile, stimmung, szenen, viral)
 from .erwartung import anzeige as _erwartung_anzeige  # eigener Name: entwurf_text hat einen Parameter „erwartung“
+from . import nachtschicht   # Nachtschicht (22.10.): Fassungen im Wettbewerb
 from .konfig import Konfig, SpeicherOffline
 from .zeit import aus_iso, iso, jetzt, utc_zu_lokal
 
@@ -239,6 +240,19 @@ def _szenen_zahl(n: int, art: str = "") -> str:
     return f"{n} {art}Szene{'n' if n != 1 else ''}"
 
 
+def wettbewerb_zeile(liste: dict) -> str | None:
+    """Nachtschicht (22.10.): „🥊 Beste von 4 Fassungen · KI-Cutter: …“ aus liste["wettbewerb"] (nachtschicht.freigeben);
+    ohne KI-Entscheid „(nach Messung)“. None ohne Wettbewerb oder mit nur einer Fassung."""
+    w = liste.get("wettbewerb")
+    if not isinstance(w, dict) or int(w.get("fassungen") or 1) < 2:
+        return None
+    zeile = f"🥊 Beste von {int(w['fassungen'])} Fassungen"
+    if w.get("ki"):
+        grund = str(w.get("grund") or "").strip()
+        return zeile + (f" · KI-Cutter: {escape(grund[:140])}" if grund else " · vom KI-Cutter gewählt")
+    return zeile + " (nach Messung)"
+
+
 def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None = None) -> str:
     """Bildunterschrift im einfachen Modus (07.10., Florian: „fehlerhafte Texte … vereinfachen“): Video statt Entwurf,
     Szenen statt Momente, ✅/❌ wie die Knöpfe – ohne Bogen, Stimmung, BPM und „🧠 Aus #…“ (das sagt der Satz nach
@@ -277,6 +291,8 @@ def entwurf_text_einfach(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row
                                                                  else "kennst du schon"))
     if m := liste.get("musik"):
         teile.append(f"🎵 {escape(m['titel'])}" + (f" – {escape(m['kuenstler'])}" if m.get("kuenstler") else ""))
+    if zeile_w := wettbewerb_zeile(liste):
+        teile.append(zeile_w)
     warnungen: list[str] = []
     for h in liste.get("hinweise", []):
         if h.startswith("🎯"):
@@ -332,6 +348,8 @@ def entwurf_text(zeile: sqlite3.Row, liste: dict, bewertung: sqlite3.Row | None 
         if a.get("ohne_datei"):
             zeile += f" · {a['ohne_datei']} ohne Datei"
         teile.append(zeile)
+    if zeile_w := wettbewerb_zeile(liste):
+        teile.append(zeile_w)
     auto = (liste.get("parameter") or {}).get("autonom") or {}
     if auto.get("version"):   # Stufe 5 (M192): ohne Version und Prozent – beides sah bei Zufall genauso aus
         teile.append("🧠 Feinwerte (Tendenzen, nicht belegt)" + (f" aus {feinwerte_videos} Video"
@@ -613,11 +631,25 @@ def baue_entwurf(konfig: Konfig, fmt: str, nur_matches: set[str] | None = None, 
                 raise regie.RegieFehler(f"{fehler} – {quell_hinweis}.{tipp}") from fehler
             t3 = time.monotonic()
             lauf.ziel, lauf.daten["schnitt_s"] = int(e["entwurf"]), round(t3 - t2, 1)
+            # Nachtschicht (22.10.): 🎬 im einfachen Modus baut mehrere Fassungen und schickt die Siegerin – nicht bei
+            # 🔥 Viral und nicht bei einer neuen Fassung nach ❌ (die muss „anders“ sein)
+            wettbewerb = nachtschicht.aktiv(konfig) and regie_fmt == "short" and variante is None \
+                and fassung is None and ersetzt is None
+            if wettbewerb:
+                nachtschicht.markiere(con, int(e["entwurf"]))
             entwurf.entwurf(con, konfig, e["entwurf"])
-            try:  # Cutter-Kritik (30.09.): der Bot benotet sich selbst – ein Fehler kostet nie den Entwurf
-                kritik.bewerte(con, konfig, e["entwurf"])
-            except Exception:
-                log.exception("Cutter-Kritik Entwurf #%s", e["entwurf"])
+            if wettbewerb:
+                try:
+                    w = nachtschicht.wettbewerb(con, konfig, regie_fmt, int(e["entwurf"]), nur_matches=nur_matches)
+                    e["entwurf"], lauf.ziel, lauf.daten["fassungen"] = w["video"], int(w["video"]), w["fassungen"]
+                except Exception:  # noqa: BLE001 – der Wettbewerb ist Zugabe: die erste Fassung kommt wie bisher
+                    log.exception("Nachtschicht Entwurf #%s", e["entwurf"])
+                    nachtschicht.freigeben(con, int(e["entwurf"]))
+            else:
+                try:  # Cutter-Kritik (30.09.): der Bot benotet sich selbst – ein Fehler kostet nie den Entwurf
+                    kritik.bewerte(con, konfig, e["entwurf"])
+                except Exception:
+                    log.exception("Cutter-Kritik Entwurf #%s", e["entwurf"])
             lauf.daten["render_s"] = round(time.monotonic() - t3, 1)
         # Wo die Wartezeit nach ✅ fertig bleibt (27.09.) – journalctl -u clip-lernbot | grep "gebaut in"
         log.info("Entwurf #%s gebaut in %.0f s: Sperre %.0f s · Stimmung %.0f s (%s Clips) · Schnitt %.0f s · Render %.0f s",

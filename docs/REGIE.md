@@ -503,6 +503,32 @@ professioneller Schnitt mit einem Hauch Humor.“ Deshalb kein starres Fail-Rege
 - **Caption** des Fail-Videos (`templates/caption-fail.txt`): Fakten des schlimmsten Fails, „Was hättest du gemacht?“
   und „Größter Fail der Woche – stimm ab auf clip-battle.de“.
 
+## Nachtschicht – Fassungen im Wettbewerb (22.10.)
+
+Im einfachen Modus entsteht ein Short nicht mehr einmal, sondern im Wettbewerb (`nachtschicht.py`):
+
+1. **Erste Fassung** wie bisher (gelernte Werte, Geschmack-Schrauben, deine Regeln). Sie wird vor dem Rendern markiert,
+   damit die Lern-Bot-Schleife sie nicht sofort schickt.
+2. **Weitere Fassungen** (`[nachtschicht].fassungen` = 4, also drei weitere): jede ändert genau eine Stellschraube –
+   Aufbau, Tempo, Zeitlupe, Länge (±10 s, nie gegen deine ⏱️/⏳-Grenze), Anlauf (×1,5) oder Song (Abzug auf den der
+   ersten Fassung). Welche drei, wechselt je Video. Eine Fassung, die dasselbe Video ergäbe, wird nicht gerendert.
+   Nach 25 min oder unter 3 GB frei im Regie-Ordner kommt keine weitere mehr.
+3. **Messen:** jede Fassung am fertigen Video (Cutter-Maßstab, ohne KI). Ein verletztes K.O.-Tor sortiert aus.
+4. **KI-Paarvergleich:** die besten zwei nach Messung blind vor Claude (`kritik.ki_paarvergleich`: je Kontaktbogen,
+   Wellenform, Plan in a/ und b/, Schema `paarvergleich`: sieger, sicherheit 0,5–1, gruende, begruendung). Höchstens
+   8 am Tag. Sicherheit unter 0,55 gilt als unentschieden – dann entscheidet die Messung.
+5. **Siegerin frei,** die anderen bleiben still (`auto_verworfen = 'nachtschicht:fassung'`). Unter dem Video steht
+   „🥊 Beste von 4 Fassungen · KI-Cutter: ‹Satz›“.
+
+**Was lernt daraus:** Jeder KI-Vergleich steht in `wettbewerbe` (quelle `ki`). `geschmack.statistik` zählt ihn nur für
+die Schrauben, in denen sich Siegerin und Verliererin unterscheiden (Gewicht 0,34 × Sicherheit); `massstab` nimmt ihn
+als blindes KI-Paar. Die Messung lehrt nie (Zirkelschluss). Dein ✅/❌ und das Publikum zählen wie bisher und gehen vor.
+Sonntags: „🥊 n Videos aus je k Fassungen · m KI-Vergleiche · der KI-Cutter bevorzugte: …“.
+
+**Nicht im Wettbewerb:** 🔥 Viral, das 2-Wochen-Video, neue Fassungen nach ❌ (die müssen „anders“ sein), /experte.
+Stirbt ein Lauf nach dem Rendern der ersten Fassung, gibt `nachtschicht.aufraeumen` sie nach 90 min frei
+(sitzung.verarbeite, alle 10 min). Annahmen W1–W12 in `docs/ENTSCHEIDUNGEN.md`.
+
 ## pve-big schaltet sich selbst ab (clip-leerlauf)
 `deploy/big/clip-leerlauf` läuft auf pve-big jede Minute und fährt ihn nach 20 min ohne echten Zugriff auf den
 Clips-Ordner herunter (Details im Kopf des Skripts). Er setzt jede Minute den Zeitstempel der leeren Datei

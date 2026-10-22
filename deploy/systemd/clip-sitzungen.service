@@ -14,6 +14,9 @@ SuccessExitStatus=3 4
 TimeoutStartSec=2h
 SupplementaryGroups=render
 NoNewPrivileges=true
+# 22.10.: ProtectSystem=strict macht auch /tmp nur lesbar – ohne eigenes /tmp scheiterte Whisper/Stimmung im Dienst
+# („No usable temporary directory“, zuerst 09.10.); der Lern-Bot hatte es schon
+PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 # /srv/puffer ausdrücklich (E19): Nach dem Umschalten (docs/PUFFER.md, R5) ist /srv/clips nur ein Link darauf –

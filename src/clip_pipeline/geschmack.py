@@ -150,7 +150,58 @@ def statistik(con: sqlite3.Connection, fmt: str = "short") -> dict[str, dict[str
                 w = stat[knopf][wahl]
                 w["n"] += KI_GEWICHT
                 w["s"] += KI_GEWICHT * max(0.0, min(1.0, float(b["ki"]) / 100))
+    # Nachtschicht (22.10.): ein KI-Paarvergleich zweier Fassungen lehrt nur die Schrauben, in denen sie sich
+    # unterscheiden – zwei gleiche Aufbauten sagen nichts über den Aufbau
+    for s_wahl, v_wahl, g in wettbewerb_paare(con, fmt):
+        for knopf in KNOEPFE:
+            if knopf in s_wahl and knopf in v_wahl and s_wahl[knopf] != v_wahl[knopf]:
+                stat[knopf][s_wahl[knopf]]["n"] += g
+                stat[knopf][s_wahl[knopf]]["s"] += g
+                stat[knopf][v_wahl[knopf]]["n"] += g
     return stat
+
+
+def wettbewerb_paare(con: sqlite3.Connection, fmt: str = "short", seit: str | None = None,
+                     bis: str | None = None) -> list[tuple[dict, dict, float]]:
+    """(Wahl der Siegerin, Wahl der Verliererin, Gewicht) je KI-Paarvergleich der Nachtschicht (wettbewerbe, quelle
+    'ki'; Gewicht KI_GEWICHT × Sicherheit, unentschieden zählt nicht). seit/bis: ISO-Zeiten (erstellt)."""
+    zeilen = con.execute(
+        """SELECT w.sicherheit, s.parameter AS ps, v.parameter AS pv FROM wettbewerbe w
+             JOIN entwuerfe s ON s.id = w.sieger JOIN entwuerfe v ON v.id = w.verlierer
+            WHERE w.quelle = 'ki' AND s.format = ? AND v.format = ? AND w.erstellt >= ? AND w.erstellt < ?
+            ORDER BY w.id""", (fmt, fmt, seit or "", bis or "9")).fetchall()
+    ergebnis = []
+    for z in zeilen:
+        sicherheit = float(z["sicherheit"] if z["sicherheit"] is not None else 0.5)
+        if sicherheit <= 0.5:
+            continue
+        ergebnis.append((_wahl_aus(z["ps"]), _wahl_aus(z["pv"]), KI_GEWICHT * min(1.0, sicherheit)))
+    return ergebnis
+
+
+def wettbewerb_zeile(con: sqlite3.Connection, seit: str, bis: str) -> str | None:
+    """„🥊 3 Videos aus je 4 Fassungen · 3 KI-Vergleiche · der KI-Cutter bevorzugte: Aufbau „erzählt“ (2×)“ – für den
+    Wochenbericht; None ohne Wettbewerb im Zeitraum."""
+    zeilen = con.execute("SELECT video, sieger, verlierer, quelle FROM wettbewerbe WHERE erstellt >= ? AND erstellt < ?",
+                         (seit, bis)).fetchall()
+    if not zeilen:
+        return None
+    fassungen: dict[int, set[int]] = {}
+    for z in zeilen:
+        fassungen.setdefault(int(z["video"]), {int(z["video"])}).update((int(z["sieger"]), int(z["verlierer"])))
+    je = sum(len(f) for f in fassungen.values()) / len(fassungen)
+    ki = sum(1 for z in zeilen if z["quelle"] == "ki")
+    n = len(fassungen)
+    text = f"🥊 {n} Video{'s' if n != 1 else ''} aus je {je:.0f} Fassungen · {ki} KI-Vergleich{'e' if ki != 1 else ''}"
+    zaehler: dict[tuple[str, str], int] = {}
+    for s_wahl, v_wahl, _g in wettbewerb_paare(con, seit=seit, bis=bis):
+        for knopf in KNOEPFE:
+            if knopf in s_wahl and knopf in v_wahl and s_wahl[knopf] != v_wahl[knopf]:
+                zaehler[(knopf, s_wahl[knopf])] = zaehler.get((knopf, s_wahl[knopf]), 0) + 1
+    if zaehler:
+        (knopf, wahl), anzahl = max(zaehler.items(), key=lambda kv: (kv[1], kv[0]))
+        text += f" · der KI-Cutter bevorzugte: {NAMEN.get((knopf, wahl), wahl)} ({anzahl}×)"
+    return text
 
 
 def _anders(anders: dict, aufbauten: list[str], basis_seg: float) -> tuple[str, str]:
@@ -436,6 +487,8 @@ def wochen_text(con: sqlite3.Connection, konfig: Konfig, bis=None) -> str | None
               (f"🎬 {len(woche)} Video{'s' if len(woche) != 1 else ''} · {ja} ✅ · {nein} ❌"
                + (f" · KI-Note im Schnitt {sum(ki) / len(ki):.0f}" if ki else "")) if woche else
               "🎬 Diese Woche kein neues Video", *block["oben"]]
+    if woche and (wz := wettbewerb_zeile(con, iso(von), iso(bis))):   # Nachtschicht (22.10.): direkt unter 🎬
+        zeilen.insert(2, wz)
     if not block["neu"]:   # 08.10.: ohne klares Bild keine Bitte an dich; mit bestem Aufbau nennt 🎯 keinen Aufbau (M188)
         stat = statistik(con)
         if not block["bester"]:
