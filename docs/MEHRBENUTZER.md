@@ -494,7 +494,7 @@ Schneller wird nichts – ehrlich gesagt. Gemessen im Container (nur als Verhäl
    Wartezeit im p90 höchstens ein laufender Freund-Auftrag, keine Haltezeit über 1 h.
 2. Daraus selbst entscheiden: harter Vortritt (Schwellen in M147), Short gleich in Upload-Qualität (ab etwa 30 %
    Freigabe, M151), ein zweiter Rechner nur bei einem Auslöser aus `docs/WORKER.md`.
-3. Florians Ja oder Nein zum Nachhol-Timer für liegengebliebene n8n-Matches (M148).
+3. ~~Florians Ja oder Nein zum Nachhol-Timer für liegengebliebene n8n-Matches (M148).~~ 22.10.: Ja (`clip-scan.timer`).
 4. Danach Stufe 4: Kampagnenlink je Instanz, neue Zielgrößen versioniert neben dem alten Score.
 
 ## Erfolg ehrlich messen (Stufe 4, Schritt 1 und 2 – umgesetzt)

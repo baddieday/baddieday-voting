@@ -113,8 +113,6 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - Whisper (Untertitel + Kommentar-Merkmal): Installation von `faster-whisper` freigeben?
 - Highlight-Video: Ordner mit lizenzierter Musik anlegen.
 - Mehrbenutzer (M1): Wie viel Speicher ist auf dem vServer frei (für den Briefkasten der Freunde, Stufe 2)?
-- Stufe 3 (M148): Soll der Mini deine n8n-Matches, die seit über 3 h auf `neu` stehen, selbst nachholen (stündlicher
-  Timer neben n8n)? Ja oder Nein – bis dahin Alarm von n8n und `pipeline process <ID>` von Hand.
 - Stufe 3 (M149): Zweiter Rechner oder Cloud nur nach einem Messbefund aus `pipeline laufzeiten` (Auslöser in
   `docs/WORKER.md`) – dann: welcher Rechner, bei der Cloud Anbieter, Monatslimit in Euro und Text der Zustimmung.
 - Stufe 4 (M157, M165–M170), gebündelt: (1) Darf clip-battle.de einen Zähler bekommen (nur Aufrufe je Video-Code und
@@ -782,3 +780,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   von CT 102** hat jetzt 32 statt 16 GB: Dort liegen Datenbank und Entwürfe des Lern-Bots (regie/, 6,7 GB), frei waren nur
   noch 3,7 GB, und die Morgenprüfung misst diese Platte nicht. Auf pve-mini lief noch der Code vom 08.10. früh, die
   Freigabe alter Rohvideos (B5) wirkt erst nach dem nächsten Update. Proxmox hat keinen Sicherungs-Job (nur Hand-Sicherungen).
+- 2026-10-22 (M148, Florian: „ja“): **Der Mini verarbeitet deine Matches selbst** – `clip-scan.timer` alle 5 min
+  (`scan --verarbeiten --max 1 --versuche 3 --mindestalter 10`: je Lauf das älteste offene Match, frühestens 10 min nach
+  dem Erfassen, nach 3 Fehlschlägen 'fehler' + Zeile im Lern-Bot). Sandbox wie clip-sitzungen, Claude für `decide` über
+  die Anmeldung des Lern-Bots (`CLAUDE_CONFIG_DIR`, Home nur lesbar). n8n darf weiterlaufen (gleiche Sperre,
+  idempotent), wird für die Clips aber nicht mehr gebraucht; DEY bleibt für clip-battle.de und den Briefkasten.
+  Anlass: DEY war ~6 Tage nicht im Tailnet, und Samba im CT lauschte seit dem Ausfall am 14.10. nur auf 127.0.0.1
+  (smbd startete vor der festen IP; Neustart behebt es) – die Matches vom 20.–22.10. blieben liegen und wurden von Hand
+  nachgeholt. Nebenbefund: `decide` aus n8n hatte nie eine Claude-Anmeldung (kein Clip mit KI-Beschreibung).

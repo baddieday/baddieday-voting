@@ -18,6 +18,7 @@ import json
 import logging
 import sqlite3
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 from . import aufraeumen, bestand, big, caption, db, erfassung, highlight, lernen, material, replay, shorts, stimmung, verarbeitung
@@ -74,11 +75,20 @@ def _cmd_scan(args, konfig, con) -> int:
     """Ohne --max/--versuche genau wie bisher. Freunde laufen ohne n8n per Timer (Mehrbenutzer, M33–M35):
     --max N verarbeitet je Lauf nur die N ältesten offenen Matches – die gemeinsame Sperre wird so zwischen den Läufen
     frei; --versuche N gibt ein Match nach N Fehlschlägen auf (Status 'fehler'), sonst blockierte ein kaputtes ältestes
-    Match alle neueren für immer. "offen" in der JSON-Zeile bleibt die volle Liste, "verarbeitet" nennt diesen Lauf."""
+    Match alle neueren für immer. "offen" in der JSON-Zeile bleibt die volle Liste, "verarbeitet" nennt diesen Lauf.
+    Florian (M148, 22.10.: Ja): clip-scan.timer verarbeitet seine Matches ohne n8n; --mindestalter MIN lässt ein Match
+    erst MIN Minuten nach dem Erfassen ran – so kommen die letzten Aufnahmen vom PC (alle 2 min) noch dazu."""
     ergebnis = erfassung.scan(con, konfig)
     if args.verarbeiten:
         ergebnis["verarbeitet"] = []
         offen = ergebnis["offen"]
+        if args.mindestalter is not None:
+            grenze = iso(jetzt() - timedelta(minutes=args.mindestalter))
+            jung = {z[0] for z in con.execute("SELECT id FROM matches WHERE status = 'neu' AND erstellt > ?", (grenze,))}
+            if jung:
+                log.info("scan: %d Match(es) erst seit weniger als %d min da – im nächsten Lauf", len(jung),
+                         args.mindestalter)
+            offen = [sid for sid in offen if sid not in jung]
         if args.max is not None and len(offen) > args.max:
             log.info("scan: %d von %d offenen Matches in diesem Lauf, der Rest in den nächsten", args.max, len(offen))
             offen = offen[: args.max]
@@ -889,6 +899,8 @@ def baue_parser() -> argparse.ArgumentParser:
                    help="mit --verarbeiten: je Lauf nur die N ältesten offenen Matches")
     s.add_argument("--versuche", type=_ab_eins, metavar="N",
                    help="mit --verarbeiten: nach N Fehlschlägen Status 'fehler' (nachholen: pipeline process ID)")
+    s.add_argument("--mindestalter", type=_ab_eins, metavar="MIN",
+                   help="mit --verarbeiten: nur Matches, die seit mindestens MIN Minuten erfasst sind")
     s.set_defaults(fn=_cmd_scan, sperren=True)
 
     s = unter.add_parser("process", help="alle vier Schritte für eine Session")

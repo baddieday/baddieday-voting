@@ -159,6 +159,19 @@ class UpdateRichtetEin(unittest.TestCase):
         self.lauf()
         self.assertEqual(self.eingeschaltet().count("clip-publikum.timer"), 1)
 
+    def test_matches_ohne_n8n_eingerichtet_und_eingeschaltet(self):
+        """22.10. (M148, Florian: „ja“): clip-scan verarbeitet deine Matches ohne n8n – eingerichtet und eingeschaltet
+        wie clip-publikum, mit Rückweg."""
+        r = self.lauf()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for name in ("clip-scan.service", "clip-scan.timer"):
+            with self.subTest(name):
+                self.assertEqual((self.units / name).read_text(encoding="utf-8"),
+                                 (SYSTEMD / name).read_text(encoding="utf-8"))
+        self.assertIn("clip-scan.timer", self.eingeschaltet())
+        rueckweg = (self.t / "sich.zurueck.sh").read_text(encoding="utf-8")
+        self.assertRegex(rueckweg, r"systemctl disable --now .*clip-scan\.timer")
+
     def test_von_hand_angepasster_timer_bleibt_unangetastet(self):
         eigen = (SYSTEMD / "clip-publikum.timer").read_text(encoding="utf-8").replace("10:00", "12:00")
         (self.units / "clip-publikum.timer").write_text(eigen, encoding="utf-8")
