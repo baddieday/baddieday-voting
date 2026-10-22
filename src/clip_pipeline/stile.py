@@ -88,8 +88,10 @@ def statistik(con: sqlite3.Connection, fmt: str, konfig: Konfig | None = None) -
 
 
 def _letzte(con: sqlite3.Connection, fmt: str, anzahl: int = 2) -> list[str | None]:
+    # Nachtschicht (22.10.): Mitbewerberinnen, die nie zu dir kamen, zählen nicht als „deine letzten“
     return [_stil_von(z["parameter"]) for z in con.execute(
-        "SELECT parameter FROM entwuerfe WHERE format = ? ORDER BY id DESC LIMIT ?", (fmt, anzahl))]
+        "SELECT parameter FROM entwuerfe WHERE format = ? AND (auto_verworfen IS NULL OR auto_verworfen NOT LIKE "
+        "'nachtschicht:%') ORDER BY id DESC LIMIT ?", (fmt, anzahl))]
 
 
 def waehle(con: sqlite3.Connection, konfig: Konfig, fmt: str) -> str:

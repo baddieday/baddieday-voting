@@ -38,7 +38,7 @@ import sqlite3
 from datetime import timedelta
 from pathlib import Path
 
-from . import db, einstellungen, entwurf, fail, lernen, material, musik, regeln, regie, regie_lernen, stimmung
+from . import db, einstellungen, entwurf, fail, lernen, material, musik, nachtschicht, regeln, regie, regie_lernen, stimmung
 from .konfig import Konfig
 from .medien import MedienFehler
 from .verarbeitung import SESSION_ID
@@ -52,6 +52,7 @@ NACHTRAG_H = 24               # Stufe 4: so lange nach dem Abend-Ende zählt sp�
 
 def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, whisper: bool = True) -> dict:
     konfig.pruefe_speicher()  # wirft SpeicherOffline -> Exit 3, kein Wecken
+    nachtschicht.aufraeumen(con)   # Nachtschicht (22.10.): eine erste Fassung, deren Wettbewerb abbrach, kommt doch
     ordner = konfig.wurzel / str(konfig.wert("sitzungen.ordner", "sitzungen"))
     fertig = {z["name"] for z in con.execute("SELECT name FROM sitzungen")}
     ergebnis: dict = {"neu": [], "wartet": [], "fehler": [], "nachgeholt": _nachholen(con, konfig), "nachtrag": []}
@@ -96,10 +97,15 @@ def verarbeite(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, 
         _lerne(con, k)
         try:
             entwurf_id = _plane(con, k, matches)
+            wettbewerb = nachtschicht.aktiv(k)
+            if wettbewerb:   # Nachtschicht (22.10.): markiert, bis der Wettbewerb entschieden ist – sonst käme sie sofort
+                nachtschicht.markiere(con, entwurf_id)
             # Die Sitzung kennt ihren Entwurf schon VOR dem Rendern: sobald er fertig ist, kann der Lern-Bot ihn als
             # „Dein Abend vom …“ schicken und die Statuszeile löschen – vorher lag dazwischen ein kleines Rennen
             _merke(con, name, matches, ende, entwurf_id, hinweis)
             entwurf.entwurf(con, k, entwurf_id)
+            if wettbewerb:
+                entwurf_id = _wettbewerb(con, k, entwurf_id, matches)
         except regie.ZuWenigSzenen as z:   # lieber kein Video als eins mit Füllmaterial (Florian, 07.10.)
             hinweis = "; ".join(filter(None, [hinweis, str(z)]))
             db.lern_meldung(con, f"kein:{name}", kein_video_text(tag, z, len(kommt_noch), experte=experte))
@@ -183,6 +189,18 @@ def _plane(con: sqlite3.Connection, k: Konfig, matches: list[str]) -> int:
     return regie.erstelle(con, k, fmt, parameter=parameter, ziel=ziel, nur_matches=set(matches))["entwurf"]
 
 
+def _wettbewerb(con: sqlite3.Connection, k: Konfig, entwurf_id: int, matches: list[str]) -> int:
+    """Nachtschicht (22.10.): weitere Fassungen bauen, messen, KI-Paarvergleich – die Siegerin wird das Abend-Video.
+    Ein Fehler kostet nie das Video: dann kommt die erste Fassung wie bisher (freigeben)."""
+    try:
+        return int(nachtschicht.wettbewerb(con, k, str(k.wert("sitzungen.format", "short")), entwurf_id,
+                                           nur_matches=set(matches))["video"])
+    except Exception:  # noqa: BLE001 – der Wettbewerb ist Zugabe
+        log.exception("Nachtschicht Abend-Video #%s", entwurf_id)
+        nachtschicht.freigeben(con, entwurf_id)
+        return entwurf_id
+
+
 def _panne(con: sqlite3.Connection, name: str, tag: str, fehler: Exception, entwurf_id: int | None, *,
            experte: bool) -> int | None:
     """Fehler beim Bauen: Entwurf, den der nächste Lauf nachholt, oder None (dann steht die Fehlerzeile da).
@@ -241,11 +259,16 @@ def _nachtrag(con: sqlite3.Connection, konfig: Konfig, *, claude: bool = True, w
     entwurf_id, hinweis = None, z["hinweis"]
     try:
         entwurf_id = _plane(con, k, matches)
+        wettbewerb = nachtschicht.aktiv(k)
+        if wettbewerb:
+            nachtschicht.markiere(con, entwurf_id)
         _merke(con, name, matches, ende, entwurf_id, None)
         hinweis = None
         db.lern_meldung(con, f"nachtrag:{name}", f"🎮 Nachtrag: Abend vom {tag} – inzwischen sind weitere Szenen "
                                                  "angekommen, ich baue dein Video. Das dauert meist 10–30 Minuten.")
         entwurf.entwurf(con, k, entwurf_id)
+        if wettbewerb:
+            entwurf_id = _wettbewerb(con, k, entwurf_id, matches)
     except regie.ZuWenigSzenen as fehler:   # reicht noch nicht: still – deine Zeile „kein Video“ bleibt stehen
         hinweis = str(fehler)
         log.info("Nachtrag %s: %s", name, fehler)
@@ -478,6 +501,7 @@ def _nachholen(con: sqlite3.Connection, konfig: Konfig) -> list[str]:
             log.info("Abend-Video %s: Entwurf #%s ist noch nicht fertig – rendere ihn neu%s", z["name"],
                      z["entwurf_id"], "" if experte else " (CPU)")
             entwurf.entwurf(con, k, z["entwurf_id"])
+            nachtschicht.freigeben(con, z["entwurf_id"])   # war sie für einen Wettbewerb markiert: ohne ihn zu dir
             nachgeholt.append(z["name"])
         except Exception as fehler:  # noqa: BLE001 – wie beim ersten Versuch: vermerken und dir sagen
             con.execute("UPDATE sitzungen SET entwurf_id = NULL, hinweis = ? WHERE name = ?",

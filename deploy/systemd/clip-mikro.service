@@ -21,6 +21,9 @@ MemoryMax=3G
 # 3 Clips à 30–60 s plus Warten auf die Sperre; hängt etwas, soll der Lauf nicht ewig stehen
 TimeoutStartSec=2h
 NoNewPrivileges=true
+# 22.10.: ProtectSystem=strict macht auch /tmp nur lesbar – ohne eigenes /tmp scheiterte Whisper/Stimmung im Dienst
+# („No usable temporary directory“, zuerst 09.10.); der Lern-Bot hatte es schon
+PrivateTmp=true
 ProtectSystem=strict
 # read-only wie clip-sitzungen: Whisper liest sein Modell aus dem Home-Cache von pipeline
 ProtectHome=read-only

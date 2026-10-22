@@ -72,6 +72,13 @@ kommt, entscheiden deine ✅/❌ mit. „🥱 Langweilig“ und deine Regeln geh
 Szenen wechseln wie bisher. Bis dahin wählt er genau wie bisher. Abschalten geht nur in der Datei (`[geschmack]
 champion_standard = false` in `lokal.toml`, danach den Lern-Bot neu starten), nicht im Bot.
 
+**Seit dem 22.10. baut der Bot jedes Video mehrfach.** Vier Fassungen, jede mit einer anderen Stellschraube (Aufbau,
+Tempo, Zeitlupe, Länge, Anlauf oder Song). Alle werden gemessen, die besten zwei bekommt Claude als Cutter blind zu
+sehen und sagt, welche besser ist und warum. Nur die Siegerin kommt zu dir, darunter steht „🥊 Beste von 4 Fassungen ·
+KI-Cutter: …“. Jeder dieser Vergleiche lehrt die Stellschrauben, ohne dass du tippst. Dein ✅/❌ zählt weiter dreimal so
+viel wie ein KI-Vergleich, und die Zuschauer gehen vor beiden, sobald `/tiktok` verbunden ist. Das Video braucht dafür
+ein paar Minuten länger.
+
 ## Der Sonntagsbericht
 Sonntags ab 18 Uhr kommt eine kurze Zusammenfassung der Woche – nur, wenn es Videos gab, oder wenn an diesem Sonntag
 ein neuer bester Aufbau feststeht. Beispiel nach gut drei Monaten:
