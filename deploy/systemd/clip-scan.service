@@ -1,0 +1,25 @@
+# Deine Matches ohne n8n (M148, Florian 22.10.: „ja“): das älteste offene Match verarbeiten – dieselben vier Schritte
+# wie aus n8n (prepare, analyze, decide, render) unter derselben Rechen-Sperre. n8n darf weiterlaufen: Was schon fertig
+# ist, überspringt der zweite Aufruf. Ein Match erst 10 min nach dem Erfassen (die letzten Aufnahmen kommen alle 2 min
+# vom PC); nach 3 Fehlschlägen Status 'fehler' und eine Zeile im Lern-Bot, nachholen mit `pipeline process <ID>`.
+# 3 = pve-big schläft (wird NICHT geweckt), 4 = anderer Schritt läuft -> kein Fehler, nächster Timer-Lauf.
+# Claude für decide: dieselbe Anmeldung wie der Lern-Bot (CLAUDE_CONFIG_DIR) – das Home bleibt wie dort nur lesbar.
+# Von Hand: sudo -u pipeline /opt/clip-pipeline/.venv/bin/pipeline scan --verarbeiten
+[Unit]
+Description=Clip-Pipeline: neue Matches verarbeiten (ohne n8n)
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/opt/clip-pipeline
+ExecStart=/opt/clip-pipeline/.venv/bin/pipeline scan --verarbeiten --max 1 --versuche 3 --mindestalter 10
+SuccessExitStatus=3 4
+TimeoutStartSec=1h
+SupplementaryGroups=render
+Environment=CLAUDE_CONFIG_DIR=/var/lib/clip-pipeline/claude
+Environment=DISABLE_AUTOUPDATER=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/clip-pipeline /srv/clips -/srv/puffer

@@ -219,7 +219,7 @@ class Vorlagen(unittest.TestCase):
         Preis: Wer die ganzen 2 h nur wartet, endet durch systemd statt mit Exit 4, ohne Zeile „gesperrt“."""
         warten = KONFIG["sperre"]["warten_s"]
         einheit = {"h": 3600, "min": 60, "s": 1}
-        for name in ("clip-sitzungen.service", "clip-mikro.service"):
+        for name in ("clip-sitzungen.service", "clip-mikro.service", "clip-scan.service"):
             spanne = lies_unit(DEPLOY / "systemd" / name)["TimeoutStartSec"][0]
             with self.subTest(name):
                 self.assertRegex(spanne, r"^(\d+(h|min|s))+$")

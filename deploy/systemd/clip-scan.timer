@@ -1,0 +1,11 @@
+# Alle 5 Minuten: neue Matches erfassen und das älteste offene verarbeiten (M148). Arbeitet nur im Puffer auf dem Mini,
+# weckt pve-big nie. alles-aktualisieren.sh richtet ihn ein und schaltet ihn an.
+[Unit]
+Description=Clip-Pipeline: alle 5 Minuten neue Matches verarbeiten (ohne n8n)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
