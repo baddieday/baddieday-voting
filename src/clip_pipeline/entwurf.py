@@ -51,7 +51,10 @@ MAX_GRAPH = 4_000_000
 # Plattformen (Annahme A1), Musik-Kanten – einblenden nur gegen Knacken, ausblenden im Short kurz (Loop-Ende),
 # im Zusammenschnitt weich
 TON_STANDARD = {"lufs": -14.0, "true_peak": -1.5, "musik_ein_s": 0.03, "musik_aus_s_short": 0.25,
-                "musik_aus_s_zs": 2.0}
+                "musik_aus_s_zs": 2.0,
+                # 22.10. (Florian: „Stimmen deiner Mitspieler sollen und können sofort raus geschnitten werden“): 0 = fertige
+                # Videos bekommen nur Spur 0 (Spielton), Mikro/Chat nie; 1 = Regel vom 26.09. (nur wenn der Moment sie braucht)
+                "stimmen": 0.0}
 AAC_RESERVE_DB = 1.0  # Abstand des loudnorm-Ziels zu [regie.ton] true_peak (normalisiere_ton)
 
 
@@ -155,8 +158,9 @@ def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", lo
 
 
 def _ton(i: int, spuren: int, dauer: float, stimmen: bool = True, tempo: str = "") -> str:
-    """Ton von Eingang i. stimmen=False: nur Spur 0 (Spielton) – Mikro/Chat ab Spur 1 nur, wenn der Moment sie
-    braucht (merkmale.stimmen_gebraucht, im Segment als „stimmen“; fehlt der Schlüssel, alte Liste → alle Spuren).
+    """Ton von Eingang i. stimmen=False: nur Spur 0 (Spielton). True nur, wenn [regie.ton] stimmen an ist UND der Moment
+    sie braucht (merkmale.stimmen_gebraucht, im Segment als „stimmen“; fehlt der Schlüssel, alte Liste → alle Spuren) –
+    ab Werk (stimmen = 0, 22.10.) kommen Mikro/Chat nie ins fertige Video (Stimmen der Mitspieler).
     tempo (effekt_filter.tempo_ton): Zeitlupe/Zeitraffer auf dem gemischten Ton, vor apad/atrim (Stille braucht
     keins – sie ist ohnehin so lang wie das Bild)."""
     einheit = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
@@ -194,6 +198,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
     bild = effekt_filter.je_segment(liste, ereignisse, griffe, effekte.BILD)   # Katalog nur aufs Spielbild
     look = effekt_filter.look_der_liste(liste) if hoch else ""  # 16:9: einmal global (effekt_filter.global_kette)
     rahmen = rahmen_zoom(liste) if rahmen is None else rahmen
+    stimmen_ok = bool({**TON_STANDARD, **(ton or {})}["stimmen"])   # 22.10.: ab Werk nie Mikro/Chat im fertigen Video
     teile, laengen = [], []
     for i, (s, (vorne, hinten)) in enumerate(zip(segmente, griffe)):
         laenge = (s["zeit_ende"] - s["zeit_start"]) + vorne + hinten
@@ -206,7 +211,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
             tempo_v, tempo_a = effekt_filter.tempo_video(fenster, eingang), effekt_filter.tempo_ton(i, s, eingang)
         teile.append(_bild(i, b, h, fps, hoch, effekt_filter.zoom(i, zooms[i]) if i in zooms else "", look, tempo_v,
                            effekt_filter.bildfilter(bild[i], b) if i in bild else "", rahmen))
-        teile.append(_ton(i, spuren[i], laenge, bool(s.get("stimmen", True)), tempo_a))
+        teile.append(_ton(i, spuren[i], laenge, stimmen_ok and bool(s.get("stimmen", True)), tempo_a))
     # Verketten: offset_i = bisherige Länge − Übergangsdauer (siehe Herleitung in docs/ENTSCHEIDUNGEN.md E8)
     v, a, gesamt = "[v0]", "[a0]", laengen[0]
     for i in range(1, len(segmente)):

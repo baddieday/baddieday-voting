@@ -630,7 +630,8 @@ Stand beim Vertrag (25.09.). Die Bauer-Annahmen und die Befunde des Panels komme
 - **S2-R3:** systemd. render schreibt nur `mikro.anstoss`; `clip-mikro.path` startet `clip-mikro.service`
   (`stimmung --clips`, Nice 15, MemoryMax 3G), `clip-mikro.timer` alle 30 min. Ersetzt den Kindprozess
   aus S2-A7 (und damit die logind-Frage).
-- **Stimmen (26.09.):** Bewertung mit allen Stimmen; im Upload Mikro/Chat (ab Spur 1) nur bei Lachen, Jubel,
+- **Stimmen (26.09., im Upload seit 23.10. nie – `[regie.ton] stimmen = false`, Florian: Mitspieler raus; `true` stellt
+  diese Regel wieder her):** Bewertung mit allen Stimmen; im Upload Mikro/Chat (ab Spur 1) nur bei Lachen, Jubel,
   lauten Mikro-Spitzen oder Stimmung „lustig“. Annahme: ohne Mic-Analyse (nichts bekannt) → nur Spielton;
   schon gerenderte Shorts (`short_pfad`) werden nicht neu gerendert.
 
@@ -1501,5 +1502,5 @@ Mitspieler kommen raus. Umsetzung `nachtschicht.py` (CLAUDE.md, 22.10.).
 | W8 | Verliererinnen zählen nirgends als „gesehen“ (szenen.verlauf und jemals_gezeigt lassen markierte Entwürfe aus, stile._letzte seit 22.10. ebenso); ihre Messungen stehen in kritiken ohne KI-Note und lehren massstab nur über den Paarvergleich |
 | W9 | Alles läuft unter der Rechen-Sperre des Aufrufers (sitzung bzw. lernbot-bau) – ein Abend-Video braucht so bis zu vier Renderzeiten statt einer; clip-scan wartet dann, Matches gehen nicht verloren |
 | W10 | Anzeige ohne Fachbegriffe: unter dem Video „🥊 Beste von 4 Fassungen · KI-Cutter: ‹Satz›“ bzw. „(nach Messung)“; sonntags eine 🥊-Zeile mit der bevorzugten Schraube; keine ⚙️-Stellschraube (Werte nur in pipeline.toml/lokal.toml) |
-| W11 | DEY rechnet nicht mit: Der Mini reicht (16 Kerne, nachts leer), und auf DEY lägen Videos mit Stimmen Dritter. Florians Zusage „Stimmen raus“ steht als Regel (die Chat-Spur verlässt den Mini nie); Rechnen auf DEY käme erst mit einem ausdrücklichen „DEY darf Videos bekommen“ |
+| W11 | DEY rechnet nicht mit: Der Mini reicht (16 Kerne, nachts leer), und auf DEY lägen Videos mit Stimmen Dritter. Florians Zusage „Stimmen raus“ ist seit 23.10. umgesetzt (`[regie.ton] stimmen = false`: kein fertiges Video bekommt noch Mikro/Chat; die Chat-Spur verlässt den Mini nie); Rechnen auf DEY käme erst mit einem ausdrücklichen „DEY darf Videos bekommen“ |
 | W12 | Grenze des Ansatzes, ehrlich: Der Richter ist der KI-Cutter mit Handwerksmaßstab – er macht Videos sauberer und dichter, kennt aber nicht den Geschmack des Publikums. Erst mit TikTok-Zahlen (`/tiktok`) prüft massstab, ob der KI-Cutter das Publikum trifft (`ki_treffer_publikum`), und das Publikum überstimmt ihn |

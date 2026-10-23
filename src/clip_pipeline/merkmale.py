@@ -148,6 +148,16 @@ def stimmen_gebraucht(moment_merkmale: dict | None, stimmung: str | None) -> boo
     return stimmung == STIMMEN_STIMMUNG or any(mic.get(m, 0.0) > 0 for m in STIMMEN_MERKMALE)
 
 
+def stimmen_erlaubt(konfig: Konfig) -> bool:
+    """Dürfen Stimmen (Mikro/Chat ab Spur 1) überhaupt in ein fertiges Video? [regie.ton] stimmen, ab Werk False
+    (22.10., Florian: die Stimmen der Mitspieler kommen raus – nur Spur 0, Spielton). True = Regel vom 26.09.: nur,
+    wenn der Moment sie braucht (stimmen_gebraucht). Vorschauen zum Bewerten und der Export behalten alle Spuren."""
+    try:
+        return bool(float(konfig.wert("regie.ton.stimmen", 0.0)))
+    except (TypeError, ValueError):
+        return False
+
+
 def stimmen_fuer_clip(con: sqlite3.Connection, clip_id: int) -> bool:
     """stimmen_gebraucht für einen Bot-Clip (Upload-Paket, `pipeline short`): Merkmale und Stimmung aus seiner
     momente-Zeile („clip:<id>“), Mic-Werte ersatzweise aus clips.merkmale. Unbekannter Clip → False.
