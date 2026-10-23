@@ -1504,3 +1504,21 @@ Mitspieler kommen raus. Umsetzung `nachtschicht.py` (CLAUDE.md, 22.10.).
 | W10 | Anzeige ohne Fachbegriffe: unter dem Video „🥊 Beste von 4 Fassungen · KI-Cutter: ‹Satz›“ bzw. „(nach Messung)“; sonntags eine 🥊-Zeile mit der bevorzugten Schraube; keine ⚙️-Stellschraube (Werte nur in pipeline.toml/lokal.toml) |
 | W11 | DEY rechnet nicht mit: Der Mini reicht (16 Kerne, nachts leer), und auf DEY lägen Videos mit Stimmen Dritter. Florians Zusage „Stimmen raus“ ist seit 23.10. umgesetzt (`[regie.ton] stimmen = false`: kein fertiges Video bekommt noch Mikro/Chat; die Chat-Spur verlässt den Mini nie); Rechnen auf DEY käme erst mit einem ausdrücklichen „DEY darf Videos bekommen“ |
 | W12 | Grenze des Ansatzes, ehrlich: Der Richter ist der KI-Cutter mit Handwerksmaßstab – er macht Videos sauberer und dichter, kennt aber nicht den Geschmack des Publikums. Erst mit TikTok-Zahlen (`/tiktok`) prüft massstab, ob der KI-Cutter das Publikum trifft (`ki_treffer_publikum`), und das Publikum überstimmt ihn |
+
+## Stimmen raus (23.10.)
+
+Florian: „Warum sind immer noch die Tonspuren meiner Mitspieler im Video zu hören? Das darf ich nicht veröffentlichen.
+Sofort raus damit außer sie werden unkenntlich gemacht durch KI generierten Inhalt.“ Befund (Whisper je Tonspur am
+echten Material, Entwürfe #245/#246): Sprache in Spur 0 (Game/SoundHandle) 37–59 Wörter, Chat-Spur leer (−70 LUFS).
+
+| Nr. | Annahme |
+|---|---|
+| S1 | Entfernen statt verfremden: Demucs (htdemucs) nimmt die Stimmen-Stem komplett heraus (Probe: 50 → 0 Wörter). „Unkenntlich machen“ wäre nur die zweite Wahl, wenn das Entfernen die Spielgeräusche zu sehr beschädigt – bisher nicht beobachtet |
+| S2 | Trennung je Segment vor dem Mischen, nicht auf dem fertigen Video: Musik und Klänge bleiben unangetastet, und der Cache je (Datei, Start, Dauer) gilt für alle Fassungen der Nachtschicht |
+| S3 | Prüfung auf den Tonstücken, die ins Video gehen, nicht auf der Mischung: NCS-Titel haben oft Gesang, der als „Stimmen“ zählen würde. Grenze 3 Wörter (Whisper-Abschnitte mit avg_logprob < −1 oder no_speech > 0,6 zählen nicht) |
+| S4 | Mit Stimmen lieber kein Video: `StimmenFehler` ist ein MedienFehler – Lern-Bot, Abend-Video und Nachtschicht melden ihn wie eine Render-Panne („Stimmen erkannt“), nichts wird gesendet |
+| S5 | Demucs in eigener Umgebung (`cache/demucs-venv`, ≈ 1,1 GB, nur CPU) statt in der Pipeline-venv; Modell nach `cache/torch`, weil das Home der Dienste nur lesbar ist. 6 Threads auf 8 Kernen |
+| S6 | Freunde-Instanzen sehen Demucs nicht (Sandbox); dort läuft nur die Prüfung – Videos mit Stimmen bleiben zurück, bis ein eigenes Demucs eingerichtet ist |
+| S7 | Vorschauen zum Bewerten (Clip-Bot, nur an Florian) und der Export für CapCut bleiben unverändert; alte fertige Videos werden nicht neu gerendert |
+| S8 | Rechenzeit: ≈ 0,7 s je Sekunde Ton (41 s für 60 s) plus Whisper ≈ 20 s je Video – mit Nachtschicht-Fassungen aus dem Cache. Florian: „der Mini darf voll laufen“ |
+| S9 | Empfehlung an der Quelle: Fortnite-Sprachchat auf „SteelSeries Sonar – Chat“ ausgeben, dann ist der Spielton ab Aufnahme sauber und Demucs nur noch Sicherheitsnetz |

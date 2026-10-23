@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .konfig import Konfig
 from .medien import MedienFehler, fuehre_aus, probe, uebernehmen
+from . import stimmen_raus
 from .merkmale import stimmen_erlaubt
 
 B, H = 1080, 1920
@@ -83,10 +84,11 @@ def _layout(layout: str, konfig: Konfig) -> str:
 
 
 def filtergraph(*, dauer: float, fps: int, tonspuren: int, layout: str, konfig: Konfig,
-                stimmen: bool = True) -> tuple[str, float]:
+                stimmen: bool = True, ton_eingang: int = 0) -> tuple[str, float]:
     """Baut den kompletten Filtergraphen. Gibt (Graph, Gesamtdauer) zurück.
     stimmen=False: nur Spur 0 (Spielton). Mikro/Chat nur mit [regie.ton] stimmen = true (merkmale.stimmen_erlaubt) UND
-    wenn der Moment sie braucht (merkmale.stimmen_gebraucht) – ab Werk (22.10.) nie."""
+    wenn der Moment sie braucht (merkmale.stimmen_gebraucht) – ab Werk (22.10.) nie. ton_eingang: Eingang, aus dem der Ton
+    kommt (1 = die von Stimmen bereinigte WAV, stimmen_raus; 0 = der Clip selbst)."""
     if not stimmen or not stimmen_erlaubt(konfig):
         tonspuren = min(tonspuren, 1)
     s = konfig.abschnitt("shorts")
@@ -116,7 +118,7 @@ def filtergraph(*, dauer: float, fps: int, tonspuren: int, layout: str, konfig: 
         teile.append("[haupt]null[v]")
 
     if tonspuren:
-        eingaenge = "".join(f"[0:a:{i}]" for i in range(tonspuren))
+        eingaenge = "".join(f"[{ton_eingang}:a:{i}]" for i in range(tonspuren))
         mix = f"{eingaenge}amix=inputs={tonspuren}:normalize=0" if tonspuren > 1 else f"{eingaenge}anull"
         teile.append(f"{mix},afade=t=out:st={max(0.0, dauer - UEBERBLENDUNG):.3f}:d={UEBERBLENDUNG},apad=whole_dur={gesamt:.3f}[a]")
     return ";".join(teile), gesamt
@@ -132,9 +134,19 @@ def rendere(clip: Path, ziel: Path, konfig: Konfig, *, layout: str | None = None
     stimmen: siehe filtergraph (Aufrufer: merkmale.stimmen_fuer_clip)."""
     info = probe(clip)
     fps = max(1, min(60, round(info.fps or 30)))
+    # Stimmen raus (23.10.): der Spielton ohne Stimmen als zweiter Eingang; Prüfung vor dem Rendern (StimmenFehler)
+    eingaenge, ton_eingang, tonspuren = ["-i", str(clip)], 0, len(info.tonspuren)
+    if info.tonspuren and stimmen_raus.aktiv(konfig):
+        sauber = stimmen_raus.bereinige(konfig, clip, 0.0, info.dauer_s)
+        stimmen_raus.pruefe(konfig, [sauber])
+        eingaenge += ["-i", str(sauber)]
+        ton_eingang, tonspuren = 1, 1
+    elif info.tonspuren and stimmen_raus.pruefen_aktiv(konfig):
+        stimmen_raus.pruefe(konfig, [stimmen_raus.ausschnitt(konfig, clip, 0.0, info.dauer_s)])
     graph, gesamt = filtergraph(
-        dauer=info.dauer_s, fps=fps, tonspuren=len(info.tonspuren),
+        dauer=info.dauer_s, fps=fps, tonspuren=tonspuren,
         layout=layout or str(konfig.wert("shorts.layout", "unschaerfe")), konfig=konfig, stimmen=stimmen,
+        ton_eingang=ton_eingang,
     )
     from .entwurf import _pruefe_formatdauer, _pruefe_renderdauer
 
@@ -152,7 +164,7 @@ def rendere(clip: Path, ziel: Path, konfig: Konfig, *, layout: str | None = None
     tmp = ziel.with_name(ziel.stem + ".tmp" + ziel.suffix)
     for _ in range(3):
         befehl = [
-            "ffmpeg", "-hide_banner", "-nostdin", "-y", "-i", str(clip), "-filter_complex", graph,
+            "ffmpeg", "-hide_banner", "-nostdin", "-y", *eingaenge, "-filter_complex", graph,
             "-map", "[v]", *ton, "-t", f"{gesamt:.3f}",
             "-c:v", "libx264", "-preset", "medium", "-crf", str(konfig.wert("shorts.crf", 20)),
             "-maxrate", f"{maxrate}k", "-bufsize", f"{maxrate * 2}k", "-pix_fmt", "yuv420p",

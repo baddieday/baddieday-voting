@@ -216,6 +216,16 @@ musik_aus_s_zs = 2.0
 # nur Spur 0 (Spielton) in Short, Upload-Fassung, 2-Wochen-Video und Clip-Shorts; true = Regel vom 26.09. (nur bei
 # Lachen, Jubel, Gag). Vorschauen zum Bewerten, Whisper/Mikro-Merkmale und der Export bleiben davon unberührt.
 stimmen = false
+# Stimmen raus (23.10.): Die Stimmen der Mitspieler stecken im Spielton selbst (Fortnite-Sprachchat über die
+# Spielausgabe). Vor dem Mischen trennt Demucs (htdemucs, nur CPU, eigene Umgebung: deploy/pve-mini/stimmen-
+# einrichten.sh) je Szene die Stimmen heraus; danach prüft Whisper die Tonstücke, die ins Video gehen – mehr als
+# stimmen_max_woerter Wörter → kein Video („Stimmen erkannt“). Ohne Demucs läuft nur die Prüfung.
+stimmen_entfernen = true
+stimmen_pruefen = true
+stimmen_max_woerter = 3
+demucs = ""                    # leer = <Datenbank-Ordner>/cache/demucs-venv/bin/demucs, sonst demucs im PATH
+demucs_modell = "htdemucs"
+stimmen_threads = 6
 
 [regie.effekte]
 # Regisseur 2.0/2.1: Der Regisseur schreibt einen Effekt-Plan in die Schnittliste (src/clip_pipeline/effekte.py), der
