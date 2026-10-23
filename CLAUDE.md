@@ -184,8 +184,9 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   die Shorts aus dem Lern-Bot und das Highlight-Video (1–2 Wochen). Der Clip-Bot zeigt nach der Freigabe keinen 📦-Knopf
   mehr und erinnert nur noch an freigegebene Highlight-Videos, bis „✅ Hochgeladen“ getippt ist. Freigaben dienen
   Bewertung, Lernen und der Highlight-Auswahl. `/paket` und `/link` bleiben für Ausnahmen (nicht mehr in der Hilfe).
-- 2026-09-26: **Stimmen im Upload nur, wenn der Moment sie braucht** (Lachen, Jubel, laute Mikro-Spitzen oder Stimmung
-  „lustig“ = Gag; `merkmale.stimmen_gebraucht`). Sonst nur Spur 0 (Spielton) – gilt für Entwürfe/Upload-Fassung,
+- 2026-09-26: ~~**Stimmen im Upload nur, wenn der Moment sie braucht**~~ (Lachen, Jubel, laute Mikro-Spitzen oder Stimmung
+  „lustig“ = Gag; `merkmale.stimmen_gebraucht`) – seit 22.10. nie (siehe dort; `[regie.ton] stimmen = true` stellt diese
+  Regel wieder her). Sonst nur Spur 0 (Spielton) – gilt für Entwürfe/Upload-Fassung,
   Highlight-Video und Clip-Shorts (nur noch Ausnahme über /paket). Für die Bewertung zählen alle Stimmen; Vorschauen zum Bewerten behalten alle Spuren.
 - 2026-09-26: **Mic-Schritt als systemd-Dienst** `clip-mikro` (path + timer) statt Kindprozess von render; render schreibt
   nur `/var/lib/clip-pipeline/mikro.anstoss`.
@@ -801,6 +802,14 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   bei 🔥 Viral, 2-Wochen-Video, neuen Fassungen nach ❌ oder unter /experte; keine weitere Fassung nach 25 min oder
   unter 3 GB frei; alles unter der einen Rechen-Sperre; eine verwaiste erste Fassung gibt `aufraeumen` nach 90 min
   frei. Sonntags eine 🥊-Zeile (Videos, Fassungen, KI-Vergleiche, bevorzugte Schraube). **DEY rechnet nicht** – der
-  Mini reicht, auf DEY liegen weiter keine Videos; die Chat-Tonspur verlässt den Mini nie (schon so: Stimmen nur, wenn
-  der Moment sie braucht, sonst Spur 0). Ehrlich: Ohne TikTok (`/tiktok`) lernt der Bot vom KI-Cutter und von dir,
-  nicht vom Publikum. Annahmen W1–W12: `docs/ENTSCHEIDUNGEN.md`, „Nachtschicht“.
+  Mini reicht, auf DEY liegen weiter keine Videos; die Chat-Tonspur verlässt den Mini nie (seit 23.10. kommt sie in
+  kein fertiges Video mehr, siehe nächste Entscheidung). Ehrlich: Ohne TikTok (`/tiktok`) lernt der Bot vom KI-Cutter
+  und von dir, nicht vom Publikum. Annahmen W1–W12: `docs/ENTSCHEIDUNGEN.md`, „Nachtschicht“.
+- 2026-10-23 (Florian 22.10.: „Stimmen deiner Mitspieler sollen und können sofort raus geschnitten werden“): **Fertige
+  Videos bekommen nur noch den Spielton** (Spur 0) – Short, Upload-Fassung, 2-Wochen-Video und Clip-Shorts, auch wenn
+  der Moment Lachen oder Jubel hat (`[regie.ton] stimmen = false`, `entwurf.filtergraph`, `shorts.filtergraph`;
+  `true` = Regel vom 26.09.). Ersetzt „Stimmen im Upload nur, wenn der Moment sie braucht“. Unverändert: Vorschauen zum
+  Bewerten (alle Spuren, nur an dich), Whisper und die Mikro-Merkmale fürs Lernen, der Export für CapCut. Ehrlich:
+  Stimmen, die schon im Spielton stecken (Fortnite-Sprachchat bei einer Aufnahme ohne eigene Chat-Spur), kann die
+  Pipeline nicht trennen – die Chat-Spur von SteelSeries liegt getrennt vor und fällt weg. Alte fertige Videos werden
+  nicht neu gerendert.

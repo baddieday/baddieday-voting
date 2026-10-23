@@ -5,8 +5,8 @@ Aufbau des FFmpeg-Filtergraphen:
      oder "mit-cam" (Cam-Ausschnitt oben, Gameplay unten)
   2. Overlay "clip-battle.de" (Links sind in Shorts/TikTok nicht klickbar -> im Bild zeigen)
   3. Endcard: 2,5 s "Wer gewinnt das Battle? Stimm ab auf clip-battle.de", weich überblendet
-Tonspuren: Spielton immer, Mikro/Chat nur bei Lachen, Jubel oder Gags (merkmale.stimmen_gebraucht); am Ende
-ausgeblendet.
+Tonspuren: Spielton immer; Mikro/Chat (Stimmen der Mitspieler) ab Werk nie (22.10., [regie.ton] stimmen = false), mit
+stimmen = true nur bei Lachen, Jubel oder Gags (merkmale.stimmen_gebraucht); am Ende ausgeblendet.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .konfig import Konfig
 from .medien import MedienFehler, fuehre_aus, probe, uebernehmen
+from .merkmale import stimmen_erlaubt
 
 B, H = 1080, 1920
 UEBERBLENDUNG = 0.5
@@ -84,8 +85,9 @@ def _layout(layout: str, konfig: Konfig) -> str:
 def filtergraph(*, dauer: float, fps: int, tonspuren: int, layout: str, konfig: Konfig,
                 stimmen: bool = True) -> tuple[str, float]:
     """Baut den kompletten Filtergraphen. Gibt (Graph, Gesamtdauer) zurück.
-    stimmen=False: nur Spur 0 (Spielton) – Mikro/Chat nur, wenn der Moment sie braucht (merkmale.stimmen_gebraucht)."""
-    if not stimmen:
+    stimmen=False: nur Spur 0 (Spielton). Mikro/Chat nur mit [regie.ton] stimmen = true (merkmale.stimmen_erlaubt) UND
+    wenn der Moment sie braucht (merkmale.stimmen_gebraucht) – ab Werk (22.10.) nie."""
+    if not stimmen or not stimmen_erlaubt(konfig):
         tonspuren = min(tonspuren, 1)
     s = konfig.abschnitt("shorts")
     font = _filterpfad(schrift(konfig))

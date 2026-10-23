@@ -364,6 +364,7 @@ liest nur `liste["effekte"]` und `segmente[].effekte`, nie die gelernten Paramet
 | Look | `eq` (Kontrast, Sättigung, Helligkeit) + `colorcorrect` (Farbstich in Schatten und Lichtern) | Short: je Segment auf Spielbild und kleinem Hintergrund (vor dem Hochskalieren); 16:9: einmal nach den Übergängen |
 | Kill-Titel, Zähler | `drawtext`, DejaVu Sans Bold (`[shorts].schriften`): wächst kurz über seine Größe (Pop-in), blendet ein und aus, gleitet leicht herein | nach dem Look (Schrift bleibt reinweiß); Short: Zähler zwischen clip-battle.de und Spielbild, Titel darunter (über den unteren 25 % für die App-Knöpfe) – auch beim Pop nie im Spielbild; die Höhe des Spielbilds misst `rendere` an den Quellen (4:3-Aufnahmen sind höher). 16:9: Titel mittig, nur in der Blende |
 | Klänge | selbst erzeugte WAVs (`sfx.py`), samplegenau verschoben | nach dem Ducking dazugemischt (die Musik weicht nur dem Spielton aus) |
+| Stimmen (Mikro/Chat ab Spur 1) | ab Werk gar nicht im Graph – je Segment nur `[i:a:0]` (`[regie.ton] stimmen = false`, 23.10.: die Stimmen der Mitspieler kommen raus) | mit `stimmen = true` wie vom 26.09.: `amix` aller Spuren nur in Segmenten, deren Moment Lachen, Jubel oder einen Gag hat (`merkmale.stimmen_gebraucht`) |
 
 Warum `colorcorrect` und `chromashift` statt `curves` und `rgbashift`: beide rechnen direkt in YUV. Ein RGB-Filter
 lässt ffmpeg **jedes** Bild zweimal umrechnen, auch außerhalb der Blende – lokal gemessen bei 720×1280: `rgbashift`

@@ -212,6 +212,10 @@ true_peak = -1.5
 musik_ein_s = 0.03
 musik_aus_s_short = 0.25
 musik_aus_s_zs = 2.0
+# Stimmen (Mikro/Chat ab Spur 1) im fertigen Video? false (22.10., Florian: die Stimmen der Mitspieler kommen raus) =
+# nur Spur 0 (Spielton) in Short, Upload-Fassung, 2-Wochen-Video und Clip-Shorts; true = Regel vom 26.09. (nur bei
+# Lachen, Jubel, Gag). Vorschauen zum Bewerten, Whisper/Mikro-Merkmale und der Export bleiben davon unberührt.
+stimmen = false
 
 [regie.effekte]
 # Regisseur 2.0/2.1: Der Regisseur schreibt einen Effekt-Plan in die Schnittliste (src/clip_pipeline/effekte.py), der

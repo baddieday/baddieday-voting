@@ -1,11 +1,14 @@
-"""Stimmen im Upload nur, wenn der Moment sie braucht (Florian, 26.09.): Lachen, Jubel, laute Mikro-Spitzen oder ein
-Gag (Stimmung „lustig“). Sonst nur Spur 0 (Spielton). Für die Bewertung zählt weiter alles; Vorschauen bleiben gleich.
+"""Stimmen im fertigen Video: ab Werk nie (22.10., Florian: „Stimmen deiner Mitspieler sollen und können sofort raus
+geschnitten werden“ – [regie.ton] stimmen = false → nur Spur 0, Spielton). Mit stimmen = true gilt die Regel vom 26.09.:
+nur, wenn der Moment sie braucht (Lachen, Jubel, laute Mikro-Spitzen oder ein Gag). Für die Bewertung zählt weiter
+alles; Vorschauen bleiben gleich.
 """
 
+import copy
 import json
 import unittest
 
-from clip_pipeline import entwurf, merkmale, regie, shorts
+from clip_pipeline import entwurf, konfig, merkmale, regie, shorts
 from clip_pipeline.zeit import iso, jetzt
 
 from tests.hilfen import MitSpeicher
@@ -43,21 +46,39 @@ class FuerClip(MitSpeicher):
 
 
 class Graphen(unittest.TestCase):
-    def test_entwurf_nimmt_ohne_stimmen_nur_spur_0(self):
+    def test_entwurf_nimmt_ab_werk_nie_stimmen(self):
+        # 22.10.: auch Segmente, die Stimmen „brauchen“, bekommen nur Spur 0 – die Mitspieler kommen raus
+        liste = BildGraph.liste("short")
+        liste["segmente"][0]["stimmen"] = False
+        liste["segmente"][1]["stimmen"] = True
+        graph, _ = entwurf.filtergraph(liste, [2, 2, 2], b=720, h=1280, musik_eingang=None, schrift=None)
+        self.assertIn("[0:a:0]", graph)
+        for i in range(3):
+            self.assertNotIn(f"[{i}:a:1]", graph)
+        self.assertEqual(entwurf.ton_einstellungen(konfig.lade())["stimmen"], 0.0)   # pipeline.toml: stimmen = false
+
+    def test_entwurf_mit_stimmen_an_nur_wenn_der_moment_sie_braucht(self):
         liste = BildGraph.liste("short")
         liste["segmente"][0]["stimmen"] = False
         liste["segmente"][1]["stimmen"] = True   # Segment 2 ohne Schlüssel: alte Liste → wie bisher alle Spuren
-        graph, _ = entwurf.filtergraph(liste, [2, 2, 2], b=720, h=1280, musik_eingang=None, schrift=None)
+        graph, _ = entwurf.filtergraph(liste, [2, 2, 2], b=720, h=1280, musik_eingang=None, schrift=None,
+                                       ton={"stimmen": 1.0})
         self.assertIn("[0:a:0]", graph)
         self.assertNotIn("[0:a:1]", graph)
         self.assertIn("[1:a:1]", graph)
         self.assertIn("[2:a:1]", graph)
 
     def test_short_ohne_stimmen_nur_spur_0(self):
-        from clip_pipeline import konfig
         k = konfig.lade()
-        mit, _ = shorts.filtergraph(dauer=10, fps=30, tonspuren=2, layout="unschaerfe", konfig=k)
-        ohne, _ = shorts.filtergraph(dauer=10, fps=30, tonspuren=2, layout="unschaerfe", konfig=k, stimmen=False)
+        self.assertFalse(merkmale.stimmen_erlaubt(k))   # ab Werk aus (22.10.)
+        werk, _ = shorts.filtergraph(dauer=10, fps=30, tonspuren=2, layout="unschaerfe", konfig=k)
+        self.assertNotIn("[0:a:1]", werk)   # auch stimmen=True (Moment braucht sie) → nur Spielton
+        self.assertIn("[0:a:0]", werk)
+        an = konfig.Konfig(daten=copy.deepcopy(k.daten), quelle=k.quelle)
+        an.daten["regie"]["ton"]["stimmen"] = True
+        self.assertTrue(merkmale.stimmen_erlaubt(an))
+        mit, _ = shorts.filtergraph(dauer=10, fps=30, tonspuren=2, layout="unschaerfe", konfig=an)
+        ohne, _ = shorts.filtergraph(dauer=10, fps=30, tonspuren=2, layout="unschaerfe", konfig=an, stimmen=False)
         self.assertIn("[0:a:1]", mit)
         self.assertNotIn("[0:a:1]", ohne)
         self.assertIn("[0:a:0]", ohne)
