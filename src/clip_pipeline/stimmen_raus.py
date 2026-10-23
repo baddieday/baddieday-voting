@@ -15,7 +15,8 @@ läuft in Fortnite über die Spielausgabe; die Chat-Spur der SteelSeries-Aufnahm
    mit Stimmen zurück.
 
 Demucs liegt in einer eigenen Umgebung (deploy/pve-mini/stimmen-einrichten.sh), nicht in der Pipeline-venv
-(torch ≈ 1 GB). Modell-Dateien landen unter <Cache>/torch, weil das Home des Dienstes nur lesbar ist.
+(torch ≈ 1 GB). Modell-Dateien landen unter <Cache>/huggingface bzw. <Cache>/torch, weil das Home des Dienstes nur
+lesbar ist.
 """
 
 from __future__ import annotations
@@ -142,9 +143,13 @@ def bereinige(konfig: Konfig, datei: Path, start_s: float, dauer_s: float) -> Pa
         threads = int(_ton(konfig).get("stimmen_threads", THREADS) or THREADS)
     except (TypeError, ValueError):
         threads = THREADS
-    torch_home = ordner.parent / "torch"
+    # Modell-Cache neben der Datenbank (Demucs ≥ 4.1 holt htdemucs vom HuggingFace-Hub, älter von AWS/torch.hub) – das
+    # Home der Dienste ist nur lesbar; geprüft 23.10. unter ProtectHome=read-only: läuft mit und ohne diese Variablen
+    torch_home, hf_home = ordner.parent / "torch", ordner.parent / "huggingface"
     torch_home.mkdir(parents=True, exist_ok=True)
-    befehl = ["env", f"TORCH_HOME={torch_home}", f"OMP_NUM_THREADS={threads}", f"MKL_NUM_THREADS={threads}",
+    hf_home.mkdir(parents=True, exist_ok=True)
+    befehl = ["env", f"TORCH_HOME={torch_home}", f"HF_HOME={hf_home}", f"OMP_NUM_THREADS={threads}",
+              f"MKL_NUM_THREADS={threads}",
               str(programm), "-n", modell, "--two-stems=vocals", "-d", "cpu", "-j", "1", "-o", str(arbeit),
               "--filename", "{stem}.{ext}", str(roh)]
     try:
