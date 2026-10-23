@@ -27,13 +27,14 @@ else
   echo "✅ installiert"
 fi
 
-# Modell einmal laden (≈ 80 MB nach $CACHE/torch) – das Home des Dienstes ist nur lesbar, deshalb TORCH_HOME
+# Modell einmal laden (≈ 545 MB nach $CACHE/huggingface, Demucs ≥ 4.1 holt es vom HuggingFace-Hub) – das Home des
+# Dienstes ist nur lesbar, deshalb HF_HOME/TORCH_HOME im Cache
 if [ "$PROBE" = 0 ]; then
   runuser -u "$NUTZER" -- bash -euo pipefail -c "
-    mkdir -p '$CACHE/torch'
+    mkdir -p '$CACHE/torch' '$CACHE/huggingface'
     t=\$(mktemp -d)
     ffmpeg -hide_banner -loglevel error -y -f lavfi -i anullsrc=r=44100:cl=stereo -t 2 \"\$t/still.wav\"
-    TORCH_HOME='$CACHE/torch' OMP_NUM_THREADS=4 '$VENV/bin/demucs' -n htdemucs --two-stems=vocals -d cpu -j 1 \
+    TORCH_HOME='$CACHE/torch' HF_HOME='$CACHE/huggingface' OMP_NUM_THREADS=4 '$VENV/bin/demucs' -n htdemucs --two-stems=vocals -d cpu -j 1 \
       -o \"\$t/aus\" --filename '{stem}.{ext}' \"\$t/still.wav\" >/dev/null 2>&1 \
       && test -s \"\$t/aus/htdemucs/no_vocals.wav\" && echo '✅ Modell htdemucs geladen und geprüft' \
       || { echo '❌ Probe-Trennung fehlgeschlagen'; rm -rf \"\$t\"; exit 3; }
