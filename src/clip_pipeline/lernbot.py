@@ -1098,6 +1098,15 @@ async def _schleife(app) -> None:
         await asyncio.sleep(float(konfig.wert("lernbot.intervall_s", 30)))
 
 
+def _rueckblick(konfig: Konfig) -> int:
+    """[regie.kritik] ki_rueckblick: so viele der zuletzt gesendeten Shorts darf die KI benoten (Standard 30; ein
+    falscher Wert gilt als Standard)."""
+    try:
+        return max(1, int(konfig.wert("regie.kritik.ki_rueckblick", geschmack.KI_RUECKBLICK)))
+    except (TypeError, ValueError):
+        return geschmack.KI_RUECKBLICK
+
+
 async def ki_nachtrag(app, konfig: Konfig) -> float | None:
     """Höchstens ein KI-Urteil je Runde für einen schon gesendeten Short – nie, während der Bot gerade baut. Jeder
     Entwurf wird je Bot-Lauf nur einmal versucht (Claude-Fehler, Tageslimit: kein Dauerversuch alle 30 s)."""
@@ -1108,7 +1117,8 @@ async def ki_nachtrag(app, konfig: Konfig) -> float | None:
         return None
     if not claude_aufruf.ki_moeglich(konfig):   # Freund ohne eigenen Claude-Zugang (M1): kein Versuch, nichts vermerkt
         return None
-    eid = geschmack.offen_fuer_ki(app.bot_data["con"], versucht)
+    eid = geschmack.offen_fuer_ki(app.bot_data["con"], versucht,
+                                  _rueckblick(konfig))   # 24.10.: die letzten 30 Shorts, nicht nur die der letzten 3 Tage
     if eid is None:
         return None
     from .sperre import Gesperrt
