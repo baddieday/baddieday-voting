@@ -112,6 +112,12 @@ if STAT="$(im_ct runuser -u pipeline -- timeout 120 "$PROD/.venv/bin/pipeline" s
   echo "✅ Datenbank antwortet: ${STAT:0:160}"
 else echo "❌ pipeline status ging nicht"; fehler=1; fi
 im_ct runuser -u pipeline -- "$PROD/.venv/bin/python" -c "import importlib.util as u; print('✅ Whisper da' if u.find_spec('faster_whisper') else 'ℹ️  Whisper fehlt in der Produktion – Mic-Merkmale nur aus vorhandenen Werten')" 2>/dev/null
+# Stimmen raus (23.10.): Demucs in eigener Umgebung neben der Datenbank – fehlt es, einmal einrichten (≈ 1,1 GB, nur CPU)
+if im_ct test -x /var/lib/clip-pipeline/cache/demucs-venv/bin/demucs; then echo "✅ Demucs da (Stimmen der Mitspieler kommen raus)"
+elif im_ct test -f "$PROD/deploy/pve-mini/stimmen-einrichten.sh"; then
+  echo "ℹ️  Demucs fehlt – richte es ein (dauert ein paar Minuten) …"
+  im_ct bash "$PROD/deploy/pve-mini/stimmen-einrichten.sh" || { echo "❌ Demucs ließ sich nicht einrichten – bis dahin hält die Prüfung Videos mit Stimmen zurück"; fehler=1; }
+fi
 
 sag "5/5 Fertig"
 echo "Produktion:  $(git_p -C "$PROD" log -1 --format='%h %ad %s' --date=short)"

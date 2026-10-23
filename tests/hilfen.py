@@ -42,6 +42,8 @@ class MitSpeicher(unittest.TestCase):
         self.konfig.daten.setdefault("viral", {})["ki"] = False
         # Schnittstil (30.09.): fest „klassik“ (= der bisherige Aufbau), damit alte Tests nicht von der Stilwahl abhängen
         self.konfig.daten["regie"]["stil"] = "klassik"
+        # Stimmen raus (23.10.): in den alten Tests weder Demucs noch die Whisper-Prüfung – eigene Tests schalten es an
+        self.konfig.daten["regie"].setdefault("ton", {}).update(stimmen_entfernen=False, stimmen_pruefen=False)
         # Effekt-Klänge in den Test-Ordner: der Standard /var/lib/clip-pipeline/sfx ist auf CI nicht beschreibbar
         self.konfig.daten["regie"].setdefault("effekte", {})["sfx_ordner"] = str(self.tmp / "sfx")
         # Stufe 1 (07.10.): die Tests prüfen weiter den alten Weg (alle Szenen, Clip-Bot schickt jede Szene); die neuen

@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 
 from . import effekt_filter, effekte, medien, messung, musik, sfx, shorts
+from . import stimmen_raus
 from .konfig import Konfig, KonfigFehler
 from .medien import MedienFehler, fuehre_aus, probe
 
@@ -157,12 +158,14 @@ def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", lo
             f"format=yuv420p,setsar=1,settb=AVTB[v{i}]")
 
 
-def _ton(i: int, spuren: int, dauer: float, stimmen: bool = True, tempo: str = "") -> str:
+def _ton(i: int, spuren: int, dauer: float, stimmen: bool = True, tempo: str = "", quelle: int | None = None) -> str:
     """Ton von Eingang i. stimmen=False: nur Spur 0 (Spielton). True nur, wenn [regie.ton] stimmen an ist UND der Moment
     sie braucht (merkmale.stimmen_gebraucht, im Segment als „stimmen“; fehlt der Schlüssel, alte Liste → alle Spuren) –
     ab Werk (stimmen = 0, 22.10.) kommen Mikro/Chat nie ins fertige Video (Stimmen der Mitspieler).
     tempo (effekt_filter.tempo_ton): Zeitlupe/Zeitraffer auf dem gemischten Ton, vor apad/atrim (Stille braucht
-    keins – sie ist ohnehin so lang wie das Bild)."""
+    keins – sie ist ohnehin so lang wie das Bild). quelle: Eingang, aus dem der Ton kommt (ohne Angabe i) – die
+    Stimmen-Bereinigung (stimmen_raus) legt je Segment eine saubere WAV als eigenen Eingang dazu, 23.10."""
+    q = i if quelle is None else quelle
     einheit = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
     if not stimmen:
         spuren = min(spuren, 1)
@@ -170,8 +173,8 @@ def _ton(i: int, spuren: int, dauer: float, stimmen: bool = True, tempo: str = "
         return f"anullsrc=r=48000:cl=stereo,atrim=0:{dauer:.3f},{einheit}[a{i}]"
     tp = f",{tempo}" if tempo else ""
     if spuren == 1:
-        return f"[{i}:a:0]{einheit}{tp},apad,atrim=0:{dauer:.3f}[a{i}]"
-    eingaenge = "".join(f"[{i}:a:{s}]" for s in range(spuren))
+        return f"[{q}:a:0]{einheit}{tp},apad,atrim=0:{dauer:.3f}[a{i}]"
+    eingaenge = "".join(f"[{q}:a:{s}]" for s in range(spuren))
     return f"{eingaenge}amix=inputs={spuren}:normalize=0,{einheit}{tp},apad,atrim=0:{dauer:.3f}[a{i}]"
 
 
@@ -179,7 +182,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
                 schrift: Path | None, sfx_pegel: float = sfx.SFX_PEGEL,
                 zeichenbreite: float = effekte.STANDARD["titel_zeichenbreite"],
                 spiel_h: int | None = None, rahmen: float | None = None, ton: dict | None = None,
-                stems: bool = False) -> tuple[str, float]:
+                stems: bool = False, ton_quellen: list[int | None] | None = None) -> tuple[str, float]:
     """(Graph, Länge). Eingänge: 0 … n−1 die Segmente, dann die Musik (musik_eingang), dann die Klänge des Plans in
     der Reihenfolge von sfx.mischung. schrift: für clip-battle.de und die Kill-Titel (ohne: keine Texte).
     spiel_h: Höhe des höchsten Spielbilds im Short (effekt_filter.spiel_hoehe) – die Texte bleiben darüber und
@@ -188,7 +191,9 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
     musik_ein_s, ausblenden musik_aus_s_short bzw. musik_aus_s_zs (Cutter-Maßstab R3).
     stems (nur mit Musik, Cutter-Maßstab R5): zusätzlich die Ausgänge [stv] (Vordergrund = Spiel + Stimmen vor den
     Klängen) und [stm] (Musik nach dem Ducking) für die Messung (messung.py). Ohne stems ist der Graph zeichengleich
-    mit dem ohne diesen Schalter."""
+    mit dem ohne diesen Schalter.
+    ton_quellen (23.10., stimmen_raus): je Segment der Eingang, aus dem sein Ton kommt (None = das Segment selbst) –
+    rendere legt die von Stimmen bereinigten WAVs als eigene Eingänge hinter die Klänge."""
     segmente = liste["segmente"]
     fps = int(liste["fps"])
     hoch = liste["format"] == "short"
@@ -211,7 +216,8 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
             tempo_v, tempo_a = effekt_filter.tempo_video(fenster, eingang), effekt_filter.tempo_ton(i, s, eingang)
         teile.append(_bild(i, b, h, fps, hoch, effekt_filter.zoom(i, zooms[i]) if i in zooms else "", look, tempo_v,
                            effekt_filter.bildfilter(bild[i], b) if i in bild else "", rahmen))
-        teile.append(_ton(i, spuren[i], laenge, stimmen_ok and bool(s.get("stimmen", True)), tempo_a))
+        teile.append(_ton(i, spuren[i], laenge, stimmen_ok and bool(s.get("stimmen", True)), tempo_a,
+                          quelle=ton_quellen[i] if ton_quellen else None))
     # Verketten: offset_i = bisherige Länge − Übergangsdauer (siehe Herleitung in docs/ENTSCHEIDUNGEN.md E8)
     v, a, gesamt = "[v0]", "[a0]", laengen[0]
     for i in range(1, len(segmente)):
@@ -309,7 +315,7 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
         b, h = _gerade(b * faktor), _gerade(h * faktor)
     griffe = _griffe(segmente, int(liste["fps"]))
     befehl = ["ffmpeg", "-hide_banner", "-nostdin", "-y"]
-    spuren, quellen = [], []
+    spuren, quellen, ausschnitte = [], [], []
     for s, (vorne, hinten) in zip(segmente, griffe):
         datei = Path(s["datei"])
         if not datei.is_file():
@@ -322,6 +328,7 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
         # Überhang: xfade braucht Bilder bis GANZ ans Ende des Übergangs, sonst bricht die Ausgabe still ab.
         # Überzählige Bilder verwirft xfade; der Ton wird im Graphen exakt auf die Länge geschnitten.
         ueberhang = max(0.0, min(UEBERHANG_S, info.dauer_s - (start + dauer)))
+        ausschnitte.append((datei, max(0.0, start), dauer + ueberhang))
         befehl += ["-ss", f"{max(0.0, start):.3f}", "-t", f"{dauer + ueberhang:.3f}", "-i", str(datei)]
     # Short: Texte über/unter dem höchsten Spielbild (4:3-Aufnahme ist höher); Zoom nur so weit, dass Titel lesbar bleiben
     rahmen = rahmen_grenze(liste, b, h, quellen)
@@ -337,11 +344,27 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
     ereignisse = effekte.zeitleiste(liste)
     klaenge, _ = sfx.mischung(ereignisse, len(segmente) + (musik_eingang is not None), sfx.pegel(konfig))
     befehl += sfx.eingaenge(konfig, klaenge)
+    # Stimmen raus (23.10.): je Segment der Spielton ohne Stimmen als eigener Eingang hinter den Klängen; die Prüfung
+    # läuft VOR dem Rendern über genau diese Tonstücke – mit Stimmen gibt es kein Video (stimmen_raus.StimmenFehler)
+    ton_quellen, stimmen_woerter = None, None
+    if stimmen_raus.aktiv(konfig):
+        saubere = [stimmen_raus.bereinige(konfig, d, st, du) for d, st, du in ausschnitte]
+        stimmen_woerter = stimmen_raus.pruefe(konfig, saubere)
+        naechster, ton_quellen = len(segmente) + (musik_eingang is not None) + len(klaenge), []
+        for w in saubere:
+            ton_quellen.append(None if w is None else naechster)
+            if w is not None:
+                befehl += ["-i", str(w)]
+                naechster += 1
+        spuren = [0 if w is None else 1 for w in saubere]
+    elif stimmen_raus.pruefen_aktiv(konfig):
+        stimmen_woerter = stimmen_raus.pruefe(konfig, [stimmen_raus.ausschnitt(konfig, d, st, du)
+                                                       for d, st, du in ausschnitte])
     mit_stems = stems is not None and musik_eingang is not None
     graph, gesamt = filtergraph(liste, spuren, b=b, h=h, musik_eingang=musik_eingang, schrift=_schrift(liste, konfig),
                                 sfx_pegel=sfx.pegel(konfig), zeichenbreite=_zeichenbreite(konfig),
                                 spiel_h=spiel_h or None, rahmen=rahmen, ton=ton_einstellungen(konfig),
-                                stems=mit_stems)
+                                stems=mit_stems, ton_quellen=ton_quellen)
     if len(graph.encode()) >= MAX_GRAPH:
         raise MedienFehler(f"Entwurf {liste['name']}: Filtergraph {len(graph.encode()) // 1000} KB – höchstens "
                            f"{MAX_GRAPH // 1000} KB")
@@ -401,7 +424,8 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
         medien.uebernehmen(stems_tmp, stems)
     _sidecar(ziel, {**geometrie(liste, b, h, quellen, rahmen), "fps": int(liste["fps"]), "encoder": name, **ton,
                     "stems": str(stems) if mit_stems else None, "render_s": round(time.monotonic() - beginn, 1),
-                    "rueckfall": _beginn is not None, "eingabe_mb": _eingabe_mb(befehl), "dauer_s": round(wirklich, 3)})
+                    "rueckfall": _beginn is not None, "eingabe_mb": _eingabe_mb(befehl), "dauer_s": round(wirklich, 3),
+                    "stimmen_entfernt": ton_quellen is not None, "stimmen_woerter": stimmen_woerter})
     return {"datei": str(ziel), "mb": round(groesse / 1e6, 1), "dauer_s": round(wirklich, 3), "encoder": name,
             "aufloesung": [b, h]}
 

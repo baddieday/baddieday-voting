@@ -813,3 +813,18 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Stimmen, die schon im Spielton stecken (Fortnite-Sprachchat bei einer Aufnahme ohne eigene Chat-Spur), kann die
   Pipeline nicht trennen – die Chat-Spur von SteelSeries liegt getrennt vor und fällt weg. Alte fertige Videos werden
   nicht neu gerendert.
+- 2026-10-23 (Florian: „Warum sind immer noch die Tonspuren meiner Mitspieler im Video zu hören? Das darf ich nicht
+  veröffentlichen. Sofort raus damit außer sie werden unkenntlich gemacht durch KI generierten Inhalt.“): **Stimmen raus
+  per KI – und kein Video mit Stimmen.** Befund am echten Material (Whisper je Spur): Die Stimmen stecken im **Spielton**
+  (Spur 0); der Fortnite-Sprachchat läuft über die Spielausgabe, die Chat-Spur der SteelSeries-Aufnahme ist leer (−70 LUFS).
+  Der Spur-Schalter vom Morgen konnte deshalb nichts ändern. Neu (`stimmen_raus.py`): (1) Vor dem Mischen trennt
+  **Demucs** (htdemucs, nur CPU, eigene Umgebung `/var/lib/clip-pipeline/cache/demucs-venv`,
+  `deploy/pve-mini/stimmen-einrichten.sh`, vom Update eingerichtet) je Szene die Stimmen aus dem Spielton; die saubere
+  WAV geht als eigener Eingang in den Filtergraphen (`ton_quellen`), im Cache je Datei/Ausschnitt – die Fassungen der
+  Nachtschicht teilen sich die Arbeit. Probe am Clip 003_double_2k (12.10.): 50 Wörter → 0, 41 s je 60 s Ton. (2)
+  **Sicherheitsnetz:** Whisper prüft genau die Tonstücke, die ins Video gehen (nicht die Mischung – NCS-Musik hat Gesang);
+  mehr als `stimmen_max_woerter` (3) → `StimmenFehler`, kein Video, der Bot sagt „Stimmen erkannt“. Ohne Demucs (Freund)
+  prüft sie den rohen Spielton und hält Videos mit Stimmen zurück. Gilt für Short, Upload-Fassung, 2-Wochen-Video,
+  Clip-Shorts; Vorschauen zum Bewerten bleiben wie sie sind. Die Videos #245/#246 vom 23.10. haben noch Stimmen – nicht
+  hochladen. Schalter `[regie.ton] stimmen_entfernen`/`stimmen_pruefen`. Sauberer wäre die Quelle: In Fortnite den
+  Sprachchat auf das Gerät „SteelSeries Sonar – Chat“ legen, dann ist der Spielton ab Aufnahme ohne Stimmen.
