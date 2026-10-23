@@ -153,3 +153,12 @@ Freigabe im Bot.“ im Clip-Bot? Diese Nachrichten schickt n8n – das 2-Wochen-
 in n8n den Ablauf „1 Match verarbeiten“ bzw. „2 Highlight-Video“ öffnen, den Kasten „Telegram Info“ anklicken, **D**
 drücken (deaktivieren), speichern. Die Dateien `1-match-verarbeiten.json` und `2-highlight-video.json` im Repo haben
 das schon.
+
+## Stimmen deiner Mitspieler
+
+Seit 23.10. nimmt der Bot die Stimmen aus dem Spielton heraus, bevor er ein Video mischt (KI-Trennung je Szene), und
+prüft danach mit Spracherkennung, ob noch gesprochen wird. Findet er trotzdem Stimmen, kommt **kein Video** – die
+Meldung sagt „Stimmen erkannt“. Vorschauen zum Bewerten bleiben wie bisher (nur bei dir). Noch sauberer wird es, wenn du
+in Fortnite den Sprachchat auf das Gerät „SteelSeries Sonar – Chat“ legst: Dann ist der Spielton schon in der Aufnahme
+ohne Stimmen, und die Trennung ist nur noch ein Sicherheitsnetz.
+
