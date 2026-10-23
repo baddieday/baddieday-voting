@@ -20,6 +20,7 @@ from tests.regie_hilfen import MOMENTE, MitRegieMaterial
 from tests.test_effekte_plan import fx_konfig, moment, plane, seg
 
 SCHRIFT = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+STIMMEN_AN = {"stimmen": 1.0}   # [regie.ton] stimmen wie vor dem 22.10. – die Graphen von damals hatten Spur 1 dabei
 EFFEKT_FILTER = ("eval=frame", "colorcorrect", "avgblur", "chromashift", "noise=", "[sfx", "adelay", "KILLS", "KILL'")
 
 # So sah der Graph vor dem Regisseur 2.0 aus (nach Stufe 0) – Effekte aus muss genau das ergeben. „Heute“ heißt
@@ -111,7 +112,9 @@ def graph(liste: dict, *, musik: bool = False, schrift: Path | None = SCHRIFT) -
     n = len(liste["segmente"])
     if musik:
         liste = {**liste, "musik": {"pegel": 0.3}}
-    return entwurf.filtergraph(liste, [2] * n, b=b, h=h, musik_eingang=n if musik else None, schrift=schrift)[0]
+    # ton stimmen=1: der Vergleich gilt den Effekten – Stimmen wie vor dem 22.10. (ab Werk kommen sie nicht mehr mit)
+    return entwurf.filtergraph(liste, [2] * n, b=b, h=h, musik_eingang=n if musik else None, schrift=schrift,
+                               ton=STIMMEN_AN)[0]
 
 
 def teile_mit(g: str, marke: str) -> list[str]:
@@ -133,11 +136,12 @@ class AusIstHeute(unittest.TestCase):
                     liste.update(version=4, effekte=effekte_)
                 with self.subTest(fmt=fmt, effekte=effekte_):
                     g, _ = entwurf.filtergraph(liste, spuren, b=b, h=h, musik_eingang=3 if musik else None,
-                                               schrift=schrift if fmt == "short" else None)
+                                               schrift=schrift if fmt == "short" else None, ton=STIMMEN_AN)
                     self.assertEqual(g, heute)
         # Stems (R5): nur zwei Abzweige mehr – Vordergrund vor dem Ducking, Musik danach
         liste = heute_liste("short", True)
-        g, _ = entwurf.filtergraph(liste, [2, 1, 0], b=720, h=1280, musik_eingang=3, schrift=schrift, stems=True)
+        g, _ = entwurf.filtergraph(liste, [2, 1, 0], b=720, h=1280, musik_eingang=3, schrift=schrift, stems=True,
+                                   ton=STIMMEN_AN)
         erwartet = (HEUTE_SHORT.replace("asplit=2[spiel][schluessel]", "asplit=3[spiel][schluessel][stv]")
                     .replace("release=400[leiser]", "release=400[leiser0];[leiser0]asplit=2[leiser][stm]"))
         self.assertEqual(g, erwartet)
