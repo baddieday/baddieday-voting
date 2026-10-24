@@ -90,6 +90,28 @@ class Geschmack(MitSpeicher):
                       text)
         self.assertIsNone(geschmack.wochen_text(self.con, self.konfig, datetime(2020, 1, 1, tzinfo=timezone.utc)))
 
+    def test_ki_benotet_die_letzten_30_videos_neueste_zuerst(self):
+        """24.10. (Florian: „sag dem Bot, dass er die letzten 30 Videos auswerten darf“): nicht mehr nur Shorts der
+        letzten 3 Tage – die letzten N gesendeten, neueste zuerst; ältere als das Fenster zählen nicht mehr mit."""
+        wahl = {"aufbau": "story", "tempo": "ruhig", "zeitlupe": "wenig"}
+        alt = jetzt() - timedelta(days=10)
+        ids = [self.entwurf(wahl, erstellt=alt + timedelta(minutes=i)) for i in range(5)]   # alle ohne KI-Note, 10 Tage alt
+        self.assertEqual(geschmack.offen_fuer_ki(self.con), ids[-1])        # früher (3-Tage-Fenster): nichts
+        self.assertEqual(geschmack.offen_fuer_ki(self.con, {ids[-1]}), ids[-2])
+        # Fenster von 2: nur die zwei neuesten; sind beide versucht oder benotet, ist Ruhe – die drei älteren fallen raus
+        self.assertEqual(geschmack.offen_fuer_ki(self.con, {ids[-1]}, 2), ids[-2])
+        self.assertIsNone(geschmack.offen_fuer_ki(self.con, {ids[-1], ids[-2]}, 2))
+        self.con.execute("INSERT INTO kritiken (entwurf_id, score, regel_score, ki_score, details, erstellt) "
+                         "VALUES (?, 70, 70, 60, '{}', ?)", (ids[-1], iso(jetzt())))
+        self.assertEqual(geschmack.offen_fuer_ki(self.con, frozenset(), 2), ids[-2])   # benotet zählt nicht als offen
+        # Konfig: Standard 30, ein falscher Wert gilt als Standard
+        from clip_pipeline import lernbot
+        self.assertEqual(lernbot._rueckblick(self.konfig), 30)
+        self.konfig.daten["regie"]["kritik"]["ki_rueckblick"] = "viele"
+        self.assertEqual(lernbot._rueckblick(self.konfig), geschmack.KI_RUECKBLICK)
+        self.konfig.daten["regie"]["kritik"]["ki_rueckblick"] = 12
+        self.assertEqual(lernbot._rueckblick(self.konfig), 12)
+
     def test_zuschauer_lehren_aufbau_tempo_und_zeitlupe(self):
         """Stufe 5 (08.10., Florian: „keine 100 oder 1000 Videos bewerten“): ohne einen einzigen Daumen lernt der Bot
         aus den Zuschauer-Noten – jede Schraube, die im Video wirkte, zählt doppelt."""

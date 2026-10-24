@@ -180,7 +180,11 @@ stil = "auto"
 # Cutter-Kritik (30.09., kritik.py): jeder Entwurf bekommt eine Note 0–100 aus Handwerksregeln und – wenn ki = true –
 # vom KI-Cutter (claude -p, nur Leserechte, zählt gegen das Abo). Aus den Noten lernt der Bot selbst.
 ki = true
-ki_pro_tag = 20            # höchstens so viele KI-Urteile am Tag, danach nur Regeln
+ki_pro_tag = 30            # höchstens so viele KI-Urteile am Tag, danach nur Regeln (24.10.: 30 statt 20)
+# 24.10. (Florian: „sag dem Bot, dass er die letzten 30 Videos auswerten darf“): Im Hintergrund benotet die KI die
+# letzten so vielen gesendeten Shorts, die noch keine KI-Note haben – neueste zuerst, im einfachen Modus (statt nur die
+# der letzten 3 Tage). Jede Note lehrt Aufbau/Tempo/Zeitlupe (geschmack) und den Maßstab (massstab); sie zählt gegen das Abo.
+ki_rueckblick = 30
 timeout_s = 180
 gut_ab = 60                # KI-Note ab hier zählt als 👍 im Regie-Lernen, darunter als 👎
 schwelle = 50              # darunter sortiert der Lern-Bot den Entwurf still aus und baut neu (0 = aus)

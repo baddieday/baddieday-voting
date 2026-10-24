@@ -334,12 +334,22 @@ def nur_wirksame(vorher: dict, nachher: dict, konfig: Konfig) -> dict:
 
 # --- KI-Urteil im Hintergrund ------------------------------------------------------------------------------------
 
-def offen_fuer_ki(con: sqlite3.Connection, ohne: set[int] | frozenset = frozenset()) -> int | None:
-    """Neuester gesendeter Short der letzten 3 Tage ohne KI-Note (und nicht schon versucht)."""
+KI_RUECKBLICK = 30            # so viele der zuletzt gesendeten Shorts darf die KI benoten ([regie.kritik] ki_rueckblick)
+
+
+def offen_fuer_ki(con: sqlite3.Connection, ohne: set[int] | frozenset = frozenset(),
+                  letzte: int = KI_RUECKBLICK) -> int | None:
+    """Neuester Short ohne KI-Note (und nicht schon versucht) unter den letzten `letzte` gesendeten oder bewerteten
+    Shorts – 24.10. (Florian: „sag dem Bot, dass er die letzten 30 Videos auswerten darf“); vorher nur die der letzten
+    3 Tage. Neueste zuerst: Ein frisches Video geht dem Rückstau vor, die älteren holt die KI nach, soweit das
+    Tageslimit ([regie.kritik] ki_pro_tag) reicht. Nachtschicht-Fassungen, die du nie siehst, haben nie diesen Status.
+    Beispiel: 31 gesendete Shorts, die 5 ältesten ohne Note → None, wenn die 26 neueren Noten haben (ältere zählen
+    nicht mehr mit)."""
     for z in con.execute("""SELECT e.id FROM entwuerfe e LEFT JOIN kritiken k ON k.entwurf_id = e.id
-                             WHERE e.format = 'short' AND e.status IN ('gesendet', 'bewertet') AND e.datei IS NOT NULL
-                               AND e.erstellt >= ? AND k.ki_score IS NULL ORDER BY e.id DESC LIMIT 10""",
-                         (iso(jetzt() - timedelta(days=3)),)):
+                             WHERE e.id IN (SELECT id FROM entwuerfe
+                                             WHERE format = 'short' AND status IN ('gesendet', 'bewertet')
+                                               AND datei IS NOT NULL ORDER BY id DESC LIMIT ?)
+                               AND k.ki_score IS NULL ORDER BY e.id DESC""", (max(1, int(letzte)),)):
         if z["id"] not in ohne:
             return int(z["id"])
     return None
@@ -522,7 +532,8 @@ def wochenbericht(con: sqlite3.Connection, konfig: Konfig, jetzt_utc=None) -> bo
 # --- Wer lehrt (08.10., „📋 sagt ehrlich, wer lehrt“) ------------------------------------------------------------
 # Nur aus vorhandenen Daten, ohne Netz: Du merkst ohne Blick ins Journal, ob KI-Note und Zuschauerzahlen ankommen.
 
-KI_FRISCH_TAGE = 3            # wie offen_fuer_ki: die KI benotet gesendete Shorts der letzten 3 Tage
+KI_FRISCH_TAGE = 3            # Fenster für 📋 (ki_stand): „läuft“ heißt eine KI-Note in den letzten 3 Tagen. Wen die KI
+#                               benotet, bestimmt seit 24.10. offen_fuer_ki (die letzten 30 Shorts), nicht dieses Fenster
 KI_SPAETESTENS_H = 6          # so lange darf ihre Note dauern (Bot baut gerade, Pipeline rechnet, Neustart)
 OHNE_ZAHLEN_TAGE = (3, 14)    # Post eines ✅-Videos, 3 bis 14 Tage alt, ohne jede Messung = „ohne Zahlen“
 

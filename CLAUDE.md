@@ -828,3 +828,11 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   Clip-Shorts; Vorschauen zum Bewerten bleiben wie sie sind. Die Videos #245/#246 vom 23.10. haben noch Stimmen – nicht
   hochladen. Schalter `[regie.ton] stimmen_entfernen`/`stimmen_pruefen`. Sauberer wäre die Quelle: In Fortnite den
   Sprachchat auf das Gerät „SteelSeries Sonar – Chat“ legen, dann ist der Spielton ab Aufnahme ohne Stimmen.
+- 2026-10-24 (Florian: „sag dem Bot mal, dass er die letzten 30 Videos auswerten darf“): **Die KI darf die letzten 30
+  Videos benoten.** Annahme: gemeint ist der KI-Cutter im Hintergrund („TikTok-Videos auswerten“ wäre eine eigene
+  Funktion und braucht erst die TikTok-Verbindung). Bisher benotete die KI nur gesendete Shorts der letzten 3
+  Tage, höchstens 20 am Tag (`geschmack.offen_fuer_ki`, `[regie.kritik] ki_pro_tag`). Neu: die letzten
+  `[regie.kritik] ki_rueckblick` (30) gesendeten oder bewerteten Shorts ohne KI-Note, neueste zuerst (frisches Video geht
+  dem Rückstau vor), Tageslimit 30. Jede Note lehrt wie bisher Aufbau/Tempo/Zeitlupe (Gewicht 0,34) und den Maßstab
+  (blind), sie zählt gegen das Abo. Nachtschicht-Fassungen, die du nie siehst, sind nicht dabei. Nichts gelöscht, keine
+  neue Knopf-Bedienung; wirkt im einfachen Modus (dort läuft die KI-Schleife).
