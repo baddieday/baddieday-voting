@@ -847,3 +847,12 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   refreshed“) – KI-Cutter, Nachtschicht-Paarvergleich und `decide` laufen erst nach einmaligem `claude /login` als
   Benutzer `pipeline` wieder (Mini hat 10 von 253 Kritiken mit KI-Note); (2) eine Warnung, wenn der Mini nicht
   antwortet, fehlt weiter (die Bots laufen ja auf ihm – nötig wäre ein Wächter außerhalb, z. B. auf DEY).
+- 2026-10-27 (Florian: „Warum werde ich so gespammt?? Das ist nicht schön!“ – Telegram: „Übertragung Gaming-PC → Puffer
+  gestartet/abgebrochen“): **Übertragungs-Probleme kommen gebündelt** (`uebertragung.beruhige`). Ursache: Der PC schreibt
+  bei jedem 2-Minuten-Lauf mit offenen Dateien einen Laufbericht – auch wenn der Mini nicht erreichbar ist (dann
+  „abgebrochen“, 0 Dateien). Diese Berichte sammeln sich lokal und werden nach dem Ausfall (24.–27.10.) alle auf einmal
+  gespiegelt; der Bot machte aus jedem zwei Nachrichten. Jetzt: ein Start, zu dem schon ein Problem-Ende existiert, wird
+  nur vermerkt; gleichartige Probleme (abgebrochen / mit Fehlern) gehen als **eine** Nachricht mit „+n zusammengefasst“
+  raus; dasselbe Problem höchstens alle 6 h (`[bot].uebertragung_pause_h`). Vermerkt heißt `routine = 2`, nichts
+  gelöscht. Berichte werden in Lieferreihenfolge gelesen (vorher nach zufälligem Dateinamen). Wirkt auch auf die schon
+  wartende Flut. Erfolgreiche Läufe unverändert (im stillen einfachen Modus ohnehin nur vermerkt). PC-Skript unverändert.
