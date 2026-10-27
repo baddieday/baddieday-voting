@@ -1,6 +1,7 @@
 """Persistente PC-Berichte -> Telegram: Reihenfolge, Wiederholung und Teilerfolg."""
 import asyncio
 import json
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest import mock
 
@@ -69,9 +70,10 @@ class Uebertragung(MitSpeicher):
                               bot=SimpleNamespace(send_message=senden))
         with self.assertRaises(OSError):
             asyncio.run(bot_app.sende_meldungen(app))
-        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM meldungen WHERE gesendet IS NULL").fetchone()[0], 2)
+        # der Start dieses Laufs wartete noch – mit dem Problem-Ende sagt er nichts Neues und wird nur vermerkt (27.10.)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM meldungen WHERE gesendet IS NULL").fetchone()[0], 1)
         senden.side_effect = None
-        self.assertEqual(asyncio.run(bot_app.sende_meldungen(app)), 2)
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(app)), 1)
         ende = senden.call_args.args[1]
         self.assertIn("mit Fehlern", ende)
         self.assertIn("Videos: 1", ende)
@@ -79,3 +81,49 @@ class Uebertragung(MitSpeicher):
         self.konfig.daten["lager"]["wurzel"] = ""
         with mock.patch("pathlib.Path.glob", side_effect=AssertionError("pve-big angefasst")):
             self.assertEqual(uebertragung.hole_meldungen(self.con, self.konfig), 0)
+
+    def _app(self):
+        senden = mock.AsyncMock()
+        return senden, SimpleNamespace(bot_data={"con": self.con, "konfig": self.konfig, "erlaubt": 42},
+                                       bot=SimpleNamespace(send_message=senden))
+
+    def _abbruch(self, nr: int, minute: int):
+        self.bericht.update(id=f"{nr:032x}", start_utc=f"2026-10-26T18:{minute:02d}:00Z",
+                            ende_utc=f"2026-10-26T18:{minute:02d}:09Z", status="abgebrochen")
+        self.schreibe()
+
+    def test_ausfall_flut_wird_eine_meldung(self):
+        """27.10., Florian: „Warum werde ich so gespammt?“ – der Mini war aus, der PC schrieb bei jedem 2-Minuten-Lauf
+        einen „abgebrochen“-Bericht und lieferte nach dem Ausfall alle auf einmal: je zwei Nachrichten (Start + Abbruch).
+        Jetzt: eine Nachricht mit der Zahl der zusammengefassten, kein Start; ein neuer gleicher Abbruch kommt erst
+        nach der Pause (6 h) wieder."""
+        for nr in range(1, 6):
+            self._abbruch(nr, nr)
+        senden, app = self._app()
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(app)), 1)
+        text = senden.call_args.args[1]
+        self.assertIn("abgebrochen", text)
+        self.assertIn("+4 gleiche Meldungen zusammengefasst", text)
+        self.assertNotIn("gestartet", text)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM meldungen WHERE gesendet IS NULL").fetchone()[0], 0)
+        # derselbe Fehler im nächsten Lauf: innerhalb der Pause still vermerkt, nichts geht verloren
+        self._abbruch(6, 30)
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(app)), 0)
+        self.assertEqual(self.con.execute(
+            "SELECT COUNT(*) FROM meldungen WHERE routine = 2 AND schluessel LIKE '%:ende'").fetchone()[0], 5)
+        # nach der Pause meldet er sich wieder (hier: die erste Meldung liegt 7 h zurück)
+        self.con.execute("UPDATE meldungen SET gesendet = ? WHERE routine IS NULL AND gesendet IS NOT NULL",
+                         (db.iso(db.jetzt() - timedelta(hours=7)),))
+        self._abbruch(7, 45)
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(app)), 1)
+        self.assertNotIn("zusammengefasst", senden.call_args.args[1])
+
+    def test_anderes_problem_wird_nicht_verschluckt(self):
+        """Die Pause gilt je Art: auf einen Abbruch folgt ein Lauf „mit Fehlern“ – der kommt trotzdem."""
+        self._abbruch(1, 1)
+        senden, app = self._app()
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(app)), 1)
+        self.bericht.update(id="b" * 32, status="fehler", ende_utc="2026-10-26T19:00:09Z", fehler=1)
+        self.schreibe()
+        self.assertEqual(asyncio.run(bot_app.sende_meldungen(app)), 1)
+        self.assertIn("mit Fehlern", senden.call_args.args[1])
