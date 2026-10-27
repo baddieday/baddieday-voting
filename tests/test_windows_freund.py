@@ -179,7 +179,9 @@ class NormalerWeg(MitPc):
         s = self.status()
         self.assertEqual((s["hochgeladen"], s["fehler"], s["offen"], s["uebersprungen"], s["fortnite"]),
                          (3, 0, [], [], False))
-        self.assertEqual((s["zeitzone"], s["utc_offset_min"]), (ZONE, 120))
+        # Versatz von jetzt (Sommer-/Winterzeit wechselt im Jahr; fest 120 war ab 25.10.2026 falsch)
+        jetzt_min = int(utc_zu_lokal(datetime.now(UTC), ZONE).utcoffset().total_seconds() // 60)
+        self.assertEqual((s["zeitzone"], s["utc_offset_min"]), (ZONE, jetzt_min))
         self.assertEqual(list((self.fach / "sitzungen").iterdir()), [])   # erst 45 min nach dem Match
 
         lauf = self.lauf(uhr_plus(50))                                    # 50 min später: der Abend ist vorbei

@@ -836,3 +836,14 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   dem Rückstau vor), Tageslimit 30. Jede Note lehrt wie bisher Aufbau/Tempo/Zeitlupe (Gewicht 0,34) und den Maßstab
   (blind), sie zählt gegen das Abo. Nachtschicht-Fassungen, die du nie siehst, sind nicht dabei. Nichts gelöscht, keine
   neue Knopf-Bedienung; wirkt im einfachen Modus (dort läuft die KI-Schleife).
+- 2026-10-27 (Ausfall 24.–27.10.): **Beide Bots waren ~2,3 Tage offline.** Ursache: Der CT `clips` war seit der festen
+  IP vom 14.10. nie neu gestartet worden – `pct config` hatte die Adresse, im CT lief aber noch die DHCP-Adresse aus einer
+  einmaligen Vergabe (ifupdown, `dhclient -1`), die am 24.10. ca. 22:58 ablief; danach kein IPv4, keine Namensauflösung
+  (27 468 Fehler im Log), der Gaming-PC konnte nicht per SMB auf 192.168.178.93 kopieren (Aufnahmen blieben dort liegen).
+  Behoben: Adresse von Hand gesetzt, dann `pct reboot 102` – Proxmox schreibt jetzt `iface eth0 inet static`; IPv4, DNS,
+  Bots, Samba (445) und Tailscale geprüft; das Update (KI-Rückblick 30 Videos, Stimmen raus) danach eingespielt. Lehre:
+  nach `pct set … -net0 ip=…` den CT neu starten und prüfen. **Offen:** (1) die Claude-Anmeldung des Lern-Bots
+  (`CLAUDE_CONFIG_DIR=/var/lib/clip-pipeline/claude`) ist abgelaufen („OAuth session expired and could not be
+  refreshed“) – KI-Cutter, Nachtschicht-Paarvergleich und `decide` laufen erst nach einmaligem `claude /login` als
+  Benutzer `pipeline` wieder (Mini hat 10 von 253 Kritiken mit KI-Note); (2) eine Warnung, wenn der Mini nicht
+  antwortet, fehlt weiter (die Bots laufen ja auf ihm – nötig wäre ein Wächter außerhalb, z. B. auf DEY).
