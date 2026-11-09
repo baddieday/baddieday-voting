@@ -12,6 +12,14 @@ from tests.hilfen import HAT_FFMPEG
 from tests.regie_hilfen import FARBEN, MOMENTE, MitRegieMaterial, farbe_bei, naechste_farbe
 
 
+def oben_farbe(video: Path, sekunde: float) -> tuple[int, int, int]:
+    """Mittlere Farbe eines Streifens ganz oben (5 % der Höhe, ohne den Schriftzug bei 12 %)."""
+    roh = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", f"{sekunde:.3f}", "-i", str(video),
+                          "-frames:v", "1", "-vf", "crop=iw:ih*0.05:0:0,scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                          "-"], capture_output=True, check=True).stdout
+    return roh[0], roh[1], roh[2]
+
+
 def dauern(video: Path) -> dict[str, float]:
     text = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration", "-of", "csv=p=0",
                            str(video)], capture_output=True, text=True, check=True).stdout
@@ -59,6 +67,16 @@ class Entwurf(MitRegieMaterial):
         self.musik_anlegen(128, "spannend")
         liste = self.pruefe("short", [720, 1280])
         self.assertTrue(30 <= liste["dauer_s"] <= 75)
+        # 09.11.: Vollbild – das Spielbild füllt das ganze Hochformat, oben ist dieselbe Farbe wie in der Mitte (vorher
+        # unscharfer, abgedunkelter Rand), das Band reicht über die ganze Höhe
+        self.assertEqual(liste["parameter"]["layout"], "vollbild")
+        video = Path(entwurf.entwurf(self.con, self.konfig, regie.erstelle(self.con, self.konfig, "short")["entwurf"])
+                     ["datei"])
+        sidecar = json.loads(video.with_suffix(".render.json").read_text())
+        self.assertEqual(sidecar["band"], [0, 1280])
+        mitte = farbe_bei(video, 1.0)
+        oben = oben_farbe(video, 1.0)
+        self.assertLess(max(abs(a - b) for a, b in zip(oben, mitte)), 8, (oben, mitte))
         liste = self.pruefe("zusammenschnitt", [1280, 720])
         self.assertTrue(75 <= liste["dauer_s"] <= 120)
         self.assertTrue(any(s["uebergang"]["art"] != "schnitt" for s in liste["segmente"]))
@@ -117,6 +135,22 @@ class BildGraph(unittest.TestCase):
                         self.assertEqual(teil.count("boxblur"), 1)
                     else:
                         self.assertNotIn("boxblur", teil)
+
+    def test_vollbild_schneidet_die_mitte_zu_ohne_hintergrund(self):
+        """09.11.: Vollbild – Mitte der Quelle auf 9:16, dann auf die Zielgröße; kein unscharfer Hintergrund. Die Texte
+        stehen im oberen Drittel auf dem Bild (vorher unter/über dem Streifen)."""
+        liste = {**self.liste("short"), "parameter": {"layout": "vollbild"}}
+        graph, _ = entwurf.filtergraph(liste, [2, 2, 2], b=720, h=1280, musik_eingang=None, schrift=None)
+        for i in range(3):
+            teil = self.bild_teile(graph, i)
+            self.assertIn(f"[{i}:v]fps=30,crop=w='min(iw,2*trunc(ih*720/1280/2))':h='min(ih,2*trunc(iw*1280/720/2))',"
+                          f"scale=720:1280", teil)
+            self.assertNotIn("boxblur", graph)
+        from clip_pipeline import effekt_filter
+        lage = effekt_filter.lage(720, 1280, True, len("DOUBLE KILL"), 0.75, 1280)
+        self.assertAlmostEqual(lage["titel"][0], 0.28 * 1280)
+        self.assertGreater(lage["titel"][1], effekt_filter.TEXT_MIN * 1280)   # Titel fällt nicht weg
+        self.assertEqual(entwurf.geometrie(liste, 720, 1280, [(1920, 1080)] * 3, 1.0)["band"], [0, 1280])
 
 
 @unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")

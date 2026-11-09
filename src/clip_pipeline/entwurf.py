@@ -105,6 +105,8 @@ def _gerade(x: float) -> int:
 
 
 RAHMEN_MAX = 1.6   # Short: Obergrenze der Angabe; wirksam begrenzt rahmen_grenze (lesbarer Titel über der Bedienzone)
+# Short-Layout (parameter.layout) – Vollbild oder Streifen, siehe effekt_filter.vollbild
+VOLLBILD, STREIFEN, vollbild = effekt_filter.VOLLBILD, effekt_filter.STREIFEN, effekt_filter.vollbild
 
 
 def rahmen_zoom(liste: dict) -> float:
@@ -121,17 +123,18 @@ def rahmen_zoom(liste: dict) -> float:
 def rahmen_grenze(liste: dict, b: int, h: int, quellen: list[tuple[int, int]]) -> float:
     """Wirksamer Rahmen-Zoom (30.09.): so groß wie der Stil will, aber nur so weit, dass unter dem Spielbild der
     höchsten Quelle (4:3 ist höher als 16:9) ein lesbarer Kill-Titel über der Bedienzone Platz hat
-    (effekt_filter.spiel_hoehe_max). 16:9 bei 720×1280: höchstens ×1,28; 4:3: ×1,0. quellen: (Breite, Höhe) je Datei."""
+    (effekt_filter.spiel_hoehe_max). 16:9 bei 720×1280: höchstens ×1,28; 4:3: ×1,0. quellen: (Breite, Höhe) je Datei.
+    Vollbild: 1,0 – der Ausschnitt füllt ohnehin das ganze Bild."""
     z = rahmen_zoom(liste)
     quellen = [(qb, qh) for qb, qh in quellen if qb and qh]
-    if z <= 1.0 or not quellen:
+    if z <= 1.0 or not quellen or vollbild(liste):
         return z
     hoch = max(qh / qb for qb, qh in quellen)
     return max(1.0, min(z, math.floor(100 * effekt_filter.spiel_hoehe_max(h) / (b * hoch)) / 100))
 
 
 def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", look: str = "", tempo: str = "",
-          flash: str = "", rahmen: float = 1.0) -> str:
+          flash: str = "", rahmen: float = 1.0, voll: bool = False) -> str:
     """fps zuerst: Alle weiteren Filter sehen nur noch die Bilder, die ins Ergebnis kommen (60 fps -> halb so viele).
     tempo (effekt_filter.tempo_video) noch davor: Zeitlupe/Zeitraffer dehnen die Quelle, fps macht daraus die
     Bilder des Videos (eine 60-fps-Aufnahme bleibt bei Faktor 0,5 im 30-fps-Short flüssig).
@@ -140,12 +143,18 @@ def _bild(i: int, b: int, h: int, fps: int, hochformat: bool, zoom: str = "", lo
     look (nur Short): Farblook auf Spielbild und kleinem Hintergrund, bevor beide zusammengesetzt werden.
     flash (effekt_filter.bildfilter): der Effekt-Katalog (Blitz, Strobe, Farb-Pop, Negativ, Blur …) nur auf dem
     Spielbild, nach dem Zoom, vor dem Look.
-    rahmen (rahmen_zoom, nur Short): Spielbild rahmen-fach breiter skalieren und auf b zuschneiden (Mitte)."""
+    rahmen (rahmen_zoom, nur Short): Spielbild rahmen-fach breiter skalieren und auf b zuschneiden (Mitte).
+    voll (Vollbild, nur Short): erst die Mitte der Quelle auf 9:16 zuschneiden, dann auf b × h – so skaliert ffmpeg nur
+    den Ausschnitt; Zoom, Katalog und Look wirken aufs ganze Bild, einen Hintergrund gibt es nicht. min(…) hält den
+    Ausschnitt in der Quelle, falls eine Aufnahme schmaler als 9:16 wäre."""
     z = f",{zoom}" if zoom else ""
     groesse = f"scale={_gerade(b * rahmen)}:-2,crop={b}:ih" if hochformat and rahmen > 1.0 else f"scale={b}:-2"
     fl = f",{flash}" if flash else ""
     lk = f",{look}" if look else ""
     kopf = f"[{i}:v]{tempo + ',' if tempo else ''}fps={fps}"
+    if hochformat and voll:
+        ausschnitt = f"crop=w='min(iw,2*trunc(ih*{b}/{h}/2))':h='min(ih,2*trunc(iw*{h}/{b}/2))',scale={b}:{h}"
+        return f"{kopf},{ausschnitt}{z}{fl}{lk},format=yuv420p,setsar=1,settb=AVTB[v{i}]"
     if hochformat:  # wie shorts.py "unschaerfe": ganzes Spielbild, unscharfer Hintergrund füllt den Rand
         # Hintergrund auf b/4 × h/4 weichzeichnen (1/16 der Pixel; Radius 5 statt 20 = gleich unscharf), dann hoch
         b4, h4 = _gerade(b / 4), _gerade(h / 4)
@@ -203,6 +212,9 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
     bild = effekt_filter.je_segment(liste, ereignisse, griffe, effekte.BILD)   # Katalog nur aufs Spielbild
     look = effekt_filter.look_der_liste(liste) if hoch else ""  # 16:9: einmal global (effekt_filter.global_kette)
     rahmen = rahmen_zoom(liste) if rahmen is None else rahmen
+    voll = vollbild(liste)
+    if voll:   # Vollbild: das Spielbild ist das ganze Bild – die Texte stehen darauf (effekt_filter.lage)
+        spiel_h, rahmen = h, 1.0
     stimmen_ok = bool({**TON_STANDARD, **(ton or {})}["stimmen"])   # 22.10.: ab Werk nie Mikro/Chat im fertigen Video
     teile, laengen = [], []
     for i, (s, (vorne, hinten)) in enumerate(zip(segmente, griffe)):
@@ -215,7 +227,7 @@ def filtergraph(liste: dict, spuren: list[int], *, b: int, h: int, musik_eingang
             eingang = s["quelle_start_s"] - vorne
             tempo_v, tempo_a = effekt_filter.tempo_video(fenster, eingang), effekt_filter.tempo_ton(i, s, eingang)
         teile.append(_bild(i, b, h, fps, hoch, effekt_filter.zoom(i, zooms[i]) if i in zooms else "", look, tempo_v,
-                           effekt_filter.bildfilter(bild[i], b) if i in bild else "", rahmen))
+                           effekt_filter.bildfilter(bild[i], b) if i in bild else "", rahmen, voll))
         teile.append(_ton(i, spuren[i], laenge, stimmen_ok and bool(s.get("stimmen", True)), tempo_a,
                           quelle=ton_quellen[i] if ton_quellen else None))
     # Verketten: offset_i = bisherige Länge − Übergangsdauer (siehe Herleitung in docs/ENTSCHEIDUNGEN.md E8)
@@ -330,9 +342,11 @@ def rendere(liste: dict, ziel: Path, konfig: Konfig, *, final: bool = False, max
         ueberhang = max(0.0, min(UEBERHANG_S, info.dauer_s - (start + dauer)))
         ausschnitte.append((datei, max(0.0, start), dauer + ueberhang))
         befehl += ["-ss", f"{max(0.0, start):.3f}", "-t", f"{dauer + ueberhang:.3f}", "-i", str(datei)]
-    # Short: Texte über/unter dem höchsten Spielbild (4:3-Aufnahme ist höher); Zoom nur so weit, dass Titel lesbar bleiben
+    # Short: Texte über/unter dem höchsten Spielbild (4:3-Aufnahme ist höher); Zoom nur so weit, dass Titel lesbar bleiben.
+    # Vollbild: das Spielbild ist das ganze Bild
     rahmen = rahmen_grenze(liste, b, h, quellen)
-    spiel_h = max((effekt_filter.spiel_hoehe(_gerade(b * rahmen), qb, qh) for qb, qh in quellen if qb and qh), default=0)
+    spiel_h = h if vollbild(liste) else max(
+        (effekt_filter.spiel_hoehe(_gerade(b * rahmen), qb, qh) for qb, qh in quellen if qb and qh), default=0)
     musik_eingang = None
     if m := liste.get("musik"):
         datei = musik.ordner(konfig) / m["datei"]
@@ -448,8 +462,12 @@ def geometrie(liste: dict, b: int, h: int, quellen: list[tuple[int, int]], rahme
     band: Short = effekt_filter.spielbild mit dem NIEDRIGSTEN Spielbild der Liste – so liegt ein Ausschnitt sicher im
     Spielbild jedes Segments, Logo, Titel und unscharfer Rand fallen heraus. 16:9: volle Höhe, nur ein Rand oben/unten
     (Quelle breiter als 16:9) wird abgezogen – 4:3 bekommt Ränder links/rechts, die Höhe bleibt voll.
-    Beispiel Short 720×1280, 16:9-Quellen, rahmen 1,0: band [436, 842], spiel_anteile je 0,3172."""
+    Beispiel Short 720×1280, 16:9-Quellen, rahmen 1,0: band [436, 842], spiel_anteile je 0,3172.
+    Vollbild: band [0, h], spiel_anteile je 1,0."""
     hoch = liste.get("format") == "short"
+    if vollbild(liste):
+        return {"b": b, "h": h, "format": liste.get("format"), "band": [0, h],
+                "spiel_anteile": [1.0 for _ in quellen], "rahmen": 1.0, "layout": VOLLBILD}
     hoehen = []
     for qb, qh in quellen:
         qb, qh = (qb, qh) if qb and qh else (16, 9)

@@ -18,6 +18,10 @@ ob du sie schon gesehen hast, ob sie gerade erst in einem deiner letzten Videos 
 der letzten Tage sie kam (Einsätze) – Fassungen eines Videos zählen als ein Video. Eine neue Fassung nach ❌ ersetzt ihr
 Video (ersetzt_kette): dessen Szenen sind für sie keine Wiederholung. Nichts wird gelöscht; alles folgt aus den
 Entwürfen.
+
+Deckel (09.11., Florian: „immer das gleiche Schema“ – eine Szene lief in 16 von 30 Videos): Eine Szene, die schon in
+`hoechstens` (3) deiner letzten `fenster` (15) Shorts lief, ist gesperrt wie eine gerade gezeigte (Verlauf.oft) – auch
+im Notfall. Das 2-Wochen-Video zählt dafür nicht (es zeigt mit Absicht die Besten der zwei Wochen).
 """
 
 from __future__ import annotations
@@ -117,7 +121,7 @@ def jemals_gezeigt(con: sqlite3.Connection) -> set[str]:
 # Videos, die du gesehen hast oder die gerade zu dir unterwegs sind: fertig gerendert, aber noch nicht verschickt, oder
 # ein Abend-Video, dessen Rendern der Timer nachholt (sitzung._nachholen) – sonst nähme ein 🎬, das auf die
 # Pipeline-Sperre wartete, dieselben Szenen wie das Abend-Video, das gleich danach kommt. Still aussortierte nie.
-_GEZEIGT = """SELECT id, schnittliste, parameter, erstellt FROM entwuerfe WHERE auto_verworfen IS NULL
+_GEZEIGT = """SELECT id, schnittliste, parameter, erstellt, format FROM entwuerfe WHERE auto_verworfen IS NULL
                 AND (status IN ('gerendert', 'gesendet', 'bewertet')
                      OR id IN (SELECT entwurf_id FROM sitzungen WHERE entwurf_id IS NOT NULL))"""
 
@@ -146,6 +150,7 @@ class Verlauf:
     gesehen: set[str] = field(default_factory=set)      # je in einem Video gesehen (auch im ersetzten)
     eigen: set[str] = field(default_factory=set)        # im Video, das die neue Fassung ersetzt (samt Vorgängern)
     gesperrt: set[str] = field(default_factory=set)     # gerade erst in einem deiner letzten Videos (ohne das ersetzte)
+    oft: set[str] = field(default_factory=set)          # 09.11.: am Deckel (hoechstens der letzten fenster Shorts)
     einsaetze: dict[str, int] = field(default_factory=dict)          # Szene -> Videos in den letzten Tagen
     videos: dict[str, frozenset[int]] = field(default_factory=dict)  # Szene -> frühere Videos (für „zusammen“)
 
@@ -155,7 +160,7 @@ class Verlauf:
 
 
 def verlauf(con: sqlite3.Connection, idx: dict[str, set[str]], *, ersetzt: Iterable[int] = (), tage: float = 30.0,
-            sperre: int = 3, stunden: float = 48.0) -> Verlauf:
+            sperre: int = 3, stunden: float = 48.0, fenster: int = 15, hoechstens: int = 3) -> Verlauf:
     """Abwechslung mit Ermüdung (08.10., Florian: „die Momente dürfen ruhig öfter und gemischter genutzt werden … bessere
     öfters zeigen, aber nicht permanent“). Ein Video = alle Fassungen eines Videos (Familie: kleinste Nummer aus dem
     Entwurf und seinem Parameter „ersetzt“), gezählt werden Videos aus _GEZEIGT, das neueste nach seiner jüngsten
@@ -167,14 +172,18 @@ def verlauf(con: sqlite3.Connection, idx: dict[str, set[str]], *, ersetzt: Itera
     Wiederholung und frei, außer sie liefen gerade erst in einem ANDEREN deiner letzten Videos (Prüfung 08.10.: sonst
     brachte die Fassung eines älteren Videos Szenen aus dem Video direkt davor gleich noch einmal). Beispiel: Videos #1
     (a, b), #2 (c), #3 = Fassung von #1 (a, d), alle von heute, sperre 1 → gesperrt {a, b, d} (beide Fassungen sind
-    ein Video), einsaetze a 1, b 1, c 1, d 1; mit ersetzt [3, 1]: eigen {a, b, d}, gesperrt {c}."""
+    ein Video), einsaetze a 1, b 1, c 1, d 1; mit ersetzt [3, 1]: eigen {a, b, d}, gesperrt {c}.
+    Deckel (09.11.): oft = Szenen aus mindestens `hoechstens` der letzten `fenster` Shorts (ohne das ersetzte Video,
+    ohne Zeitgrenze) – sie stehen auch in gesperrt. hoechstens 0 = kein Deckel."""
     ersetzt = [int(i) for i in ersetzt]
     familie_von: dict[int, int] = {}
     familien: dict[int, dict] = {}
     for z in con.execute(_GEZEIGT):
         fam = min([int(z["id"]), *_ersetzt(z["parameter"])])
         familie_von[int(z["id"])] = fam
-        f = familien.setdefault(fam, {"momente": set(), "neuester": 0, "zeit": None, "unlesbar": False})
+        f = familien.setdefault(fam, {"momente": set(), "neuester": 0, "zeit": None, "unlesbar": False,
+                                      "short": False})
+        f["short"] = f["short"] or z["format"] == "short"
         f["momente"] |= momente_der_liste(z["schnittliste"])
         f["neuester"] = max(f["neuester"], int(z["id"]))
         try:
@@ -191,10 +200,15 @@ def verlauf(con: sqlite3.Connection, idx: dict[str, set[str]], *, ersetzt: Itera
     sperr_grenze = jetzt() - timedelta(hours=float(stunden))
     videos: dict[str, set[int]] = {}
     andere = sorted((fam for fam in familien if fam not in weg), key=lambda fam: -familien[fam]["neuester"])
+    kurze, oft = 0, {}   # Deckel: Shorts im Fenster, Szene -> in wie vielen davon
     for rang, fam in enumerate(andere):
         f = familien[fam]
         szenen_ = erweitert(f["momente"], idx)
         neu = f["unlesbar"] or f["zeit"] is None
+        if f["short"] and kurze < int(fenster):
+            kurze += 1
+            for s in szenen_:
+                oft[s] = oft.get(s, 0) + 1
         if rang < int(sperre) and (neu or f["zeit"] >= sperr_grenze):
             v.gesperrt |= szenen_
         if neu or f["zeit"] >= grenze:
@@ -205,6 +219,9 @@ def verlauf(con: sqlite3.Connection, idx: dict[str, set[str]], *, ersetzt: Itera
         v.gesehen |= szenen_
     v.gesehen |= v.eigen
     v.videos = {s: frozenset(fams) for s, fams in videos.items()}
+    if int(hoechstens) > 0:
+        v.oft = {s for s, n in oft.items() if n >= int(hoechstens)}
+        v.gesperrt |= v.oft
     return v
 
 

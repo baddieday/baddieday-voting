@@ -168,6 +168,11 @@ sperre_videos = 3
 sperre_stunden = 48
 wiederholung_anteil = 0.5
 gleich_mit_video = 2
+# Deckel (09.11., Florian: „immer das gleiche Schema“ – eine Szene lief in 16 von 30 Videos): eine Szene höchstens in
+# szene_hoechstens deiner letzten szene_fenster Shorts, danach gesperrt (auch im Notfall; 0 = kein Deckel). Das
+# 2-Wochen-Video zählt nicht mit. Reicht das Material dann nicht, kommt lieber kein Video.
+szene_hoechstens = 3
+szene_fenster = 15
 # Effekt-Stufe 0 aus · 1 ruhig · 2 normal · 3 wild – hier bewusst nicht gesetzt: ohne Wert gilt das Gelernte,
 # „😵 Zu hektisch“ unter ❌ setzt sie (effekt_stufe = 2)
 # pve-big höchstens so lange für den Final-Render wach halten
@@ -175,6 +180,11 @@ final_halten_min = 60
 # Schnittstil (30.09., stile.py): "auto" = der Bot wählt selbst nach den Noten seines Cutter-Kritikers;
 # fest: montage, story, steigerung, kino, klassik. Im Lern-Bot unter ⚙️ Einstellungen umstellbar.
 stil = "auto"
+# Bild im Short (09.11., Florian: „immer das gleiche Schema“): "vollbild" = das Spielbild füllt das ganze Hochformat
+# (Mitte des 16:9-Bilds, Texte auf dem Bild, kein Kill-Zähler); "streifen" = wie bis 08.11. (16:9-Streifen in der
+# Mitte, unscharfer Hintergrund, Texte darüber/darunter). Der KI-Cutter bemängelte am Streifen fast jedes Mal das
+# „winzige Spielbild“.
+short_layout = "vollbild"
 
 [regie.kritik]
 # Cutter-Kritik (30.09., kritik.py): jeder Entwurf bekommt eine Note 0–100 aus Handwerksregeln und – wenn ki = true –
@@ -239,8 +249,9 @@ stimmen_threads = 6
 # config/lokal.toml unter [regie.effekte.<stimmung>] (Beispiele in config/lokal.beispiel.toml).
 # Aus = wie vorher (gleiche Übergänge, gleicher Filtergraph):
 an = true
-# Höchstens so viele Zeitlupen bzw. Zeitraffer je Video (28.09.; 0 = keine)
-max_lupen = 8
+# Höchstens so viele Zeitlupen bzw. Zeitraffer je Video (28.09.; 0 = keine). 09.11.: 3 statt 8 – acht Zeitlupen nahmen
+# jedem Kill den Kontrast (KI-Cutter); „viel Zeitlupe“ heißt jetzt 3, „wenig“ 1 (geschmack.ZEITLUPEN)
+max_lupen = 3
 max_raffer = 6
 # steigt, wenn sich die Profilwerte im Code ändern (steht in jeder Schnittliste)
 profil_version = 2

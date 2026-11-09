@@ -35,7 +35,7 @@ plane() in dieser Reihenfolge:
    7. Jubel        Meme-Zoom + Pop auf der ersten Jubel-Spitze (nur lustig)
    8. Riser        endet auf dem ersten Kill des Höhepunkts (wenn davor ≥ 1,5 s Video liegen)
    9. Whoosh       auf jedem weichen Übergang (nicht Schnitt, nicht Abblende über Schwarz)
-   9b. Einstieg    auf jedem harten Schnitt (auch Jump-Cut, auch ganz vorn): Stil aus EINSTIEG_STILE × einstieg
+   9b. Einstieg    ganz vorn und auf dem harten Schnitt in den Höhepunkt (09.11.; vorher auf jedem harten Schnitt): Stil aus EINSTIEG_STILE × einstieg
    9c. Drift       jedes Segment zoomt langsam hinein bzw. heraus (abwechselnd), Stärke drift – ohne Budget
   10. Budget       Zoom-Ereignisse ≥ effekt_abstand_s auseinander (Vorrang Finisher > Meme > Punch/Einstieg > Akzent),
                    kein Zoom-Start in einer Übergangsblende
@@ -100,15 +100,15 @@ HEKTISCH = {"akzent", "flash", "shake", "rgb", "negativ", "blur", "strobe", "far
 SCHLUESSEL = {"einzug": "einstieg", "drift_ein": "drift", "drift_aus": "drift"}
 # Stil-Rotationen (keine zwei gleichen nacheinander; nur Stile, deren Arten im Profil Stärke haben; Start je Video
 # aus der Momentfolge). Finisher = letzte Aktion einer Kette, Neben = Kills davor (× mini_faktor), Beat = Akzente auf
-# der Musik (× akzent), Einstieg = jeder harte Schnitt (× einstieg)
-STILE = (("punch",), ("punch", "flash"), ("shake", "rgb"), ("punch", "negativ"), ("tilt", "flash"),
-         ("punch", "blur"), ("punch", "strobe"), ("shake", "hue"), ("punch", "pixel"),
+# der Musik (× akzent), Einstieg = ganz vorn und beim Höhepunkt (× einstieg)
+# 09.11. (Effekte nur bei Anlass): Negativ, Pixel, Strobe, Farbrad und Blur sind aus den Rotationen raus – sie
+# verdeckten genau den Kill, um den es geht (KI-Cutter: „Pixel-Effekt macht das Bild unkenntlich“, „Negativ, Hue,
+# Strobe ohne Anlass“). Die Filter bleiben im Katalog (Viral, eigene Vorgaben), nur die Rotation wählt sie nicht mehr.
+STILE = (("punch",), ("punch", "flash"), ("shake", "rgb"), ("tilt", "flash"),
          ("punch", "kontrast", "vignette"), ("tilt", "farbpop"))
 NEBEN_STILE = (("punch",), ("punch", "kontrast"), ("akzent", "farbpop"), ("punch", "vignette"), ("shake",))
-BEAT_STILE = (("akzent",), ("farbpop",), ("akzent", "vignette"), ("blur",), ("akzent", "kontrast"), ("hue",),
-              ("akzent", "flash"))
-EINSTIEG_STILE = (("einzug",), ("einzug", "flash"), ("blur",), ("einzug", "rgb"), ("negativ",),
-                  ("einzug", "farbpop"), ("pixel",))
+BEAT_STILE = (("akzent",), ("farbpop",), ("akzent", "vignette"), ("akzent", "kontrast"))
+EINSTIEG_STILE = (("einzug",), ("einzug", "flash"), ("einzug", "rgb"), ("einzug", "farbpop"))
 VERGROESSERND = {"zoom"}              # Übergänge, die das GANZE Bild vergrößern (xfade zoomin) – Short: Texte enden davor
 # Zoom-Budget: wer gewinnt bei zu engem Abstand (Tod-Punch zählt wie ein Finisher)
 RANG_FINISHER, RANG_MEME, RANG_PUNCH, RANG_AKZENT = 3, 2, 1, 0
@@ -156,24 +156,26 @@ STAERKEN = {"mini_faktor", "punch", "titel", "zaehler", "akzent", "meme", "tod_p
             "pop", "einschlag", "riser", "lupe", "raffer", "flash", "shake", "rgb", "negativ", "blur", "strobe",
             "farbpop", "kontrast", "hue", "vignette", "pixel", "tilt", "einstieg", "drift"}
 # Regisseur 2.1/2.2 (28.09.): Tempo, Impacts, Katalog und Dichte je Stimmung (0 = aus). Florian: „das wird langweilig –
-# mir ist egal, wie lange es rechnet, hauptsächlich es kommt ein sehr gutes Video raus“. Beat-Akzente kommen darum
-# schon nach max_ruhe_s 0,8 s statt 2,5 s, jeder harte Schnitt bekommt einen Einstieg, jedes Segment einen Drift.
+# mir ist egal, wie lange es rechnet, hauptsächlich es kommt ein sehr gutes Video raus“. Jedes Segment bekommt einen
+# Drift. 09.11. (Effekte nur bei Anlass): Beat-Effekte erst nach max_ruhe_s 4 s Ruhe (vorher 0,8 s – im Schnitt mehr als
+# ein Effekt je Sekunde, „Gewitter ohne Kontrast“), ein Einstieg nur ganz vorn und beim Höhepunkt (vorher auf jedem
+# harten Schnitt).
 NEU = {
     "episch": {"raffer": 0.6, "flash": 0.7, "shake": 0.6, "rgb": 0.5, "negativ": 0.6, "blur": 0.7, "strobe": 0.5,
                "farbpop": 0.7, "kontrast": 0.7, "hue": 0.4, "vignette": 0.7, "pixel": 0.4, "tilt": 0.7,
-               "einstieg": 0.8, "drift": 0.6, "akzent": 0.8, "max_ruhe_s": 0.8},
+               "einstieg": 0.8, "drift": 0.6, "akzent": 0.8, "max_ruhe_s": 4.0},
     "spannend": {"raffer": 0.7, "flash": 0.6, "shake": 0.7, "rgb": 0.6, "negativ": 0.7, "blur": 0.6, "strobe": 0.6,
                  "farbpop": 0.5, "kontrast": 0.8, "hue": 0.5, "vignette": 0.8, "pixel": 0.6, "tilt": 0.6,
-                 "einstieg": 0.8, "drift": 0.5, "akzent": 0.8, "max_ruhe_s": 0.8},
+                 "einstieg": 0.8, "drift": 0.5, "akzent": 0.8, "max_ruhe_s": 4.0},
     "lustig": {"raffer": 0.3, "flash": 0.3, "shake": 0.5, "rgb": 0.0, "negativ": 0.0, "blur": 0.3, "strobe": 0.3,
                "farbpop": 0.9, "kontrast": 0.5, "hue": 0.8, "vignette": 0.3, "pixel": 0.5, "tilt": 0.8,
-               "einstieg": 0.6, "drift": 0.4, "akzent": 0.6, "max_ruhe_s": 1.2, "lupe": 0.4},
+               "einstieg": 0.6, "drift": 0.4, "akzent": 0.6, "max_ruhe_s": 4.0, "lupe": 0.4},
     "frustriert": {"raffer": 0.0, "flash": 0.5, "shake": 0.6, "rgb": 0.0, "negativ": 0.5, "blur": 0.6, "strobe": 0.0,
                    "farbpop": 0.0, "kontrast": 0.6, "hue": 0.0, "vignette": 0.9, "pixel": 0.3, "tilt": 0.4,
-                   "einstieg": 0.5, "drift": 0.5, "akzent": 0.4, "max_ruhe_s": 2.0},
+                   "einstieg": 0.5, "drift": 0.5, "akzent": 0.4, "max_ruhe_s": None},
     "chill": {"raffer": 0.0, "flash": 0.0, "shake": 0.0, "rgb": 0.0, "negativ": 0.0, "blur": 0.3, "strobe": 0.0,
               "farbpop": 0.4, "kontrast": 0.0, "hue": 0.0, "vignette": 0.4, "pixel": 0.0, "tilt": 0.0,
-              "einstieg": 0.3, "drift": 0.8, "akzent": 0.3, "max_ruhe_s": 2.5},
+              "einstieg": 0.3, "drift": 0.8, "akzent": 0.3, "max_ruhe_s": None},
 }
 for _st, _werte in NEU.items():
     PROFIL[_st].update(_werte)
@@ -218,8 +220,9 @@ def finisher_stil(pr: dict, k: int) -> tuple[str, ...]:
     return moeglich[k % len(moeglich)]
 
 # [regie.effekte]: Standardwerte und Grenzen. Weitere Schlüssel (z. B. für Export oder Hook) lesen andere Module selbst.
+# max_lupen 3 (09.11., vorher 8): „A zieht alle 8 Kills in Zeitlupe und verliert so den Kontrast“ (KI-Cutter)
 STANDARD = {"an": True, "profil_version": 2, "schwelle": 0.15, "effekt_abstand_s": 0.4, "max_glitch": 1,
-            "max_lupen": 8, "max_raffer": 6,
+            "max_lupen": 3, "max_raffer": 6,
             "sfx_ordner": "/var/lib/clip-pipeline/sfx", "sfx_pegel": 0.8, "titel_zeichenbreite": 0.75}
 GRENZEN = {"profil_version": (1, 99), "schwelle": (0.0, 1.0), "effekt_abstand_s": (0.0, 5.0), "max_glitch": (0, 20),
            "max_lupen": (0, 20), "max_raffer": (0, 20), "sfx_pegel": (0.0, 2.0), "titel_zeichenbreite": (0.3, 1.5)}
@@ -801,7 +804,9 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
                 break
 
     plan += _titel_setzen(titel, victory, segmente, fenster, kurz, gross)
-    if kurz:  # 5. Zähler (im 16:9 kein Zähler)
+    # 5. Zähler (im 16:9 kein Zähler; 09.11. auch nicht im Vollbild – „KILLS 1“ nach fünf Kills las der KI-Cutter als
+    # Fehler, der Kill-Titel sagt genug)
+    if kurz and p.get("layout") != "vollbild":
         plan += _zaehler(gezaehlt, segmente, prof, stark, gleich, gross)
     # 8. Riser in den ersten sichtbaren Kill des Höhepunkts
     if reihe and (idx := je_moment.get(reihe[-1].schluessel)):
@@ -814,13 +819,17 @@ def plane(segmente: list[dict], reihe: list, p: dict, konfig: Konfig, fmt_name: 
     for i, s in enumerate(segmente[1:], 1):
         if s["uebergang"]["art"] not in ("schnitt", "fadeblack") and s["uebergang"]["dauer_s"] > 0:
             dazu(plan, "sfx", i, s["zeit_start"], stark(i, prof[s["stimmung"]]["whoosh"], "whoosh"), klang="whoosh")
-    # 9b. Einstieg auf jedem harten Schnitt (auch Jump-Cut und ganz vorn) und 9c. Drift über jedes Segment
+    # 9b. Einstieg (09.11.: nur ganz vorn und auf dem harten Schnitt in den Höhepunkt – vorher auf jedem harten Schnitt)
+    # und 9c. Drift über jedes Segment
     einstieg = Stilfolge(EINSTIEG_STILE, "ein" + seed)
+    vorn = next((i for i, s in enumerate(segmente) if s.get("rolle") != "hook"), None)
+    hoehepunkt = (je_moment.get(reihe[-1].schluessel) or [None])[0] if reihe else None
     for i, s in enumerate(segmente):
         if s.get("rolle") == "hook":
             continue
         pr = prof[s["stimmung"]]
-        if (i == 0 or s["uebergang"]["art"] == "schnitt") and (stil := einstieg.naechster(pr)):
+        if (i == vorn or (i == hoehepunkt and s["uebergang"]["art"] == "schnitt")) \
+                and (stil := einstieg.naechster(pr)):
             stil_setzen(plan, stil, i, s["zeit_start"], float(pr["einstieg"]), RANG_PUNCH)
         art = DRIFT[i % 2]   # abwechselnd hinein und heraus
         dazu(plan, art, i, s["zeit_start"], stark(i, pr["drift"], art),

@@ -80,6 +80,19 @@ TEXT_MIN = 0.015                          # × h: kleiner wird kein Text – dan
 TITEL_LESBAR = 0.03                       # × h: so groß muss der Kill-Titel bleiben – deckelt den Rahmen-Zoom (30.09.)
 # 16:9: Titel mitten in der Blende
 TITEL_16_9_GROESSE, TITEL_16_9_BREITE = 0.14, 0.80
+# Short-Layout (parameter.layout). Vollbild (09.11., Florian: „immer das gleiche Schema“; der KI-Cutter in fast jeder
+# Kritik: „Spielbild nur ein schmaler Streifen, auf dem Handy viel zu klein“): die Mitte der Aufnahme – dort liegt das
+# Fadenkreuz – als 9:16-Ausschnitt über das ganze Bild, kein unscharfer Rand (entwurf._bild). Streifen: das ganze
+# 16:9-Bild in der Mitte (bis 09.11. immer; alte Schnittlisten ohne Angabe bleiben so).
+VOLLBILD, STREIFEN = "vollbild", "streifen"
+# Im Vollbild stehen Titel und Zähler mit schwarzem Rand auf dem Bild, im oberen Drittel: Dort ist im Spiel meist
+# Himmel, die Figur und das Fadenkreuz liegen in der Mitte, unten liegen die Knöpfe der App
+VOLL_ZAEHLER_Y, VOLL_TITEL_Y = 0.20, 0.28   # × h, Mitte des Texts (clip-battle.de steht bei 0,12·h)
+
+
+def vollbild(liste: dict) -> bool:
+    """Short im Vollbild (parameter.layout = "vollbild")? Alte Listen ohne Angabe: Streifen wie bisher."""
+    return liste.get("format") == "short" and (liste.get("parameter") or {}).get("layout") == VOLLBILD
 
 
 def _z(x: float) -> str:
@@ -377,10 +390,14 @@ def lage(b: int, h: int, hochformat: bool, zeichen: int, zeichenbreite: float,
          spiel_h: int | None = None) -> dict[str, tuple[float, float]]:
     """{"titel"/"zaehler": (Mitte y, Schriftgröße)} in Pixeln. Short: Zähler zwischen clip-battle.de und Spielbild,
     Titel zwischen Spielbild und der unteren Sicherheitszone – beide auch beim Pop mit Rand außerhalb des Spielbilds.
-    spiel_h: Höhe des Spielbilds (siehe spielbild) – ein höheres Spielbild (4:3-Aufnahme) lässt weniger Platz."""
+    spiel_h: Höhe des Spielbilds (siehe spielbild) – ein höheres Spielbild (4:3-Aufnahme) lässt weniger Platz.
+    Vollbild (spiel_h ≥ h): beide im oberen Drittel auf dem Bild (VOLL_ZAEHLER_Y, VOLL_TITEL_Y)."""
     if not hochformat:
         groesse = min(TITEL_16_9_GROESSE * h, TITEL_16_9_BREITE * b / (zeichenbreite * max(1, zeichen)))
         return {"titel": (h / 2, groesse)}
+    if spiel_h is not None and spiel_h >= h:
+        groesse = min(TITEL_GROESSE * b, TITEL_BREITE * b / (zeichenbreite * max(1, zeichen) * POP_SPITZE))
+        return {"titel": (VOLL_TITEL_Y * h, groesse), "zaehler": (VOLL_ZAEHLER_Y * h, ZAEHLER_GROESSE * h)}
     oben, unten = spielbild(b, h, spiel_h)
     logo_unten = h * (LOGO_Y + LOGO_GROESSE)
     frei_unten = h * SICHER_UNTEN - unten

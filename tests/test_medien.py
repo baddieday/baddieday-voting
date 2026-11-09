@@ -129,5 +129,23 @@ class SchnittRueckfall(unittest.TestCase):
         self.assertFalse(self.ziel.exists())
 
 
+
+@unittest.skipUnless(__import__("shutil").which("ffmpeg"), "ffmpeg fehlt")
+class VideoDauer(unittest.TestCase):
+    def test_bild_statt_container(self):
+        """09.11.: Ist der Ton länger als das Bild, misst video_dauer das Bild (der Kontaktbogen des KI-Cutters nahm
+        sonst sein letztes Bild hinter dem letzten Videobild – eine schwarze Kachel). Fehlerfall: keine Datei → 0."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ziel = Path(tmp) / "v.mp4"
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-f", "lavfi", "-i",
+                            "testsrc2=size=160x90:rate=30:duration=2", "-f", "lavfi", "-i", "sine=duration=2.5",
+                            "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", str(ziel)], check=True)
+            self.assertAlmostEqual(medien.video_dauer(ziel), 2.0, delta=0.05)
+            self.assertGreater(medien.probe(ziel).dauer_s, 2.4)
+            self.assertEqual(medien.video_dauer(Path(tmp) / "fehlt.mp4"), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

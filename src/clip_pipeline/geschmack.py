@@ -62,7 +62,7 @@ NAMEN = {("aufbau", "montage"): "Aufbau „schnelle Montage“", ("aufbau", "sto
          ("tempo", "schnell"): "schnelle Schnitte", ("tempo", "ruhig"): "ruhige Schnitte",
          ("zeitlupe", "viel"): "viel Zeitlupe", ("zeitlupe", "wenig"): "wenig Zeitlupe"}
 TEMPO = {"schnell": 0.8, "ruhig": 1.25}
-ZEITLUPEN = {"viel": 8, "wenig": 2}
+ZEITLUPEN = {"viel": 3, "wenig": 1}   # 09.11.: vorher 8 / 2 – acht Zeitlupen nahmen jedem Kill den Kontrast
 KI_GEWICHT = 0.34                                  # wie regie_lernen.KI_STAERKE: die KI zählt ein Drittel von dir
 ZUSCHAUER_GEWICHT = 2.0                            # je Video mit Zuschauer-Note – wie stile.statistik (Experten-Modus)
 NICHT_GESCHMACK = {"kurz", "lang", "musik"}        # dafür gibt es feste Regeln – die Schrauben sind unschuldig

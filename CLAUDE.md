@@ -97,6 +97,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   rechnete es nach einem Absturz verwaist ohne Sperre weiter; fertige Dateien kommen per fsync auf die Platte, bevor sie
   ihren Namen bekommen (`medien.uebernehmen`), sonst kann nach einem Stromausfall eine leere Datei „fertig“ sein.
 
+- ffmpeg 8.0.1 (Ubuntu 26.04) stürzt bei Effekt-Renderläufen ab (Exit -11 = Speicherfehler, 09.11. in CI, auch auf main
+  ohne Änderung) → CI läuft fest auf `ubuntu-24.04`. Der Mini hat ffmpeg 7.1 (Debian 13); vor einem Upgrade auf
+  ffmpeg 8 erst die Render-Tests (`tests.test_effekte_render`) dort laufen lassen.
+
 ## Stufen (grobe Reihenfolge)
 0. Fundament: Proxmox, LXC, Tailscale, SSH-Zugang für n8n (mache ich mit Anleitung selbst)
 1. Kill-Daten: Replay auslesen, Kill-Zeitleiste, Zeitabgleich mit dem Video
@@ -469,7 +473,7 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     Posts keine Noten mehr). Erste Caption-Zeile im einfachen Modus mit Songtitel, am Post gespeichert (zwei ✅ eines
     Abends bekamen vorher nie Zahlen). Nach dem Paket: „füg den Text oben unverändert ein“. KI-Note im 📋 mit echtem
     Grund; n8n „Highlight-Video fertig“ aus; Kopfzeile bleibt nach dem Tipp. N38–N47.
-  - **Stufe 4: Zu kurz? Erst mehr Anlauf** (`regie.mehr_anlauf`): Bleibt ein Short im einfachen Modus unter 30 s oder
+  - **Stufe 4: Zu kurz? Erst mehr Anlauf** (entfällt seit 09.11. – mehr Szenen statt Laufen) (`regie.mehr_anlauf`): Bleibt ein Short im einfachen Modus unter 30 s oder
     mehr als 10 s unter dem Ziel, plant der Bot einmal neu – Anlauf/Ausklang mindestens 4/3 s statt gelernt 2,5/1,5 s,
     dieselben Szenen, kein Füllmaterial (vorher „kein Video, die starken Szenen ergeben nur 22 s“ bzw. 32 s bei Ziel
     45 s; jetzt 34 bzw. 44 s). Reicht es nicht, „kein Video“ wie bisher; gilt auch für 🥱; /experte unverändert. N48–N50.
@@ -856,3 +860,23 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   raus; dasselbe Problem höchstens alle 6 h (`[bot].uebertragung_pause_h`). Vermerkt heißt `routine = 2`, nichts
   gelöscht. Berichte werden in Lieferreihenfolge gelesen (vorher nach zufälligem Dateinamen). Wirkt auch auf die schon
   wartende Flut. Erfolgreiche Läufe unverändert (im stillen einfachen Modus ohnehin nur vermerkt). PC-Skript unverändert.
+- 2026-11-09 (Florian: „Wie können wir die Qualität der Clips um das 1000 fache steigern? … Es ist gerade immer das
+  gleiche Schema“): **Stufe 1 – weg mit dem Schema.** Befund an den letzten 30 Videos (Schnittlisten, KI-Kritiken):
+  schmaler 16:9-Streifen, gelernt 6 s Laufen vor und 4 s nach jeder Szene, rund 95 Effekte je Video, „VICTORY ROYALE“
+  nach 5 s, eine Szene in 16 von 30 Videos, „KILLS 1“ nach fünf Kills.
+  - **Vollbild** im Short (`[regie] short_layout = "vollbild"`, `"streifen"` = bisher): die Mitte der Aufnahme füllt
+    das Hochformat, Kill-Titel auf dem Bild im oberen Drittel, kein Zähler.
+  - **Nur Action:** eine Szene beginnt am Kampf (`regie.kampfbeginn`: Schuss-Spitzen im Spielton vor dem Umhauen), sonst
+    höchstens 2,5 s davor; danach höchstens 2 s (Sieg 3,5 s) – egal, was gelernt ist. ⏱️ heißt mehr Szenen, 💥 dichter
+    schneiden (vorher stärkere Effekte), 🎆/😵 weniger Effekte. „Mehr Anlauf“ (08.10.) entfällt: lieber kein Video.
+  - **Effekte nur bei Anlass:** keine Negativ-/Pixel-/Strobe-/Farbrad-/Blur-Stile in den Rotationen, Beat-Effekte erst
+    nach 4 s Ruhe, Einstieg nur vorn und beim Höhepunkt, höchstens 3 Zeitlupen (viel 3, wenig 1).
+  - **Sieg am Ende** (`regie.sieg_ans_ende`), **Deckel je Szene**: höchstens in 3 der letzten 15 Shorts
+    (`[regie] szene_hoechstens`/`szene_fenster`), sonst „Kein neues Video …“ – auch im Notfall.
+  - Fehler: das „Schwarzbild am Ende“ war die letzte Kachel des KI-Kontaktbogens (`medien.video_dauer`); eine Fassung nach
+    ❌ an einem Notfall-Video sperrt wie das Video selbst. Doku `docs/REGIE.md` „Stufe 1 – weg mit dem Schema“.
+  - Nächste Stufen: KI-Regisseur mit neuen Formaten (ein Moment groß erzählt, Top 5 der Woche, Texte aus Replay-Fakten),
+    dann das Publikum als Richter.
+- 2026-11-09 (Florian: „Ja, meine Stimme mit Untertiteln darf rein“): **Deine eigene Stimme kommt zurück ins Video** –
+  nur deine Mikro-Spur, mit Untertiteln aus Whisper; die Stimmen der Mitspieler bleiben draußen (Spielton weiter ohne
+  Stimmen, Prüfung weiter nur auf dem Spielton). Umsetzung als nächster Schritt nach Stufe 1.
