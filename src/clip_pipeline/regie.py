@@ -24,7 +24,7 @@ Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der K
                  Hälfte des abgelehnten Videos bleibt, die schwächere wird nur in dieser Fassung durch ungesehene
                  Szenen ersetzt (erst der Abend, dann starke früherer Abende), sonst KeineNeuenSzenen.
                  Nachschub (Stufe 4, 08.10., einfacher Modus): Reicht ein Abend nicht (weniger als 4 ungesehene starke
-                 Szenen, oder auch mit mehr Anlauf zu kurz), kommen nie gezeigte starke Szenen früherer Abende dazu
+                 Szenen, oder zu kurz – seit 09.11. ohne „mehr Anlauf“), kommen nie gezeigte starke Szenen früherer Abende dazu
                  (höchstens 12 Tage alt, nachschub_matches) – nach dem Abend, nie mehr als vom Abend (nachschub_darf),
                  nie vorn (abend_vorn). Dieselben Grenzen gelten für die 🥱-Fassung.
                  Abwechslung mit Ermüdung (08.10., einfacher Modus, ersetzt dort Abzug, Cooldown und Frische-Quote):
@@ -883,8 +883,8 @@ def frei_von_cooldown(kandidaten_: list[Kandidat], fmt: dict, p: dict, ziel: flo
     06.10. (Florian: „der Bot macht die schon wieder sackrisch kurz“): vorher reichte min_s (30 s) – bei wenig
     Material oder enger Clip-Auswahl sperrte der Cooldown so viel, dass die Shorts bei 30–35 s statt beim Ziel
     (45–75 s) endeten. Die Abwechslung bleibt trotzdem: gezeigte Momente verlieren weiter Punkte (abwechslung).
-    Einfacher Modus (08.10., p["ermuedung"]): die Sperre wird nie aufgehoben – lieber kürzer, Nachschub, mehr Anlauf
-    oder kein Video als eine Szene aus deinen letzten Videos."""
+    Einfacher Modus (08.10., p["ermuedung"]): die Sperre wird nie aufgehoben – lieber kürzer, Nachschub oder kein
+    Video als eine Szene aus deinen letzten Videos (09.11.: nie mehr Anlauf, nur Szenen)."""
     frei = [k for k in kandidaten_ if not k.gesperrt]
     if len(frei) == len(kandidaten_) or p.get("ermuedung"):
         return frei, None
@@ -1608,7 +1608,7 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
     verlieren je Einsatz der letzten 30 Tage die Hälfte ihrer Punkte (Abzug), höchstens die Hälfte des Videos
     bekannte (bis zur Mindestzahl dürfen es mehr sein) und nie mehr als zwei, die schon zusammen in einem Video waren.
     Sie ersetzt dort Abzug, Cooldown und Frische-Quote des Experten-Modus (frueher leer). Reicht es nicht: Nachschub,
-    mehr Anlauf, sonst ZuWenigSzenen (schon: gesperrte starke Szenen).
+    sonst ZuWenigSzenen (schon: gesperrte starke Szenen, seit 09.11. auch die am Deckel 3 von 15).
     p["ersetzt"] (neue Fassung nach ❌, lernbot.baue_entwurf): die Szenen dieser Videos sind für sie frei und keine
     Wiederholung; bei 🥱 kommt der Ersatz nie aus ihnen (erst neue, dann bekannte starke).
     mischen (🎬 und neue Fassungen, lernbot.baue_entwurf; einfacher Modus): _mit_lockerung – erst vom Abend, erreicht das

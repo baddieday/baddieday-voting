@@ -4,7 +4,7 @@ verbessert … ich möchte nicht mehr selbst voten müssen … die videos sollen
 Im einfachen Modus entsteht ein Short (Abend-Video, 🎬) nicht mehr einmal, sondern im Wettbewerb: Die erste Fassung ist
 die wie bisher (regie_lernen + geschmack + deine Regeln). Dazu kommen [nachtschicht].fassungen − 1 weitere, die sich in
 genau EINER Stellschraube von ihr unterscheiden (ARTEN, im Wechsel je Video): anderer Aufbau, anderes Tempo, andere
-Zeitlupe, andere Länge (±10 s, nie gegen deine ⏱️/⏳-Grenze), mehr Anlauf, anderer Song. Alle werden gerendert und am
+Zeitlupe, andere Länge (±10 s, nie gegen deine ⏱️/⏳-Grenze), mit Vorschau (09.11., vorher mehr Anlauf), anderer Song. Alle werden gerendert und am
 fertigen Video gemessen (Cutter-Maßstab, kritik.bewerte ohne KI); Fassungen mit verletztem K.O.-Tor fallen raus. Die
 besten zwei nach Messung treten blind vor dem KI-Cutter an (kritik.ki_paarvergleich: zwei Kontaktbögen, zwei
 Wellenformen, zwei Pläne – „welche ist besser und warum“). Die Siegerin kommt zu dir; die anderen siehst du nie

@@ -216,7 +216,7 @@ def _quelle(zeile) -> str:
 
 
 def _deine_richtung(zeilen: list) -> set[str]:
-    """Deine letzte ausdrückliche Ansage je Gegensatzpaar („kurz“ oder „lang“, „effekte_viel“ oder „action“) – ein
+    """Deine letzte ausdrückliche Ansage je Gegensatzpaar („kurz“ oder „lang“, „hektisch“ oder „action“) – ein
     KI-Grund, der ihr widerspricht, wirkt nicht (dein Wort gilt, bis du es selbst änderst)."""
     richtung: dict[frozenset, str] = {}
     for z in zeilen:  # zeilen sind nach Zeit sortiert – die letzte Ansage gewinnt
