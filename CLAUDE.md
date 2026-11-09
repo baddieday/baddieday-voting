@@ -97,6 +97,10 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
   rechnete es nach einem Absturz verwaist ohne Sperre weiter; fertige Dateien kommen per fsync auf die Platte, bevor sie
   ihren Namen bekommen (`medien.uebernehmen`), sonst kann nach einem Stromausfall eine leere Datei „fertig“ sein.
 
+- ffmpeg 8.0.1 (Ubuntu 26.04) stürzt bei Effekt-Renderläufen ab (Exit -11 = Speicherfehler, 09.11. in CI, auch auf main
+  ohne Änderung) → CI läuft fest auf `ubuntu-24.04`. Der Mini hat ffmpeg 7.1 (Debian 13); vor einem Upgrade auf
+  ffmpeg 8 erst die Render-Tests (`tests.test_effekte_render`) dort laufen lassen.
+
 ## Stufen (grobe Reihenfolge)
 0. Fundament: Proxmox, LXC, Tailscale, SSH-Zugang für n8n (mache ich mit Anleitung selbst)
 1. Kill-Daten: Replay auslesen, Kill-Zeitleiste, Zeitabgleich mit dem Video
@@ -124,8 +128,6 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
 - Stufe 5 (M178, M169): (1) Soll Humor/Überraschung (Twist mit 1–2 lustigen Szenen) als fünfter Aufbau in den einfachen
   Modus? Dann kämen Fail-Szenen in „🎬 Neues Video“, und die Liga würde langsamer – ohne Antwort bleibt es bei vier.
   (2) Sollen die Zuschauerzahlen deiner Freunde abgeholt werden? Bis dahin bleibt ihre Liga leer.
-- Qualität Stufe 1 (09.11.): Sollen deine eigenen Reaktionen (nur deine Mikro-Spur, nie die Mitspieler) mit Untertiteln
-  zurück ins Video? Bis dahin bleibt es beim Spielton.
 
 ## Entscheidungen
 - 2026-09-23: Kein Medal.tv – Nvidia + SteelSeries reichen; Pipeline wählt pro Moment die Aufnahme mit bester Abdeckung.
@@ -875,3 +877,6 @@ Fortnite-Aufnahmen → automatische Highlights → Bewertung per Telegram → Ve
     ❌ an einem Notfall-Video sperrt wie das Video selbst. Doku `docs/REGIE.md` „Stufe 1 – weg mit dem Schema“.
   - Nächste Stufen: KI-Regisseur mit neuen Formaten (ein Moment groß erzählt, Top 5 der Woche, Texte aus Replay-Fakten),
     dann das Publikum als Richter.
+- 2026-11-09 (Florian: „Ja, meine Stimme mit Untertiteln darf rein“): **Deine eigene Stimme kommt zurück ins Video** –
+  nur deine Mikro-Spur, mit Untertiteln aus Whisper; die Stimmen der Mitspieler bleiben draußen (Spielton weiter ohne
+  Stimmen, Prüfung weiter nur auf dem Spielton). Umsetzung als nächster Schritt nach Stufe 1.

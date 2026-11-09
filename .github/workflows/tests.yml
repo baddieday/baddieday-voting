@@ -8,7 +8,9 @@ permissions:
   contents: read
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    # 09.11.: fest auf 24.04 – ubuntu-latest ist jetzt 26.04 mit ffmpeg 8.0.1, das bei Effekt-Renderläufen abstürzt
+    # (Exit -11, auch auf main ohne Änderung). Der Mini rendert mit ffmpeg 7.1 (Debian 13).
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
