@@ -183,7 +183,8 @@ class Sitzung(MitRegieMaterial):
             self.con.execute("INSERT INTO matches (id, replay_pfad, start_utc, ende_utc, status, erstellt, geaendert) "
                              "VALUES (?, ?, ?, ?, 'verarbeitet', 'x', 'x')",
                              (m, f"replays/{m}.replay", iso(jetzt() - vor), iso(jetzt() - vor + timedelta(minutes=20))))
-        self.momente_anlegen([("episch", 2, [7.0, 9.5], "a1"), ("spannend", 2, [6.0, 10.0], "a1"),
+        # 09.11.: die Kills des Abends 5 s auseinander – ohne Laufen (Anlauf ≤ 2,5 s) ergaben 2 + 2 kurze Szenen < 30 s
+        self.momente_anlegen([("episch", 2, [6.0, 11.0], "a1"), ("spannend", 2, [6.0, 11.0], "a1"),
                               ("spannend", 1, [8.0], "a1"), ("episch", 3, [5.0, 7.0, 9.0], "o1"),
                               ("spannend", 2, [7.0, 9.5], "o1"), ("episch", 2, [6.0, 8.0], "o1")])
         self.musik_anlegen(150, "episch")
@@ -212,9 +213,10 @@ class Sitzung(MitRegieMaterial):
         und es bleibt bei einem Video. Vorher blieb es für immer bei „kein Video“."""
         self.spiel("a1", 200)
         self.spiel("a2", 150)
-        self.momente_anlegen([("episch", 2, [7.0, 9.5], "a1"), ("spannend", 1, [8.0], "a2"),
+        # 09.11.: Kills weiter auseinander – ohne Laufen (Anlauf ≤ 2,5 s) ergaben die 4 starken Szenen sonst < 30 s
+        self.momente_anlegen([("episch", 2, [6.0, 11.0], "a1"), ("spannend", 1, [8.0], "a2"),
                               ("episch", 3, [5.0, 7.0, 9.0], "a3"), ("spannend", 2, [6.0, 10.0], "a3"),
-                              ("episch", 2, [6.0, 8.0], "a3")])
+                              ("episch", 2, [6.0, 9.5], "a3")])
         self.musik_anlegen(150, "episch")
         with mock.patch.object(entwurf, "entwurf"):                          # nur planen, nicht rendern
             erst = sitzung.verarbeite(self.con, self.konfig, claude=False, whisper=False)
