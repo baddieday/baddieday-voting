@@ -71,6 +71,13 @@ class Stile(MitSpeicher):
                          ["c", "b", "d", "a"])
         ks[0].start_utc, ks[1].start_utc, ks[3].start_utc = "2026-09-29T20:00:00Z", "2026-09-29T21:00:00Z", "2026-09-29T22:00:00Z"
         self.assertEqual([x.schluessel for x in regie.bogen(ks, "short", reihenfolge="chronologisch")], ["a", "b", "d", "c"])
+        # 09.11.: Ein Sieg beendet das Video – auch beim Cold Open (dort rückt der bisherige Schluss nach vorn)
+        ks[2].victory = True
+        self.assertEqual([x.schluessel for x in regie.bogen(ks, "short", reihenfolge="steigend", hook_staerkster=True)],
+                         ["a", "b", "d", "c"])
+        ks[2].victory, ks[1].victory = False, True                     # schwacher Sieg in der Mitte: rückt ans Ende
+        self.assertEqual([x.schluessel for x in regie.bogen(ks, "short", reihenfolge="steigend")], ["d", "a", "c", "b"])
+        self.assertEqual([x.schluessel for x in regie.bogen(ks, "short")][-1], "b")
 
 
 class Kritik(MitSpeicher):
@@ -246,6 +253,18 @@ class PlanerSpeichertWirksamenZoom(MitRegieMaterial):
         self.momente_anlegen(MOMENTE)
         self.musik_anlegen(150, "episch")
         self.konfig.daten["regie"]["stil"] = "kino"
+        self.konfig.daten["regie"]["effekte"]["an"] = True   # regie_hilfen schaltet sie für Bestandstests aus
+        # 09.11.: Vollbild ist Standard – das Spielbild füllt das Hochformat, ein Rahmen-Zoom wäre nur Ausschnitt
+        p, ziel = regie_lernen.aktuelle(self.con, self.konfig, "short")
+        e = regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel)
+        zeile = self.con.execute("SELECT parameter, schnittliste FROM entwuerfe WHERE id = ?", (e["entwurf"],)).fetchone()
+        gespeichert = json.loads(zeile[0])
+        self.assertEqual((gespeichert["stil"], gespeichert["layout"], gespeichert["rahmen_zoom"]), ("kino", "vollbild", 1.0))
+        arten = {x["art"] for s in json.loads(Path(zeile[1]).read_text(encoding="utf-8"))["segmente"]
+                 for x in s.get("effekte", [])}
+        self.assertIn("titel", arten)
+        self.assertNotIn("zaehler", arten)        # Probe 09.11.: der Plan entstand vor dem Layout – 15 Zähler im Vollbild
+        self.konfig.daten["regie"]["short_layout"] = "streifen"         # der alte Streifen wie bis 08.11.
         p, ziel = regie_lernen.aktuelle(self.con, self.konfig, "short")
         e = regie.erstelle(self.con, self.konfig, "short", parameter=p, ziel=ziel)
         gespeichert = json.loads(self.con.execute("SELECT parameter FROM entwuerfe WHERE id = ?", (e["entwurf"],)).fetchone()[0])

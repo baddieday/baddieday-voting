@@ -7,8 +7,11 @@ begrenzten Schritt:
   zu hektisch         Segmente länger (+15 %), Übergänge länger (+10 %); ab +30 % nur jeden 2., ab +70 % jeden 4. Beat;
                       effekt_hektik ×0,9 (0,3 … 1,3): Beat-Akzente und Impacts (Blitz, Wackeln, RGB) schwächer
   zu lang             Ziel-Dauer −10 % (höchstens bis 60 %)
-  zu kurz             Ziel-Dauer +11 % (÷0,9); Short: Start 45 s, immer 30–75 s (regie.dauer_grenzen)
-  abgeschnitten       mehr Vorlauf (+0,5 s) und Nachlauf (+0,3 s) um die Kills
+  zu kurz             Ziel-Dauer +11 % (÷0,9); Short: Start 45 s, immer 30–75 s (regie.dauer_grenzen) – seit 09.11.
+                      erreicht der Regisseur die Länge nur mit mehr Szenen, nie mit mehr Laufen (regie.ANLAUF_MAX_S)
+  abgeschnitten       mehr Vorlauf (+0,5 s) und Nachlauf (+0,3 s) um die Kills – seit 09.11. höchstens bis
+                      regie.ANLAUF_MAX_S / AUSKLANG_MAX_S (vorher 6 / 4 s: Laufen statt Kampf); den Kampf davor
+                      findet regie.kampfbeginn an den Schüssen
   Musik passt nicht   dieser Titel bekommt einen Abzug (−1 je Nennung)
   Stimmung getroffen  die Hauptstimmung bekommt Bonus (+0,5), und die Musik-Ziele dieser Stimmung rücken
                       20 % in Richtung des benutzten Titels (so lernt der Regisseur, welche Musik passt)
@@ -17,8 +20,10 @@ begrenzten Schritt:
                       daraus geschmack.py (bis 07.10. hieß er „Clips langweilig“ und kostete jeden Moment −1)
   je Moment           👍: +0,5 für jeden Moment im Entwurf; 👎 ohne Grund: −0,5 (bei 👎 mit Grund lag es an
                       Musik/Tempo/Länge/Schnitt, nicht an den Clips); begrenzt auf ±3
-  zu viele Effekte    Effekt-Stärke der Hauptstimmung ×0,85 (0,1 … 1,5); zusammen mit "mehr Action": nichts
-  mehr Action         Effekt-Stärke der Hauptstimmung ×1,15; eine Vorgabe 0 (Effekte aus) bleibt 0
+  zu viele Effekte    Effekt-Stärke der Hauptstimmung ×0,85 (0,1 … 1,5)
+  mehr Action         (09.11.) dichter schneiden: Segmente ×0,9 – kürzere Szenen, also mehr Szenen im Video. Bis
+                      09.11. hieß das „Effekt-Stärke ×1,15“: 22 Tipps zusammen mit „langweilig“ hatten die Effekte auf
+                      das Maximum getrieben (Gewitter ohne Kontrast), während im Video zu wenig passierte
 """
 
 from __future__ import annotations
@@ -31,7 +36,8 @@ import sqlite3
 from . import db, effekte
 from .konfig import Konfig
 from .musik import ZIEL
-from .regie import FORMATE, PARAMETER, dauer_grenzen, format_regeln, momente_grenzen, ziel_dauer
+from .regie import (ANLAUF_MAX_S, AUSKLANG_MAX_S, FORMATE, PARAMETER, dauer_grenzen, format_regeln, momente_grenzen,
+                    ziel_dauer)
 
 log = logging.getLogger("pipeline")
 
@@ -89,7 +95,8 @@ def _liste(zeile: sqlite3.Row) -> dict:
 
 # Deine Vorgaben ([regie.vorgaben] in config/lokal.toml): erlaubte Schlüssel und ihre Grenzen
 VORGABE_GRENZEN = {
-    "puffer_vor_s": (1.0, 6.0), "puffer_nach_s": (0.5, 4.0), "seg_min_faktor": (0.5, 2.0),
+    # 09.11.: Anlauf/Ausklang höchstens wie regie.ANLAUF_MAX_S / AUSKLANG_MAX_S (vorher 6 / 4 s)
+    "puffer_vor_s": (1.0, ANLAUF_MAX_S), "puffer_nach_s": (0.5, AUSKLANG_MAX_S), "seg_min_faktor": (0.5, 2.0),
     "dauer_faktor": (0.6, 2.0), "uebergang_faktor": (0.5, 2.0), "musik_pegel": (0.0, 1.0),
     "max_je_match": (1, 10), "beats_pro_schnitt": (1, 4), "abwechslung": (0.0, 1.0),
     "effekt_hektik": (0.3, 1.3),
@@ -197,7 +204,8 @@ def aktuelle(con: sqlite3.Connection, konfig: Konfig, fmt: str | None = None, an
 # Dein Einfluss (05.10., Florian: „mein persönlicher Impact wird zu wenig gewertet“): Ein Urteil des KI-Cutters wirkt
 # nur mit diesem Anteil eines Schritts von dir – sonst überstimmt er dich allein durch die Menge (bis 20 am Tag).
 KI_STAERKE = 0.34
-GEGENSTUECKE = {"lang": "kurz", "kurz": "lang", "effekte_viel": "action", "action": "effekte_viel"}
+# 09.11.: „mehr Action“ heißt dichter schneiden – sein Gegenstück ist jetzt „zu hektisch“ (vorher „zu viele Effekte“)
+GEGENSTUECKE = {"lang": "kurz", "kurz": "lang", "hektisch": "action", "action": "hektisch"}
 
 
 def _quelle(zeile) -> str:
@@ -259,13 +267,15 @@ def _falte(zeilen: list, konfig: Konfig, energien: list[float], fmt: str | None)
             p["seg_min_faktor"] = _grenze(p["seg_min_faktor"] * 1.15 ** w, 0.5, 2.0)
             p["uebergang_faktor"] = _grenze(p["uebergang_faktor"] * 1.10 ** w, 0.5, 2.0)
             p["effekt_hektik"] = _grenze(p["effekt_hektik"] * 0.9 ** w, *VORGABE_GRENZEN["effekt_hektik"])
-        # Effekt-Stärke der Hauptstimmung: beide Gründe zugleich heben sich auf
-        weniger, mehr = "effekte_viel" in gruende, "action" in gruende
-        if haupt in ZIEL and weniger != mehr:
+        if "action" in gruende and "hektisch" not in gruende:
+            # 09.11.: „mehr Action“ = dichter schneiden (mehr Szenen), nicht stärkere Effekte
+            p["seg_min_faktor"] = _grenze(p["seg_min_faktor"] * 0.9 ** w, 0.5, 2.0)
+        # Effekt-Stärke der Hauptstimmung: nur noch „zu viele Effekte“ (weniger); stärker machen sie ⚙️/„✨ wild“
+        if haupt in ZIEL and "effekte_viel" in gruende:
             alt = p["effekt_staerke"].get(haupt, 1.0)
             unten, oben = EFFEKT_STAERKE_GELERNT
             if alt > 0:  # eine Vorgabe 0 (diese Stimmung ohne Effekte) bleibt 0; eine unter 0,1 steigt nicht durch 🎆
-                p["effekt_staerke"][haupt] = _grenze(alt * (0.85 if weniger else 1.15) ** w, min(unten, alt), oben)
+                p["effekt_staerke"][haupt] = _grenze(alt * 0.85 ** w, min(unten, alt), oben)
         # „zu lang“ ×0,9 / „zu kurz“ ÷0,9 (27.09.: vorher gab es kein Gegenstück – der Faktor konnte nur fallen und
         # blieb für immer unten, auch eine Vorgabe in lokal.toml ist nur der Startwert); beide zugleich: nichts
         kuerzer, laenger = "lang" in gruende, "kurz" in gruende
@@ -274,8 +284,8 @@ def _falte(zeilen: list, konfig: Konfig, energien: list[float], fmt: str | None)
             # 45 s Schluss, und jedes weitere „zu kurz“ verpuffte ohne Wirkung
             p["dauer_faktor"] = _grenze(p["dauer_faktor"] * (0.9 if kuerzer else 1 / 0.9) ** w, dauer_unten, dauer_oben)
         if "abgeschnitten" in gruende:
-            p["puffer_vor_s"] = _grenze(p["puffer_vor_s"] + 0.5 * w, 1.0, 6.0)
-            p["puffer_nach_s"] = _grenze(p["puffer_nach_s"] + 0.3 * w, 0.5, 4.0)
+            p["puffer_vor_s"] = _grenze(p["puffer_vor_s"] + 0.5 * w, *VORGABE_GRENZEN["puffer_vor_s"])
+            p["puffer_nach_s"] = _grenze(p["puffer_nach_s"] + 0.3 * w, *VORGABE_GRENZEN["puffer_nach_s"])
         if "musik" in gruende and b["track_id"] is not None:
             schluessel = str(b["track_id"])
             p["track_malus"][schluessel] = _grenze(p["track_malus"].get(schluessel, 0.0) + 1.0 * w, 0.0, 5.0)

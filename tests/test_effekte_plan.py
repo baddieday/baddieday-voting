@@ -122,6 +122,10 @@ class Ketten(unittest.TestCase):
         liste = plane(segs, [moment("m", {"kill_sekunden": [7.0, 9.0], "aktion_sekunden": [2.0, 8.5]})])
         self.assertEqual([(e["t_s"], e["zahl"]) for _, e in ereignisse(liste, "zaehler")], [(7.0, 1), (8.5, 2)])
         self.assertEqual(titel(liste), [("DOUBLE KILL", 8.6)])
+        # 09.11.: im Vollbild kein Zähler („KILLS 1“ nach fünf Kills las der KI-Cutter als Fehler), der Titel bleibt
+        voll = plane(segs, [moment("m", {"kill_sekunden": [7.0, 9.0], "aktion_sekunden": [2.0, 8.5]})],
+                     p={"layout": "vollbild"})
+        self.assertEqual((ereignisse(voll, "zaehler"), titel(voll)), ([], [("DOUBLE KILL", 8.6)]))
 
     def test_team_wipe_anker_ist_das_umhauen(self):
         mk = {"kill_sekunden": [12.74, 12.81, 12.91], "aktion_sekunden": [2.0, 5.78, 12.91]}
@@ -569,20 +573,33 @@ class Katalog2(unittest.TestCase):
         liste = plane(segs, reihe, beats=beats)               # plane() prüft die Liste gegen Schema und Regeln
         alle = ereignisse(liste)
         self.assertEqual({e["art"] for _, e in alle} - ERLAUBT, set())
-        # Einstieg auf jedem harten Schnitt (Segment 1, 2, 4 – Segment 3 kommt per Whip): ein Effekt auf dem Quellstart
-        for nr in (1, 2, 4):
+
+        def einstieg(nr):
             s = liste["segmente"][nr - 1]
-            self.assertTrue([e for n, e in alle if n == nr and e["t_s"] == s["quelle_start_s"]
-                             and e["art"] not in ("drift_ein", "drift_aus", "sfx")], nr)
+            return [e for n, e in alle if n == nr and e["t_s"] == s["quelle_start_s"]
+                    and e["art"] not in ("drift_ein", "drift_aus", "sfx")]
+        # 09.11. (Effekte nur bei Anlass): Einstieg nur ganz vorn und auf dem harten Schnitt in den Höhepunkt (Segment
+        # 4 = letzter Moment) – nicht mehr auf jedem harten Schnitt (Segment 2)
+        self.assertTrue(einstieg(1))
+        self.assertTrue(einstieg(4))
+        self.assertFalse(einstieg(2), einstieg(2))
         # Drift über jedes Segment, abwechselnd hinein und heraus, so lang wie das Segment
         drift = [(n, e["art"], e["dauer_s"]) for n, e in alle if e["art"].startswith("drift")]
         self.assertEqual(drift, [(1, "drift_ein", 12.0), (2, "drift_aus", 12.0), (3, "drift_ein", 12.0),
                                  (4, "drift_aus", 12.0)])
-        # Beats: viele und nicht nur Zoom-Pulse (Farb-Pop, Vignette, Blur, Kontrast, Farbrad …)
-        auf_beats = [e for n, e in alle if any(abs(effekte.auf_zeitleiste(liste["segmente"][n - 1], e["t_s"]) - b) < 1e-3
-                                               for b in beats) and e["art"] not in ("sfx", "drift_ein", "drift_aus")]
-        self.assertGreater(len({e["art"] for e in auf_beats}), 3, auf_beats)
-        self.assertGreater(len([1 for _, e in alle if e["art"] != "sfx"]), 45)
+        # Beats: es gibt sie noch, aber erst nach 4 s ohne Schnitt und ohne anderen Treffer (vorher 0,8 s – im Schnitt
+        # mehr als ein Effekt je Sekunde)
+        starts = [s["zeit_start"] for s in liste["segmente"]]
+        kills = (6.0, 15.0, 17.0, 21.0, 44.0)                 # Kill-Sekunden oben auf der Zeitleiste
+        zeit = sorted({round(effekte.auf_zeitleiste(liste["segmente"][n - 1], e["t_s"]), 3) for n, e in alle
+                       if e["art"] not in ("sfx", "drift_ein", "drift_aus", "titel", "zaehler")})
+        auf_beats = [t for t in zeit if any(abs(t - b) < 1e-3 for b in beats)
+                     and not any(abs(t - u) < 0.05 for u in [*starts, *kills])]
+        self.assertTrue(auf_beats)
+        for t in auf_beats:
+            davor = [u for u in [*zeit, *starts] if u < t - 1e-3]
+            self.assertGreaterEqual(t - max(davor), 4.0 - 1e-3, (t, sorted(davor)[-3:]))
+        self.assertLess(len([1 for _, e in alle if e["art"] != "sfx"]), 45)
 
     def test_chill_bleibt_ruhig(self):
         liste = ein_moment({"kill_sekunden": [6.0, 8.0]}, stimmung="chill")

@@ -44,9 +44,10 @@ Schritte (jeder für sich nachvollziehbar, Zahlen in PARAMETER und [regie] der K
                  (merkmale.aktion_sekunden = mein Umhauen) beginnt der Moment vor der ersten Aktion; eine Serie
                  (≥ 2 Kills) bleibt ein Stück bis serie_max_s, Pausen > luecke_max_s zwischen zwei Aktionen
                  werden per Jump-Cut übersprungen (Teile desselben Moments, harter Schnitt).
-                 Zu kurz (Stufe 4, 08.10., einfacher Modus): Bleibt ein Short unter 30 s oder mehr als 10 s unter dem
-                 Ziel, plant der Bot einmal neu mit mehr Anlauf und Ausklang (mindestens 4 / 3 s) aus denselben
-                 Szenen (mehr_anlauf); reicht auch das nicht, kommt ZuKurz – nie Füllmaterial.
+                 Nur Action (09.11.): Eine Szene beginnt am Kampfbeginn (kampfbeginn: Schüsse im Spielton vor dem
+                 ersten Umhauen), davor höchstens ANLAUF_MAX_S, nach dem letzten Kill höchstens AUSKLANG_MAX_S (Victory:
+                 VICTORY_AUSKLANG_S für das Sieg-Banner) – auch wenn mehr gelernt ist. Zu kurz heißt mehr Szenen
+                 (Nachlegen, Nachschub), nie mehr Laufen; das Auffüllen mit Anlauf (mehr_anlauf, 08.10.) ist weg.
   5. Übergänge   je Stimmung des folgenden Moments; die Mitte des Übergangs liegt genau auf dem Beat.
                  Mit Effekten (Regisseur 2.0): Rotation aus effekte.PROFIL, in einen epischen/spannenden Höhepunkt
                  ein harter Schnitt auf den Drop.
@@ -192,11 +193,16 @@ PARAMETER = {
     "effekt_hektik": 1.0,         # dämpft Beat-Akzente und Glitch-Übergänge ("zu hektisch" ×0,9)
 }
 ABWECHSLUNG_FENSTER = 12          # so viele letzte Entwürfe zählen für die Abwechslung
-# Stufe 4 (08.10., Florian: „autonom … besser und schneller als mit der Hand“): Bleibt ein Short unter 30 s oder mehr
-# als MEHR_ANLAUF_AB_S unter dem Ziel, plant der Bot einmal neu – mit mindestens so viel Anlauf und Ausklang aus
-# denselben Szenen (innerhalb der gelernten Grenzen 1–6 / 0,5–4 s; die Clips haben 8 s Vorlauf), statt „kein Video“.
-MEHR_ANLAUF = {"puffer_vor_s": 4.0, "puffer_nach_s": 3.0}
-MEHR_ANLAUF_AB_S = 10.0
+# Nur Action (09.11., Florian: „immer das gleiche Schema“): Gelernt waren 6 s Anlauf und 4 s Ausklang je Szene (aus
+# „⏱️ zu kurz“ und „✂️ abgeschnitten“) – bei 5 Szenen rund 50 s Laufen in einem 70-s-Video, der KI-Cutter schrieb in
+# fast jeder Kritik „10–15 s ohne Kill, hier wischt man weg“. Jetzt: Beginn am Kampf (kampfbeginn), höchstens so viel
+# Laufen davor und danach, egal was gelernt ist. Länge kommt aus mehr Szenen (Nachlegen, Nachschub), nie aus Laufen.
+ANLAUF_MAX_S = 2.5            # vor dem Kampfbeginn bzw. dem ersten Umhauen (Standard puffer_vor_s)
+AUSKLANG_MAX_S = 2.0          # nach dem letzten Kill
+VICTORY_AUSKLANG_S = 3.5      # nach dem letzten Kill eines Siegs: das Banner „#1 Victory Royale“ kommt etwas später
+KAMPF_MAX_S = 6.0             # so weit vor dem ersten Umhauen sucht kampfbeginn nach Schüssen (die Clips haben 8 s Vorlauf)
+KAMPF_LUECKE_S = 3.0          # Schüsse, die höchstens so weit auseinander liegen, gehören zu einem Kampf
+KAMPF_VOR_S = 0.5             # so viel vor dem ersten Schuss beginnt die Szene
 # Stufe 4 (08.10., Florian: „Ja, auffüllen“): Reicht der Abend nicht, kommen nie gezeigte starke Szenen früherer
 # Abende dazu (Nachschub) – höchstens die Hälfte des Videos, vorn immer eine Szene vom Abend, und nur aus Matches, die
 # höchstens [puffer].rohdaten_tage − NACHSCHUB_RESERVE_TAGE alt sind: danach gibt der Puffer ihre Rohvideos frei
@@ -208,7 +214,11 @@ NACHSCHUB_RESERVE_TAGE = 2
 # stunden (Prüfung 08.10.): die Sperre gilt nur für Videos, die höchstens so alt sind (2 Tage) – nach einer Pause
 # sperrte sonst das letzte Video seine Szenen für immer. Nachgestellt: 18 h ließ die Szenen von gestern sofort wieder
 # zu (größter Anteil einer Szene 25 % statt 18 %), 48 h hält die Abwechslung über Tage.
-ERMUEDUNG = {"tage": 30.0, "faktor": 0.5, "sperre": 3, "stunden": 48.0, "anteil": 0.5, "gleich": 2}
+ERMUEDUNG = {"tage": 30.0, "faktor": 0.5, "sperre": 3, "stunden": 48.0, "anteil": 0.5, "gleich": 2,
+             "hoechstens": 3, "fenster": 15}
+# Deckel (09.11., Florian: „immer das gleiche Schema“ – clip:249 lief in 16 von 30 Videos): eine Szene höchstens in
+# hoechstens (3) deiner letzten fenster (15) Shorts – danach ist sie gesperrt wie eine gerade gezeigte, auch im
+# Notfall (szenen.verlauf, Verlauf.oft). Reicht das Material dann nicht, kommt lieber kein Video.
 # Prüfung 08.10. (Florian: „über 100-mal gesagt, dass die Shorts zu kurz sind“): Erreicht ein Short sein Ziel nicht,
 # geht die Länge vor den Feinregeln der Zusammenstellung. So viel unter dem Ziel gilt er noch als lang genug
 # (Beat-Raster), und so locker wird die Zusammenstellung im letzten Versuch von 🎬 und neuen Fassungen
@@ -227,7 +237,7 @@ SPRUNG_NACH_S = 1.5
 SPRUNG_VOR_S = 2.0
 # Schnittliste version 4 (Regisseur 2.0): Grenzen der fachlichen Prüfung
 MAX_EREIGNISSE = 1500
-MAX_LUPEN = 20                    # obere Grenze im Prüfer (Standard in [regie.effekte].max_lupen: 8)
+MAX_LUPEN = 20                    # obere Grenze im Prüfer (Standard in [regie.effekte].max_lupen: 3, bis 08.11. 8)
 MAX_RAFFER = 20                   # obere Grenze im Prüfer (Standard in [regie.effekte].max_raffer: 6)
 HOOK_MAX_S = 2.5
 HOOK_S = 1.25                     # Hook-Teaser (05.10.): so lang, auf einen Beat zwischen HOOK_MIN_S und HOOK_LANG_S
@@ -287,9 +297,9 @@ class ZuWenigSzenen(RegieFehler):
         if self.schon and not self.stark:   # Prüfung 08.10.: statt „keine starke Szene (4 weitere waren …)“
             alle = "die starke Szene" if self.schon == 1 else f"alle {self.schon} starken Szenen"
             return (f"{alle} {'der letzten Tage' if self.mix else 'dieses Abends'} "
-                    f"{'war' if self.schon == 1 else 'waren'} gerade erst in deinen letzten Videos")
-        weitere = (f" ({self.schon} weitere {'war' if self.schon == 1 else 'waren'} gerade erst in deinen letzten "
-                   "Videos)") if self.schon else ""
+                    f"{'lief' if self.schon == 1 else 'liefen'} gerade erst oder schon oft in deinen letzten Videos")
+        weitere = (f" ({self.schon} weitere {'lief' if self.schon == 1 else 'liefen'} gerade erst oder schon oft in "
+                   "deinen letzten Videos)") if self.schon else ""
         if self.mix:   # 08.10.: auch gemischt aus den letzten Tagen zu wenig
             return f"aus den letzten Tagen gibt es {_szenen(self.stark)}{weitere}, ein Video braucht {self.mindestens}"
         if self.schon:   # 08.10.: die übrigen waren gerade erst in deinen letzten Videos – so schnell kommt keine wieder
@@ -492,7 +502,12 @@ def _kern(mk: dict, dauer: float, p: dict) -> tuple[tuple[float, float], tuple[f
     elif kills:
         aktionen = _aktionen(mk)
         erste = min(kills[0], *aktionen) if aktionen else kills[0]  # mit Aktionen: ab dem ersten Umhauen
-        kern = (erste - p["puffer_vor_s"], kills[-1] + p["puffer_nach_s"])
+        # Nur Action (09.11.): Laufen davor und danach gedeckelt, Beginn am Kampf (Schüsse vor dem Umhauen)
+        vor = min(float(p["puffer_vor_s"]), ANLAUF_MAX_S)
+        nach = min(float(p["puffer_nach_s"]), AUSKLANG_MAX_S)
+        if mk.get("victory_royale"):
+            nach = max(nach, VICTORY_AUSKLANG_S)
+        kern = (min(erste - vor, kampfbeginn(mk, erste) - KAMPF_VOR_S), kills[-1] + nach)
         muss = (erste - 1.0, kills[-1] + 0.5)
         grund = f"{len(kills)} Kill(s)"
     else:
@@ -506,6 +521,21 @@ def _kern(mk: dict, dauer: float, p: dict) -> tuple[tuple[float, float], tuple[f
     nutzbar = max(0.5, dauer - 0.25)
     klemme = lambda a, b: (max(0.0, min(a, nutzbar)), max(0.0, min(b, nutzbar)))  # noqa: E731
     return klemme(*kern), klemme(*muss), grund
+
+
+def kampfbeginn(mk: dict, erste: float) -> float:
+    """Wann der Kampf vor dem ersten Umhauen begann: die früheste Spielton-Spitze (stimmung: Lautheit ≥ 8 LU über dem
+    Median = meist Schüsse) einer Kette, deren Abstände höchstens KAMPF_LUECKE_S sind und die bis kurz vor `erste`
+    reicht – höchstens KAMPF_MAX_S davor. Ohne passende Spitzen: erste (dann gilt der Anlauf, ANLAUF_MAX_S).
+    Beispiel (echter Clip vom 29.10.): Umhauen bei 8,0 s, Spitzen 3,5 · 5,3 · 7,3 → 3,5; Spitzen 0,4 · 6,3 → 6,3."""
+    beginn = erste
+    for t in sorted((float(x) for x in (mk.get("spitzen_s") or []) if isinstance(x, (int, float))), reverse=True):
+        if t >= beginn:
+            continue
+        if beginn - t > KAMPF_LUECKE_S or erste - t > KAMPF_MAX_S:
+            break
+        beginn = t
+    return beginn
 
 
 def anker(mk: dict, dauer: float) -> list[float]:
@@ -791,13 +821,15 @@ COOLDOWN_AUFGEHOBEN = "Cooldown aufgehoben"
 
 def ermuedung_regeln(konfig: Konfig | None) -> dict:
     """Die Werte der Abwechslung mit Ermüdung aus [regie] (ermuedung_tage, ermuedung_faktor, sperre_videos,
-    wiederholung_anteil, gleich_mit_video) – Unsinniges fällt auf ERMUEDUNG zurück. Landet als p["ermuedung"] in den
+    wiederholung_anteil, gleich_mit_video, seit 09.11. szene_hoechstens/szene_fenster) – Unsinniges fällt auf
+    ERMUEDUNG zurück. Landet als p["ermuedung"] in den
     Parametern des Videos (so sieht jede Schnittliste, nach welchen Regeln sie gewählt wurde)."""
     regeln = dict(ERMUEDUNG)
     for name, schluessel, unten, oben in (("tage", "ermuedung_tage", 1.0, 365.0), ("faktor", "ermuedung_faktor", 0.0, 1.0),
                                           ("sperre", "sperre_videos", 0, 12), ("stunden", "sperre_stunden", 1.0, 240.0),
                                           ("anteil", "wiederholung_anteil", 0.0, 1.0),
-                                          ("gleich", "gleich_mit_video", 1, 10)):
+                                          ("gleich", "gleich_mit_video", 1, 10),
+                                          ("hoechstens", "szene_hoechstens", 0, 15), ("fenster", "szene_fenster", 1, 100)):
         wert = konfig.wert(f"regie.{schluessel}", None) if konfig is not None else None
         if isinstance(wert, (int, float)) and not isinstance(wert, bool) and unten <= wert <= oben:
             regeln[name] = type(ERMUEDUNG[name])(wert)
@@ -971,11 +1003,35 @@ def waehle(kandidaten_: list[Kandidat], fmt: dict, p: dict, pflicht: list[Kandid
 
 # --- 2. Spannungsbogen -----------------------------------------------------------------
 
+def sieg_ans_ende(reihe: list[Kandidat], *, starker_einstieg: bool = False) -> list[Kandidat]:
+    """09.11. (Florian: „immer das gleiche Schema“): Ein Sieg (Victory Royale) beendet das Video – das Banner ist der
+    natürliche Schluss. Vorher stand er beim Cold Open (Montage, Kino) ganz vorn, und danach kam nur noch Schwächeres
+    („VICTORY ROYALE“ nach 5 s). Mehrere Siege: der stärkste ans Ende. Stand er vorn und soll der Einstieg stark sein
+    (Bogen, Cold Open), tauscht er mit dem bisherigen Schluss; sonst rückt alles nach ihm eins auf (steigend, wie
+    gespielt)."""
+    siege = [k for k in reihe if getattr(k, "victory", False)]   # Test-Kandidaten ohne Feld: kein Sieg
+    if len(reihe) < 2 or not siege:
+        return reihe
+    sieg = max(siege, key=lambda k: (k.intensitaet, k.schluessel))
+    if reihe[-1] is sieg:
+        return reihe
+    rest = [k for k in reihe if k is not sieg]
+    if starker_einstieg and reihe[0] is sieg:
+        return [rest[-1], *rest[:-1], sieg]
+    return [*rest, sieg]
+
+
 def bogen(gewaehlt: list[Kandidat], fmt_name: str, *, hook_staerkster: bool = False,
           reihenfolge: str = "bogen") -> list[Kandidat]:
     """Reihenfolge der Momente. reihenfolge (Schnittstil, stile.py): "bogen" = Hook, Steigerung, Höhepunkt am Ende;
     "steigend" = vom schwächsten zum stärksten; "chronologisch" = wie gespielt (Match, dann Zeit im Moment), der
-    stärkste Moment wandert ans Ende (Höhepunkt, aus ihm kommt auch der Hook vorn)."""
+    stärkste Moment wandert ans Ende (Höhepunkt, aus ihm kommt auch der Hook vorn). Ein Sieg steht immer am Ende
+    (sieg_ans_ende, 09.11.)."""
+    return sieg_ans_ende(_bogen(gewaehlt, fmt_name, hook_staerkster=hook_staerkster, reihenfolge=reihenfolge),
+                         starker_einstieg=hook_staerkster or reihenfolge not in ("steigend", "chronologisch"))
+
+
+def _bogen(gewaehlt: list[Kandidat], fmt_name: str, *, hook_staerkster: bool, reihenfolge: str) -> list[Kandidat]:
     if reihenfolge in ("steigend", "chronologisch") and len(gewaehlt) > 1:
         staerkster = max(gewaehlt, key=lambda k: (k.intensitaet, k.schluessel))
         rest = [k for k in gewaehlt if k is not staerkster]
@@ -1401,28 +1457,27 @@ def fassung_kandidaten(alle: list[Kandidat], fassung: dict, idx: dict[str, set[s
     return auswahl, pflicht
 
 
-def zu_kurz(gesamt: float, ziel_s: float, unten: float) -> bool:
-    """Stufe 4 (08.10.): Ein Short ist zu kurz, wenn er unter `unten` (30 s) oder mehr als MEHR_ANLAUF_AB_S unter dem
-    Ziel liegt – dann erst mehr Anlauf (mehr_anlauf), dann Nachschub früherer Abende."""
-    return gesamt < unten - 1e-6 or gesamt < ziel_s - MEHR_ANLAUF_AB_S - 1e-6
-
-
-def mehr_anlauf(p: dict, gesamt: float, ziel_s: float, unten: float) -> dict | None:
-    """Stufe 4 (08.10.): Anlauf und Ausklang für den zweiten Plan eines zu kurzen Shorts – je max(gelernt, MEHR_ANLAUF).
-    None: Der Plan reicht (mindestens `unten` und höchstens MEHR_ANLAUF_AB_S unter dem Ziel), oder mehr Anlauf ändert
-    nichts, weil das Gelernte schon darüber liegt – so plant der zweite Plan nie ein drittes Mal.
-    Nach „⏳ höchstens …“ (p["laenge_richtung"] "lang", regeln.anwenden) nur bis 30 s (Prüfung 08.10.: sonst wurde aus
-    43 s mit mehr Anlauf 62 s bei „höchstens 55 s“).
-    Beispiel: 32 s bei Ziel 45 s, gelernt 2,5 / 1,5 s → {"puffer_vor_s": 4.0, "puffer_nach_s": 3.0}."""
-    if not zu_kurz(gesamt, ziel_s, unten) or (p.get("laenge_richtung") == "lang" and gesamt >= unten - 1e-6):
-        return None
-    alt = {k: float(p.get(k, PARAMETER[k])) for k in MEHR_ANLAUF}
-    neu = {k: max(alt[k], wert) for k, wert in MEHR_ANLAUF.items()}
-    return neu if neu != alt else None
-
-
 def ordner(konfig: Konfig) -> Path:
     return Path(str(konfig.wert("regie.ordner", "/var/lib/clip-pipeline/regie")))
+
+
+def _notfall_video(con: sqlite3.Connection, ids: list[int]) -> bool:
+    """Wurde eines dieser Videos im Notfall gebaut (Parameter „notfall“, _mit_lockerung)? Kaputte Parameter: nein."""
+    for i in ids:
+        z = con.execute("SELECT parameter FROM entwuerfe WHERE id = ?", (int(i),)).fetchone()
+        try:
+            if z is not None and json.loads(z["parameter"] or "{}").get("notfall"):
+                return True
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return False
+
+
+def short_layout(konfig: Konfig | None) -> str:
+    """[regie] short_layout: "vollbild" (Standard seit 09.11.) oder "streifen" (der Aufbau bis dahin). Unbekanntes
+    gilt als Vollbild."""
+    wert = str(konfig.wert("regie.short_layout", entwurf.VOLLBILD) if konfig is not None else entwurf.VOLLBILD)
+    return wert if wert in (entwurf.VOLLBILD, entwurf.STREIFEN) else entwurf.VOLLBILD
 
 
 def ueber_grenze(liste: dict) -> bool:
@@ -1580,9 +1635,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         fmt = viral.format_fuer(fmt, variante)
     hinweise = [*(hinweise_vorab or []), *hinweise]
     p = {**PARAMETER, **(parameter or {})}
+    if fmt_name == "short":   # 09.11.: vor allem Planen – der Effekt-Plan lässt im Vollbild den Kill-Zähler weg
+        p["layout"] = short_layout(konfig)
     fps = int(konfig.wert("regie.fps", 60 if fmt_name == "zusammenschnitt" else 30))
     fx, fx_hinweise = effekte.einstellungen(konfig)
-    # Stufe 4 (08.10.): einfacher Modus wie bei mehr_anlauf (regie.geschmack aus einstellungen.EINFACH_FEST)
+    # Stufe 4 (08.10.): einfacher Modus (regie.geschmack aus einstellungen.EINFACH_FEST)
     einfach = fmt_name == "short" and viral is None and bool(konfig.wert("regie.geschmack", False))
     mix = einfach and bool(p.get("mix"))   # zweiter Versuch von 🎬 / neuer Fassung: gemischt aus den letzten Tagen
     # Abwechslung mit Ermüdung (08.10.): im einfachen Modus statt Abzug, Cooldown und Frische-Quote (szenen.verlauf) –
@@ -1606,11 +1663,14 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
         p["ermuedung"] = ermuedung_regeln(konfig)   # waehle, Nachlegen und Kürzen lesen die Regeln von hier
         if p.get("locker"):   # letzter Versuch von 🎬/neuer Fassung (_mit_lockerung): die Länge geht vor
             p["ermuedung"] = {**p["ermuedung"], **LOCKER}
-        if p.get("notfall"):   # Notfall (_mit_lockerung): sonst gar kein Video – das älteste gesperrte Video wird frei
-            p["ermuedung"]["sperre"] = max(1, int(p["ermuedung"]["sperre"]) - 1)
         ersetzt = [i for i in (p.get("ersetzt") or []) if isinstance(i, int)]   # lernbot: Fassung nach ❌
+        # Notfall (_mit_lockerung): sonst gar kein Video – das älteste gesperrte Video wird frei. 09.11.: auch für die
+        # Fassung eines Notfall-Videos – sonst flogen bei 🥱 genau die starken Szenen raus, die sie behalten soll
+        if p.get("notfall") or _notfall_video(con, ersetzt):
+            p["ermuedung"]["sperre"] = max(1, int(p["ermuedung"]["sperre"]) - 1)
         verlauf = szenen.verlauf(con, idx, ersetzt=ersetzt, tage=p["ermuedung"]["tage"],
-                                 sperre=p["ermuedung"]["sperre"], stunden=p["ermuedung"]["stunden"])
+                                 sperre=p["ermuedung"]["sperre"], stunden=p["ermuedung"]["stunden"],
+                                 fenster=p["ermuedung"]["fenster"], hoechstens=p["ermuedung"]["hoechstens"])
 
     def ermuede(kandidaten_: list[Kandidat]) -> None:
         """Einfacher Modus: Eine bekannte Szene (nicht aus dem Video, das eine Fassung ersetzt) verliert je Einsatz der
@@ -1860,16 +1920,12 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             raise fehler
         raise ZuWenigSzenen(sum(1 for k in reihe if not k.nachschub), momente_grenzen(fmt)[0], szenen_gesamt, schon,
                             mix=mix)
-    # Stufe 4 (08.10.): Zu kurz? Erst einmal mit mehr Anlauf aus denselben Szenen neu planen – kein Füllmaterial; reicht
-    # auch das nicht, mit Nachschub früherer Abende (hatte der Abend genug ungesehene starke Szenen, war er noch nicht
-    # dabei). Nur im einfachen Modus (regie.geschmack aus einstellungen.EINFACH_FEST, wie regie_lernen.aktuelle);
-    # /experte wie bisher. Bis dahin ist nichts gespeichert: der zweite Plan schreibt seine Schnittliste selbst.
+    # Stufe 4 (08.10.): Zu kurz? Mit Nachschub früherer Abende neu planen (hatte der Abend genug ungesehene starke
+    # Szenen, war er noch nicht dabei). Nur im einfachen Modus (regie.geschmack aus einstellungen.EINFACH_FEST, wie
+    # regie_lernen.aktuelle); /experte wie bisher. Bis dahin ist nichts gespeichert: der zweite Plan schreibt seine
+    # Schnittliste selbst. 09.11.: kein Auffüllen mehr mit mehr Anlauf (Laufen) – nur mit Szenen.
     zweiter = None
-    if einfach and (anlauf := mehr_anlauf(p, gesamt, ziel_s, unten)) is not None:
-        log.info("Short %.1f s bei Ziel %.0f s – plane neu mit mehr Anlauf (%.1f s davor, %.1f s danach)",
-                 gesamt, ziel_s, anlauf["puffer_vor_s"], anlauf["puffer_nach_s"])
-        zweiter = ("Mehr Anlauf", {**(parameter or {}), **anlauf}, nachschub)
-    elif einfach and nachschub is False and pool and gesamt < ziel_s - ZIEL_TOLERANZ_S - 1e-6:
+    if einfach and nachschub is False and pool and gesamt < ziel_s - ZIEL_TOLERANZ_S - 1e-6:
         # Prüfung 08.10.: schon, wenn das Ziel nicht erreicht ist (vorher erst 10 s darunter) – nach deinem „mindestens
         # 45 s“ blieb ein Abend mit vier starken Szenen sonst bei 40 s, obwohl frühere Abende genug hatten
         log.info("Short %.1f s bei Ziel %.0f s – plane neu mit starken Szenen früherer Abende (%d da)",
@@ -1943,6 +1999,11 @@ def erstelle(con: sqlite3.Connection, konfig: Konfig, fmt_name: str, *, paramete
             tod = float(k.merkmale["tod_sekunde"])
             if s["quelle_start_s"] - 1e-6 <= tod <= s["quelle_ende_s"] + 1e-6:
                 s["tod_s"] = round(tod, 3)
+    # 09.11.: Vollbild – die Mitte der Aufnahme füllt das Hochformat (entwurf.vollbild; p["layout"] steht seit dem
+    # Anfang fest); [regie] short_layout = "streifen" holt den alten Aufbau zurück. Der Rahmen-Zoom der Stile gilt im
+    # Vollbild nicht (gespeichert: 1,0).
+    if fmt_name == "short" and p.get("layout") == entwurf.VOLLBILD:
+        p["rahmen_zoom"] = 1.0
     # 30.09.: Rahmen-Zoom nur so weit, dass der Kill-Titel über der Bedienzone lesbar bleibt (4:3 ist höher als
     # 16:9). Gespeichert wird der WIRKSAME Wert – Kritik, Bot-Anzeige und Publikums-Modell sehen, was im Video ist.
     if fmt_name == "short" and float(p.get("rahmen_zoom", 1.0) or 1.0) > 1.0:

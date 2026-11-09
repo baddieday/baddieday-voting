@@ -181,7 +181,8 @@ def ki_urteil(con: sqlite3.Connection, konfig: Konfig, liste: dict, video: Path,
         return None, "KI-Cutter: Video fehlt – nur Plan"
     ordner.mkdir(parents=True, exist_ok=True)
     try:
-        zeiten = bilder_zeiten(liste, medien.probe(video).dauer_s or None)   # die echte Länge des Videos
+        # die echte Länge des Bilds (09.11.: nicht des Containers – sonst blieb die letzte Kachel schwarz)
+        zeiten = bilder_zeiten(liste, medien.video_dauer(video) or medien.probe(video).dauer_s or None)
         kontaktbogen(video, ordner, liste, zeiten)
     except medien.MedienFehler as fehler:
         return None, f"KI-Cutter: kein Kontaktbogen ({str(fehler)[:60]})"
@@ -412,7 +413,7 @@ def ki_paarvergleich(con: sqlite3.Connection, konfig: Konfig, a_id: int, b_id: i
         video, unter = Path(z["datei"]), ordner / name
         unter.mkdir(parents=True, exist_ok=True)
         try:
-            zeiten = bilder_zeiten(liste, medien.probe(video).dauer_s or None)
+            zeiten = bilder_zeiten(liste, medien.video_dauer(video) or medien.probe(video).dauer_s or None)
             kontaktbogen(video, unter, liste, zeiten)
         except medien.MedienFehler as fehler:
             return None, f"KI-Cutter: kein Kontaktbogen für #{eid} ({str(fehler)[:60]})"

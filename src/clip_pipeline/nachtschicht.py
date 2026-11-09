@@ -45,12 +45,13 @@ BASIS = "nachtschicht:basis"          # die erste Fassung, solange der Wettbewer
 FASSUNG = "nachtschicht:fassung"      # eine Mitbewerberin – bleibt so markiert, wenn sie verliert
 GLEICH = "nachtschicht:gleich"        # Plan Zeichen für Zeichen wie eine andere Fassung – nicht gerendert
 MARKEN = (BASIS, FASSUNG, GLEICH)
-ARTEN = ("aufbau", "tempo", "zeitlupe", "laenge", "anlauf", "song")
+# 09.11.: „mehr Anlauf“ (Laufen vor dem Kampf) ist raus – stattdessen „mit Vorschau“: 1–1,5 s vom Höhepunkt ganz vorn
+# (regie.hook_segment), damit niemand in der ersten Sekunde wegwischt. „anlauf“ bleibt in ART_NAMEN für alte Fassungen.
+ARTEN = ("aufbau", "tempo", "zeitlupe", "laenge", "vorschau", "song")
 ART_NAMEN = {"basis": "wie gelernt", "aufbau": "anderer Aufbau", "tempo": "anderes Tempo",
-             "zeitlupe": "andere Zeitlupe", "laenge": "andere Länge", "anlauf": "mehr Anlauf", "song": "anderer Song"}
+             "zeitlupe": "andere Zeitlupe", "laenge": "andere Länge", "anlauf": "mehr Anlauf",
+             "vorschau": "mit Vorschau", "song": "anderer Song"}
 LAENGE_SCHRITT_S = 10.0
-ANLAUF_FAKTOR = 1.5
-ANLAUF_MAX = {"puffer_vor_s": 6.0, "puffer_nach_s": 4.0}   # wie die gelernten Grenzen in regie_lernen
 SONG_MALUS = 10.0
 VERWAIST_MIN = 90
 NICHT_VERGLICHEN = frozenset({"name", "parameter", "hinweise", "wettbewerb"})
@@ -151,11 +152,10 @@ def _variante(p: dict, art: str, basis_id: int, konfig: Konfig, fmt_regeln: dict
         if abs(neu - ziel) < LAENGE_SCHRITT_S / 2:
             return None
         q["ziel_dauer_s"] = round(neu, 1)
-    elif art == "anlauf":
-        for schluessel, oben in ANLAUF_MAX.items():
-            q[schluessel] = round(min(oben, float(q.get(schluessel, regie.PARAMETER[schluessel])) * ANLAUF_FAKTOR), 2)
-        if all(q[s] == p.get(s) for s in ANLAUF_MAX):
+    elif art == "vorschau":
+        if p.get("hook_teaser"):   # die erste Fassung hat schon eine Vorschau – hier nichts Neues
             return None
+        q["hook_teaser"] = True
     elif art == "song":
         if track_id is None:
             return None

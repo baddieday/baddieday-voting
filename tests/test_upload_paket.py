@@ -282,11 +282,10 @@ class UploadFassungVaApi(MitUpload):
         self.assertNotIn("-crf", vaapi)
         self.assertEqual(cpu[cpu.index("-c:v") + 1], "libx264")
         self.assertEqual(cpu[cpu.index("-crf") + 1], "20")
-        # Volle Auflösung, nicht 720×1280: das Spielbild in voller Breite und der Hintergrund auf 1080×1920. (Seit
-        # Regisseur 2.0 wird der Hintergrund auf Viertelgröße weichgezeichnet – crop=270:480 – und erst dann
-        # hochskaliert; ein „crop=1080:1920“ gibt es deshalb nicht mehr.)
+        # Volle Auflösung, nicht 720×1280: seit 09.11. Vollbild – die Mitte der Aufnahme auf 9:16 zugeschnitten und
+        # auf 1080×1920 skaliert (bis 08.11. Spielbild-Streifen in voller Breite auf unscharfem Hintergrund)
         graph = cpu[cpu.index("-filter_complex") + 1]
-        self.assertIn("[vg0]scale=1080:-2", graph)
+        self.assertIn("crop=w='min(iw,2*trunc(ih*1080/1920/2))'", graph)
         self.assertIn("scale=1080:1920", graph)
         self.assertNotIn("720", graph)
         self.assertNotIn("-vaapi_device", cpu)
@@ -339,6 +338,7 @@ class UploadFassungMitEffekten(MitUpload):
 
     def test_1080x1920_zoom_nur_im_spielbild_texte_im_rand(self):
         self.konfig.daten["regie"]["effekte"]["an"] = True  # regie_hilfen schaltet sie für Bestandstests aus
+        self.konfig.daten["regie"]["short_layout"] = "streifen"   # 09.11.: der alte Streifen (Standard ist Vollbild)
         eid = self.short_entwurf(echte_videos=True)  # rendere misst die Moment-Dateien mit ffprobe
         liste = self.liste(eid)
         self.assertTrue(liste["effekte"]["an"])

@@ -178,6 +178,20 @@ def probe(pfad: Path) -> Probe:
     )
 
 
+def video_dauer(pfad: Path) -> float:
+    """Länge des Videostroms in s – nicht des Containers (probe.dauer_s): Nach dem Angleichen der Lautheit ist der Ton
+    ein paar Millisekunden länger, dort gibt es kein Bild mehr. 09.11.: Der Kontaktbogen des KI-Cutters nahm sein
+    letztes Bild an der Container-Länge – die Kachel blieb schwarz, und der Cutter bemängelte ein „Schwarzbild am Ende“,
+    das im Video nicht ist. 0.0, wenn ffprobe nichts liefert."""
+    messung = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration",
+                              "-of", "json", str(pfad)], capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", check=False)
+    try:
+        return float(json.loads(messung.stdout or "{}")["streams"][0]["duration"])
+    except (KeyError, IndexError, ValueError, TypeError):
+        return 0.0
+
+
 def _ziel_fps(fps: float) -> str:
     """VFR-Quellen bekommen ihre nominelle Rate als feste Rate (60 bleibt 60)."""
     gerundet = round(fps) if fps > 0 else 30
