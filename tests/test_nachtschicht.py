@@ -39,9 +39,9 @@ class Varianten(MitSpeicher):
         self.assertEqual((q["geschmack"]["aufbau"], q["geschmack"]["experiment"]), (q["stil"], None))
         self.assertEqual(arten["tempo"]["geschmack"]["tempo"], "ruhig")
         self.assertAlmostEqual(arten["tempo"]["seg_min_faktor"], round(0.75 * 1.25 / 0.8, 3))
-        self.assertEqual((arten["zeitlupe"]["max_lupen"], arten["zeitlupe"]["geschmack"]["zeitlupe"]), (2, "wenig"))
+        self.assertEqual((arten["zeitlupe"]["max_lupen"], arten["zeitlupe"]["geschmack"]["zeitlupe"]), (1, "wenig"))
         self.assertEqual(arten["laenge"]["ziel_dauer_s"], 75.0)     # „mindestens 65 s“: nie darunter, also länger
-        self.assertEqual((arten["anlauf"]["puffer_vor_s"], arten["anlauf"]["puffer_nach_s"]), (3.75, 2.25))
+        self.assertIs(arten["vorschau"]["hook_teaser"], True)       # 09.11.: statt „mehr Anlauf“
         self.assertEqual(arten["song"]["track_malus"], {"7": nachtschicht.SONG_MALUS})
         for art, q in arten.items():
             self.assertEqual(q["nachtschicht"], {"art": art, "basis": 12})

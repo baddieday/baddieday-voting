@@ -53,13 +53,31 @@ class Szene(MitSpeicher):
         self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx)], ["clip:1", "clip:2", "datei:3"])
         self.assertEqual([x.schluessel for x in szenen.eine_je_szene(liste, idx, {"datei:1"})], ["datei:1", "datei:3"])
 
-    def video(self, momente, status="gesendet", *, verworfen=None, parameter="{}", erstellt="x") -> int:
+    def video(self, momente, status="gesendet", *, verworfen=None, parameter="{}", erstellt="x",
+              format_="short") -> int:
         """Ein Entwurf mit diesen Momenten (Schnittliste im Testordner)."""
         pfad = self.tmp / f"v{self.con.execute('SELECT COUNT(*) FROM entwuerfe').fetchone()[0]}.json"
         pfad.write_text(json.dumps({"segmente": [{"moment": m} for m in momente]}), encoding="utf-8")
         return self.con.execute("INSERT INTO entwuerfe (name, format, schnittliste, parameter, status, erstellt, "
-                                "auto_verworfen) VALUES (?, 'short', ?, ?, ?, ?, ?)",
-                                (pfad.stem, str(pfad), parameter, status, erstellt, verworfen)).lastrowid
+                                "auto_verworfen) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                (pfad.stem, format_, str(pfad), parameter, status, erstellt, verworfen)).lastrowid
+
+    def test_deckel_drei_der_letzten_fuenfzehn(self):
+        """09.11. (Florian: „immer das gleiche Schema“): Eine Szene aus 3 der letzten 15 Shorts ist gesperrt – auch
+        ohne Zeitgrenze (die Videos sind 5 Tage alt, die 48-h-Sperre greift nicht mehr). Das 2-Wochen-Video zählt nicht
+        mit; fällt ein Short aus dem Fenster, ist die Szene wieder frei."""
+        alt = iso(jetzt() - timedelta(days=5))
+        for _ in range(3):
+            self.video(["clip:1"], erstellt=alt)
+        for _ in range(2):
+            self.video(["clip:2"], erstellt=alt)
+        self.video(["clip:2"], erstellt=alt, format_="zusammenschnitt")
+        v = szenen.verlauf(self.con, {}, sperre=3)
+        self.assertEqual((v.oft, v.gesperrt), ({"clip:1"}, {"clip:1"}))
+        self.assertEqual(szenen.verlauf(self.con, {}, sperre=3, hoechstens=0).gesperrt, set())   # 0 = kein Deckel
+        for i in range(13):                                    # 13 neuere Shorts: das erste clip:1-Video fällt raus
+            self.video([f"clip:{20 + i}"], erstellt=alt)
+        self.assertEqual(szenen.verlauf(self.con, {}, sperre=3).oft, set())
 
     def test_verlauf_je_video(self):
         """08.10. (Abwechslung mit Ermüdung): Fassungen eines Videos zählen als ein Video; gesperrt sind die Szenen der

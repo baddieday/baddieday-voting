@@ -121,12 +121,12 @@ dem Vertrag v1 in `docs/WORKER.md`.
 | 😵 zu hektisch | Segmente +15 % länger, Übergänge +10 %; ab +30 % nur jeder 2., ab +70 % jeder 4. Beat; dazu Hektik ×0,9 (Beat-Akzente schwächer, 0,3 … 1,3) |
 | 🎯 Stimmung getroffen | Hauptstimmung +0,5; Musikziel dieser Stimmung rückt 20 % zum benutzten Titel |
 | ⏳ zu lang | Ziel-Dauer −10 % (bis 60 %) |
-| ⏱️ zu kurz | Ziel-Dauer +11 % – hebt „zu lang“ wieder auf; beide zugleich: nichts. Short (28.09., Florian): Start 45 s, immer 30–75 s und 4–10 Momente; jede Stimme wirkt bis an diese Grenzen (vorher war bei 45 s Schluss). `pipeline lernstand` bzw. 🧠 Lernstand zeigt „Short-Länge: …“ mit deinen Stimmen. Einfacher Modus (Stufe 5, 08.10.): ⏱️/⏳ setzen dort eine Grenze 10 s über bzw. unter dem Video (`regeln.laenge`) – sie ist der Start fürs Publikums-Modell, das nur in deiner Richtung abweichen darf; der gelernte Faktor wirkt dort nur ohne sie |
-| ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills |
+| ⏱️ zu kurz | Ziel-Dauer +11 % – hebt „zu lang“ wieder auf; beide zugleich: nichts. Short (28.09., Florian): Start 45 s, immer 30–75 s und 4–10 Momente; jede Stimme wirkt bis an diese Grenzen (vorher war bei 45 s Schluss). `pipeline lernstand` bzw. 🧠 Lernstand zeigt „Short-Länge: …“ mit deinen Stimmen. Einfacher Modus (Stufe 5, 08.10.): ⏱️/⏳ setzen dort eine Grenze 10 s über bzw. unter dem Video (`regeln.laenge`) – sie ist der Start fürs Publikums-Modell, das nur in deiner Richtung abweichen darf; der gelernte Faktor wirkt dort nur ohne sie. **Seit 09.11.: länger nur durch mehr Szenen, nie durch mehr Laufen** (Anlauf/Ausklang gedeckelt, siehe „Stufe 1 – weg mit dem Schema“) |
+| ✂️ abgeschnitten | +0,5 s vor, +0,3 s nach den Kills – seit 09.11. höchstens bis 2,5 s davor / 2 s danach (`regie.ANLAUF_MAX_S`, `AUSKLANG_MAX_S`); einen Kampf davor findet `regie.kampfbeginn` an den Schüssen |
 | 🥱 Schnitt langweilig | (07.10.) nichts an den Momenten – ein Urteil über den Schnitt; im einfachen Modus lernt `geschmack.py` daraus Aufbau, Tempo und Zeitlupe, und die neue Fassung ist anders geschnitten (bis 07.10.: „Clips langweilig“, jeder Moment −1) |
 | 🎆 zu viele Effekte | Effekt-Stärke der Hauptstimmung ×0,85 (bis 0,1) – alle Effekte dieser Stimmung schwächer, schwache fallen unter die Schwelle weg |
-| 💥 mehr Action | Effekt-Stärke der Hauptstimmung ×1,15 (bis 1,5) |
-| 🎆 + 💥 zugleich | nichts (heben sich auf) |
+| 💥 mehr Action | (09.11.) dichter schneiden: Segmente ×0,9 – kürzere Szenen, also mehr Szenen im Video. Bis 08.11.: Effekt-Stärke ×1,15 – das trieb die Effekte bis zum Anschlag, während im Video zu wenig passierte |
+| 💥 + 😵 zugleich | 😵 gilt (ruhiger), 💥 entfällt |
 | 👍 | jeder Moment dieses Entwurfs +0,5 (kommt öfter wieder) |
 | 👎 ohne Grund | jeder Moment dieses Entwurfs −0,5 (bei 👎 *mit* Grund lag es nicht an den Clips) |
 | 👍/👎 ohne Grund | Hauptstimmung ±0,25 (ab 3 Bewertungen) |
@@ -336,7 +336,7 @@ Bewertungen – wie die anderen Regeln):
 
 | Parameter | Start | wirkt auf | lernt aus |
 |---|---|---|---|
-| `effekt_staerke[stimmung]` | 1,0 je Stimmung | **alle** Effekte von Segmenten dieser Stimmung (Zoom, Titel, Zähler, Klänge) und den Look, wenn sie die Hauptstimmung ist | 🎆 ×0,85 · 💥 ×1,15 für die **Hauptstimmung** des Entwurfs, Grenzen 0,1 … 1,5; beide zugleich: nichts; 👍/👎 ohne Grund: nichts |
+| `effekt_staerke[stimmung]` | 1,0 je Stimmung | **alle** Effekte von Segmenten dieser Stimmung (Zoom, Titel, Zähler, Klänge) und den Look, wenn sie die Hauptstimmung ist | 🎆 ×0,85 für die **Hauptstimmung** des Entwurfs, Grenzen 0,1 … 1,5; 👍/👎 ohne Grund: nichts. 💥 hebt sie seit 09.11. nicht mehr (es schneidet dichter) |
 | `effekt_hektik` | 1,0 | die Beat-Akzente und die Impacts Blitz, Wackeln, RGB-Stoß (28.09.) | 😵 zu hektisch ×0,9, Grenzen 0,3 … 1,3 |
 
 Stärke eines Effekts = Profilwert × `effekt_staerke[stimmung]` (× `effekt_hektik` bei Beat-Akzenten und Impacts), höchstens 1;
@@ -512,8 +512,8 @@ Im einfachen Modus entsteht ein Short nicht mehr einmal, sondern im Wettbewerb (
 1. **Erste Fassung** wie bisher (gelernte Werte, Geschmack-Schrauben, deine Regeln). Sie wird vor dem Rendern markiert,
    damit die Lern-Bot-Schleife sie nicht sofort schickt.
 2. **Weitere Fassungen** (`[nachtschicht].fassungen` = 4, also drei weitere): jede ändert genau eine Stellschraube –
-   Aufbau, Tempo, Zeitlupe, Länge (±10 s, nie gegen deine ⏱️/⏳-Grenze), Anlauf (×1,5) oder Song (Abzug auf den der
-   ersten Fassung). Welche drei, wechselt je Video. Eine Fassung, die dasselbe Video ergäbe, wird nicht gerendert.
+   Aufbau, Tempo, Zeitlupe, Länge (±10 s, nie gegen deine ⏱️/⏳-Grenze), Vorschau (1–1,5 s des Höhepunkts ganz vorn;
+   bis 08.11. „Anlauf ×1,5“) oder Song (Abzug auf den der ersten Fassung). Welche drei, wechselt je Video. Eine Fassung, die dasselbe Video ergäbe, wird nicht gerendert.
    Nach 25 min oder unter 3 GB frei im Regie-Ordner kommt keine weitere mehr.
 3. **Messen:** jede Fassung am fertigen Video (Cutter-Maßstab, ohne KI). Ein verletztes K.O.-Tor sortiert aus.
 4. **KI-Paarvergleich:** die besten zwei nach Messung blind vor Claude (`kritik.ki_paarvergleich`: je Kontaktbogen,
@@ -530,6 +530,32 @@ Sonntags: „🥊 n Videos aus je k Fassungen · m KI-Vergleiche · der KI-Cutte
 **Nicht im Wettbewerb:** 🔥 Viral, das 2-Wochen-Video, neue Fassungen nach ❌ (die müssen „anders“ sein), /experte.
 Stirbt ein Lauf nach dem Rendern der ersten Fassung, gibt `nachtschicht.aufraeumen` sie nach 90 min frei
 (sitzung.verarbeite, alle 10 min). Annahmen W1–W12 in `docs/ENTSCHEIDUNGEN.md`.
+
+## Stufe 1 – weg mit dem Schema (09.11.)
+
+Florian: „Es ist gerade immer das gleiche Schema.“ Befund an den letzten 30 Videos (KI-Cutter, Schnittlisten): schmaler
+16:9-Streifen, gelernt 6 s Laufen vor und 4 s nach jeder Szene, rund 95 Effekte je Video, „VICTORY ROYALE“ nach 5 s,
+eine Szene in 16 von 30 Videos, „KILLS 1“ nach fünf Kills. Was jetzt gilt:
+
+- **Vollbild** (`[regie] short_layout = "vollbild"`): Die Mitte der Aufnahme füllt das Hochformat (`entwurf._bild`,
+  crop auf 9:16). Kill-Titel stehen auf dem Bild im oberen Drittel, ohne Zähler. `"streifen"` holt den alten Aufbau
+  zurück (dort wirkt auch der Rahmen-Zoom der Stile wieder).
+- **Nur Action** (`regie._kern`): Eine Szene beginnt am Kampf – an der ersten Schuss-Spitze im Spielton vor dem
+  Umhauen (`kampfbeginn`, höchstens 6 s davor) –, sonst höchstens 2,5 s davor; danach höchstens 2 s (Sieg 3,5 s für das
+  Banner). Egal, was gelernt ist. „Mehr Anlauf“ als Rettung für zu kurze Shorts gibt es nicht mehr – lieber mehr Szenen,
+  sonst kein Video.
+- **Gründe neu gedeutet:** ⏱️ = mehr Szenen, 💥 = dichter schneiden, 🎆/😵 = weniger Effekte (siehe Tabelle oben).
+- **Effekte nur bei Anlass** (`effekte.py`): keine Negativ-, Pixel-, Strobe-, Farbrad- und Blur-Stile mehr in den
+  Rotationen (die Filter bleiben für 🔥 Viral), Beat-Effekte erst nach 4 s Ruhe (vorher 0,8 s), ein Einstieg nur ganz vorn
+  und beim Höhepunkt, höchstens 3 Zeitlupen (viel 3, wenig 1; vorher 8 / 2).
+- **Sieg am Ende** (`regie.sieg_ans_ende`): Ein Victory Royale beendet das Video, auch beim Cold Open.
+- **Deckel je Szene** (`szenen.verlauf`, `[regie] szene_hoechstens = 3`, `szene_fenster = 15`): eine Szene höchstens in
+  3 deiner letzten 15 Shorts, danach gesperrt wie eine gerade gezeigte – auch im Notfall. Ist alles ausgeschöpft, kommt
+  „Kein neues Video …“ statt derselben Szenen. Nachgestellt (4 Abende, 21 starke Szenen, nichts Neues): 13 Videos, dann
+  Schluss; keine Szene öfter als 3-mal.
+- **Fehler:** Das „Schwarzbild am Ende“ war die letzte Kachel des Kontaktbogens (gemessen an der Container-Länge, der
+  Ton ist ein paar ms länger) – jetzt `medien.video_dauer`. Eine Fassung nach ❌ an einem Notfall-Video sperrt wie das
+  Video selbst (vorher flogen bei 🥱 genau die Szenen raus, die sie behalten sollte).
 
 ## pve-big schaltet sich selbst ab (clip-leerlauf)
 `deploy/big/clip-leerlauf` läuft auf pve-big jede Minute und fährt ihn nach 20 min ohne echten Zugriff auf den

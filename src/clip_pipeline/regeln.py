@@ -15,7 +15,8 @@ sichtbarer Wirkung – der Bot sagt dir in einem Satz, was er geändert hat:
                    gesenkte Effekte eine Stufe zurück (aus → ruhig → normal, nie darüber; mehr_effekte)
   🎵 Musik         dieser Song kommt nie wieder                             Tabelle sperren (art track)
   😵 zu hektisch   Effekte eine Stufe ruhiger (wild → normal → ruhig → aus) Einstellung regie.effekt_stufe
-  (Experten-Gründe: 🎆 zu viele Effekte wie hektisch, 💥 mehr Action eine Stufe wilder)
+  (Experten-Gründe: 🎆 zu viele Effekte wie hektisch; 💥 mehr Action seit 09.11. dichter schneiden – mehr Szenen,
+   weniger Laufen, regie_lernen – statt „eine Stufe wilder“: die Effekte standen schon auf dem Maximum)
 
 anwenden() legt die Regeln NACH allem Gelernten über die Regie-Parameter – sie gehen immer vor. Die Sperren wirken direkt
 in regie.kandidaten_mit_bericht und regie.waehle_musik; alte 🥱-Sperren (grund „langweilig“, bis 07.10.) bleiben in der
@@ -156,7 +157,7 @@ def anwenden(con: sqlite3.Connection, konfig: Konfig, fmt: str, p: dict) -> dict
             p["ziel_dauer_s"] = ziel                     # fest wie bis 08.10. (/experte, ⚙️-Wert ohne ⏱️/⏳)
         else:   # Stufe 5: Grenze in deiner Richtung – darüber bzw. darunter gilt die Wahl des Publikums-Modells
             p["ziel_dauer_s"] = (max if richtung == "kurz" else min)(float(gelernt), ziel)
-        if richtung is not None:   # Prüfung 08.10.: regie.mehr_anlauf streckt nach ⏳ nie über deine Grenze, und
+        if richtung is not None:   # Prüfung 08.10.: Nachlegen und Kürzen halten deine Grenze ein, und
             p["laenge_richtung"], p["laenge_grenze_s"] = richtung, ziel   # „kürzer als deine Mindestlänge“ (regie)
     s = stufe(con, konfig)
     if s == STANDARD_STUFE and einfach:
@@ -319,10 +320,12 @@ def wende_an(con: sqlite3.Connection, konfig: Konfig, grund: str, liste: dict,
             return "🎵 Dieses Video hatte keine Musik."
         sperre(con, "track", [str(m["track_id"])], "musik")
         return f"🎵 Verstanden: „{m.get('titel') or 'diesen Song'}“ spiele ich nie wieder."
-    if grund in ("hektisch", "effekte_viel", "action"):
+    if grund == "action":   # 09.11.: mehr Kampf statt mehr Blitze – wirkt über regie_lernen (Segmente ×0,9)
+        return "💥 Verstanden: mehr Kampf, weniger Laufen – ich schneide dichter und nehme mehr Szenen."
+    if grund in ("hektisch", "effekte_viel"):
         alt = stufe(con, konfig)
         alt = STANDARD_STUFE if alt is None else alt
-        neu = min(3, alt + 1) if grund == "action" else max(0, alt - 1)
+        neu = max(0, alt - 1)
         einstellungen.setze(con, STUFE_SCHLUESSEL, neu)
         if neu == alt:
             return f"✨ Effekte sind schon auf „{STUFEN[neu]}“."

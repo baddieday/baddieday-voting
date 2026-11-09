@@ -84,8 +84,8 @@ wol_mac = "aa:bb:cc:dd:ee:ff"   # MAC-Adresse von pve-big (Beispielwert)
 # lupe = 0.5                # Zeitlupe um den Finisher (Standard 0.8), raffer = Zeitraffer im Anlauf (0.6)
 # raffer = 0
 # 2.2-Katalog (0 = diesen Effekt nie): negativ, blur, strobe, farbpop, kontrast, hue, vignette, pixel, tilt,
-# einstieg (Effekt auf jedem harten Schnitt), drift (Ken-Burns je Segment), akzent + max_ruhe_s (Beat-Effekte)
+# einstieg (Effekt ganz vorn und beim Höhepunkt), drift (Ken-Burns je Segment), akzent + max_ruhe_s (Beat-Effekte)
 # strobe = 0
-# max_ruhe_s = 1.5          # Beat-Effekte seltener (Standard episch 0.8)
+# max_ruhe_s = 6            # Beat-Effekte noch seltener (Standard episch 4, bis 08.11. 0.8)
 # [regie.effekte.lustig]
 # max_ruhe_s = 0            # keine Beat-Akzente (Zoom auf dem Beat nach so vielen Sekunden Ruhe)

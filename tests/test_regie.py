@@ -89,7 +89,9 @@ class Regisseur(MitRegieMaterial):
         regie_lernen.bewerte(self.con, zweiter, grund="hektisch")  # zweimal hektisch (gleicher Entwurf, umschalten)
         regie_lernen.bewerte(self.con, zweiter, grund="hektisch")
         p, _ = regie_lernen.aktuelle(self.con, self.konfig)
-        self.assertGreater(p["puffer_vor_s"], regie.PARAMETER["puffer_vor_s"])
+        # 09.11.: Anlauf höchstens regie.ANLAUF_MAX_S (= Start 2,5 s, kein Laufen) – „abgeschnitten“ hebt den Ausklang
+        self.assertEqual(p["puffer_vor_s"], regie.ANLAUF_MAX_S)
+        self.assertGreater(p["puffer_nach_s"], regie.PARAMETER["puffer_nach_s"])
         self.assertLess(p["dauer_faktor"], 1.0)
         self.assertEqual(p["track_malus"], {str(erster_track["id"]): 1.0})
 
@@ -315,43 +317,25 @@ class Abwechslung(MitRegieMaterial):
 
 
 @unittest.skipUnless(HAT_FFMPEG, "ffmpeg fehlt")
-class MehrAnlauf(MitRegieMaterial):
-    """Stufe 4 (08.10.): Zu kurz? Erst mehr Anlauf aus denselben starken Szenen – nur im einfachen Modus."""
+class KeinLaufen(MitRegieMaterial):
+    """09.11.: Zu kurz heißt nie mehr Laufen – bis 08.11. plante der Bot einen zu kurzen Short mit 4 / 3 s Anlauf und
+    Ausklang neu (Stufe 4, „mehr Anlauf“); jetzt bleibt es bei den gedeckelten Werten: Nachschub (mit Szenen) oder kein
+    Video."""
 
     def setUp(self):
         super().setUp()
         self.konfig.daten["regie"]["szenen"] = "stark"
         self.musik_anlegen(150, "episch")
 
-    def abend(self, kills: list[float]) -> None:
-        """4 Doppel-Kills (stark) und ein Einzelkill, der nie Füllmaterial wird – alle aus dem Match a1."""
-        self.momente_anlegen([(s, 2, kills, "a1") for s in ("episch", "spannend") * 2]
-                             + [("spannend", 1, kills[:1], "a1")])
-
-    def short(self, experte: bool = False) -> dict:
-        self.konfig.daten["lernbot"]["experte"] = experte
+    def test_zu_kurzer_abend_ohne_auffuellen(self):
+        # 4 Doppel-Kills (stark) und ein Einzelkill, der nie Füllmaterial wird – alle aus dem Match a1
+        self.momente_anlegen([(s, 2, [8.0, 9.5], "a1") for s in ("episch", "spannend") * 2]
+                             + [("spannend", 1, [8.0], "a1")])
         k = einstellungen.anwenden(self.con, self.konfig)
         p = regeln.anwenden(self.con, k, "short", regie_lernen.aktuelle(self.con, k, "short")[0])
-        return regie.erstelle(self.con, k, "short", parameter=p, nur_matches={"a1"})
-
-    def test_kurze_starke_szenen_mit_mehr_anlauf(self):
-        self.abend([8.0, 9.5])        # wie aufgeben/s2: 8 s Vorlauf wie die echten Clips, Kills 1,5 s auseinander
-        with self.assertRaises(regie.ZuKurz) as fehler:                   # /experte: wie bisher (2,5 / 1,5 s → 22 s)
-            self.short(experte=True)
-        self.assertLess(fehler.exception.sekunden, 30.0)
-        liste = lies(self.short())
-        self.assertGreaterEqual(liste["dauer_s"], 30.0)
-        self.assertEqual({s["moment"] for s in liste["segmente"]}, {"datei:1", "datei:2", "datei:3", "datei:4"})
-        self.assertEqual((liste["parameter"]["puffer_vor_s"], liste["parameter"]["puffer_nach_s"]), (4.0, 3.0))
-        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 1)   # nur der zweite Plan
-
-    def test_auch_mit_mehr_anlauf_zu_kurz(self):
-        self.DAUER = 8.0              # kaum Vorlauf in der Datei: auch mit 4 / 3 s keine 30 s
-        self.abend([3.0, 4.0])
         with self.assertRaises(regie.ZuKurz) as fehler:
-            self.short()
+            regie.erstelle(self.con, k, "short", parameter=p, nur_matches={"a1"})
         self.assertLess(fehler.exception.sekunden, 30.0)
-        self.assertNotIn("⚙️", fehler.exception.satz(experte=False))
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM entwuerfe").fetchone()[0], 0)   # kein Video
 
 
@@ -362,8 +346,9 @@ class Nachschub(MitRegieMaterial):
     12 Tage (sonst fehlt beim ✅ das Rohvideo). Nur im einfachen Modus."""
 
     # a1 = der Abend: 2 starke (datei:1, 2) und ein Einzelkill (3); o1 vor 5 Tagen: 3 starke (4–6), ein Einzelkill (7),
-    # eine schon gezeigte (8); z1 vor 13 Tagen: eine starke (9)
-    SZENEN = [("episch", 2, [7.0, 9.5], "a1"), ("spannend", 2, [6.0, 10.0], "a1"), ("spannend", 1, [8.0], "a1"),
+    # eine schon gezeigte (8); z1 vor 13 Tagen: eine starke (9). 09.11.: die Kills des Abends 5 s auseinander – ohne
+    # Laufen (Anlauf ≤ 2,5 s) ergaben 2 + 2 kurze Szenen nur 29 s, also kein Video
+    SZENEN = [("episch", 2, [6.0, 11.0], "a1"), ("spannend", 2, [6.0, 11.0], "a1"), ("spannend", 1, [8.0], "a1"),
               ("episch", 3, [5.0, 7.0, 9.0], "o1"), ("spannend", 2, [7.0, 9.5], "o1"), ("episch", 2, [6.0, 8.0], "o1"),
               ("spannend", 1, [11.0], "o1"), ("episch", 4, [6.0, 8.0, 10.0, 12.5], "o1"),
               ("episch", 4, [6.0, 8.0, 10.0, 12.5], "z1")]
@@ -467,19 +452,31 @@ class Nachschub(MitRegieMaterial):
         self.assertTrue({"datei:2", "datei:4"} <= set(self.reihe(liste)), self.reihe(liste))
         self.assertLessEqual(2 * len(liste["auswahl"]["wiederholt"]), len(self.reihe(liste)))   # höchstens die Hälfte
         videos.append(self.reihe(liste))
+        notfall = [False] * 4 + [bool(liste["parameter"].get("notfall"))]
+        satz = None
         for _ in range(12):                                                  # alles ausgeschöpft: nur noch bekannte
-            _eid, liste = self.gezeigt(["e4"])
+            try:
+                _eid, liste = self.gezeigt(["e4"])
+            except regie.ZuWenigSzenen as fehler:                            # 09.11.: bis der Deckel greift
+                satz = fehler.satz(experte=False)
+                break
             a = liste["auswahl"]
             self.assertEqual((a["neu"], len(a["wiederholt"])), (0, len(self.reihe(liste))))
             videos.append(self.reihe(liste))
+            notfall.append(bool(liste["parameter"].get("notfall")))
+        self.assertGreaterEqual(len(videos), 8)                              # bekannte kommen wieder …
+        self.assertIn("Kein neues Video", satz or "Kein neues Video")        # … aber irgendwann ist Schluss
         for i, video in enumerate(videos):
             for j, frueher in enumerate(videos[:i]):
                 gemeinsam = set(video) & set(frueher)
-                self.assertFalse(gemeinsam and i - j <= 3, (i, j, gemeinsam))   # nie in einem der letzten 3 Videos
+                # nie in einem der letzten 3 Videos – im Notfall (sonst gar kein Video) nur der letzten 2
+                self.assertFalse(gemeinsam and i - j <= (2 if notfall[i] else 3), (i, j, gemeinsam))
                 self.assertLessEqual(len(gemeinsam), 2, (i, j))                  # nie dieselbe Zusammenstellung
+            # 09.11. (Deckel): in 15 Videos hintereinander höchstens 3-mal dieselbe Szene
+            self.assertLessEqual(max(Counter(m for v in videos[max(0, i - 14):i + 1] for m in v).values()), 3, i)
         zaehler = Counter(m for video in videos for m in video)
         doppel = [f"datei:{i}" for i in (2, 4, 6, *range(7, 22))]
-        self.assertGreater(zaehler["datei:1"], sum(zaehler[m] for m in doppel) / len(doppel))   # die beste öfter
+        self.assertGreaterEqual(zaehler["datei:1"], sum(zaehler[m] for m in doppel) / len(doppel))   # die beste nicht seltener
 
     def test_neue_fassung_behaelt_ihre_szenen(self):
         """Wichtigster Fehlerfall: Ist nichts Neues mehr da, endet die neue Fassung nach ❌ trotzdem nicht mit „kein
@@ -501,8 +498,9 @@ class Nachschub(MitRegieMaterial):
         self.assertTrue(set(fassung["behalten"]) <= r1 and not set(fassung["ohne"]) & r1, (fassung, r1))
         self.assertTrue(liste1["auswahl"]["wiederholt"])                     # Ersatz auch aus bekannten
         f2, liste2 = self.gezeigt(sorted(regeln.abend_aus(liste1)), ersetzt=[f1, eid], ziel_dauer_s=40.0)   # ❌ ⏱️
-        stark = r1 - {"datei:22", "datei:23", "datei:24"}                    # ohne die Einzelkills (nur 🥱 nimmt sie)
-        self.assertTrue(stark <= set(self.reihe(liste2)), (stark, self.reihe(liste2)))
+        # die stärkere Hälfte bleibt (09.11.: unter gleich starken Doppel-Kills eines alten Abends entscheidet „nie mehr
+        # als 2 aus demselben Video“, welche – vorher hieß es hier „alle starken aus Fassung 1“)
+        self.assertTrue(set(fassung["behalten"]) <= set(self.reihe(liste2)), (fassung, self.reihe(liste2)))
         self.assertGreater(liste2["dauer_s"], liste1["dauer_s"])
         _e, liste3 = self.gezeigt(["e4"])                                    # 🎬: alles ausgeschöpft – Notfall
         self.assertTrue(liste3["parameter"].get("notfall"))
@@ -599,15 +597,21 @@ class Auswahl(unittest.TestCase):
             lauf([kein, kein, kein, kein])
         self.assertTrue(fehler.exception.mix)
 
-    def test_mehr_anlauf_nur_wenn_zu_kurz(self):
-        p = dict(regie.PARAMETER)                                                    # gelernt: 2,5 / 1,5 s
-        self.assertEqual(regie.mehr_anlauf(p, 32.0, 45.0, 30.0), {"puffer_vor_s": 4.0, "puffer_nach_s": 3.0})
-        self.assertIsNone(regie.mehr_anlauf(p, 36.0, 45.0, 30.0))                    # reicht: kein zweiter Plan
-        oben = {**p, "laenge_richtung": "lang"}         # Prüfung 08.10.: nach ⏳ nur bis 30 s, nie über deine Grenze
-        self.assertIsNone(regie.mehr_anlauf(oben, 32.0, 45.0, 30.0))
-        self.assertIsNotNone(regie.mehr_anlauf(oben, 25.0, 45.0, 30.0))
-        # Das Gelernte liegt schon darüber: ein zweiter Plan änderte nichts (und plant nie ein drittes Mal)
-        self.assertIsNone(regie.mehr_anlauf({**p, "puffer_vor_s": 5.0, "puffer_nach_s": 3.0}, 22.0, 45.0, 30.0))
+    def test_kampfbeginn_und_deckel(self):
+        """09.11.: Szene beginnt am Kampf (Schüsse vor dem Umhauen), Laufen davor und danach gedeckelt – auch wenn 6 / 4 s
+        gelernt sind (vorher bei 5 Szenen rund 50 s Laufen in einem 70-s-Video)."""
+        p = {**regie.PARAMETER, "puffer_vor_s": 6.0, "puffer_nach_s": 4.0}
+        # echte Werte vom 29.10.: Umhauen bei 8,0 s, Schüsse 3,5 · 5,3 · 7,3 s → Kampf ab 3,5 s
+        mk = {"kill_sekunden": [8.0], "aktion_sekunden": [8.0], "spitzen_s": [3.5, 5.3, 7.3, 10.4]}
+        self.assertEqual(regie.kampfbeginn(mk, 8.0), 3.5)
+        kern, muss, _ = regie._kern(mk, 13.0, p)
+        self.assertEqual(kern, (3.0, 10.0))                  # 0,5 s vor dem ersten Schuss … 2 s nach dem Kill
+        self.assertEqual(muss, (7.0, 8.5))
+        # eine Spitze weit vorher (Sturm, Lärm) gehört nicht zum Kampf: Abstand zur nächsten > 3 s
+        self.assertEqual(regie.kampfbeginn({"spitzen_s": [0.4, 6.3]}, 8.0), 6.3)
+        # ohne Spitzen: höchstens 2,5 s Anlauf; ein Sieg behält 3,5 s für das Banner
+        kern, _, _ = regie._kern({"kill_sekunden": [8.0], "victory_royale": 1}, 13.0, p)
+        self.assertEqual(kern, (5.5, 11.5))
 
     @staticmethod
     def k(name, punkte, *, gezeigt=0, gesperrt=False, match="m1", kern=(4.0, 12.0)):
@@ -906,26 +910,30 @@ class EffekteLernen(MitRegieMaterial):
         self.entwurf("episch", ["effekte_viel"])
         self.assertEqual(self.p()["effekt_staerke"], {"episch": 0.85})
         self.entwurf("episch", ["effekte_viel"])
-        self.entwurf("spannend", ["action"])
-        self.entwurf("lustig", ["effekte_viel", "action"])                # beide zugleich: nichts
+        self.entwurf("spannend", ["action"])                              # 09.11.: dichter schneiden, Effekte bleiben
+        self.entwurf("lustig", ["effekte_viel", "action"])
         self.entwurf("chill", daumen=1)                                   # 👍/👎 ohne Grund: nichts
         self.entwurf("frustriert", daumen=-1)
         p = self.p()
-        self.assertEqual(p["effekt_staerke"], {"episch": 0.722, "spannend": 1.15})
+        self.assertEqual(p["effekt_staerke"], {"episch": 0.722, "lustig": 0.85})
+        self.assertEqual(p["seg_min_faktor"], 0.81)                       # zweimal „mehr Action“: ×0,9 ×0,9
         self.assertEqual(p["effekt_hektik"], 1.0)
         self.assertEqual(self.con.execute("SELECT daumen FROM entwurf_bewertungen WHERE entwurf_id = 3")
                          .fetchone()[0], -1)                              # „mehr Action“ ist Kritik
 
     def test_chronologisch_mit_grenzen(self):
-        for _ in range(4):
-            self.entwurf("episch", ["action"])                            # 1,15 · 1,323 · 1,5 (Grenze) · 1,5
+        for _ in range(8):
+            self.entwurf("episch", ["action"])                            # 09.11.: Segmente ×0,9 bis 0,5 (Grenze)
+        self.assertEqual(self.p()["seg_min_faktor"], 0.5)
+        self.entwurf("episch", ["hektisch"])
+        self.assertEqual(self.p()["seg_min_faktor"], 0.575)               # von der Grenze aus, nicht von 0,43
         self.entwurf("episch", ["effekte_viel"])
-        self.assertEqual(self.p()["effekt_staerke"], {"episch": 1.275})   # von der Grenze aus, nicht von 1,749
+        self.assertEqual(self.p()["effekt_staerke"], {"episch": 0.85})    # „mehr Action“ hob die Effekte nicht
         for _ in range(20):
             self.entwurf("spannend", ["effekte_viel"])
         self.assertEqual(self.p()["effekt_staerke"]["spannend"], 0.1)     # nie ganz aus durch Lernen
         self.entwurf("spannend", ["action"])
-        self.assertEqual(self.p()["effekt_staerke"]["spannend"], 0.115)
+        self.assertEqual(self.p()["effekt_staerke"]["spannend"], 0.1)
 
     def test_hektisch_daempft_und_vorgabe_null_bleibt(self):
         self.konfig.daten["regie"]["vorgaben"] = {"effekt_staerke": {"chill": 0}, "effekt_hektik": 1.2}
@@ -951,7 +959,8 @@ class EffekteLernen(MitRegieMaterial):
         p, ziel = regie_lernen.aktuelle(self.con, self.konfig)
         alt = {"abwechslung": 0.7, "beats_pro_schnitt": 2, "dauer_faktor": 0.9, "luecke_max_s": 4.0,
                "max_je_match": 3, "moment_bonus": {"a": 0.5, "b": 1.0, "c": -0.5, "e": 0.5, "f": 0.5},   # 🥱: 0
-               "musik_pegel": 0.35, "puffer_nach_s": 1.8, "puffer_vor_s": 3.0, "seg_min_faktor": 1.322,
+               # 09.11.: Anlauf höchstens regie.ANLAUF_MAX_S (2,5 s) – vorher 2,5 + 0,5 nach „abgeschnitten“
+               "musik_pegel": 0.35, "puffer_nach_s": 1.8, "puffer_vor_s": 2.5, "seg_min_faktor": 1.322,
                "stimmung_bonus": {"chill": 0.25, "episch": -0.25, "lustig": 0.5, "spannend": -0.25},
                "track_malus": {"2": 1.0}, "uebergang_faktor": 1.21}
         self.assertEqual({k: v for k, v in p.items() if k in alt}, alt)
@@ -969,8 +978,8 @@ class EffekteLernen(MitRegieMaterial):
             return [z for z in regie_lernen.lernstand_text(self.con, self.konfig).splitlines()
                     if z.startswith("Effekte:")]
 
-        self.assertEqual(zeile(), ["Effekte: episch 0.85 · spannend 1.0 · lustig 0.92 (Vorgabe 0.8) · "
-                                   "frustriert 1.0 · chill 0.5 (deine Vorgabe) · Hektik 0.9"])
+        self.assertEqual(zeile(), ["Effekte: episch 0.85 · spannend 1.0 · lustig 0.8 (deine Vorgabe) · "
+                                   "frustriert 1.0 · chill 0.5 (deine Vorgabe) · Hektik 0.9"])   # 09.11.: 💥 ≠ Effekte
         self.konfig.daten["regie"]["effekte"]["an"] = False
         self.assertTrue(zeile()[0].endswith("Hektik 0.9 – ausgeschaltet ([regie.effekte] an = false)"))
 

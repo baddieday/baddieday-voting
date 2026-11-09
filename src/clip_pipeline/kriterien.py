@@ -800,6 +800,8 @@ def _spiel_h(liste: dict, g: dict, b: int, h: int) -> int:
         return int(g["spiel_h"])
     if g.get("band") and len(g["band"]) == 2:
         return int(g["band"][1]) - int(g["band"][0])
+    if effekt_filter.vollbild(liste):   # 09.11.: das Spielbild ist das ganze Bild
+        return h
     return min(h, int(effekt_filter.spiel_hoehe(b, 16, 9) * _zoom(liste)))
 
 
@@ -813,7 +815,7 @@ def _spielbild(x: _Lage) -> Teilnote | None:
         quelle = "video"
     else:
         b, h = _masse(x.liste, x.g, x.fmt)
-        anteil = effekt_filter.spiel_hoehe(b, 16, 9) * _zoom(x.liste) / h
+        anteil = 1.0 if effekt_filter.vollbild(x.liste) else effekt_filter.spiel_hoehe(b, 16, 9) * _zoom(x.liste) / h
         quelle = "plan"
     return Teilnote(auf(anteil, 0.30, 0.55), quelle, _rund({"anteil": anteil}),
                     KRITERIEN["spielbild"]["befund"].format(_proz(anteil)))
